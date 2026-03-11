@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export JAVA_HOME:*)",
+      "Bash($JAVA_HOME/bin/java -version)",
+      "Bash(./gradlew :platform-core:compileJava:*)",
+      "Bash(JAVA_HOME=\"/Users/sykim/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home\" PATH=\"/Users/sykim/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home/bin:$PATH\" ./gradlew:*)",
+      "Bash(JAVA_HOME=\"/Users/sykim/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home\" \"/Users/sykim/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home/bin/java\":*)",
+      "Read(//Users/sykim/.gradle/wrapper/dists/gradle-8.10-bin/deqhafrv1ntovfmgh0nh3npr9/gradle-8.10/lib/**)",
+      "Bash(java -version:*)",
+      "Bash(unzip:*)",
+      "Bash(JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.anthropic/anthropic-java-core/2.12.0/93cc57ab474793a9cf39f56b8212e7402a27db5d/anthropic-java-core-2.12.0.jar\" javap:*)",
+      "Bash(JAR=/Users/sykim/.gradle/caches/modules-2/files-2.1/com.openai/openai-java-core/2.1.0/bc957b45a8a1fe1d78ab4e5041a740c43ad9d0dc/openai-java-core-2.1.0.jar)",
+      "Bash(JAR=/tmp/openai-java-core-2.1.0.jar javap:*)",
+      "Bash(JAR=/tmp/openai-java-core-2.1.0.jar)"
+    ],
+    "additionalDirectories": [
+      "/Users/sykim/.gradle/caches/modules-2/files-2.1/com.openai/openai-java-core/2.1.0/bc957b45a8a1fe1d78ab4e5041a740c43ad9d0dc"
+    ]
+  }
+}

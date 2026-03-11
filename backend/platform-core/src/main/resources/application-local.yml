@@ -1,0 +1,17 @@
+spring:
+  jpa:
+    show-sql: true
+
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}/v1
+
+logging:
+  level:
+    com.platform: DEBUG
+    org.springframework.ai: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE

@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gradle --version:*)",
+      "Bash(gradle wrapper:*)",
+      "Bash(JAVA_HOME=~/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home ./gradlew :platform-core:compileJava --no-daemon)",
+      "Bash(JAVA_HOME=~/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home ./gradlew :platform-core:dependencies --configuration compileClasspath --no-daemon)",
+      "Read(//Users/sykim/.gradle/caches/**)",
+      "Bash(JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.anthropic/anthropic-java-core/2.12.0/93cc57ab474793a9cf39f56b8212e7402a27db5d/anthropic-java-core-2.12.0.jar\":*)",
+      "Bash(jar tf:*)",
+      "Bash(OAI_JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.openai/openai-java-core/2.1.0/bc957b45a8a1fe1d78ab4e5041a740c43ad9d0dc/openai-java-core-2.1.0.jar\")",
+      "Bash(JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.anthropic/anthropic-java/2.12.0/4796bce9c34e6e5b0202c9c81dd201c474bce6e7/anthropic-java-2.12.0.jar\":*)",
+      "Bash(OAI_JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.openai/openai-java/2.1.0/51227ffb2bb5df7f8d1048e43d094b17af7868c7/openai-java-2.1.0.jar\")",
+      "Read(//private/tmp/**)",
+      "Bash(jar xf:*)",
+      "Bash(javap:*)",
+      "Bash(ANTHROPIC_CORE_JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.anthropic/anthropic-java-core/2.12.0/93cc57ab474793a9cf39f56b8212e7402a27db5d/anthropic-java-core-2.12.0.jar\":*)",
+      "Bash(ANTHROPIC_MAIN_JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.anthropic/anthropic-java/2.12.0/4796bce9c34e6e5b0202c9c81dd201c474bce6e7/anthropic-java-2.12.0.jar\":*)",
+      "Bash(__NEW_LINE_b89045aae755941a__ echo \"=== Checking which JAR contains MessageAccumulator ===\")",
+      "Bash(__NEW_LINE_495b26a0626cbf53__ echo \"=== Checking which JAR contains MessageAccumulator ===\")",
+      "Bash(/usr/bin/jar tf:*)",
+      "Bash(/usr/bin/jar:*)",
+      "Bash(__NEW_LINE_a2ef4bf9a3ba1086__ echo \"=== Checking core JAR for MessageAccumulator ===\")",
+      "Bash(jar -tf:*)",
+      "Bash(__NEW_LINE_3f32183ea5ba431a__ echo \"=== Checking main JAR for MessageAccumulator ===\")",
+      "Bash(__NEW_LINE_e2e8da90b39c2fab__ echo \"=== MessageAccumulator ===\")",
+      "Bash(__NEW_LINE_b7a17209d0ee9f52__ echo \"\")",
+      "Bash(/usr/bin/javap:*)",
+      "Bash(__NEW_LINE_d544af8d3724721e__ echo \"=== Tool$InputSchema$Builder ===\")",
+      "Bash(OPENAI_CORE_JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.openai/openai-java-core/2.1.0/bc957b45a8a1fe1d78ab4e5041a740c43ad9d0dc/openai-java-core-2.1.0.jar\")",
+      "Bash(__NEW_LINE_92b052dd4118e7a9__ echo \"=== FunctionParameters ===\")",
+      "Bash(__NEW_LINE_38ec86f1bb461503__ echo \"=== FunctionParameters$Builder ===\")",
+      "Bash(__NEW_LINE_986755fdfc48ddc9__ echo \"=== ChatCompletion.Choice ===\")",
+      "Bash(__NEW_LINE_0c8727b433e03d49__ echo \"=== ChatCompletion.Choice.FinishReason ===\")",
+      "Bash(__NEW_LINE_fdd758e4b9b3a887__ echo \"=== ChatCompletion.Choice.FinishReason.Value \\(enum\\) ===\")",
+      "Bash(__NEW_LINE_fdd758e4b9b3a887__ echo \"\")"
+    ],
+    "additionalDirectories": [
+      "/Users/sykim/.claude/plans"
+    ]
+  }
+}

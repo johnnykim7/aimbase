@@ -1,0 +1,24 @@
+# Backend
+backend/.gradle/
+backend/build/
+backend/**/build/
+backend/**/bin/
+backend/.idea/
+backend/*.iml
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Environment
+.env
+.env.local
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/settings.json

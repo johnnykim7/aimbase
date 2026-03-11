@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: platform-core/Dockerfile
+    ports:
+      - "8080:8080"
+    env_file: .env
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      postgres-tenant-dev:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+
+  # Master DB — 테넌트 레지스트리, 구독, 글로벌 설정
+  postgres-master:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: aimbase_master
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+    volumes:
+      - master-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d aimbase_master"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 개발용 Tenant DB — 로컬 개발 시 사용 (테넌트 ID: dev)
+  # pgvector 포함 이미지 사용 (RAG 벡터 검색 지원)
+  postgres-tenant-dev:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: aimbase_tenant_dev
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+    volumes:
+      - tenant-dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d aimbase_tenant_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 로컬 LLM (선택)
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles:
+      - local-llm
+    # 모델 설치: docker exec ollama ollama pull llama3.2
+
+volumes:
+  master-pgdata:
+  tenant-dev-pgdata:
+  ollama_data:
