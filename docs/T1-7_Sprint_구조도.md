@@ -233,14 +233,14 @@ flowchart LR
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| - | Python 프로젝트 세팅 (uv + pyproject.toml + FastMCP) | 없음 | FastMCP 서버 기동 확인 | Python | 미구현 |
-| - | Docker Compose에 Python 서비스 추가 | Sprint 0 | docker compose up 정상 기동 | Python | 미구현 |
-| PY-001 | 시맨틱 청킹 (LlamaIndex SemanticSplitter) | Python 세팅 | MCP tool 호출 → 청크 반환 | Python | 미구현 |
-| PY-002 | 로컬 임베딩 (sentence-transformers, KoSimCSE) | Python 세팅 | MCP tool 호출 → 임베딩 벡터 반환 | Python | 미구현 |
-| PY-004 | 하이브리드 검색 (BM25 + 벡터 + RRF) | PY-002 | MCP tool 호출 → 하이브리드 결과 반환 | Python | 미구현 |
-| PY-003 | 리랭킹 (cross-encoder) | PY-004 | MCP tool 호출 → 리랭킹 결과 반환 | Python | 미구현 |
-| PRD-052 | 인제스션 파이프라인 이관 (Tika→Unstructured) | PY-001, PY-002 | Spring MCP Client → Python 인제스션 호출 성공 | Python+BE | 미구현 |
-| PRD-053 | 벡터 검색 이관 | PY-003, PY-004 | Spring MCP Client → Python 검색 호출 성공 | Python+BE | 미구현 |
+| - | Python 프로젝트 세팅 (uv + pyproject.toml + FastMCP) | 없음 | FastMCP 서버 기동 확인 | Python | 완료 |
+| - | Docker Compose에 Python 서비스 추가 | Sprint 0 | docker compose up 정상 기동 | Python | 완료 |
+| PY-001 | 시맨틱 청킹 (LlamaIndex SemanticSplitter) | Python 세팅 | MCP tool 호출 → 청크 반환 | Python | 완료 |
+| PY-002 | 로컬 임베딩 (sentence-transformers, KoSimCSE) | Python 세팅 | MCP tool 호출 → 임베딩 벡터 반환 | Python | 완료 |
+| PY-004 | 하이브리드 검색 (BM25 + 벡터 + RRF) | PY-002 | MCP tool 호출 → 하이브리드 결과 반환 | Python | 완료 |
+| PY-003 | 리랭킹 (cross-encoder) | PY-004 | MCP tool 호출 → 리랭킹 결과 반환 | Python | 완료 |
+| PRD-052 | 인제스션 파이프라인 이관 (Tika→Unstructured) | PY-001, PY-002 | Spring MCP Client → Python 인제스션 호출 성공 | Python+BE | 완료 |
+| PRD-053 | 벡터 검색 이관 | PY-003, PY-004 | Spring MCP Client → Python 검색 호출 성공 | Python+BE | 완료 |
 
 ---
 
@@ -248,8 +248,8 @@ flowchart LR
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| PY-009 | PII 탐지/마스킹 (Presidio + 한국어 커스텀) | Sprint 15 Python 세팅 | MCP tool 호출 → PII 탐지 + 마스킹 결과 | Python | 미구현 |
-| PRD-095 | PII 마스킹 이관 (PIIMasker→Presidio MCP) | PY-009 | Spring PolicyEngine → Python PII MCP 호출 성공 | Python+BE | 미구현 |
+| PY-009 | PII 탐지/마스킹 (Presidio + 한국어 커스텀) | Sprint 15 Python 세팅 | MCP tool 호출 → PII 탐지 + 마스킹 결과 | Python | 완료 |
+| PRD-095 | PII 마스킹 이관 (PIIMasker→Presidio MCP) | PY-009 | Spring PolicyEngine → Python PII MCP 호출 성공 | Python+BE | 완료 |
 
 ---
 
@@ -257,8 +257,8 @@ flowchart LR
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| PY-006 | RAG 품질 평가 (RAGAS) | Sprint 15 | MCP tool 호출 → faithfulness/relevancy 점수 | Python | 미구현 |
-| PY-007 | LLM 출력 평가 (DeepEval) | Sprint 15 Python 세팅 | MCP tool 호출 → hallucination/toxicity 점수 | Python | 미구현 |
+| PY-006 | RAG 품질 평가 (RAGAS) | Sprint 15 | MCP tool 호출 → faithfulness/relevancy 점수 | Python | 완료 |
+| PY-007 | LLM 출력 평가 (DeepEval) | Sprint 15 Python 세팅 | MCP tool 호출 → hallucination/toxicity 점수 | Python | 완료 |
 
 ---
 
@@ -266,11 +266,11 @@ flowchart LR
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| PY-005 | 쿼리 변환 (HyDE, Multi-Query) | Sprint 15 | MCP tool 호출 → 변환된 쿼리 반환 | Python | 미구현 |
-| PY-008 | 프롬프트 회귀 테스트 | Sprint 17 | A/B 비교 점수 반환 | Python | 미구현 |
-| PY-010 | 출력 가드레일 (Guardrails AI) | Sprint 16 | MCP tool 호출 → 안전성 검증 결과 | Python | 미구현 |
-| PY-011 | 고급 추론 체인 (LangGraph) | Sprint 15 | MCP tool 호출 → 추론 결과 반환 | Python | 미구현 |
-| PY-012 | 임베딩 파인튜닝 파이프라인 | Sprint 15 | 학습 완료 → 모델 파일 생성 | Python | 미구현 |
+| PY-005 | 쿼리 변환 (HyDE, Multi-Query) | Sprint 15 | MCP tool 호출 → 변환된 쿼리 반환 | Python | 완료 |
+| PY-008 | 프롬프트 회귀 테스트 | Sprint 17 | A/B 비교 점수 반환 | Python | 완료 |
+| PY-010 | 출력 가드레일 (Guardrails AI) | Sprint 16 | MCP tool 호출 → 안전성 검증 결과 | Python | 완료 |
+| PY-011 | 고급 추론 체인 (LangGraph) | Sprint 15 | MCP tool 호출 → 추론 결과 반환 | Python | 완료 |
+| PY-012 | 임베딩 파인튜닝 파이프라인 | Sprint 15 | 학습 완료 → 모델 파일 생성 | Python | 완료 |
 
 ---
 

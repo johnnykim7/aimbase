@@ -148,7 +148,7 @@ frontend/src/
 - [x] Sprint 0: 인프라 세팅 (Gradle, Flyway, Docker Compose, CI)
 - [x] Sprint 1-10: BE 구현
 - [x] Sprint 11-14: FE 구현
-- [ ] Sprint 15-18: Python 사이드카 (RAG Pipeline, Safety, Evaluation, 고급 기능)
+- [x] Sprint 15-18: Python 사이드카 (RAG Pipeline, Safety, Evaluation, 고급 기능)
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)
