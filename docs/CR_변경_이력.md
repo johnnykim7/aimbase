@@ -11,6 +11,7 @@
 |---------|----------|----------|--------|----------|
 | CR-001 | 초기 시스템 구축 | 신규 | High | v1.0.0 |
 | CR-002 | Python 사이드카 아키텍처 도입 | 변경 | High | v2.0.0 |
+| CR-003 | MCP 클라이언트 통합 완성 | 변경 | High | v2.1.0 |
 
 ---
 
@@ -45,6 +46,22 @@
 - **영향 범위**: PRD-048, PRD-052, PRD-053, PRD-095, PY-001~PY-012
 - **영향 설계서**: T1-1, T1-2, T2-1, T3-1, T3-2, T3-5, T3-6
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v2.0.0
+- **변경 일자**: 2026-03-12
+
+### CR-003 | MCP 클라이언트 통합 완성
+- **대상 기능 ID**: PY-009, PY-010, PY-011
+- **변경 타입**: 변경
+- **변경 내용**: Spring Boot ↔ Python MCP Server 통합 완성
+  - EvaluationService + EvaluationController: 평가 API 엔드포인트 신규 (POST /api/v1/evaluations/rag, /llm-output, /prompt-comparison)
+  - 출력 가드레일(PY-010): OrchestratorEngine에 MCPSafetyClient.validateOutput() 연동, ChatResponse에 guardrail 필드 추가
+  - MCPRagClientTest, MCPSafetyClientTest: 단위 테스트 추가
+  - MCPClientIntegrationTest: 3개 MCP 클라이언트 라운드트립 통합 테스트 (RAG Pipeline, Safety, Evaluation)
+- **변경 사유**: CR-002에서 도입한 MCP 클라이언트들의 비즈니스 로직 연동 및 테스트 커버리지 확보
+- **영향 모듈**: Evaluation(신규), 오케스트레이터, RAG, 정책(Safety)
+- **영향도**: High
+- **영향 범위**: PY-009, PY-010, PY-011
+- **영향 설계서**: T3-2, T3-5
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v2.1.0
 - **변경 일자**: 2026-03-12
 
 ---

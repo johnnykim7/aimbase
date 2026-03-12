@@ -9,6 +9,24 @@ spring:
       api-key: ${OPENAI_API_KEY:}
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}/v1
 
+# Python RAG Pipeline MCP Server (Docker Compose: rag-pipeline:8000)
+rag:
+  mcp:
+    url: ${RAG_MCP_URL:http://localhost:8000}
+    enabled: ${RAG_MCP_ENABLED:true}
+
+# Python Safety MCP Server (Docker Compose: safety:8001)
+safety:
+  mcp:
+    url: ${SAFETY_MCP_URL:http://localhost:8001}
+    enabled: ${SAFETY_MCP_ENABLED:true}
+
+# Python Evaluation MCP Server (Docker Compose: evaluation:8002)
+evaluation:
+  mcp:
+    url: ${EVALUATION_MCP_URL:http://localhost:8002}
+    enabled: ${EVALUATION_MCP_ENABLED:true}
+
 logging:
   level:
     com.platform: DEBUG

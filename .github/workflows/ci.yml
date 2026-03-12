@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend Build & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres-master:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aimbase_master
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U platform -d aimbase_master"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgres-tenant:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: aimbase_tenant_dev
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U platform -d aimbase_tenant_dev"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('backend/**/*.gradle.kts') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Build & Test
+        working-directory: backend
+        run: ./gradlew build
+        env:
+          MASTER_DB_URL: jdbc:postgresql://localhost:5432/aimbase_master
+          MASTER_DB_USERNAME: platform
+          MASTER_DB_PASSWORD: platform
+          TENANT_DB_HOST: localhost
+          TENANT_DB_PORT: 5433
+          TENANT_DB_USERNAME: platform
+          TENANT_DB_PASSWORD: platform
+          SPRING_REDIS_HOST: localhost
+          SPRING_REDIS_PORT: 6379
+
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check & Build
+        working-directory: frontend
+        run: npm run build

@@ -45,19 +45,22 @@ public class IngestionPipeline {
     private final DocumentChunker documentChunker;
     private final IngestionLogRepository ingestionLogRepository;
     private final HttpClient httpClient;
+    private final MCPRagClient mcpRagClient;
 
     public IngestionPipeline(KnowledgeSourceRepository knowledgeSourceRepository,
                               EmbeddingRepository embeddingRepository,
                               EmbeddingService embeddingService,
                               DocumentParser documentParser,
                               DocumentChunker documentChunker,
-                              IngestionLogRepository ingestionLogRepository) {
+                              IngestionLogRepository ingestionLogRepository,
+                              MCPRagClient mcpRagClient) {
         this.knowledgeSourceRepository = knowledgeSourceRepository;
         this.embeddingRepository = embeddingRepository;
         this.embeddingService = embeddingService;
         this.documentParser = documentParser;
         this.documentChunker = documentChunker;
         this.ingestionLogRepository = ingestionLogRepository;
+        this.mcpRagClient = mcpRagClient;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(java.time.Duration.ofSeconds(30))
                 .build();
@@ -129,14 +132,20 @@ public class IngestionPipeline {
         int totalDocs = 0;
         int totalChunks = 0;
 
+        // 소스 타입별 문서 수집
+        List<RawDocument> documents = collectDocuments(type, config, source.getId(), errors);
+
+        // MCP 사용 가능 시 Python 사이드카로 위임 (CR-002)
+        if (mcpRagClient.isAvailable()) {
+            return doIngestViaMCP(source, documents, chunkingConfig, errors);
+        }
+
+        // Fallback: 기존 Java 구현
         // 기존 임베딩 삭제 (re-sync)
         int deleted = embeddingRepository.deleteBySourceId(source.getId());
         if (deleted > 0) {
             log.info("Deleted {} existing embeddings for source '{}'", deleted, source.getId());
         }
-
-        // 소스 타입별 문서 수집
-        List<RawDocument> documents = collectDocuments(type, config, source.getId(), errors);
 
         for (RawDocument doc : documents) {
             try {
@@ -156,6 +165,56 @@ public class IngestionPipeline {
 
         source.setDocumentCount(totalDocs);
         log.info("Ingestion complete for '{}': {} docs, {} chunks, {} errors",
+                source.getId(), totalDocs, totalChunks, errors.size());
+
+        return errors.isEmpty()
+                ? IngestionResult.success(source.getId(), totalDocs, totalChunks)
+                : new IngestionResult(source.getId(), true, totalDocs, totalChunks, errors);
+    }
+
+    /**
+     * Python MCP Server를 통한 인제스션 (CR-002).
+     * 시맨틱 청킹(LlamaIndex) + 로컬 임베딩(KoSimCSE)을 Python 사이드카에서 실행.
+     */
+    @SuppressWarnings("unchecked")
+    private IngestionResult doIngestViaMCP(KnowledgeSourceEntity source,
+                                            List<RawDocument> documents,
+                                            Map<String, Object> chunkingConfig,
+                                            List<Map<String, Object>> errors) {
+        int totalDocs = 0;
+        int totalChunks = 0;
+
+        String strategy = chunkingConfig != null
+                ? (String) chunkingConfig.getOrDefault("strategy", "semantic")
+                : "semantic";
+
+        for (RawDocument doc : documents) {
+            try {
+                Map<String, Object> result = mcpRagClient.ingestDocument(
+                        source.getId(), doc.content(), doc.documentId(),
+                        strategy, chunkingConfig, null);
+
+                boolean success = Boolean.TRUE.equals(result.get("success"));
+                int chunks = result.get("chunks_created") instanceof Number n ? n.intValue() : 0;
+
+                if (success) {
+                    totalChunks += chunks;
+                    totalDocs++;
+                } else {
+                    List<Map<String, Object>> mcpErrors = result.get("errors") instanceof List
+                            ? (List<Map<String, Object>>) result.get("errors") : List.of();
+                    errors.addAll(mcpErrors);
+                }
+
+                log.debug("MCP ingest '{}' → {} chunks, success={}", doc.documentId(), chunks, success);
+            } catch (Exception e) {
+                log.warn("MCP ingestion failed for '{}': {}", doc.documentId(), e.getMessage());
+                errors.add(Map.of("documentId", doc.documentId(), "error", e.getMessage()));
+            }
+        }
+
+        source.setDocumentCount(totalDocs);
+        log.info("MCP ingestion complete for '{}': {} docs, {} chunks, {} errors",
                 source.getId(), totalDocs, totalChunks, errors.size());
 
         return errors.isEmpty()

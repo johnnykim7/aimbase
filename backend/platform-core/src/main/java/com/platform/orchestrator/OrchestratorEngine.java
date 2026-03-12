@@ -9,6 +9,7 @@ import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
 import com.platform.llm.router.ModelRouter;
 import com.platform.policy.AuditLogger;
+import com.platform.policy.MCPSafetyClient;
 import com.platform.policy.PolicyEngine;
 import com.platform.policy.model.PolicyResult;
 import com.platform.monitoring.PlatformMetrics;
@@ -25,6 +26,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -57,6 +59,7 @@ public class OrchestratorEngine {
     private final ToolCallHandler toolCallHandler;
     private final ToolRegistry toolRegistry;
     private final RAGService ragService;
+    private final MCPSafetyClient mcpSafetyClient;
     private final PlatformMetrics platformMetrics;
 
     public OrchestratorEngine(
@@ -71,6 +74,7 @@ public class OrchestratorEngine {
             ToolCallHandler toolCallHandler,
             ToolRegistry toolRegistry,
             RAGService ragService,
+            MCPSafetyClient mcpSafetyClient,
             PlatformMetrics platformMetrics
     ) {
         this.modelRouter = modelRouter;
@@ -84,6 +88,7 @@ public class OrchestratorEngine {
         this.toolCallHandler = toolCallHandler;
         this.toolRegistry = toolRegistry;
         this.ragService = ragService;
+        this.mcpSafetyClient = mcpSafetyClient;
         this.platformMetrics = platformMetrics;
     }
 
@@ -165,15 +170,18 @@ public class OrchestratorEngine {
             platformMetrics.recordLlmCall(provider, resolvedModel, llmSuccess, latencyMs, inputTokens, outputTokens);
         }
 
-        // 6. 세션 저장 (사용자 메시지 + 어시스턴트 최종 응답)
+        // 6. 출력 가드레일 검증 (PY-010: MCPSafetyClient validate_output)
+        Map<String, Object> guardrailResult = validateOutput(llmResponse.textContent());
+
+        // 7. 세션 저장 (사용자 메시지 + 어시스턴트 최종 응답)
         request.messages().forEach(m -> sessionStore.appendMessage(sessionId, m));
         sessionStore.appendMessage(sessionId,
                 UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, llmResponse.textContent()));
 
-        // 7. 사용량 로그 저장
+        // 8. 사용량 로그 저장
         saveUsageLog(request.userId(), sessionId, resolvedModel, llmResponse);
 
-        // 8. 감사 로그
+        // 9. 감사 로그
         auditLogger.logLLMCall(resolvedModel, sessionId,
                 llmResponse.usage().inputTokens(), llmResponse.usage().outputTokens());
 
@@ -184,7 +192,8 @@ public class OrchestratorEngine {
                 llmResponse.content(),
                 List.of(),  // actions_executed
                 llmResponse.usage(),
-                llmResponse.costUsd()
+                llmResponse.costUsd(),
+                guardrailResult
         );
     }
 
@@ -233,6 +242,30 @@ public class OrchestratorEngine {
             }
             chunkConsumer.accept(chunk);
         });
+    }
+
+    /**
+     * 출력 가드레일 검증 (PY-010).
+     * MCPSafetyClient의 validate_output 도구를 호출하여 LLM 응답의 안전성을 검증.
+     * MCP 미연결 시 null 반환 (가드레일 미적용).
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> validateOutput(String outputText) {
+        if (!mcpSafetyClient.isAvailable() || outputText == null || outputText.isBlank()) {
+            return null;
+        }
+        try {
+            Map<String, Object> result = mcpSafetyClient.validateOutput(outputText);
+            boolean safe = Boolean.TRUE.equals(result.get("safe"));
+            if (!safe) {
+                int violationCount = result.get("violation_count") instanceof Number n ? n.intValue() : 0;
+                log.warn("Output guardrail violations detected: count={}", violationCount);
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("Output guardrail validation failed: {}", e.getMessage());
+            return null;
+        }
     }
 
     private void saveUsageLog(String userId, String sessionId, String model, LLMResponse response) {

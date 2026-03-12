@@ -63,6 +63,18 @@ dependencyManagement {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+
+    // Docker 미실행 환경에서 TestContainers 기반 통합 테스트 자동 스킵
+    val dockerAvailable = try {
+        val process = ProcessBuilder("docker", "info").start()
+        process.waitFor() == 0
+    } catch (_: Exception) { false }
+
+    if (!dockerAvailable) {
+        exclude("**/integration/**")
+        logger.lifecycle("⚠ Docker not available — skipping TestContainers integration tests")
+    }
+
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = false

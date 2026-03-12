@@ -63,6 +63,67 @@ services:
       timeout: 5s
       retries: 5
 
+  # Python Sidecar — RAG Pipeline MCP Server
+  rag-pipeline:
+    build:
+      context: ../python-sidecar
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: postgres-tenant-dev
+      DB_PORT: "5432"
+      DB_NAME: aimbase_tenant_dev
+      DB_USER: platform
+      DB_PASSWORD: platform
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+    depends_on:
+      postgres-tenant-dev:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/sse')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Python Sidecar — Safety MCP Server (PII Detection, Sprint 16)
+  safety:
+    build:
+      context: ../python-sidecar
+      dockerfile: Dockerfile.safety
+    ports:
+      - "8001:8001"
+    environment:
+      SAFETY_MCP_HOST: "0.0.0.0"
+      SAFETY_MCP_PORT: "8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/sse')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Python Sidecar — Evaluation MCP Server (RAG/LLM 평가, Sprint 17)
+  evaluation:
+    build:
+      context: ../python-sidecar
+      dockerfile: Dockerfile.evaluation
+    ports:
+      - "8002:8002"
+    environment:
+      EVALUATION_MCP_HOST: "0.0.0.0"
+      EVALUATION_MCP_PORT: "8002"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EVAL_LLM_MODEL: ${EVAL_LLM_MODEL:-gpt-4o-mini}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/sse')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   # 로컬 LLM (선택)
   ollama:
     image: ollama/ollama

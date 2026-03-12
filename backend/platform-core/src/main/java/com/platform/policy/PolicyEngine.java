@@ -27,7 +27,7 @@ import java.util.Map;
  * - DENY            → 즉시 거부
  * - REQUIRE_APPROVAL → 승인 요구
  * - LOG             → 감사 로그 기록 후 ALLOW
- * - TRANSFORM       → PIIMasker로 페이로드 마스킹 (transforms에 저장) 후 ALLOW
+ * - TRANSFORM       → Presidio MCP(우선) 또는 PIIMasker(폴백)로 PII 마스킹 후 ALLOW
  * - RATE_LIMIT      → 슬라이딩 윈도우 초과 시 DENY
  * - ALLOW           → 명시적 허용
  *
@@ -46,6 +46,7 @@ public class PolicyEngine {
     private final AuditLogger auditLogger;
     private final ObjectMapper objectMapper;
     private final PIIMasker piiMasker;
+    private final MCPSafetyClient mcpSafetyClient;
     private final RateLimiter rateLimiter;
     private final PlatformMetrics platformMetrics;
 
@@ -53,12 +54,14 @@ public class PolicyEngine {
                         AuditLogger auditLogger,
                         ObjectMapper objectMapper,
                         PIIMasker piiMasker,
+                        MCPSafetyClient mcpSafetyClient,
                         RateLimiter rateLimiter,
                         PlatformMetrics platformMetrics) {
         this.policyRepository = policyRepository;
         this.auditLogger = auditLogger;
         this.objectMapper = objectMapper;
         this.piiMasker = piiMasker;
+        this.mcpSafetyClient = mcpSafetyClient;
         this.rateLimiter = rateLimiter;
         this.platformMetrics = platformMetrics;
     }
@@ -163,12 +166,23 @@ public class PolicyEngine {
             }
 
             case "TRANSFORM" -> {
-                // PII 마스킹 — 결과를 transforms에 저장
+                // PII 마스킹 — Presidio MCP 우선, 폴백 시 Java PIIMasker
                 Map<String, Object> originalData = request.payload() != null && request.payload().data() != null
                         ? request.payload().data() : Map.of();
-                Map<String, Object> maskedData = piiMasker.maskMap(originalData);
-                transforms.put("masked_payload", maskedData);
-                log.debug("Policy TRANSFORM: PII masking applied for intent '{}'", request.intent());
+
+                if (mcpSafetyClient.isAvailable()) {
+                    try {
+                        Map<String, Object> maskedResult = maskViaMCP(originalData);
+                        transforms.put("masked_payload", maskedResult);
+                        log.debug("Policy TRANSFORM: Presidio PII masking applied for intent '{}'", request.intent());
+                    } catch (Exception e) {
+                        log.warn("Presidio MCP masking failed, falling back to regex PIIMasker: {}", e.getMessage());
+                        transforms.put("masked_payload", piiMasker.maskMap(originalData));
+                    }
+                } else {
+                    transforms.put("masked_payload", piiMasker.maskMap(originalData));
+                    log.debug("Policy TRANSFORM: regex PII masking applied for intent '{}'", request.intent());
+                }
                 yield PolicyResult.PolicyAction.ALLOW;
             }
 
@@ -196,6 +210,28 @@ public class PolicyEngine {
 
             default -> PolicyResult.PolicyAction.ALLOW;
         };
+    }
+
+    // ─── MCP PII 마스킹 ─────────────────────────────────────────────────
+
+    /**
+     * Map 내 String 값을 Presidio MCP로 마스킹. 중첩 Map 재귀 처리.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> maskViaMCP(Map<String, Object> data) {
+        Map<String, Object> masked = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String text) {
+                Map<String, Object> result = mcpSafetyClient.maskPii(text);
+                masked.put(entry.getKey(), result.get("masked_text"));
+            } else if (value instanceof Map) {
+                masked.put(entry.getKey(), maskViaMCP((Map<String, Object>) value));
+            } else {
+                masked.put(entry.getKey(), value);
+            }
+        }
+        return masked;
     }
 
     // ─── SpEL 조건 평가 ───────────────────────────────────────────────────

@@ -59,6 +59,24 @@ spring:
 # Virtual Threads (Java 21)
 spring.threads.virtual.enabled: true
 
+# ─── RAG MCP 설정 (Python 사이드카 연동, CR-002) ─────────────────────
+rag:
+  mcp:
+    url: ${RAG_MCP_URL:http://localhost:8000}
+    enabled: ${RAG_MCP_ENABLED:false}
+
+# ─── Safety MCP 설정 (PII Detection, Sprint 16) ──────────────────────
+safety:
+  mcp:
+    url: ${SAFETY_MCP_URL:http://localhost:8001}
+    enabled: ${SAFETY_MCP_ENABLED:false}
+
+# ─── Evaluation MCP 설정 (RAG/LLM 평가, Sprint 17) ───────────────────
+evaluation:
+  mcp:
+    url: ${EVALUATION_MCP_URL:http://localhost:8002}
+    enabled: ${EVALUATION_MCP_ENABLED:false}
+
 # ─── Platform 설정 (테넌트 프로비저닝 기본값) ────────────────────────
 platform:
   default-db-host: ${TENANT_DB_HOST:localhost}

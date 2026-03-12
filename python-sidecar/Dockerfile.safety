@@ -1,0 +1,23 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy project files
+COPY pyproject.toml .
+COPY src/ src/
+
+# Install dependencies + spaCy Korean model
+RUN uv pip install --system -e ".[dev]" && \
+    python -m spacy download ko_core_news_sm
+
+EXPOSE 8001
+
+CMD ["python", "-m", "safety.server"]
