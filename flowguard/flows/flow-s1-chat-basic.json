@@ -1,0 +1,19 @@
+{
+  "scenarioKey": "aimbase.s1.chat-basic",
+  "name": "Sprint 1: 핵심 채팅 전체 흐름",
+  "description": "동기 채팅 → 스트리밍 → 세션 컨텍스트 → 모델 선택 → 빈 메시지 거부 (UAT-S1-001~005)",
+  "tags": ["sprint-1", "chat", "session", "streaming"],
+  "coverage": {
+    "T4-1": ["V-001", "V-002", "V-003"],
+    "T4-2": ["UAT-S1-001", "UAT-S1-002", "UAT-S1-003", "UAT-S1-004", "UAT-S1-005"]
+  },
+  "vars": {},
+  "steps": [
+    "aimbase.chat.sync",
+    "aimbase.chat.stream",
+    "aimbase.chat.session_init",
+    "aimbase.chat.session_recall",
+    "aimbase.chat.model_select",
+    "aimbase.chat.empty_message"
+  ]
+}

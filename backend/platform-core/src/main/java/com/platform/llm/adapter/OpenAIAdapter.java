@@ -8,12 +8,19 @@ import com.openai.models.FunctionDefinition;
 import com.openai.models.FunctionParameters;
 import com.openai.models.chat.completions.ChatCompletion;
 import com.openai.models.chat.completions.ChatCompletionAssistantMessageParam;
+import com.openai.models.ResponseFormatJsonObject;
+import com.openai.models.ResponseFormatJsonSchema;
 import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
 import com.openai.models.chat.completions.ChatCompletionSystemMessageParam;
 import com.openai.models.chat.completions.ChatCompletionTool;
+import com.openai.models.chat.completions.ChatCompletionNamedToolChoice;
+import com.openai.models.chat.completions.ChatCompletionToolChoiceOption;
 import com.openai.models.chat.completions.ChatCompletionToolMessageParam;
+import com.openai.models.chat.completions.ChatCompletionContentPart;
+import com.openai.models.chat.completions.ChatCompletionContentPartImage;
+import com.openai.models.chat.completions.ChatCompletionContentPartText;
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.LLMRequest;
@@ -80,10 +87,42 @@ public class OpenAIAdapter implements LLMAdapter {
                 builder.maxTokens(request.config().maxTokens());
             }
 
+            // CR-007: 구조화 출력 — response_format: json_schema (OpenAI native)
+            if (request.responseSchema() != null && !request.responseSchema().isEmpty()) {
+                try {
+                    String schemaName = request.responseSchema()
+                            .getOrDefault("title", "structured_output").toString();
+                    // Schema의 각 속성을 JsonValue로 변환
+                    Map<String, JsonValue> schemaProps = request.responseSchema().entrySet().stream()
+                            .collect(Collectors.toMap(Map.Entry::getKey, e -> JsonValue.from(e.getValue())));
+
+                    builder.responseFormat(ResponseFormatJsonSchema.builder()
+                            .jsonSchema(ResponseFormatJsonSchema.JsonSchema.builder()
+                                    .name(schemaName)
+                                    .schema(ResponseFormatJsonSchema.JsonSchema.Schema.builder()
+                                            .putAllAdditionalProperties(schemaProps)
+                                            .build())
+                                    .strict(true)
+                                    .build())
+                            .build());
+                } catch (Exception e) {
+                    log.warn("Failed to set response_format json_schema, falling back to json_object: {}", e.getMessage());
+                    builder.responseFormat(ResponseFormatJsonObject.builder().build());
+                }
+            }
+
             if (request.tools() != null && !request.tools().isEmpty()) {
                 @SuppressWarnings("unchecked")
                 List<ChatCompletionTool> openAiTools = (List<ChatCompletionTool>) transformToolDefs(request.tools());
                 builder.tools(openAiTools);
+
+                // CR-006: tool_choice 매핑
+                if (request.toolChoice() != null) {
+                    ChatCompletionToolChoiceOption choice = mapToolChoice(request.toolChoice());
+                    if (choice != null) {
+                        builder.toolChoice(choice);
+                    }
+                }
             }
 
             ChatCompletion response = client.chat().completions().create(builder.build());
@@ -158,6 +197,28 @@ public class OpenAIAdapter implements LLMAdapter {
 
     // ─── Private Helpers ────────────────────────────────────────────────
 
+    /**
+     * CR-006: toolChoice 문자열을 OpenAI ChatCompletionToolChoiceOption으로 매핑.
+     * - "auto" → ofAuto("auto")
+     * - "none" → ofAuto("none")
+     * - "required" → ofAuto("required")
+     * - 그 외 → ofChatCompletionNamedToolChoice (특정 function 강제)
+     */
+    private ChatCompletionToolChoiceOption mapToolChoice(String toolChoice) {
+        return switch (toolChoice) {
+            case "auto", "none", "required" ->
+                    ChatCompletionToolChoiceOption.ofAuto(
+                            ChatCompletionToolChoiceOption.Auto.of(toolChoice));
+            default ->
+                    ChatCompletionToolChoiceOption.ofNamedToolChoice(
+                            ChatCompletionNamedToolChoice.builder()
+                                    .function(ChatCompletionNamedToolChoice.Function.builder()
+                                            .name(toolChoice)
+                                            .build())
+                                    .build());
+        };
+    }
+
     private String extractModelId(String model) {
         return model.contains("/") ? model.substring(model.indexOf("/") + 1) : model;
     }
@@ -225,10 +286,46 @@ public class OpenAIAdapter implements LLMAdapter {
                                 .content(ChatCompletionAssistantMessageParam.Content.ofText(extractText(msg)))
                                 .build());
             }
-            default -> ChatCompletionMessageParam.ofUser(
-                    ChatCompletionUserMessageParam.builder()
-                            .content(ChatCompletionUserMessageParam.Content.ofText(extractText(msg)))
-                            .build());
+            default -> {
+                // PRD-111: 멀티모달 — Image 블록 포함 시 content part 배열로 변환
+                boolean hasImage = msg.content().stream()
+                        .anyMatch(b -> b instanceof ContentBlock.Image);
+                if (hasImage) {
+                    List<ChatCompletionContentPart> parts = msg.content().stream()
+                            .map(b -> {
+                                if (b instanceof ContentBlock.Image img) {
+                                    String imageUrl;
+                                    if (img.isBase64()) {
+                                        imageUrl = "data:" + img.mediaType() + ";base64," + img.data();
+                                    } else {
+                                        imageUrl = img.url();
+                                    }
+                                    return ChatCompletionContentPart.ofImageUrl(
+                                            ChatCompletionContentPartImage.builder()
+                                                    .imageUrl(ChatCompletionContentPartImage.ImageUrl.builder()
+                                                            .url(imageUrl)
+                                                            .build())
+                                                    .build());
+                                } else if (b instanceof ContentBlock.Text text) {
+                                    return ChatCompletionContentPart.ofText(
+                                            ChatCompletionContentPartText.builder()
+                                                    .text(text.text())
+                                                    .build());
+                                }
+                                return ChatCompletionContentPart.ofText(
+                                        ChatCompletionContentPartText.builder().text("").build());
+                            })
+                            .toList();
+                    yield ChatCompletionMessageParam.ofUser(
+                            ChatCompletionUserMessageParam.builder()
+                                    .contentOfArrayOfContentParts(parts)
+                                    .build());
+                }
+                yield ChatCompletionMessageParam.ofUser(
+                        ChatCompletionUserMessageParam.builder()
+                                .content(ChatCompletionUserMessageParam.Content.ofText(extractText(msg)))
+                                .build());
+            }
         };
     }
 

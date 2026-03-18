@@ -51,3 +51,16 @@ export interface Approval {
   context?: Record<string, unknown>;
   description?: string;
 }
+
+export interface CostBreakdown {
+  model: string;
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+}
+
+export interface CostTrendPoint {
+  date: string;
+  model: string;
+  cost: number;
+}

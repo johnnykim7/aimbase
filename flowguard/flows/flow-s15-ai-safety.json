@@ -1,0 +1,18 @@
+{
+  "scenarioKey": "aimbase.s15.ai-safety",
+  "name": "Sprint 15-18: AI 안전성 & RAG 고급",
+  "description": "PII 마스킹 → 출력 가드레일(차단/통과) → 쿼리 변환 → RAG 평가 (UAT-S15-001~005)",
+  "tags": ["sprint-15", "safety", "pii", "guardrail", "rag-advanced"],
+  "coverage": {
+    "T4-1": ["V-063", "V-064", "V-059", "V-060"],
+    "T4-2": ["UAT-S15-001", "UAT-S15-002", "UAT-S15-003", "UAT-S15-005"]
+  },
+  "vars": {},
+  "steps": [
+    "aimbase.safety.pii_mask",
+    "aimbase.safety.guardrail_block",
+    "aimbase.safety.guardrail_pass",
+    "aimbase.rag.query_transform",
+    "aimbase.rag.evaluate"
+  ]
+}

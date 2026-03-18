@@ -34,6 +34,15 @@ export const useDeleteWorkflow = () => {
   });
 };
 
+export const useUpdateWorkflow = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<WorkflowRequest> }) =>
+      workflowsApi.update(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflows"] }),
+  });
+};
+
 export const useRunWorkflow = () =>
   useMutation({
     mutationFn: ({ id, input }: { id: string; input?: Record<string, unknown> }) =>

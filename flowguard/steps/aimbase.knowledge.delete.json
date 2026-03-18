@@ -1,0 +1,14 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "DELETE",
+    "endpoint": "/knowledge-sources/{{steps.aimbase.knowledge.create.output.knowledgeSourceId}}",
+    "headers": {}
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "soft"
+}

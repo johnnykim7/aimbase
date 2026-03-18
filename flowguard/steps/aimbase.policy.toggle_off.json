@@ -1,0 +1,29 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "PUT",
+    "endpoint": "/policies/{{steps.aimbase.policy.deny.output.policyId}}",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-Test-Deny",
+      "domain": "CHAT",
+      "action": "DENY",
+      "priority": 1,
+      "isActive": false,
+      "rules": [
+        {
+          "field": "model",
+          "operator": "==",
+          "value": "blocked-model"
+        }
+      ]
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.isActive", "operator": "==", "value": false }
+  ],
+  "failMode": "hard"
+}

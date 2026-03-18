@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 2.0 | 최종 수정: 2026-03-12 | 관련 CR: CR-002
+> 설계 버전: 2.2 | 최종 수정: 2026-03-15 | 관련 CR: CR-007
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -271,6 +271,34 @@ flowchart LR
 | PY-010 | 출력 가드레일 (Guardrails AI) | Sprint 16 | MCP tool 호출 → 안전성 검증 결과 | Python | 완료 |
 | PY-011 | 고급 추론 체인 (LangGraph) | Sprint 15 | MCP tool 호출 → 추론 결과 반환 | Python | 완료 |
 | PY-012 | 임베딩 파인튜닝 파이프라인 | Sprint 15 | 학습 완료 → 모델 파일 생성 | Python | 완료 |
+
+---
+
+### Sprint 19: FE 워크플로우 스튜디오 [v2.3, CR-005]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| FE-001 | 비주얼 캔버스 에디터 (React Flow) | Sprint 12 FE | 드래그&드롭 노드 배치 + 엣지 연결 | FE | 미완료 |
+| FE-002 | 노드 팔레트 (6개 스텝 유형) | FE-001 | 팔레트→캔버스 드래그 추가 | FE | 미완료 |
+| FE-003 | 노드 설정 패널 | FE-001 | 노드 클릭→설정 편집→저장 | FE | 미완료 |
+| FE-004 | 캔버스 ↔ JSON 양방향 변환 | FE-001 | 저장→API 호출→리로드 정합성 | FE | 미완료 |
+| FE-005 | 실행 시각화 | FE-001, Sprint 6 BE | 실행 시 노드별 상태 실시간 표시 | FE | 미완료 |
+| - | 라우팅 추가 (/workflows/new, /:id/edit) | Sprint 12 FE | 스튜디오 페이지 진입 | FE | 미완료 |
+| - | @xyflow/react + dagre 의존성 추가 | 없음 | npm install 성공 | FE | 미완료 |
+
+---
+
+### Sprint 21: 구조화된 출력 (BE + FE) [v2.5, CR-007]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-098 | ChatRequest에 response_format 파라미터 추가 + OrchestratorEngine 분기 | Sprint 1, Sprint 8(스키마) | response_format 지정 시 구조화된 JSON 응답 반환 | BE | 미완료 |
+| PRD-099 | LLM 어댑터별 구조화 출력 분기 (OpenAI/Claude/Ollama) | PRD-098 | OpenAI strict, Claude 프롬프트+ToolUse, Ollama format:json | BE | 미완료 |
+| PRD-019 | SchemaService.validate() 연동 — LLM 응답 후처리 검증 | PRD-098 | 스키마 위반 시 재시도 또는 에러 | BE | 미완료 |
+| PRD-100 | WorkflowEntity에 output_schema JSONB 컬럼 + WorkflowEngine 자동 주입 | Sprint 6, PRD-098 | 워크플로우 실행 시 output_schema 자동 적용 | BE | 미완료 |
+| PRD-101 | 워크플로우 스튜디오 스키마 편집 UI | Sprint 19, PRD-100 | 스키마 선택/편집 → JSON 반영 | FE | 미완료 |
+| - | Flyway 마이그레이션 (workflows 테이블에 output_schema 컬럼 추가) | Sprint 0 | 마이그레이션 성공 | BE | 미완료 |
+| - | ContentBlock.Structured 레코드 추가 | PRD-098 | sealed interface 확장 | BE | 미완료 |
 
 ---
 

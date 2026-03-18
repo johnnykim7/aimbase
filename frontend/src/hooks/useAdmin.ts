@@ -67,3 +67,17 @@ export const useUsage = () =>
     queryFn: () => adminApi.usage({ page: 0, size: 50 }).then((r) => r.data.data),
     retry: false,
   });
+
+export const useCostBreakdown = (days: number = 30) =>
+  useQuery({
+    queryKey: ["admin", "cost-breakdown", days],
+    queryFn: () => adminApi.costBreakdown(days).then((r) => r.data.data),
+    retry: false,
+  });
+
+export const useCostTrend = (days: number = 30) =>
+  useQuery({
+    queryKey: ["admin", "cost-trend", days],
+    queryFn: () => adminApi.costTrend(days).then((r) => r.data.data),
+    retry: false,
+  });

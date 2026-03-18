@@ -1,7 +1,8 @@
 """Aimbase Evaluation - FastMCP Server.
 
 MCP Server 2: RAG Quality / LLM Output Evaluation
-Tools: evaluate_rag, evaluate_llm_output, compare_prompts
+Tools: evaluate_rag, evaluate_llm_output, compare_prompts, generate_benchmark,
+       detect_embedding_drift
 """
 
 import json
@@ -14,10 +15,7 @@ from evaluation.config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP(
-    "Aimbase Evaluation",
-    description="RAG quality evaluation (RAGAS), LLM output evaluation (DeepEval), and prompt regression testing",
-)
+mcp = FastMCP("Aimbase Evaluation")
 
 
 @mcp.tool()
@@ -101,6 +99,58 @@ def compare_prompts(
     metric_list = json.loads(metrics) if isinstance(metrics, str) and metrics.strip() not in ("", "[]") else None
 
     result = do_compare(cases, pa, pb, metric_list)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def generate_benchmark(
+    chunks: str,
+    question_types: str = '["definition", "explanation", "comparison"]',
+    max_questions: int = 20,
+) -> str:
+    """Generate Q&A benchmark dataset from document chunks (PY-020).
+
+    Template-based generation (no LLM required):
+    - definition: Extracts "X는 ...이다" patterns → "X란 무엇인가?" questions
+    - explanation: Extracts "때문에/위해/하면" patterns → "왜 X인가?" questions
+    - comparison: Detects 2+ entities → "A와 B의 차이는?" questions
+
+    Args:
+        chunks: JSON array of [{content, metadata?}] document chunks
+        question_types: JSON array of question types to generate
+        max_questions: Maximum number of questions to generate (default: 20)
+    """
+    from evaluation.engine import generate_benchmark as do_generate
+
+    chunk_list = json.loads(chunks) if isinstance(chunks, str) else chunks
+    types = json.loads(question_types) if isinstance(question_types, str) else question_types
+
+    result = do_generate(chunk_list, types, max_questions)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def detect_embedding_drift(
+    source_id: str,
+    sample_size: int = 100,
+    baseline_stats: str = "{}",
+) -> str:
+    """Detect embedding distribution drift for a knowledge source (PY-021).
+
+    Compares current embedding similarity distribution against a baseline.
+    Recommends reindexing if drift_score > 0.3.
+
+    Args:
+        source_id: Knowledge source ID to analyze
+        sample_size: Number of random embeddings to sample (default: 100)
+        baseline_stats: JSON object with {mean, std} from previous measurement
+    """
+    from evaluation.drift_detector import detect_embedding_drift as do_detect
+
+    baseline = json.loads(baseline_stats) if isinstance(baseline_stats, str) else baseline_stats
+    baseline = baseline if baseline else None
+
+    result = do_detect(source_id, sample_size, baseline)
     return json.dumps(result, ensure_ascii=False)
 
 

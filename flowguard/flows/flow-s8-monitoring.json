@@ -1,0 +1,19 @@
+{
+  "scenarioKey": "aimbase.s8.monitoring",
+  "name": "Sprint 8: 관리 & 모니터링 전체 흐름",
+  "description": "대시보드 통계 → 승인 대기 목록 → 감사 로그 → 프롬프트 CRUD → 사용량 (UAT-S8-001~005)",
+  "tags": ["sprint-8", "monitoring", "dashboard", "audit", "prompt"],
+  "coverage": {
+    "T4-1": ["V-029", "V-030", "V-031", "V-032"],
+    "T4-2": ["UAT-S8-001", "UAT-S8-002", "UAT-S8-003", "UAT-S8-004", "UAT-S8-005"]
+  },
+  "vars": {},
+  "steps": [
+    "aimbase.dashboard.stats",
+    "aimbase.approval.list",
+    "aimbase.audit.list",
+    "aimbase.prompt.create",
+    "aimbase.prompt.delete",
+    "aimbase.usage.stats"
+  ]
+}

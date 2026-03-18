@@ -25,6 +25,29 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
+# Javadoc / Dokka 생성물
+backend/META-INF/
+backend/allclasses.html
+backend/com/
+backend/deprecated.html
+backend/dokka-javadoc-stylesheet.css
+backend/element-list
+backend/index-files/
+backend/index.html
+backend/jquery/
+backend/member-search-index.js
+backend/module-search-index.js
+backend/package-list
+backend/package-search-index.js
+backend/resources/
+backend/search.js
+backend/stylesheet.css
+backend/tag-search-index.js
+backend/type-search-index.js
+
+# Python venv
+python-sidecar/.venv/
+
 # IDE
 .idea/
 .vscode/settings.json

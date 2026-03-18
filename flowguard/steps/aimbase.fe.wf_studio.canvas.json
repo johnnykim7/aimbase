@@ -1,0 +1,16 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "FE-001 캔버스: 노드 드래그 배치 + 엣지 연결",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/workflows/new",
+    "checkpoints": [
+      {"selector": ".react-flow, [data-testid=workflow-canvas]", "visible": true},
+      {"selector": ".react-flow__minimap", "visible": true}
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

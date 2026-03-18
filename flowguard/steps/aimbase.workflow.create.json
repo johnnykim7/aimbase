@@ -1,0 +1,34 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/workflows",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-Test-WF",
+      "description": "FlowGuard 인수테스트용 워크플로우",
+      "domain": "test",
+      "triggerConfig": {"type": "manual"},
+      "steps": [
+        {
+          "id": "step1",
+          "type": "LLM_CALL",
+          "config": {
+            "model": "auto",
+            "prompt": "Say hello in Korean",
+            "connection_id": "{{vars.connectionId}}"
+          },
+          "dependsOn": []
+        }
+      ]
+    }
+  },
+  "extract": {
+    "workflowId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

@@ -1,0 +1,14 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-platform-api",
+  "action": {
+    "method": "GET",
+    "endpoint": "/platform/dashboard",
+    "headers": {}
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

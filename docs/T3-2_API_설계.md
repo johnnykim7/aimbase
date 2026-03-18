@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 2.0 | 최종 수정: 2026-03-12 | 관련 CR: CR-002
+> 설계 버전: 2.2 | 최종 수정: 2026-03-19 | 관련 CR: CR-009, CR-010
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -33,7 +33,69 @@
 
 | 메서드 | 경로 | 설명 | 인증 |
 |--------|------|------|------|
-| POST | `/chat/completions` | LLM 채팅 완료 (동기/SSE 스트리밍) | 🔒 |
+| POST | `/chat/completions` | LLM 채팅 완료 (동기/SSE 스트리밍, 구조화 출력) | 🔒 |
+
+### 구조화된 출력 요청 (v2.5, CR-007)
+
+`POST /chat/completions`의 `response_format` 파라미터로 구조화된 JSON 응답을 요청한다.
+
+**요청 확장 필드**:
+```json
+{
+  "model": "claude-sonnet-4-5",
+  "messages": [{ "role": "user", "content": "직원 정보 추출해줘" }],
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "employee_form",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "department": { "type": "string" },
+          "salary": { "type": "number" }
+        },
+        "required": ["name", "department"]
+      }
+    }
+  }
+}
+```
+
+**스키마 참조 방식** (등록된 스키마 재사용):
+```json
+{
+  "response_format": {
+    "type": "schema_ref",
+    "schema_id": "employee-form",
+    "version": "v1"
+  }
+}
+```
+
+**응답 (구조화)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "msg_xxx",
+    "model": "claude-sonnet-4-5",
+    "session_id": "uuid",
+    "content": [{
+      "type": "structured",
+      "schema": "employee_form",
+      "data": {
+        "name": "홍길동",
+        "department": "개발팀",
+        "salary": 5000000
+      }
+    }],
+    "usage": { "input_tokens": 150, "output_tokens": 80, "cost_usd": 0.001 }
+  }
+}
+```
+
+**response_format 미지정 시**: 기존 동작 (type: "text" 텍스트 응답)
 
 ---
 
@@ -121,7 +183,7 @@
 | 메서드 | 경로 | 설명 | 인증 |
 |--------|------|------|------|
 | GET | `/workflows` | 워크플로우 목록 조회 (domain 필터) | 🔒 |
-| POST | `/workflows` | 워크플로우 생성 | 🔒 |
+| POST | `/workflows` | 워크플로우 생성 (**v2.5: output_schema 지원**) | 🔒 |
 | GET | `/workflows/{id}` | 워크플로우 상세 조회 | 🔒 |
 | PUT | `/workflows/{id}` | 워크플로우 수정 | 🔒 |
 | DELETE | `/workflows/{id}` | 워크플로우 삭제 | 🔒 |
@@ -129,6 +191,40 @@
 | POST | `/workflows/runs/{runId}/approve` | 워크플로우 승인 처리 | 🔒 |
 | GET | `/workflows/{id}/runs` | 실행 이력 조회 | 🔒 |
 | GET | `/workflows/{id}/runs/{runId}` | 실행 상세 조회 | 🔒 |
+
+### 워크플로우 출력 스키마 (v2.5, CR-007)
+
+`POST /workflows` 및 `PUT /workflows/{id}` 요청에 `output_schema` 필드를 추가하여 설계 시점에 출력 포맷을 바인딩한다.
+
+**요청 확장 필드**:
+```json
+{
+  "id": "employee-extraction",
+  "name": "직원 정보 추출",
+  "steps": [ ... ],
+  "output_schema": {
+    "schema_id": "employee-form",
+    "version": "v1"
+  }
+}
+```
+
+또는 인라인 정의:
+```json
+{
+  "output_schema": {
+    "inline": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "department": { "type": "string" }
+      }
+    }
+  }
+}
+```
+
+런타임 시 마지막 LLM_CALL 스텝에 `response_format`이 자동 주입된다.
 
 ---
 
@@ -142,8 +238,31 @@
 | PUT | `/knowledge-sources/{id}` | 지식소스 수정 | 🔒 |
 | DELETE | `/knowledge-sources/{id}` | 지식소스 삭제 | 🔒 |
 | POST | `/knowledge-sources/{id}/sync` | 인제스션 실행 | 🔒 |
+| POST | `/knowledge-sources/{id}/upload` | 파일 업로드 (multipart, v3.0 CR-010) | 🔒 |
 | POST | `/knowledge-sources/search` | 벡터 검색 | 🔒 |
 | GET | `/knowledge-sources/{id}/ingestion-logs` | 인제스션 로그 조회 | 🔒 |
+
+### 파일 업로드 (v3.0, CR-010)
+
+`POST /knowledge-sources/{id}/upload` — 지식소스에 파일을 업로드하고 자동 인제스션을 트리거한다.
+
+**요청**: `Content-Type: multipart/form-data`
+```
+file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
+```
+
+**응답**:
+```json
+{
+  "success": true,
+  "data": {
+    "source_id": "ks-001",
+    "file_path": "/data/aimbase/tenant-1/knowledge/uuid_document.pdf",
+    "file_size": 2048576,
+    "status": "syncing"
+  }
+}
+```
 
 ---
 
@@ -170,6 +289,9 @@
 | GET | `/admin/approvals` | 승인 대기 목록 | 🔒 |
 | POST | `/admin/approvals/{id}/approve` | 승인 처리 | 🔒 |
 | POST | `/admin/approvals/{id}/reject` | 거부 처리 | 🔒 |
+| GET | `/admin/traces` | LLM 트레이스 조회 (v3.0 CR-010) | 🔒 Admin |
+| GET | `/admin/cost-breakdown` | 모델별 비용 분석 (v3.0 CR-010) | 🔒 Admin |
+| GET | `/admin/cost-trend` | 일별 비용 추세 (v3.0 CR-010) | 🔒 Admin |
 
 ---
 
@@ -207,6 +329,49 @@
 
 ---
 
+## 인증 (Auth) [v3.0, CR-010]
+
+| 메서드 | 경로 | 설명 | 인증 |
+|--------|------|------|------|
+| POST | `/auth/login` | JWT 로그인 (email + password) | 🔓 Public |
+| POST | `/auth/refresh` | 토큰 갱신 (refreshToken) | 🔓 Public |
+
+### 로그인
+
+**요청**:
+```json
+{ "email": "admin@example.com", "password": "..." }
+```
+
+**응답**:
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "eyJ...",
+    "refresh_token": "eyJ...",
+    "expires_in": 1800,
+    "token_type": "Bearer"
+  }
+}
+```
+
+### API Key 인증
+
+`X-API-Key` 헤더로 인증. JWT와 API Key 중 하나로 인증 가능.
+
+---
+
+## 대화 히스토리 (Conversations) [v3.0, CR-010]
+
+| 메서드 | 경로 | 설명 | 인증 |
+|--------|------|------|------|
+| GET | `/conversations` | 대화 세션 목록 조회 (페이징, 검색) | 🔒 |
+| GET | `/conversations/{sessionId}` | 대화 상세 (메시지 포함) | 🔒 |
+| DELETE | `/conversations/{sessionId}` | 대화 삭제 (Redis + DB) | 🔒 |
+
+---
+
 ## 플랫폼 관리 (Platform - Super Admin)
 
 | 메서드 | 경로 | 설명 | 인증 |
@@ -239,6 +404,12 @@
 | `chunk_document` | 문서를 시맨틱 청크로 분할 (인제스션 미수행) | PY-001 |
 | `rerank_results` | 검색 결과를 cross-encoder로 리랭킹 | PY-003 |
 | `transform_query` | 쿼리 변환 (HyDE, Multi-Query) | PY-005 |
+| `finetune_embeddings` | 도메인 특화 임베딩 파인튜닝 | PY-012 |
+| `parse_document` | 문서 파싱 (PDF/DOCX/PPTX 등, v3.0 CR-009) | PY-013 |
+| `self_rag_search` | Self-RAG 자동 개선 루프 (v3.0 CR-009) | PY-014 |
+| `compress_context` | 컨텍스트 압축 (v3.0 CR-009) | PY-015 |
+| `embed_multimodal` | 멀티모달 임베딩 CLIP (v3.0 CR-009) | PY-016 |
+| `scrape_url` | 웹 스크래핑 강화 (v3.0 CR-009) | PY-017 |
 
 ### MCP Server 2: Evaluation
 
@@ -247,6 +418,8 @@
 | `evaluate_rag` | RAG 응답 품질 평가 (faithfulness, relevancy, context precision/recall) | PY-006 |
 | `evaluate_llm_output` | LLM 출력 평가 (hallucination, toxicity, bias) | PY-007 |
 | `compare_prompts` | 프롬프트 A/B 비교 회귀 테스트 | PY-008 |
+| `generate_benchmark` | RAG 벤치마크 Q&A 자동 생성 (v3.0 CR-009) | PY-020 |
+| `detect_embedding_drift` | 임베딩 드리프트 감지 (v3.0 CR-009) | PY-021 |
 
 ### MCP Server 3: Safety
 
@@ -256,7 +429,10 @@
 | `mask_pii` | PII 마스킹 처리 | PY-009 |
 | `validate_output` | 출력 안전성/포맷 가드레일 검증 | PY-010 |
 
-### MCP Server 4: Agent (향후)
+Safety MCP Server에 PY-018(한국어 NER 강화)은 기존 `detect_pii` / `mask_pii` 도구에 엔티티 타입 확장으로 반영 (별도 도구 불필요).
+PY-019(독성 분류 강화)는 기존 `validate_output` 도구 내부 로직 고도화로 반영.
+
+### MCP Server 4: Agent
 
 | Tool 이름 | 설명 | 관련 기능ID |
 |-----------|------|------------|

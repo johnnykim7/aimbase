@@ -1,0 +1,23 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-mcp-rag",
+  "action": {
+    "method": "POST",
+    "endpoint": "/mcp",
+    "headers": {},
+    "body": {
+      "tool": "transform_query",
+      "arguments": {
+        "query": "반품 처리 어떻게 해?",
+        "method": "hyde"
+      }
+    }
+  },
+  "extract": {
+    "transformedQuery": "$.body.result.transformed_query"
+  },
+  "assert": [
+    { "field": "$.body.result.transformed_query", "operator": "!=", "value": null }
+  ],
+  "failMode": "hard"
+}

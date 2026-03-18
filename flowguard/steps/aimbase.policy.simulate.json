@@ -1,0 +1,24 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/policies/simulate",
+    "headers": {},
+    "body": {
+      "model": "blocked-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ]
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.action", "operator": "==", "value": "DENY" }
+  ],
+  "failMode": "hard"
+}

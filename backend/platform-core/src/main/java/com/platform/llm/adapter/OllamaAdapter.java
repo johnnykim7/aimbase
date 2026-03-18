@@ -57,18 +57,42 @@ public class OllamaAdapter implements LLMAdapter {
             long start = Instant.now().toEpochMilli();
             String modelId = extractModelId(request.model());
 
-            List<Map<String, Object>> messages = request.messages().stream()
-                    .map(msg -> Map.<String, Object>of(
-                            "role", toOpenAIRole(msg.role()),
-                            "content", extractText(msg)
-                    ))
-                    .toList();
+            // CR-007: 구조화 출력 시 system prompt에 스키마 주입
+            boolean structuredMode = request.responseSchema() != null && !request.responseSchema().isEmpty();
+            List<Map<String, Object>> messages = new ArrayList<>(request.messages().stream()
+                    .map(this::toOllamaMessage)
+                    .toList());
 
-            Map<String, Object> body = Map.of(
+            if (structuredMode) {
+                try {
+                    String schemaJson = objectMapper.writeValueAsString(request.responseSchema());
+                    String schemaPrompt = "[STRUCTURED OUTPUT]\nYou MUST respond with valid JSON matching this schema:\n"
+                            + schemaJson + "\nReturn ONLY the JSON object, no other text.";
+                    messages.add(0, Map.of("role", "system", "content", schemaPrompt));
+                } catch (Exception e) {
+                    log.warn("Failed to inject schema prompt for Ollama: {}", e.getMessage());
+                }
+            }
+
+            // CR-006: toolChoice가 "none"이면 도구를 요청에 포함하지 않음
+            boolean excludeTools = "none".equals(request.toolChoice());
+            if (request.toolChoice() != null && !"auto".equals(request.toolChoice()) && !excludeTools) {
+                log.warn("Ollama does not support tool_choice='{}', falling back to auto", request.toolChoice());
+            }
+
+            // CR-007: 구조화 모드에서 response_format: json_object 추가
+            Map<String, Object> body = new java.util.HashMap<>(Map.of(
                     "model", modelId,
                     "messages", messages,
                     "stream", false
-            );
+            ));
+            // CR-006: toolChoice가 "none"이 아닐 때만 도구 포함
+            if (!excludeTools && request.tools() != null && !request.tools().isEmpty()) {
+                body.put("tools", transformToolDefs(request.tools()));
+            }
+            if (structuredMode) {
+                body.put("response_format", Map.of("type", "json_object"));
+            }
 
             try {
                 String json = objectMapper.writeValueAsString(body);
@@ -191,6 +215,37 @@ public class OllamaAdapter implements LLMAdapter {
             case ASSISTANT -> "assistant";
             case TOOL_RESULT -> "tool";
         };
+    }
+
+    /**
+     * PRD-111: UnifiedMessage → Ollama 메시지 맵 변환.
+     * Image 블록이 있으면 images 필드에 base64 배열로 추가 (Ollama native multimodal).
+     */
+    private Map<String, Object> toOllamaMessage(UnifiedMessage msg) {
+        String text = extractText(msg);
+        List<String> images = msg.content().stream()
+                .filter(b -> b instanceof ContentBlock.Image)
+                .map(b -> {
+                    ContentBlock.Image img = (ContentBlock.Image) b;
+                    if (img.isBase64()) {
+                        return img.data();
+                    } else if (img.isUrl()) {
+                        // Ollama는 URL을 직접 지원하지 않으므로 URL을 그대로 전달 (일부 모델은 지원)
+                        return img.url();
+                    }
+                    return null;
+                })
+                .filter(s -> s != null)
+                .toList();
+
+        if (!images.isEmpty()) {
+            Map<String, Object> message = new java.util.HashMap<>();
+            message.put("role", toOpenAIRole(msg.role()));
+            message.put("content", text);
+            message.put("images", images);
+            return message;
+        }
+        return Map.of("role", toOpenAIRole(msg.role()), "content", text);
     }
 
     private String extractText(UnifiedMessage msg) {

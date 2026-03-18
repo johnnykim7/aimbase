@@ -1,7 +1,7 @@
 """Aimbase Safety - FastMCP Server.
 
-MCP Server 3: PII Detection & Masking
-Tools: detect_pii, mask_pii, validate_output
+MCP Server 3: PII Detection & Masking + Output Guardrails
+Tools: detect_pii, mask_pii, validate_output, validate_output_guardrails
 """
 
 import json
@@ -14,10 +14,7 @@ from safety.config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP(
-    "Aimbase Safety",
-    description="PII detection and masking tools with Korean language support (Presidio)",
-)
+mcp = FastMCP("Aimbase Safety")
 
 
 @mcp.tool()
@@ -34,7 +31,7 @@ def detect_pii(
 
     Args:
         text: Input text to analyze for PII
-        language: Language code ("ko" or "en", default: "ko")
+        language: Language code (default: "en"). Korean PII is detected via regex under "en" context.
         entities: JSON array of entity types to detect (default: all)
         score_threshold: Minimum confidence score (0.0-1.0, default: 0.4)
     """
@@ -63,7 +60,7 @@ def mask_pii(
 
     Args:
         text: Input text to mask PII in
-        language: Language code ("ko" or "en", default: "ko")
+        language: Language code (default: "en"). Korean PII is detected via regex under "en" context.
         entities: JSON array of entity types to mask (default: all)
         score_threshold: Minimum confidence score (0.0-1.0, default: 0.4)
     """
@@ -88,7 +85,7 @@ def validate_output(
 
     Args:
         text: LLM output text to validate
-        language: Language code ("ko" or "en", default: "ko")
+        language: Language code (default: "en"). Korean PII is detected via regex under "en" context.
         entities: JSON array of entity types to check (default: all)
         score_threshold: Minimum confidence score (0.0-1.0, default: 0.4)
     """
@@ -96,6 +93,32 @@ def validate_output(
 
     ent_list = json.loads(entities) if isinstance(entities, str) and entities.strip() not in ("", "[]") else None
     result = do_validate(text, language, ent_list, score_threshold)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def validate_output_guardrails(
+    text: str,
+    rules: str = "[]",
+) -> str:
+    """Validate LLM output against guardrail rules (PY-010).
+
+    Checks topic adherence, format constraints, and safety rules.
+    For PII-only checks, use validate_output instead.
+
+    Rule types:
+    - topic: {"type": "topic", "config": {"forbidden_topics": ["violence"], "check_off_topic": true}}
+    - format: {"type": "format", "config": {"max_length": 5000, "forbidden_patterns": ["(?i)password"]}}
+    - safety: {"type": "safety", "config": {"check_toxic": true, "check_pii": true, "custom_forbidden": ["competitor"]}}
+
+    Args:
+        text: LLM output text to validate
+        rules: JSON array of rule definitions
+    """
+    from safety.guardrails import validate_with_rules
+
+    rule_list = json.loads(rules) if isinstance(rules, str) else rules
+    result = validate_with_rules(text, rule_list)
     return json.dumps(result, ensure_ascii=False)
 
 

@@ -1,0 +1,20 @@
+{
+  "scenarioKey": "aimbase.s5.rag",
+  "name": "Sprint 5: RAG 지식 관리 전체 흐름",
+  "description": "지식소스 생성 → 동기화 → 목록 조회 → 벡터 검색 → RAG 채팅 → 정리 (UAT-S5-001~005)",
+  "tags": ["sprint-5", "rag", "knowledge", "vector-search"],
+  "coverage": {
+    "T4-1": ["V-015", "V-016", "V-017"],
+    "T4-2": ["UAT-S5-001", "UAT-S5-002", "UAT-S5-004", "UAT-S5-005"]
+  },
+  "vars": {},
+  "steps": [
+    "aimbase.knowledge.create",
+    "aimbase.knowledge.sync",
+    "aimbase.knowledge.list",
+    "aimbase.knowledge.search",
+    "aimbase.knowledge.chat_with_rag",
+    "aimbase.chat.sync",
+    "aimbase.knowledge.delete"
+  ]
+}

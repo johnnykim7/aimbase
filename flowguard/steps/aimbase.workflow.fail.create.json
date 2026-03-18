@@ -1,0 +1,34 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/workflows",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-Fail-WF",
+      "description": "실패 재시도 테스트 워크플로우",
+      "domain": "test",
+      "triggerConfig": {"type": "manual"},
+      "steps": [
+        {
+          "id": "s1",
+          "type": "LLM_CALL",
+          "config": {
+            "prompt": "Hello",
+            "model": "nonexistent-model",
+            "connection_id": "nonexistent-connection"
+          },
+          "dependsOn": []
+        }
+      ]
+    }
+  },
+  "extract": {
+    "workflowId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

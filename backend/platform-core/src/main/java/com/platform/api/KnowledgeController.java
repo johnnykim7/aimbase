@@ -6,6 +6,8 @@ import com.platform.rag.VectorSearcher;
 import com.platform.rag.model.RetrievedChunk;
 import com.platform.repository.IngestionLogRepository;
 import com.platform.repository.KnowledgeSourceRepository;
+import com.platform.storage.StorageService;
+import com.platform.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -14,29 +16,39 @@ import jakarta.validation.constraints.NotNull;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/v1/knowledge-sources")
 @Tag(name = "Knowledge Sources", description = "RAG 지식 소스 관리")
 public class KnowledgeController {
 
+    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
+            "pdf", "docx", "xlsx", "pptx", "csv", "txt", "md", "html"
+    );
+
     private final KnowledgeSourceRepository knowledgeSourceRepository;
     private final IngestionLogRepository ingestionLogRepository;
     private final IngestionPipeline ingestionPipeline;
     private final VectorSearcher vectorSearcher;
+    private final StorageService storageService;
 
     public KnowledgeController(KnowledgeSourceRepository knowledgeSourceRepository,
                                 IngestionLogRepository ingestionLogRepository,
                                 IngestionPipeline ingestionPipeline,
-                                VectorSearcher vectorSearcher) {
+                                VectorSearcher vectorSearcher,
+                                StorageService storageService) {
         this.knowledgeSourceRepository = knowledgeSourceRepository;
         this.ingestionLogRepository = ingestionLogRepository;
         this.ingestionPipeline = ingestionPipeline;
         this.vectorSearcher = vectorSearcher;
+        this.storageService = storageService;
     }
 
     @GetMapping
@@ -102,6 +114,54 @@ public class KnowledgeController {
     @Operation(summary = "지식 소스 삭제")
     public void delete(@PathVariable String id) {
         knowledgeSourceRepository.deleteById(id);
+    }
+
+    @PostMapping("/{id}/upload")
+    @Operation(summary = "지식 소스 파일 업로드")
+    public ApiResponse<Map<String, Object>> uploadFile(
+            @PathVariable String id,
+            @RequestParam("file") MultipartFile file) {
+        KnowledgeSourceEntity entity = knowledgeSourceRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Knowledge source not found: " + id));
+
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || originalFilename.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Filename is required");
+        }
+
+        String extension = originalFilename.contains(".")
+                ? originalFilename.substring(originalFilename.lastIndexOf('.') + 1).toLowerCase()
+                : "";
+        if (!ALLOWED_EXTENSIONS.contains(extension)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unsupported file extension: " + extension
+                            + ". Allowed: " + ALLOWED_EXTENSIONS);
+        }
+
+        try {
+            String tenantId = TenantContext.getTenantId();
+            String filePath = storageService.save(tenantId, "knowledge", originalFilename, file.getInputStream());
+
+            // Update entity config with file_path
+            Map<String, Object> config = entity.getConfig() != null
+                    ? new HashMap<>(entity.getConfig()) : new HashMap<>();
+            config.put("file_path", filePath);
+            entity.setConfig(config);
+            knowledgeSourceRepository.save(entity);
+
+            return ApiResponse.ok(Map.of(
+                    "sourceId", id,
+                    "filePath", filePath,
+                    "fileSize", file.getSize(),
+                    "status", "uploaded"
+            ));
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "File upload failed: " + e.getMessage());
+        }
     }
 
     @PostMapping("/{id}/sync")

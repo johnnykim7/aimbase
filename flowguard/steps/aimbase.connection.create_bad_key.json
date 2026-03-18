@@ -1,0 +1,25 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/connections",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-BadKey-LLM",
+      "type": "LLM",
+      "adapterType": "OPENAI",
+      "config": {
+        "apiKey": "sk-invalid-key-12345",
+        "model": "gpt-4o"
+      }
+    }
+  },
+  "extract": {
+    "badConnectionId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

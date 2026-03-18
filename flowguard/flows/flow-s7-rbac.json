@@ -1,0 +1,20 @@
+{
+  "scenarioKey": "aimbase.s7.rbac",
+  "name": "Sprint 7: 사용자 & RBAC 전체 흐름",
+  "description": "역할 생성 → 사용자 생성 → 목록 → 수정 → API키 재생성 → 삭제 (UAT-S7-001~005)",
+  "tags": ["sprint-7", "rbac", "user", "role", "api-key"],
+  "coverage": {
+    "T4-1": ["V-025", "V-026", "V-027"],
+    "T4-2": ["UAT-S7-001", "UAT-S7-003", "UAT-S7-004", "UAT-S7-005"]
+  },
+  "vars": {},
+  "steps": [
+    "aimbase.role.create",
+    "aimbase.user.create",
+    "aimbase.user.list",
+    "aimbase.user.update",
+    "aimbase.user.regenerate_apikey",
+    "aimbase.user.delete",
+    "aimbase.role.delete"
+  ]
+}

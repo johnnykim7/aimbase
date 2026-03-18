@@ -97,7 +97,10 @@ public class ConnectionController {
 
         try {
             HealthStatus health;
-            if ("write".equals(entity.getType()) && adapterRegistry.hasWriteAdapter(entity.getAdapter())) {
+            if ("llm".equals(entity.getType())) {
+                // CR-008: LLM 연결은 실제 API 호출로 검증
+                health = connectionAdapterFactory.ping(id);
+            } else if ("write".equals(entity.getType()) && adapterRegistry.hasWriteAdapter(entity.getAdapter())) {
                 health = adapterRegistry.getWriteAdapter(entity.getAdapter()).healthCheck();
             } else if ("notify".equals(entity.getType()) && adapterRegistry.hasNotifyAdapter(entity.getAdapter())) {
                 health = adapterRegistry.getNotifyAdapter(entity.getAdapter()).healthCheck();

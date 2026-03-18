@@ -1,0 +1,14 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/connections/{{steps.aimbase.connection.create_bad_key.output.badConnectionId}}/test",
+    "headers": {}
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.data.ok", "operator": "==", "value": false }
+  ],
+  "failMode": "hard"
+}

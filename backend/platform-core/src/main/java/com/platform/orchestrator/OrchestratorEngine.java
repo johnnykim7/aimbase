@@ -13,12 +13,16 @@ import com.platform.policy.MCPSafetyClient;
 import com.platform.policy.PolicyEngine;
 import com.platform.policy.model.PolicyResult;
 import com.platform.monitoring.PlatformMetrics;
+import com.platform.monitoring.TraceService;
 import com.platform.rag.RAGService;
 import com.platform.repository.UsageLogRepository;
+import com.platform.schema.SchemaRegistry;
+import com.platform.schema.SchemaValidator;
 import com.platform.session.ContextWindowManager;
 import com.platform.session.SessionStore;
 import com.platform.tool.ToolCallHandler;
 import com.platform.tool.ToolRegistry;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -61,6 +65,12 @@ public class OrchestratorEngine {
     private final RAGService ragService;
     private final MCPSafetyClient mcpSafetyClient;
     private final PlatformMetrics platformMetrics;
+    private final TraceService traceService;
+    private final SchemaRegistry schemaRegistry;
+    private final SchemaValidator schemaValidator;
+    private final ObjectMapper objectMapper;
+
+    private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
     public OrchestratorEngine(
             ModelRouter modelRouter,
@@ -75,7 +85,11 @@ public class OrchestratorEngine {
             ToolRegistry toolRegistry,
             RAGService ragService,
             MCPSafetyClient mcpSafetyClient,
-            PlatformMetrics platformMetrics
+            PlatformMetrics platformMetrics,
+            TraceService traceService,
+            SchemaRegistry schemaRegistry,
+            SchemaValidator schemaValidator,
+            ObjectMapper objectMapper
     ) {
         this.modelRouter = modelRouter;
         this.connectionAdapterFactory = connectionAdapterFactory;
@@ -90,6 +104,10 @@ public class OrchestratorEngine {
         this.ragService = ragService;
         this.mcpSafetyClient = mcpSafetyClient;
         this.platformMetrics = platformMetrics;
+        this.traceService = traceService;
+        this.schemaRegistry = schemaRegistry;
+        this.schemaValidator = schemaValidator;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -140,20 +158,24 @@ public class OrchestratorEngine {
             resolvedModel = modelRouter.resolveModelId(request.model());
         }
 
+        // 4-1. CR-007: 구조화 출력 — 스키마 해석
+        Map<String, Object> resolvedSchema = resolveResponseSchema(request.responseFormat());
+
         // 5. LLM 호출 (Phase 2: actionsEnabled=true 시 tool use 루프)
         LLMResponse llmResponse = null;
         long llmStart = System.currentTimeMillis();
         boolean llmSuccess = false;
         try {
             if (request.actionsEnabled() && toolRegistry.hasTools()) {
-                // Tool use 루프 — 최대 5회 반복
+                // Tool use 루프 — 최대 5회 반복 (CR-006: 필터링 + 선택 전략 지원)
                 llmResponse = toolCallHandler.executeLoop(
                         adapter, resolvedModel, trimmedMessages,
-                        ModelConfig.defaults(), sessionId, toolRegistry);
+                        ModelConfig.defaults(), sessionId, toolRegistry,
+                        request.toolFilter(), request.toolChoice());
             } else {
                 LLMRequest llmRequest = new LLMRequest(
                         resolvedModel, trimmedMessages, null,
-                        ModelConfig.defaults(), false, sessionId);
+                        ModelConfig.defaults(), false, sessionId, null, resolvedSchema);
                 try {
                     llmResponse = adapter.chat(llmRequest).get();
                 } catch (Exception e) {
@@ -168,6 +190,35 @@ public class OrchestratorEngine {
             long inputTokens = (llmResponse != null && llmResponse.usage() != null) ? llmResponse.usage().inputTokens() : 0;
             long outputTokens = (llmResponse != null && llmResponse.usage() != null) ? llmResponse.usage().outputTokens() : 0;
             platformMetrics.recordLlmCall(provider, resolvedModel, llmSuccess, latencyMs, inputTokens, outputTokens);
+
+            // PRD-112: LLM 트레이싱 — 비동기 기록 (실패해도 메인 플로우에 영향 없음)
+            try {
+                if (llmResponse != null) {
+                    Map<String, Object> responseMap = Map.of(
+                            "text", llmResponse.textContent(),
+                            "finish_reason", llmResponse.finishReason().name(),
+                            "cost_usd", llmResponse.costUsd()
+                    );
+                    traceService.record(sessionId, resolvedModel,
+                            trimmedMessages.stream().map(m -> Map.of(
+                                    "role", m.role().name(),
+                                    "content", m.content().stream()
+                                            .filter(b -> b instanceof ContentBlock.Text)
+                                            .map(b -> ((ContentBlock.Text) b).text())
+                                            .reduce("", String::concat)
+                            )).toList(),
+                            responseMap, (int) inputTokens, (int) outputTokens,
+                            (int) latencyMs, llmResponse.costUsd());
+                }
+            } catch (Exception e) {
+                log.warn("Tracing record failed: {}", e.getMessage());
+            }
+        }
+
+        // 5-1. CR-007: 구조화 출력 — 응답 검증 + 재시도 + ContentBlock 변환
+        if (resolvedSchema != null) {
+            llmResponse = validateAndConvertStructuredOutput(
+                    llmResponse, resolvedSchema, adapter, resolvedModel, trimmedMessages, sessionId);
         }
 
         // 6. 출력 가드레일 검증 (PY-010: MCPSafetyClient validate_output)
@@ -266,6 +317,128 @@ public class OrchestratorEngine {
             log.warn("Output guardrail validation failed: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * CR-007: response_format에서 JSON Schema를 해석.
+     * schema_ref → SchemaRegistry 조회, schema → 인라인 사용. 둘 다 없으면 null.
+     */
+    private Map<String, Object> resolveResponseSchema(ChatRequest.ResponseFormat format) {
+        if (format == null || !"json_schema".equals(format.type())) {
+            return null;
+        }
+        if (format.schemaRef() != null && !format.schemaRef().isBlank()) {
+            // schema_ref: "schemaId" 또는 "schemaId/version"
+            String ref = format.schemaRef();
+            if (ref.contains("/")) {
+                String[] parts = ref.split("/", 2);
+                try {
+                    int version = Integer.parseInt(parts[1]);
+                    return schemaRegistry.getSchema(parts[0], version)
+                            .orElseThrow(() -> new IllegalArgumentException("Schema not found: " + ref));
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("Invalid schema_ref version: " + ref);
+                }
+            }
+            return schemaRegistry.getLatestSchema(ref)
+                    .orElseThrow(() -> new IllegalArgumentException("Schema not found: " + ref));
+        }
+        if (format.schema() != null && !format.schema().isEmpty()) {
+            return format.schema();
+        }
+        return null;
+    }
+
+    /**
+     * CR-007: LLM 응답의 JSON을 파싱 → 스키마 검증 → 실패 시 최대 2회 재시도 → Structured ContentBlock 변환.
+     */
+    @SuppressWarnings("unchecked")
+    private LLMResponse validateAndConvertStructuredOutput(
+            LLMResponse original, Map<String, Object> schema,
+            LLMAdapter adapter, String resolvedModel,
+            List<UnifiedMessage> messages, String sessionId) {
+
+        LLMResponse current = original;
+        for (int attempt = 0; attempt <= STRUCTURED_OUTPUT_MAX_RETRIES; attempt++) {
+            String jsonText = current.textContent();
+            // JSON 블록 추출 (```json ... ``` 또는 순수 JSON)
+            String cleanJson = extractJsonFromText(jsonText);
+
+            try {
+                Map<String, Object> data = objectMapper.readValue(cleanJson, Map.class);
+                SchemaValidator.ValidationResult result = schemaValidator.validate(schema, data);
+
+                if (result.valid()) {
+                    // 성공: Structured 블록으로 대체
+                    String schemaName = schema.getOrDefault("title", "inline").toString();
+                    List<ContentBlock> newContent = List.of(new ContentBlock.Structured(schemaName, data));
+                    return new LLMResponse(current.id(), current.model(), newContent,
+                            current.toolCalls(), current.usage(), current.finishReason(),
+                            current.latencyMs(), current.costUsd());
+                }
+
+                if (attempt < STRUCTURED_OUTPUT_MAX_RETRIES) {
+                    log.warn("Structured output validation failed (attempt {}): {}", attempt + 1, result.errors());
+                    // 재시도: 검증 오류를 포함한 메시지로 재호출
+                    List<UnifiedMessage> retryMessages = new ArrayList<>(messages);
+                    retryMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, jsonText));
+                    retryMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER,
+                            "The JSON output did not pass schema validation. Errors: " + result.errors()
+                                    + "\nPlease fix and return valid JSON only."));
+
+                    LLMRequest retryRequest = new LLMRequest(
+                            resolvedModel, retryMessages, null,
+                            ModelConfig.defaults(), false, sessionId, null, schema);
+                    try {
+                        current = adapter.chat(retryRequest).get();
+                    } catch (Exception e) {
+                        log.error("Structured output retry failed", e);
+                        break;
+                    }
+                } else {
+                    log.error("Structured output validation failed after {} retries: {}",
+                            STRUCTURED_OUTPUT_MAX_RETRIES, result.errors());
+                }
+            } catch (Exception e) {
+                if (attempt < STRUCTURED_OUTPUT_MAX_RETRIES) {
+                    log.warn("Structured output JSON parse failed (attempt {}): {}", attempt + 1, e.getMessage());
+                    List<UnifiedMessage> retryMessages = new ArrayList<>(messages);
+                    retryMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, jsonText));
+                    retryMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER,
+                            "Your response was not valid JSON. Error: " + e.getMessage()
+                                    + "\nPlease return valid JSON only, matching the requested schema."));
+
+                    LLMRequest retryRequest = new LLMRequest(
+                            resolvedModel, retryMessages, null,
+                            ModelConfig.defaults(), false, sessionId, null, schema);
+                    try {
+                        current = adapter.chat(retryRequest).get();
+                    } catch (Exception retryEx) {
+                        log.error("Structured output retry failed", retryEx);
+                        break;
+                    }
+                } else {
+                    log.error("Structured output parse failed after {} retries", STRUCTURED_OUTPUT_MAX_RETRIES);
+                }
+            }
+        }
+        // 모든 재시도 실패: 원본 텍스트 그대로 반환
+        return current;
+    }
+
+    /** JSON 텍스트에서 ```json ... ``` 코드 블록 또는 순수 JSON 추출 */
+    private String extractJsonFromText(String text) {
+        if (text == null) return "{}";
+        String trimmed = text.strip();
+        // ```json ... ``` 패턴
+        if (trimmed.startsWith("```")) {
+            int start = trimmed.indexOf('\n');
+            int end = trimmed.lastIndexOf("```");
+            if (start > 0 && end > start) {
+                return trimmed.substring(start + 1, end).strip();
+            }
+        }
+        return trimmed;
     }
 
     private void saveUsageLog(String userId, String sessionId, String model, LLMResponse response) {

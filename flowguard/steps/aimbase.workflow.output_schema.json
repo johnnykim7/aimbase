@@ -1,0 +1,51 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/workflows",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-Structured-WF",
+      "description": "구조화 출력 테스트 워크플로우",
+      "domain": "test",
+      "triggerConfig": {"type": "manual"},
+      "steps": [
+        {
+          "id": "step1",
+          "type": "LLM_CALL",
+          "config": {
+            "model": "auto",
+            "prompt": "직원 정보: 홍길동, 개발팀",
+            "connection_id": "{{vars.connectionId}}"
+          },
+          "dependsOn": []
+        }
+      ],
+      "output_schema": {
+        "inline": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "department": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "department"
+          ]
+        }
+      }
+    }
+  },
+  "extract": {
+    "workflowId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

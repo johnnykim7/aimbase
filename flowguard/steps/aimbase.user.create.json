@@ -1,0 +1,22 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/users",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-TestUser",
+      "email": "flowguard-test@example.com",
+      "roleId": "{{vars.roleId}}"
+    }
+  },
+  "extract": {
+    "userId": "$.body.data.id",
+    "apiKey": "$.body.data.apiKey"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

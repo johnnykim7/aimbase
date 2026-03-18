@@ -1,0 +1,16 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "GET",
+    "endpoint": "/mcp-servers/{{steps.aimbase.mcp.create.output.mcpServerId}}/tools",
+    "headers": {}
+  },
+  "extract": {
+    "toolCount": "$.body.data.length"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

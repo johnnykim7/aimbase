@@ -1,0 +1,18 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "Auth (Users + Roles) 페이지",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/users",
+    "checkpoints": [
+      {"selector": "table, [data-testid=data-table]", "visible": true}
+    ],
+    "additionalPages": [
+      "{{vars.feBaseUrl}}/roles"
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

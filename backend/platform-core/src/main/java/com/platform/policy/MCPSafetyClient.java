@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -111,6 +112,31 @@ public class MCPSafetyClient {
 
         String result = mcpClient.callTool("validate_output", input);
         return parseJson(result);
+    }
+
+    /**
+     * 규칙 기반 출력 가드레일 검증 — validate_output_guardrails 도구 호출 (PY-010).
+     *
+     * @param text  검증할 LLM 출력 텍스트
+     * @param rules 가드레일 규칙 목록 [{type: "topic"|"format"|"safety", config: {...}}]
+     * @return {valid: true/false, violations: [...], violation_count: N, rules_evaluated: N}
+     */
+    public Map<String, Object> validateOutputGuardrails(String text, List<Map<String, Object>> rules) {
+        Map<String, Object> input = Map.of(
+                "text", text,
+                "rules", toJsonString(rules)
+        );
+
+        String result = mcpClient.callTool("validate_output_guardrails", input);
+        return parseJson(result);
+    }
+
+    private String toJsonString(Object obj) {
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize to JSON", e);
+        }
     }
 
     private Map<String, Object> parseJson(String json) {

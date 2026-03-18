@@ -1,0 +1,19 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/workflows/{{steps.aimbase.workflow.condition.create.output.workflowId}}/run",
+    "headers": {},
+    "body": {
+      "route": "A"
+    }
+  },
+  "extract": {
+    "runId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

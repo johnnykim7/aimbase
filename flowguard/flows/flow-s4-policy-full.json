@@ -1,0 +1,26 @@
+{
+  "scenarioKey": "aimbase.s4.policy-full",
+  "name": "Sprint 4: 정책 엔진 전체 흐름",
+  "description": "DENY 정책 → 차단 확인 → 시뮬레이션 → 토글 비활성화 → 차단 해제 확인 → 승인대기 → 우선순위 → 정리 (UAT-S4-001~005)",
+  "tags": ["sprint-4", "policy", "deny", "approval", "priority"],
+  "coverage": {
+    "T4-1": ["V-011", "V-012", "V-014"],
+    "T4-2": ["UAT-S4-001", "UAT-S4-002", "UAT-S4-003", "UAT-S4-004", "UAT-S4-005"]
+  },
+  "vars": {},
+  "steps": [
+    "aimbase.policy.deny",
+    "aimbase.chat.denied",
+    "aimbase.policy.simulate",
+    "aimbase.policy.toggle_off",
+    "aimbase.policy.chat_after_toggle",
+    "aimbase.policy.cleanup",
+    "aimbase.policy.require_approval",
+    "aimbase.policy.chat_approval",
+    "aimbase.policy.cleanup_approval",
+    "aimbase.policy.deny",
+    "aimbase.policy.priority_low",
+    "aimbase.policy.cleanup",
+    "aimbase.policy.cleanup_allow"
+  ]
+}

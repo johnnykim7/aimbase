@@ -9,7 +9,7 @@ class Settings:
     MCP_PORT: int = int(os.getenv("SAFETY_MCP_PORT", "8001"))
 
     # Presidio
-    DEFAULT_LANGUAGE: str = os.getenv("SAFETY_DEFAULT_LANGUAGE", "ko")
+    DEFAULT_LANGUAGE: str = os.getenv("SAFETY_DEFAULT_LANGUAGE", "en")
     DEFAULT_SCORE_THRESHOLD: float = float(os.getenv("SAFETY_SCORE_THRESHOLD", "0.4"))
 
     # Masking

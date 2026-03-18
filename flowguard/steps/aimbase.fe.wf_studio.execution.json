@@ -1,0 +1,15 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "FE-005 실행시각화: 노드별 상태 표시",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/workflows/{{vars.testWorkflowId}}/edit",
+    "checkpoints": [
+      {"selector": ".react-flow__node[data-status]", "exists": true}
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

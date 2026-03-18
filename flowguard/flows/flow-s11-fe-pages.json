@@ -1,0 +1,25 @@
+{
+  "scenarioKey": "aimbase.s11.fe-pages",
+  "name": "Sprint 11-14: FE 전체 페이지 스모크 테스트",
+  "description": "AppShell → Dashboard → Connections → MCP/Schemas/Policies/Prompts → Workflows → Knowledge → Auth → Monitoring → Platform (V-039~049)",
+  "tags": ["sprint-11", "fe", "ui-smoke"],
+  "coverage": {
+    "T4-1": ["V-040", "V-041", "V-042", "V-043", "V-044", "V-045", "V-046", "V-047", "V-048", "V-049"],
+    "T4-2": []
+  },
+  "vars": {
+    "feBaseUrl": "{{env.FE_BASE_URL}}"
+  },
+  "steps": [
+    "aimbase.fe.appshell",
+    "aimbase.fe.common_components",
+    "aimbase.fe.dashboard",
+    "aimbase.fe.connections",
+    "aimbase.fe.mcp_schemas_policies",
+    "aimbase.fe.workflows",
+    "aimbase.fe.knowledge",
+    "aimbase.fe.auth",
+    "aimbase.fe.monitoring",
+    "aimbase.fe.platform"
+  ]
+}

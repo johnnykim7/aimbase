@@ -1,5 +1,6 @@
 package com.platform.workflow.step;
 
+import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
 import com.platform.llm.router.ModelRouter;
@@ -28,9 +29,11 @@ public class LlmCallStepExecutor implements StepExecutor {
     private static final Logger log = LoggerFactory.getLogger(LlmCallStepExecutor.class);
 
     private final ModelRouter modelRouter;
+    private final ConnectionAdapterFactory connectionAdapterFactory;
 
-    public LlmCallStepExecutor(ModelRouter modelRouter) {
+    public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory) {
         this.modelRouter = modelRouter;
+        this.connectionAdapterFactory = connectionAdapterFactory;
     }
 
     @Override
@@ -43,6 +46,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         Map<String, Object> config = step.config();
 
         String model = config.containsKey("model") ? (String) config.get("model") : "auto";
+        String connectionId = (String) config.get("connection_id");
         String promptTemplate = (String) config.getOrDefault("prompt", "");
         String systemTemplate = (String) config.get("system");
 
@@ -50,8 +54,16 @@ public class LlmCallStepExecutor implements StepExecutor {
         String prompt = context.resolve(promptTemplate);
         String system = systemTemplate != null ? context.resolve(systemTemplate) : null;
 
-        String resolvedModel = modelRouter.resolveModelId(model);
-        LLMAdapter adapter = modelRouter.route(new LLMRequest(resolvedModel, List.of()));
+        // connection_id가 있으면 ConnectionAdapterFactory 사용, 없으면 ModelRouter 폴백
+        LLMAdapter adapter;
+        String resolvedModel;
+        if (connectionId != null && !connectionId.isBlank()) {
+            adapter = connectionAdapterFactory.getAdapter(connectionId);
+            resolvedModel = connectionAdapterFactory.resolveModel(connectionId, model);
+        } else {
+            resolvedModel = modelRouter.resolveModelId(model);
+            adapter = modelRouter.route(new LLMRequest(resolvedModel, List.of()));
+        }
 
         // 메시지 구성
         java.util.List<UnifiedMessage> messages = new java.util.ArrayList<>();
@@ -60,9 +72,14 @@ public class LlmCallStepExecutor implements StepExecutor {
         }
         messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt));
 
+        // CR-007: response_schema (인라인 또는 WorkflowEngine에서 자동 주입)
+        @SuppressWarnings("unchecked")
+        Map<String, Object> responseSchema = config.containsKey("response_schema")
+                ? (Map<String, Object>) config.get("response_schema") : null;
+
         // LLM 호출 (tool use 없이 단순 호출)
         LLMRequest llmRequest = new LLMRequest(resolvedModel, messages, null,
-                ModelConfig.defaults(), false, context.workflowRunId());
+                ModelConfig.defaults(), false, context.workflowRunId(), null, responseSchema);
         LLMResponse response;
         try {
             response = adapter.chat(llmRequest).get();
@@ -72,6 +89,22 @@ public class LlmCallStepExecutor implements StepExecutor {
 
         String output = response.textContent();
         log.debug("LLM_CALL step '{}' completed: {} chars", step.id(), output.length());
+
+        // CR-007: Structured 블록이 있으면 data를 output에 포함
+        Map<String, Object> structuredData = response.content().stream()
+                .filter(b -> b instanceof ContentBlock.Structured)
+                .map(b -> ((ContentBlock.Structured) b).data())
+                .findFirst().orElse(null);
+
+        if (structuredData != null) {
+            return Map.of(
+                    "output", output,
+                    "structured_data", structuredData,
+                    "model", resolvedModel,
+                    "input_tokens", response.usage().inputTokens(),
+                    "output_tokens", response.usage().outputTokens()
+            );
+        }
 
         return Map.of(
                 "output", output,

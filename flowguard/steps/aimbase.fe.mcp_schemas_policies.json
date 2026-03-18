@@ -1,0 +1,20 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "MCP/Schemas/Policies/Prompts 관리 페이지",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/mcp-servers",
+    "checkpoints": [
+      {"selector": "table, [data-testid=data-table]", "visible": true}
+    ],
+    "additionalPages": [
+      "{{vars.feBaseUrl}}/schemas",
+      "{{vars.feBaseUrl}}/policies",
+      "{{vars.feBaseUrl}}/prompts"
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

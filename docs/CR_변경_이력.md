@@ -12,6 +12,13 @@
 | CR-001 | 초기 시스템 구축 | 신규 | High | v1.0.0 |
 | CR-002 | Python 사이드카 아키텍처 도입 | 변경 | High | v2.0.0 |
 | CR-003 | MCP 클라이언트 통합 완성 | 변경 | High | v2.1.0 |
+| CR-004 | Sprint 18 고급 기능 구현 완성 | 변경 | Medium | v2.2.0 |
+| CR-005 | 워크플로우 비주얼 스튜디오 | 변경 | Medium | v2.3.0 |
+| CR-006 | 도구 선택 제어 (Tool Selection Control) | 변경 | Medium | v2.4.0 |
+| CR-007 | 구조화된 출력 (Structured Output) | 변경 | High | v2.5.0 |
+| CR-008 | LLM 연결 테스트 실제 검증 | 버그수정 | Medium | v2.5.1 |
+| CR-009 | Python 사이드카 알파 기능 | 변경 | High | v3.0.0 |
+| CR-010 | 플랫폼 핵심 강화 | 변경 | High | v3.0.0 |
 
 ---
 
@@ -63,6 +70,140 @@
 - **영향 설계서**: T3-2, T3-5
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v2.1.0
 - **변경 일자**: 2026-03-12
+
+### CR-004 | Sprint 18 고급 기능 구현 완성
+- **대상 기능 ID**: PY-005, PY-010, PY-011, PY-012
+- **변경 타입**: 변경
+- **변경 내용**: Sprint 18에서 "완료"로 표기되었으나 실제 미구현이었던 4건의 고급 기능을 구현
+  - PY-005 쿼리 변환: HyDE, Multi-Query, Step-Back 전략 (RAG Pipeline MCP Server에 transform_query 도구 추가)
+  - PY-010 출력 가드레일: 규칙 기반 검증 엔진 (Safety MCP Server에 validate_output_guardrails 도구 추가, topic/format/safety 규칙)
+  - PY-011 고급 추론 체인: MCP Server 4 (Agent) 신규 — reflection, plan_and_execute, ReAct 패턴
+  - PY-012 임베딩 파인튜닝: sentence-transformers 기반 학습 파이프라인 (RAG Pipeline MCP Server에 finetune_embeddings 도구 추가)
+  - Spring MCP Client: MCPRagClient에 transformQuery/finetuneEmbeddings, MCPSafetyClient에 validateOutputGuardrails 메서드 추가
+  - Docker Compose: Agent MCP Server (포트 8003) 서비스 추가
+  - application.yml: agent.mcp 설정 추가
+- **변경 사유**: 전체 점검에서 T1-7 "완료" 표기와 실제 코드 간 불일치 발견 — 설계 문서 정합성 확보
+- **영향 모듈**: RAG(PY-005, PY-012), Safety(PY-010), Agent(PY-011, 신규)
+- **영향도**: Medium
+- **영향 범위**: PY-005, PY-010, PY-011, PY-012
+- **영향 설계서**: T1-1(상태 갱신), T1-7(상태 확인), T4-1(검증 항목 추가)
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v2.2.0
+- **변경 일자**: 2026-03-15
+
+### CR-005 | 워크플로우 비주얼 스튜디오
+- **대상 기능 ID**: PRD-039(생성), PRD-041(수정), FE-001~FE-005(신규)
+- **변경 타입**: 변경
+- **변경 내용**: 읽기 전용 워크플로우 목록/프리뷰를 UiPath 수준의 비주얼 워크플로우 빌더로 확장
+  - React Flow(@xyflow/react) 기반 드래그 & 드롭 DAG 에디터
+  - FE-001: 캔버스 에디터 (줌/팬/미니맵, 노드 배치, 엣지 연결)
+  - FE-002: 노드 팔레트 (6개 스텝 유형 드래그 추가)
+  - FE-003: 노드 설정 패널 (스텝별 config 편집)
+  - FE-004: 캔버스 ↔ WorkflowRequest JSON 양방향 변환
+  - FE-005: 실행 시각화 (노드별 상태 실시간 표시, 승인 인라인)
+  - 라우팅 추가: /workflows/new, /workflows/:id/edit
+  - FE 기술 스택 추가: @xyflow/react, dagre
+- **변경 사유**: BE에 워크플로우 CRUD + DAG 엔진이 완비되어 있으나 FE에서 생성/편집 UI 부재. 사용자 관점 기능 미완성
+- **영향 모듈**: 워크플로우 (FE)
+- **영향도**: Medium
+- **영향 범위**: PRD-039, PRD-041, FE-001~FE-005
+- **영향 설계서**: T1-1, T1-2, T1-7, T2-1, T3-6, T4-1
+- **요청자**: sykim | **승인자**: sykim | **적용 버전**: v2.3.0
+- **변경 일자**: 2026-03-15
+
+### CR-006 | 도구 선택 제어 (Tool Selection Control)
+- **대상 기능 ID**: PRD-092(확장), PRD-096(신규), PRD-097(신규)
+- **변경 타입**: 변경
+- **변경 내용**: LLM에 노출할 도구를 제어하는 2가지 메커니즘 추가
+  - PRD-096 컨텍스트 기반 도구 필터링 (방식 B): ToolRegistry에 ToolFilterContext 기반 getToolDefs(filter) 추가. 테넌트/태그/허용목록 기준으로 LLM에 노출할 도구 후보를 제한
+  - PRD-097 도구 강제 선택 (방식 C): LLMRequest에 toolChoice 필드 추가, 각 LLMAdapter(Anthropic/OpenAI/Ollama)에서 provider별 tool_choice 파라미터 매핑 (auto/none/required/특정tool)
+  - PRD-092 확장: ToolCallHandler에서 필터링된 도구 목록 + toolChoice를 LLM 호출에 전달
+- **변경 사유**: 도구 수 증가 시 LLM 정확도/비용 저하 방지, 고위험 도구 노출 제어, 특정 워크플로우 스텝에서 도구 강제 필요
+- **영향 모듈**: 오케스트레이터, 도구(Tool), LLM 어댑터
+- **영향도**: Medium
+- **영향 범위**: PRD-092, PRD-096(신규), PRD-097(신규)
+- **영향 설계서**: T1-1, T1-2, T2-1, T3-6, T4-1
+- **요청자**: sykim | **승인자**: sykim | **적용 버전**: v2.4.0
+- **변경 일자**: 2026-03-15
+
+### CR-007 | 구조화된 출력 (Structured Output)
+- **대상 기능 ID**: PRD-001(확장), PRD-019(확장), PRD-043(확장), PRD-098~PRD-101(신규)
+- **변경 타입**: 변경
+- **변경 내용**: LLM 응답을 JSON Schema 기반 구조화된 포맷으로 반환하는 기능 추가
+  - PRD-098 구조화된 출력 요청: ChatRequest에 `response_format` 파라미터 추가 (inline json_schema 또는 schema_id 참조)
+  - PRD-099 LLM 어댑터별 구조화 출력 분기: OpenAI → `response_format: json_schema` + `strict: true`, Gemini → `responseSchema`, Claude → 시스템 프롬프트 주입 + Tool Use 역이용, Ollama → `format: "json"`
+  - PRD-100 워크플로우 출력 스키마: Workflow 정의에 `output_schema` 필드 추가 — 설계 시점 스키마 바인딩, 런타임 자동 적용
+  - PRD-101 워크플로우 스튜디오 스키마 편집 (FE): 노드 설정 패널에 출력 스키마 탭 추가, 등록된 스키마 드롭다운 선택/인라인 JSON Schema 에디터, 워크플로우 레벨 최종 output_schema 설정
+  - PRD-001 확장: ChatResponse에 `type: "structured"` ContentBlock 추가, 구조화 응답과 텍스트 응답 분기
+  - PRD-019 확장: 기존 SchemaService.validate() 재사용하여 LLM 구조화 응답 검증
+  - PRD-043 확장: 워크플로우 실행 시 output_schema 자동 주입
+- **변경 사유**: 채팅 외 클라이언트(폼 자동완성, RPA, 대시보드 등)가 구조화된 데이터를 필요로 함. 현재 Text 블록만 반환하여 AI 미들웨어 역할 부족. 업계 표준(OpenAI Structured Outputs, Gemini responseSchema) 대응
+- **영향 모듈**: 오케스트레이터, 채팅, 스키마, 워크플로우, LLM 어댑터, 워크플로우 스튜디오(FE)
+- **영향도**: High
+- **영향 범위**: PRD-001, PRD-019, PRD-043, PRD-098~PRD-101(신규)
+- **영향 설계서**: T1-1, T1-2, T1-7, T2-1, T3-2, T3-3, T3-6, T4-1
+- **요청자**: sykim | **승인자**: sykim | **적용 버전**: v2.5.0
+- **변경 일자**: 2026-03-15
+
+### CR-008 | LLM 연결 테스트 실제 검증
+- **대상 기능 ID**: PRD-008(연결 테스트)
+- **변경 타입**: 버그수정
+- **변경 내용**: ConnectionController.test()에서 LLM 타입 연결이 실제 API 호출 없이 무조건 성공을 반환하던 버그 수정
+  - 기존: `write`/`notify` 타입이 아닌 경우 `HealthStatus(true, 0)` 하드코딩 → 항상 "연결 성공"
+  - 수정: LLM 타입 연결 시 ConnectionAdapterFactory를 통해 실제 어댑터를 생성하고, 최소 토큰의 ping 요청을 전송하여 API Key 유효성 및 네트워크 연결을 검증
+  - Anthropic: `Messages.create()` with max_tokens=1
+  - OpenAI: `ChatCompletion.create()` with max_tokens=1
+  - 응답 시간(latencyMs) 측정하여 반환
+- **변경 사유**: 연결 테스트가 실제 검증 없이 성공을 반환하여, 잘못된 API Key로도 "연결 성공" 표시됨. 사용자가 채팅 시점에서야 오류를 인지하게 되는 UX 결함
+- **영향 모듈**: 연결 관리(Connection)
+- **영향도**: Medium
+- **영향 범위**: PRD-008
+- **영향 설계서**: T3-2, T4-1
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v2.5.1
+- **변경 일자**: 2026-03-18
+
+### CR-009 | Python 사이드카 알파 기능
+- **대상 기능 ID**: PY-013~PY-022(신규)
+- **변경 타입**: 변경
+- **변경 내용**: Python MCP Server 4개에 알파 수준 고급 기능 10개 추가
+  - PY-013 문서 파싱 도구(parse_document): unstructured 기반 PDF/DOCX/PPTX/XLSX/CSV/HTML 파싱, RAG Pipeline MCP에 도구 등록
+  - PY-014 Self-RAG 자동 개선 루프(self_rag_search): 검색 품질 자동 평가 → 쿼리 재작성 → 재검색 (최대 2회 반복)
+  - PY-015 컨텍스트 압축(compress_context): 쿼리와 무관한 문장 제거로 LLM 입력 토큰 절감
+  - PY-016 멀티모달 임베딩(embed_multimodal): CLIP 기반 이미지+텍스트 통합 임베딩
+  - PY-017 웹 스크래핑 강화(scrape_url): Playwright JS 렌더링, 사이트맵 크롤링, robots.txt 준수
+  - PY-018 한국어 NER 강화: 여권번호, 사업자등록번호, 운전면허번호, 한국 주소 인식기 4종 추가
+  - PY-019 한국어 독성 분류 강화: 키워드 기반 → 임베딩 유사도 기반 독성 분류 고도화
+  - PY-020 RAG 평가 벤치마크 자동 생성(generate_benchmark): 지식소스 청크에서 Q&A 쌍 자동 생성
+  - PY-021 임베딩 드리프트 감지(detect_embedding_drift): 임베딩 분포 변화 모니터링 및 재인덱싱 권고
+  - PY-022 추론 체인 LLM 콜백 연동: 휴리스틱 → Spring 오케스트레이터 HTTP 콜백으로 실제 LLM 호출
+- **변경 사유**: 경쟁 플랫폼(Dify, OpenWebUI) 대비 RAG/Safety 품질 차별화, 프로덕션급 AI 파이프라인 완성
+- **영향 모듈**: RAG Pipeline(PY-013~017), Safety(PY-018~019), Evaluation(PY-020~021), Agent(PY-022)
+- **영향도**: High
+- **영향 범위**: PY-013~PY-022(신규)
+- **영향 설계서**: T1-1, T1-2, T3-2, T3-6, T4-1
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v3.0.0
+- **변경 일자**: 2026-03-19
+
+### CR-010 | 플랫폼 핵심 강화
+- **대상 기능 ID**: PRD-102~PRD-115(신규), PRD-048(확장), PRD-089(확장), PRD-092(확장), PRD-096(완성), PRD-097(완성), PRD-098~101(완성)
+- **변경 타입**: 변경
+- **변경 내용**: 프로덕션 서비스 수준으로 플랫폼 핵심 기능 10개 영역 강화
+  - B1 파일 업로드 API(PRD-102): 지식소스에 멀티파트 파일 업로드, StorageService → 자동 인제스션
+  - B2 대화 히스토리 DB 저장(PRD-103~105): Redis 캐시 + DB 영구 듀얼 저장, 대화 목록/상세/삭제 API
+  - B3 인증/RBAC(PRD-106~108): JWT 인증 + API Key 인증, 역할 기반 접근 제어 실제 적용
+  - B4 CR-006 완성(PRD-096~097): OllamaAdapter toolChoice "none" 처리 등 잔여 작업
+  - B5 CR-007 완성(PRD-098~101): WorkflowEngine outputSchema 자동 주입, LlmCallStepExecutor 연동
+  - B6 비용 추적 대시보드 강화(PRD-109~110): 모델별 단가 테이블, 비용 분석 차트(recharts)
+  - B7 멀티모달 API 입력(PRD-111): ChatController content를 텍스트/이미지 혼합 지원, 3개 어댑터 매핑
+  - B8 LLM 트레이싱(PRD-112~113): 모든 LLM 호출의 입출력/토큰/지연/비용 기록, 트레이스 조회 API
+  - B9 검색 설정 CRUD 완성(PRD-055~058): RetrievalConfig ↔ VectorSearcher 실참조 연결 확인
+  - B10 클라우드 스토리지 추상화(PRD-114~115): StorageService 인터페이스, Local/S3 구현체
+- **변경 사유**: 경쟁 플랫폼 대비 누락된 핵심 기능(파일 업로드, 대화 영구 저장, 인증, 멀티모달) 보완, 프로덕션 운영에 필요한 트레이싱/비용 관리 체계 구축
+- **영향 모듈**: RAG, 세션, 인증(신규), 채팅, 워크플로우, 오케스트레이터, LLM 어댑터, 관리, 스토리지(신규), 모니터링(FE)
+- **영향도**: High
+- **영향 범위**: PRD-048, PRD-055~058, PRD-089, PRD-092, PRD-096~101, PRD-102~115(신규)
+- **영향 설계서**: T1-1, T1-2, T2-1, T3-2, T3-3, T3-6, T4-1
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v3.0.0
+- **변경 일자**: 2026-03-19
 
 ---
 

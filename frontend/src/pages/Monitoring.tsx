@@ -1,16 +1,44 @@
+import { useMemo } from "react";
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis,
+  CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 import { COLORS, FONTS } from "../theme";
 import { Badge } from "../components/common/Badge";
 import { StatCard } from "../components/common/StatCard";
 import { DataTable, type Column } from "../components/common/DataTable";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { PageHeader } from "../components/layout/PageHeader";
-import { useUsage } from "../hooks/useAdmin";
+import { useUsage, useCostBreakdown, useCostTrend } from "../hooks/useAdmin";
 import { useModels } from "../hooks/useMonitoring";
 import type { UsageStat } from "../types/admin";
+import type { CostBreakdown, CostTrendPoint } from "../types/admin";
 
 export default function Monitoring() {
   const { data: usageRaw, isLoading: usageLoading } = useUsage();
   const { data: models = [] } = useModels();
+  const { data: costBreakdownRaw } = useCostBreakdown();
+  const { data: costTrendRaw } = useCostTrend();
+
+  const costBreakdown: CostBreakdown[] = Array.isArray(costBreakdownRaw) ? costBreakdownRaw : [];
+
+  const costTrendData = useMemo(() => {
+    const raw: CostTrendPoint[] = Array.isArray(costTrendRaw) ? costTrendRaw : [];
+    if (raw.length === 0) return { chartData: [] as Record<string, unknown>[], modelNames: [] as string[] };
+
+    const modelSet = new Set<string>();
+    const dateMap: Record<string, Record<string, number>> = {};
+    for (const pt of raw) {
+      modelSet.add(pt.model);
+      if (!dateMap[pt.date]) dateMap[pt.date] = {};
+      dateMap[pt.date][pt.model] = pt.cost;
+    }
+    const modelNames = Array.from(modelSet);
+    const chartData = Object.entries(dateMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, models]) => ({ date, ...models }));
+    return { chartData, modelNames };
+  }, [costTrendRaw]);
 
   const usageList: UsageStat[] = (() => {
     if (!usageRaw) return [];
@@ -177,6 +205,111 @@ export default function Monitoring() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* 모델별 비용 분석 (BarChart) */}
+      {costBreakdown.length > 0 && (
+        <div
+          style={{
+            marginTop: 28,
+            background: COLORS.surface,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 12,
+            padding: 20,
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 16 }}>
+            모델별 비용 분석
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={costBreakdown} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
+              <XAxis
+                dataKey="model"
+                tick={{ fontSize: 11, fontFamily: FONTS.mono, fill: COLORS.textMuted }}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fontFamily: FONTS.mono, fill: COLORS.textMuted }}
+                tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: COLORS.surface,
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontFamily: FONTS.sans,
+                }}
+                formatter={(value: unknown, name: unknown) => [
+                  `$${Number(value).toFixed(4)}`,
+                  String(name) === "inputCost" ? "입력 비용" : "출력 비용",
+                ]}
+              />
+              <Legend
+                formatter={(value: string) =>
+                  value === "inputCost" ? "입력 비용" : "출력 비용"
+                }
+              />
+              <Bar dataKey="inputCost" stackId="cost" fill={COLORS.accent} radius={[0, 0, 0, 0]} />
+              <Bar dataKey="outputCost" stackId="cost" fill={COLORS.purple} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* 일별 비용 추세 (LineChart) */}
+      {costTrendData.chartData.length > 0 && (
+        <div
+          style={{
+            marginTop: 20,
+            background: COLORS.surface,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 12,
+            padding: 20,
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 16 }}>
+            일별 비용 추세
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={costTrendData.chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 11, fontFamily: FONTS.mono, fill: COLORS.textMuted }}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fontFamily: FONTS.mono, fill: COLORS.textMuted }}
+                tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: COLORS.surface,
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontFamily: FONTS.sans,
+                }}
+                formatter={(value: unknown) => [`$${Number(value).toFixed(4)}`, ""]}
+              />
+              <Legend />
+              {costTrendData.modelNames.map((name, i) => {
+                const lineColors = [COLORS.accent, COLORS.purple, COLORS.warning, COLORS.success, COLORS.danger];
+                return (
+                  <Line
+                    key={name}
+                    type="monotone"
+                    dataKey={name}
+                    stroke={lineColors[i % lineColors.length]}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 5 }}
+                  />
+                );
+              })}
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       )}
     </div>

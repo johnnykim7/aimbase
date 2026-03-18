@@ -1,0 +1,14 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "DELETE",
+    "endpoint": "/users/{{steps.aimbase.user.create.output.userId}}",
+    "headers": {}
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "soft"
+}

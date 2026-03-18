@@ -1,0 +1,16 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-platform-api",
+  "action": {
+    "method": "GET",
+    "endpoint": "/platform/tenants",
+    "headers": {}
+  },
+  "extract": {
+    "tenantCount": "$.body.data.length"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

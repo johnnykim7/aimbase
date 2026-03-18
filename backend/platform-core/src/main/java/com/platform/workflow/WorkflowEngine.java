@@ -8,6 +8,7 @@ import com.platform.monitoring.PlatformMetrics;
 import com.platform.repository.PendingApprovalRepository;
 import com.platform.repository.WorkflowRepository;
 import com.platform.repository.WorkflowRunRepository;
+import com.platform.tenant.TenantContext;
 import com.platform.workflow.model.ErrorHandling;
 import com.platform.workflow.model.WorkflowStep;
 import com.platform.workflow.step.StepExecutor;
@@ -74,9 +75,18 @@ public class WorkflowEngine {
         run.setStepResults(new LinkedHashMap<>());
         WorkflowRunEntity saved = workflowRunRepository.save(run);
 
+        // Virtual Thread에 TenantContext 전파
+        String tenantId = TenantContext.getTenantId();
         Thread.ofVirtual()
                 .name("workflow-run-" + saved.getId())
-                .start(() -> doExecuteAsync(workflowEntity, saved));
+                .start(() -> {
+                    if (tenantId != null) TenantContext.setTenantId(tenantId);
+                    try {
+                        doExecuteAsync(workflowEntity, saved);
+                    } finally {
+                        TenantContext.clear();
+                    }
+                });
 
         return saved;
     }
@@ -167,6 +177,12 @@ public class WorkflowEngine {
             }
 
             ErrorHandling errorHandling = parseErrorHandling(workflowEntity);
+
+            // CR-007: output_schema가 있으면 마지막 LLM_CALL 스텝에 자동 주입
+            if (workflowEntity.getOutputSchema() != null && !workflowEntity.getOutputSchema().isEmpty()) {
+                injectOutputSchemaToLastLlmStep(steps, workflowEntity.getOutputSchema());
+            }
+
             Map<String, WorkflowStep> stepMap = steps.stream()
                     .collect(Collectors.toMap(WorkflowStep::id, s -> s, (a, b) -> a, LinkedHashMap::new));
 
@@ -352,6 +368,31 @@ public class WorkflowEngine {
         }
     }
 
+    /**
+     * CR-007: output_schema를 마지막 LLM_CALL 스텝의 config에 response_schema로 주입.
+     * steps 리스트는 mutable이어야 함.
+     */
+    private void injectOutputSchemaToLastLlmStep(List<WorkflowStep> steps, Map<String, Object> outputSchema) {
+        // 마지막 LLM_CALL 스텝 찾기 (역순 탐색)
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            WorkflowStep step = steps.get(i);
+            if (step.type() == WorkflowStep.StepType.LLM_CALL) {
+                // 이미 response_schema가 있으면 스킵
+                if (step.config() != null && step.config().containsKey("response_schema")) {
+                    return;
+                }
+                // config에 response_schema 주입 (새 WorkflowStep으로 교체)
+                Map<String, Object> newConfig = new HashMap<>(step.config() != null ? step.config() : Map.of());
+                newConfig.put("response_schema", outputSchema);
+                steps.set(i, new WorkflowStep(
+                        step.id(), step.type(), newConfig,
+                        step.dependsOn(), step.onSuccess(), step.onFailure(), step.timeoutMs()));
+                log.debug("Injected output_schema into last LLM_CALL step '{}'", step.id());
+                return;
+            }
+        }
+    }
+
     // ─── 파싱 헬퍼 ────────────────────────────────────────────────────────
 
     private List<WorkflowStep> parseSteps(WorkflowEntity entity) {
@@ -359,7 +400,7 @@ public class WorkflowEngine {
         if (rawSteps == null || rawSteps.isEmpty()) return List.of();
         return rawSteps.stream()
                 .map(raw -> objectMapper.convertValue(raw, WorkflowStep.class))
-                .toList();
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     private ErrorHandling parseErrorHandling(WorkflowEntity entity) {

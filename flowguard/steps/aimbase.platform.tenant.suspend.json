@@ -1,0 +1,15 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-platform-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/platform/tenants/{{steps.aimbase.platform.tenant.create.output.tenantId}}/suspend",
+    "headers": {}
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.status", "operator": "==", "value": "suspended" }
+  ],
+  "failMode": "hard"
+}

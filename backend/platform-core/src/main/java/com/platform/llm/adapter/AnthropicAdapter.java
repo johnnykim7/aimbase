@@ -3,8 +3,10 @@ package com.platform.llm.adapter;
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.core.JsonValue;
 import com.anthropic.helpers.MessageAccumulator;
+import com.anthropic.models.messages.Base64ImageSource;
 import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.ContentBlockParam;
+import com.anthropic.models.messages.ImageBlockParam;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.Model;
@@ -14,7 +16,13 @@ import com.anthropic.models.messages.Tool;
 import com.anthropic.models.messages.ToolResultBlockParam;
 import com.anthropic.models.messages.ToolUseBlock;
 import com.anthropic.models.messages.ToolUseBlockParam;
+import com.anthropic.models.messages.ToolChoice;
+import com.anthropic.models.messages.ToolChoiceAny;
+import com.anthropic.models.messages.ToolChoiceAuto;
+import com.anthropic.models.messages.ToolChoiceNone;
+import com.anthropic.models.messages.ToolChoiceTool;
 import com.anthropic.models.messages.ToolUnion;
+import com.anthropic.models.messages.UrlImageSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.llm.model.LLMRequest;
 import com.platform.llm.model.LLMResponse;
@@ -73,13 +81,30 @@ public class AnthropicAdapter implements LLMAdapter {
                             ? request.config().maxTokens() : 4096);
 
             List<MessageParam> userMessages = new ArrayList<>();
+            StringBuilder systemText = new StringBuilder();
             for (UnifiedMessage msg : request.messages()) {
                 if (msg.role() == UnifiedMessage.Role.SYSTEM) {
-                    String sysText = extractText(msg);
-                    builder.system(sysText);
+                    systemText.append(extractText(msg));
                 } else {
                     userMessages.add(toAnthropicMessage(msg));
                 }
+            }
+
+            // CR-007: Claude 구조화 출력 — system prompt에 스키마 주입 + Tool Use trick
+            boolean structuredMode = request.responseSchema() != null && !request.responseSchema().isEmpty();
+            if (structuredMode) {
+                try {
+                    String schemaJson = MAPPER.writeValueAsString(request.responseSchema());
+                    systemText.append("\n\n[STRUCTURED OUTPUT INSTRUCTION]\n")
+                            .append("You MUST respond by calling the 'structured_output' tool with data matching this JSON Schema:\n")
+                            .append(schemaJson)
+                            .append("\nDo NOT return plain text. You MUST call the tool.");
+                } catch (Exception e) {
+                    log.warn("Failed to serialize schema for Anthropic prompt injection: {}", e.getMessage());
+                }
+            }
+            if (!systemText.isEmpty()) {
+                builder.system(systemText.toString());
             }
             builder.messages(userMessages);
 
@@ -87,13 +112,35 @@ public class AnthropicAdapter implements LLMAdapter {
                 builder.temperature(request.config().temperature());
             }
 
-            if (request.tools() != null && !request.tools().isEmpty()) {
+            // CR-007: structured mode → 가상 tool 정의 + tool_choice: any
+            if (structuredMode) {
+                Map<String, JsonValue> schemaProps = request.responseSchema().entrySet().stream()
+                        .collect(Collectors.toMap(Map.Entry::getKey, e -> JsonValue.from(e.getValue())));
+                Tool structuredTool = Tool.builder()
+                        .name("structured_output")
+                        .description("Return structured data matching the requested JSON Schema")
+                        .inputSchema(Tool.InputSchema.builder()
+                                .type(JsonValue.from("object"))
+                                .putAllAdditionalProperties(schemaProps)
+                                .build())
+                        .build();
+                builder.tools(List.of(ToolUnion.Companion.ofTool(structuredTool)));
+                builder.toolChoice(ToolChoice.ofAny(ToolChoiceAny.builder().build()));
+            } else if (request.tools() != null && !request.tools().isEmpty()) {
                 @SuppressWarnings("unchecked")
                 List<Tool> anthropicTools = (List<Tool>) transformToolDefs(request.tools());
                 List<ToolUnion> toolUnions = anthropicTools.stream()
                         .map(t -> ToolUnion.Companion.ofTool(t))
                         .toList();
                 builder.tools(toolUnions);
+
+                // CR-006: tool_choice 매핑
+                if (request.toolChoice() != null) {
+                    ToolChoice choice = mapToolChoice(request.toolChoice());
+                    if (choice != null) {
+                        builder.toolChoice(choice);
+                    }
+                }
             }
 
             var response = client.messages().create(builder.build());
@@ -185,6 +232,23 @@ public class AnthropicAdapter implements LLMAdapter {
 
     // ─── Private Helpers ────────────────────────────────────────────────
 
+    /**
+     * CR-006: toolChoice 문자열을 Anthropic ToolChoice로 매핑.
+     * - "auto" / null → ToolChoice.ofAuto
+     * - "none" → null (tools 전달하되 tool_choice 미설정 → Anthropic 기본 동작)
+     * - "required" → ToolChoice.ofAny
+     * - 그 외 → ToolChoice.ofTool (특정 도구 강제)
+     */
+    private ToolChoice mapToolChoice(String toolChoice) {
+        return switch (toolChoice) {
+            case "auto" -> ToolChoice.ofAuto(ToolChoiceAuto.builder().build());
+            case "none" -> ToolChoice.ofNone(ToolChoiceNone.builder().build());
+            case "required" -> ToolChoice.ofAny(ToolChoiceAny.builder().build());
+            default -> ToolChoice.ofTool(
+                    ToolChoiceTool.builder().name(toolChoice).build());
+        };
+    }
+
     private String extractModelId(String model) {
         return model.contains("/") ? model.substring(model.indexOf("/") + 1) : model;
     }
@@ -257,11 +321,61 @@ public class AnthropicAdapter implements LLMAdapter {
                         .contentOfBlockParams(params)
                         .build();
             }
-            default -> MessageParam.builder()
-                    .role(MessageParam.Role.USER)
-                    .content(extractText(msg))
-                    .build();
+            default -> {
+                // PRD-111: 멀티모달 — Image 블록 포함 시 ContentBlockParam 목록으로 변환
+                boolean hasImage = msg.content().stream()
+                        .anyMatch(b -> b instanceof com.platform.llm.model.ContentBlock.Image);
+                if (hasImage) {
+                    List<ContentBlockParam> params = msg.content().stream()
+                            .map(b -> {
+                                if (b instanceof com.platform.llm.model.ContentBlock.Image img) {
+                                    return toImageBlockParam(img);
+                                } else if (b instanceof com.platform.llm.model.ContentBlock.Text text) {
+                                    return ContentBlockParam.ofText(
+                                            TextBlockParam.builder().text(text.text()).build());
+                                }
+                                return ContentBlockParam.ofText(
+                                        TextBlockParam.builder().text("").build());
+                            })
+                            .toList();
+                    yield MessageParam.builder()
+                            .role(MessageParam.Role.USER)
+                            .contentOfBlockParams(params)
+                            .build();
+                }
+                yield MessageParam.builder()
+                        .role(MessageParam.Role.USER)
+                        .content(extractText(msg))
+                        .build();
+            }
         };
+    }
+
+    /** PRD-111: Image ContentBlock → Anthropic ImageBlockParam (base64 또는 URL) */
+    private ContentBlockParam toImageBlockParam(com.platform.llm.model.ContentBlock.Image img) {
+        if (img.isBase64()) {
+            Base64ImageSource.MediaType mediaType = switch (img.mediaType()) {
+                case "image/png" -> Base64ImageSource.MediaType.IMAGE_PNG;
+                case "image/gif" -> Base64ImageSource.MediaType.IMAGE_GIF;
+                case "image/webp" -> Base64ImageSource.MediaType.IMAGE_WEBP;
+                default -> Base64ImageSource.MediaType.IMAGE_JPEG;
+            };
+            return ContentBlockParam.ofImage(
+                    ImageBlockParam.builder()
+                            .source(Base64ImageSource.builder()
+                                    .data(img.data())
+                                    .mediaType(mediaType)
+                                    .build())
+                            .build());
+        } else if (img.isUrl()) {
+            return ContentBlockParam.ofImage(
+                    ImageBlockParam.builder()
+                            .source(UrlImageSource.builder()
+                                    .url(img.url())
+                                    .build())
+                            .build());
+        }
+        return ContentBlockParam.ofText(TextBlockParam.builder().text("[unsupported image]").build());
     }
 
     private LLMResponse toLLMResponse(com.anthropic.models.messages.Message msg,
@@ -273,6 +387,12 @@ public class AnthropicAdapter implements LLMAdapter {
                                 new com.platform.llm.model.ContentBlock.Text(block.asText().text());
                     } else if (block.isToolUse()) {
                         ToolUseBlock tu = block.asToolUse();
+                        // CR-007: structured_output 가상 도구 → Structured 블록으로 변환
+                        if ("structured_output".equals(tu.name())) {
+                            Map<String, Object> data = jsonValueToMap(tu._input());
+                            return (com.platform.llm.model.ContentBlock)
+                                    new com.platform.llm.model.ContentBlock.Structured("structured_output", data);
+                        }
                         return (com.platform.llm.model.ContentBlock)
                                 new com.platform.llm.model.ContentBlock.ToolUse(
                                         tu.id(), tu.name(), jsonValueToMap(tu._input()));

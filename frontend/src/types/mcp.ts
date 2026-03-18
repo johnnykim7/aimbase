@@ -11,6 +11,7 @@ export interface MCPServer {
   config: Record<string, unknown>;
   status?: "connected" | "disconnected" | "error";
   autoStart?: boolean;
+  toolsCache?: MCPToolDef[];
   discoveredTools?: MCPToolDef[];
   toolCount?: number;
   createdAt?: string;

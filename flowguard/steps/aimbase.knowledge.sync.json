@@ -1,0 +1,17 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/knowledge-sources/{{steps.aimbase.knowledge.create.output.knowledgeSourceId}}/sync",
+    "headers": {}
+  },
+  "extract": {
+    "syncStatus": "$.body.data.status"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "retry": {"maxAttempts": 3, "intervalMs": 2000},
+  "failMode": "hard"
+}

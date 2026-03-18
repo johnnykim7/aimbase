@@ -1,0 +1,50 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-4o",
+      "messages": [
+        {
+          "role": "user",
+          "content": "직원 정보를 추출해줘: 홍길동, 개발팀, 연봉 5000만원"
+        }
+      ],
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "employee_form",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "department": {
+                "type": "string"
+              },
+              "salary": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "department"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "extract": {
+    "structuredData": "$.body.data.content[0].data"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.content[0].type", "operator": "==", "value": "structured" }
+  ],
+  "failMode": "hard"
+}

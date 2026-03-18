@@ -1,6 +1,6 @@
 import { apiClient } from "./client";
 import type { ApiResponse, PagedResponse } from "../types/api";
-import type { ActionLog, AuditLog, Approval, DashboardStats, UsageStat } from "../types/admin";
+import type { ActionLog, AuditLog, Approval, DashboardStats, UsageStat, CostBreakdown, CostTrendPoint } from "../types/admin";
 
 export const adminApi = {
   dashboard: () =>
@@ -23,4 +23,10 @@ export const adminApi = {
 
   reject: (id: string, data?: { reason?: string; rejected_by?: string }) =>
     apiClient.post<ApiResponse<Approval>>(`/admin/approvals/${id}/reject`, data ?? {}),
+
+  costBreakdown: (days: number = 30) =>
+    apiClient.get<ApiResponse<CostBreakdown[]>>(`/admin/cost-breakdown`, { params: { days } }),
+
+  costTrend: (days: number = 30) =>
+    apiClient.get<ApiResponse<CostTrendPoint[]>>(`/admin/cost-trend`, { params: { days } }),
 };

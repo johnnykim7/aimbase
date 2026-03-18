@@ -1,0 +1,27 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "name": "컨텍스트 윈도우 트리밍 (50개 메시지)",
+  "action": {
+    "method": "POST",
+    "endpoint": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-4o",
+      "session_id": "{{vars.longSessionId}}",
+      "messages": [
+        {
+          "role": "user",
+          "content": "지금까지 대화 요약해줘"
+        }
+      ]
+    }
+  },
+  "extract": {
+    "response": "$.body.data.content[0].text"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

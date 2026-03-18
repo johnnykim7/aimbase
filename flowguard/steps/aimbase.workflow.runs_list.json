@@ -1,0 +1,16 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "GET",
+    "endpoint": "/workflows/{{steps.aimbase.workflow.dag.create.output.workflowId}}/runs",
+    "headers": {}
+  },
+  "extract": {
+    "runCount": "$.body.data.length"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

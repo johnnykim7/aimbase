@@ -1,0 +1,45 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-4o",
+      "messages": [
+        {
+          "role": "user",
+          "content": "다음 데이터를 정리해줘: 홍길동, 개발팀, 5000만원, 서울, 2020-01-15 입사"
+        }
+      ],
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "complex_employee",
+          "strict": true,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "department": {"type": "string"},
+              "salary": {"type": "number"},
+              "location": {"type": "string"},
+              "joinDate": {"type": "string"},
+              "isActive": {"type": "boolean"}
+            },
+            "required": ["name", "department", "salary", "location", "joinDate", "isActive"]
+          }
+        }
+      }
+    }
+  },
+  "extract": {
+    "structuredData": "$.body.data.content[0].data"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.content[0].type", "operator": "==", "value": "structured" }
+  ],
+  "failMode": "hard"
+}

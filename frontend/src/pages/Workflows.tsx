@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { COLORS, FONTS } from "../theme";
 import { Badge } from "../components/common/Badge";
 import { ActionButton } from "../components/common/ActionButton";
@@ -78,6 +79,7 @@ function FlowPreview({ steps }: { steps: WorkflowStep[] }) {
 }
 
 export default function Workflows() {
+  const navigate = useNavigate();
   const { data: workflows = [], isLoading } = useWorkflows();
   const deleteWorkflow = useDeleteWorkflow();
   const runWorkflow = useRunWorkflow();
@@ -142,8 +144,8 @@ export default function Workflows() {
       header: "액션",
       render: (w) => (
         <div style={{ display: "flex", gap: 4 }}>
-          <ActionButton small variant="ghost" onClick={() => setSelectedWorkflow(w)}>
-            상세
+          <ActionButton small variant="ghost" onClick={() => navigate(`/workflows/${w.id}/edit`)}>
+            편집
           </ActionButton>
           <ActionButton small variant="default" disabled={runWorkflow.isPending} onClick={() => handleRun(w.id)}>
             {runResult[w.id] ? runResult[w.id] : "실행"}
@@ -165,8 +167,8 @@ export default function Workflows() {
         title="워크플로우"
         subtitle="DAG 기반 다단계 AI 오케스트레이션"
         actions={
-          <ActionButton variant="ghost" icon="📋" small>
-            새 워크플로우
+          <ActionButton variant="primary" small onClick={() => navigate("/workflows/new")}>
+            + 새 워크플로우
           </ActionButton>
         }
       />

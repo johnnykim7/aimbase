@@ -1,0 +1,15 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "목록 페이지: 편집 버튼 → 스튜디오 진입",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/workflows",
+    "checkpoints": [
+      {"selector": "button, a", "textContains": "편집"}
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

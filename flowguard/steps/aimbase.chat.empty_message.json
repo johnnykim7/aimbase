@@ -1,0 +1,23 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-4o",
+      "messages": [
+        {
+          "role": "user",
+          "content": ""
+        }
+      ]
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.status", "operator": "in", "value": [400, 422] }
+  ],
+  "failMode": "hard"
+}

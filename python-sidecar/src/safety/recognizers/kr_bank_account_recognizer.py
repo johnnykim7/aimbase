@@ -38,5 +38,5 @@ class KrBankAccountRecognizer(PatternRecognizer):
             supported_entity="KR_BANK_ACCOUNT",
             patterns=self.PATTERNS,
             context=self.CONTEXT,
-            supported_language="ko",
+            supported_language="en",
         )

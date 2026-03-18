@@ -1,0 +1,14 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "DELETE",
+    "endpoint": "/schemas/{{steps.aimbase.schema.create.output.schemaId}}",
+    "headers": {}
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "soft"
+}

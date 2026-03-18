@@ -12,6 +12,7 @@ from evaluation.engine import (
     compare_prompts,
     evaluate_llm_output,
     evaluate_rag,
+    generate_benchmark,
     _evaluate_rag_heuristic,
     _evaluate_llm_heuristic,
 )
@@ -321,3 +322,98 @@ class TestComparePrompts:
 
         assert "summary" in result
         assert result["summary"]["prompt_a_avg"] == result["summary"]["prompt_b_avg"]
+
+
+class TestGenerateBenchmark:
+    """PY-020: RAG 벤치마크 자동 생성."""
+
+    def test_definition_questions(self):
+        """'은/는 ...이다' 패턴 → 정의 질문 생성."""
+        chunks = [
+            {"content": "멀티테넌시는 하나의 소프트웨어로 여러 조직을 지원하는 아키텍처이다."},
+        ]
+
+        result = generate_benchmark(chunks, question_types=["definition"])
+
+        assert result["total"] >= 1
+        q = result["benchmark"][0]
+        assert q["question_type"] == "definition"
+        assert "무엇인가" in q["question"]
+        assert q["answer"]
+        assert q["contexts"]
+        assert q["ground_truth"]
+
+    def test_explanation_questions(self):
+        """'때문에/위해' 패턴 → 설명 질문 생성."""
+        chunks = [
+            {"content": "성능 최적화를 위해 인덱스를 생성해야 합니다."},
+        ]
+
+        result = generate_benchmark(chunks, question_types=["explanation"])
+
+        assert result["total"] >= 1
+        q = result["benchmark"][0]
+        assert q["question_type"] == "explanation"
+        assert "왜" in q["question"]
+
+    def test_comparison_questions(self):
+        """2개 이상 엔티티 → 비교 질문 생성."""
+        chunks = [
+            {"content": "PostgreSQL은 관계형 데이터베이스이고, MongoDB는 문서형 데이터베이스입니다."},
+        ]
+
+        result = generate_benchmark(chunks, question_types=["comparison"])
+
+        assert result["total"] >= 1
+        q = result["benchmark"][0]
+        assert q["question_type"] == "comparison"
+        assert "차이는" in q["question"]
+
+    def test_empty_chunks(self):
+        """빈 청크 리스트 → 빈 결과."""
+        result = generate_benchmark([], question_types=["definition"])
+
+        assert result["benchmark"] == []
+        assert result["total"] == 0
+
+    def test_max_questions_limit(self):
+        """max_questions 제한."""
+        chunks = [
+            {"content": f"개념{i}는 중요한 기술이다." for i in range(50)}
+        ]
+
+        result = generate_benchmark(chunks, question_types=["definition"], max_questions=5)
+
+        assert result["total"] <= 5
+
+    def test_all_question_types(self):
+        """전체 질문 유형 동시 생성."""
+        chunks = [
+            {"content": "벡터 검색은 임베딩 유사도 기반의 검색 방식이다."},
+            {"content": "성능을 위해 HNSW 인덱스를 사용합니다."},
+            {"content": "BM25는 키워드 기반이고 벡터검색은 의미 기반입니다."},
+        ]
+
+        result = generate_benchmark(chunks)
+
+        assert result["total"] >= 1
+        types_found = {q["question_type"] for q in result["benchmark"]}
+        assert len(types_found) >= 1  # 최소 하나의 유형
+
+    def test_result_structure(self):
+        """결과 구조 검증."""
+        chunks = [
+            {"content": "RAG는 Retrieval Augmented Generation의 약자이다."},
+        ]
+
+        result = generate_benchmark(chunks, question_types=["definition"])
+
+        assert "benchmark" in result
+        assert "total" in result
+        if result["total"] > 0:
+            item = result["benchmark"][0]
+            assert "question" in item
+            assert "answer" in item
+            assert "contexts" in item
+            assert "ground_truth" in item
+            assert "question_type" in item

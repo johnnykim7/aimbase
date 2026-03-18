@@ -18,5 +18,16 @@ class Settings:
     # DeepEval defaults
     DEEPEVAL_DEFAULT_THRESHOLD: float = float(os.getenv("DEEPEVAL_THRESHOLD", "0.5"))
 
+    # Database (pgvector) — for drift detection
+    DB_HOST: str = os.getenv("DB_HOST", "localhost")
+    DB_PORT: int = int(os.getenv("DB_PORT", "5433"))
+    DB_NAME: str = os.getenv("DB_NAME", "aimbase_tenant_dev")
+    DB_USER: str = os.getenv("DB_USER", "platform")
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "platform")
+
+    @property
+    def db_url(self) -> str:
+        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
 
 settings = Settings()
