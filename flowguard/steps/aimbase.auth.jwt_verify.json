@@ -1,0 +1,17 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "name": "JWT 인증/인가 검증",
+  "action": {
+    "method": "GET",
+    "endpoint": "/connections",
+    "headers": {
+      "Authorization": "Bearer {{vars.testJwtToken}}"
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

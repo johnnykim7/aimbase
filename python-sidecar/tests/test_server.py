@@ -19,6 +19,7 @@ class TestMCPServerTools:
             "search_hybrid",
             "rerank_results",
             "ingest_document",
+            "parse_document",
         }
 
         assert expected_tools.issubset(tool_names), (

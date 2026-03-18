@@ -1,0 +1,21 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-platform-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/platform/tenants",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-TestTenant",
+      "plan": "standard",
+      "adminEmail": "fg-tenant@example.com"
+    }
+  },
+  "extract": {
+    "tenantId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

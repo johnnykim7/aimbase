@@ -1,0 +1,18 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "Platform 관리 페이지 (Tenants/Subscriptions)",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/platform/tenants",
+    "checkpoints": [
+      {"selector": "table, [data-testid=data-table]", "visible": true}
+    ],
+    "additionalPages": [
+      "{{vars.feBaseUrl}}/platform/subscriptions"
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

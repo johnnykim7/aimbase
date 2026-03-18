@@ -10,10 +10,14 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
+    "@types/dagre": "^0.7.54",
+    "@xyflow/react": "^12.10.1",
     "axios": "^1.7.7",
+    "dagre": "^0.8.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.27.0"
+    "react-router-dom": "^6.27.0",
+    "recharts": "^3.8.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.11",

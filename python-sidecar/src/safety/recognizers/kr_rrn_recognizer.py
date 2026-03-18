@@ -32,7 +32,7 @@ class KrRrnRecognizer(PatternRecognizer):
             supported_entity="KR_RRN",
             patterns=self.PATTERNS,
             context=self.CONTEXT,
-            supported_language="ko",
+            supported_language="en",
         )
 
     def validate_result(self, pattern_text: str) -> bool:

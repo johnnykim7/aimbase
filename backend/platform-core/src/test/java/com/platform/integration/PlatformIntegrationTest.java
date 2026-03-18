@@ -14,6 +14,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -48,8 +49,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *  3. 테넌트 프로비저닝 — POST /api/v1/platform/tenants 로 새 테넌트 생성
  *  4. 플랫폼 관리 API — Master DB 기반 테넌트 목록 조회
  */
-@SpringBootTest
+@SpringBootTest(properties = "security.enabled=false")
 @AutoConfigureMockMvc
+@Import(TestSecurityConfig.class)
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)  // @BeforeAll을 인스턴스 메서드로, @Autowired 사용 가능
 class PlatformIntegrationTest {

@@ -1,0 +1,23 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "blocked-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "테스트 메시지"
+        }
+      ]
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 403 }
+  ],
+  "failMode": "hard"
+}

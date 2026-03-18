@@ -1,0 +1,20 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/roles",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-TestRole",
+      "permissions": ["chat:read", "chat:write", "connection:read"]
+    }
+  },
+  "extract": {
+    "roleId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

@@ -5,6 +5,11 @@ spring:
   application:
     name: aimbase
 
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
   # ─── Master DataSource (테넌트 레지스트리, 구독 관리) ─────────────
   datasource:
     master:
@@ -40,12 +45,9 @@ spring:
       port: ${SPRING_REDIS_PORT:6379}
       timeout: 5000ms
 
+  # LLM 채팅은 Connection DB 기반 (AppConfig에서 직접 SDK 사용)
+  # Spring AI는 임베딩(RAG)용으로만 사용
   ai:
-    anthropic:
-      api-key: ${ANTHROPIC_API_KEY:}
-      chat:
-        options:
-          model: claude-sonnet-4-5
     openai:
       api-key: ${OPENAI_API_KEY:}
       chat:
@@ -55,6 +57,13 @@ spring:
         options:
           model: text-embedding-3-small
           dimensions: 1536
+    # ─── MCP Server SSE 설정 (FlowGuard 교훈 반영) ──────────────────────
+    # context-path 사용 시 base-url 필수. 미설정 시 SSE data에 prefix 누락되어 클라이언트 연결 실패.
+    mcp:
+      server:
+        base-url: ${MCP_SERVER_BASE_URL:}
+        sse-message-endpoint: /mcp/message
+        sse-endpoint: /sse
 
 # Virtual Threads (Java 21)
 spring.threads.virtual.enabled: true
@@ -76,6 +85,12 @@ evaluation:
   mcp:
     url: ${EVALUATION_MCP_URL:http://localhost:8002}
     enabled: ${EVALUATION_MCP_ENABLED:false}
+
+# ─── Agent MCP 설정 (고급 추론 체인, Sprint 18) ────────────────────────
+agent:
+  mcp:
+    url: ${AGENT_MCP_URL:http://localhost:8003}
+    enabled: ${AGENT_MCP_ENABLED:false}
 
 # ─── Platform 설정 (테넌트 프로비저닝 기본값) ────────────────────────
 platform:
@@ -103,6 +118,17 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
     operations-sorter: method
+
+# ─── JWT 설정 ─────────────────────────────────────────────────────────
+jwt:
+  secret: ${JWT_SECRET:aimbase-dev-secret-key-change-in-production-min-256-bits!!}
+  expiration-ms: 1800000
+  refresh-expiration-ms: 604800000
+
+# ─── 스토리지 설정 ────────────────────────────────────────────────────
+storage:
+  local:
+    base-path: ${STORAGE_BASE_PATH:/data/aimbase}
 
 logging:
   level:

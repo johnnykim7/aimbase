@@ -7,22 +7,19 @@ import logging
 from typing import Any
 
 from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
-from presidio_analyzer.nlp_engine import NlpEngineProvider
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
 from safety.config import settings
+from safety.recognizers.kr_address_recognizer import KrAddressRecognizer
 from safety.recognizers.kr_bank_account_recognizer import KrBankAccountRecognizer
+from safety.recognizers.kr_business_number_recognizer import KrBusinessNumberRecognizer
+from safety.recognizers.kr_driver_license_recognizer import KrDriverLicenseRecognizer
+from safety.recognizers.kr_passport_recognizer import KrPassportRecognizer
 from safety.recognizers.kr_phone_recognizer import KrPhoneRecognizer
 from safety.recognizers.kr_rrn_recognizer import KrRrnRecognizer
 
 logger = logging.getLogger(__name__)
-
-# 한국어 지원 NLP 엔진 설정 (spaCy 불필요 — 패턴 기반)
-_NLP_CONFIG = {
-    "nlp_engine_name": "spacy",
-    "models": [{"lang_code": "ko", "model_name": "ko_core_news_sm"}],
-}
 
 # 지원하는 모든 엔티티 타입
 ALL_ENTITY_TYPES = [
@@ -30,6 +27,10 @@ ALL_ENTITY_TYPES = [
     "KR_RRN",
     "KR_PHONE_NUMBER",
     "KR_BANK_ACCOUNT",
+    "KR_PASSPORT",
+    "KR_BUSINESS_NUMBER",
+    "KR_DRIVER_LICENSE",
+    "KR_ADDRESS",
     # Presidio 내장 (영어)
     "EMAIL_ADDRESS",
     "CREDIT_CARD",
@@ -43,6 +44,10 @@ OPERATOR_MAP = {
     "KR_RRN": OperatorConfig("replace", {"new_value": "******-*******"}),
     "KR_PHONE_NUMBER": OperatorConfig("mask", {"masking_char": "*", "chars_to_mask": 8, "from_end": True}),
     "KR_BANK_ACCOUNT": OperatorConfig("mask", {"masking_char": "*", "chars_to_mask": 100, "from_end": False}),
+    "KR_PASSPORT": OperatorConfig("replace", {"new_value": "*********"}),
+    "KR_BUSINESS_NUMBER": OperatorConfig("replace", {"new_value": "***-**-*****"}),
+    "KR_DRIVER_LICENSE": OperatorConfig("replace", {"new_value": "**-**-******-**"}),
+    "KR_ADDRESS": OperatorConfig("replace", {"new_value": "<주소>"}),
     "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "***@***.***"}),
     "CREDIT_CARD": OperatorConfig("replace", {"new_value": "****-****-****-****"}),
     "DEFAULT": OperatorConfig("replace", {"new_value": "<PII>"}),
@@ -58,21 +63,17 @@ def _build_analyzer() -> AnalyzerEngine:
     registry.add_recognizer(KrRrnRecognizer())
     registry.add_recognizer(KrPhoneRecognizer())
     registry.add_recognizer(KrBankAccountRecognizer())
+    registry.add_recognizer(KrPassportRecognizer())
+    registry.add_recognizer(KrBusinessNumberRecognizer())
+    registry.add_recognizer(KrDriverLicenseRecognizer())
+    registry.add_recognizer(KrAddressRecognizer())
 
-    try:
-        provider = NlpEngineProvider(nlp_configuration=_NLP_CONFIG)
-        nlp_engine = provider.create_engine()
-        analyzer = AnalyzerEngine(
-            registry=registry,
-            nlp_engine=nlp_engine,
-            supported_languages=["ko", "en"],
-        )
-    except Exception:
-        logger.warning("spaCy 'ko_core_news_sm' not available — falling back to pattern-only mode")
-        analyzer = AnalyzerEngine(
-            registry=registry,
-            supported_languages=["ko", "en"],
-        )
+    # 한국어 recognizer들은 패턴(regex) 기반이므로 spaCy NLP 불필요.
+    # 모든 recognizer를 'en' 언어 컨텍스트로 등록하여 기본 영어 NLP 엔진 사용.
+    analyzer = AnalyzerEngine(
+        registry=registry,
+        supported_languages=["en"],
+    )
 
     logger.info(
         "PII AnalyzerEngine initialized with %d recognizers",

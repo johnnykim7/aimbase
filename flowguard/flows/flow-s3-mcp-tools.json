@@ -1,0 +1,21 @@
+{
+  "scenarioKey": "aimbase.s3.mcp-tools",
+  "name": "Sprint 3: 도구 & MCP 전체 흐름",
+  "description": "MCP 서버 등록 → 도구 탐색 → 채팅 도구 호출 → 잘못된 URL 등록 → 정리 (UAT-S3-001~005)",
+  "tags": ["sprint-3", "mcp", "tools"],
+  "coverage": {
+    "T4-1": ["V-008", "V-010"],
+    "T4-2": ["UAT-S3-001", "UAT-S3-002", "UAT-S3-003", "UAT-S3-005"]
+  },
+  "vars": {
+    "mcpServerUrl": "{{env.MCP_SERVER_URL}}"
+  },
+  "steps": [
+    "aimbase.mcp.create",
+    "aimbase.mcp.list_tools",
+    "aimbase.mcp.chat_with_tool",
+    "aimbase.mcp.create_bad_url",
+    "aimbase.mcp.delete_bad_url",
+    "aimbase.mcp.delete"
+  ]
+}

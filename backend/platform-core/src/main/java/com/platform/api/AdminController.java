@@ -1,6 +1,8 @@
 package com.platform.api;
 
+import com.platform.domain.ModelPricingEntity;
 import com.platform.domain.PendingApprovalEntity;
+import com.platform.monitoring.TraceService;
 import com.platform.repository.*;
 import com.platform.workflow.WorkflowEngine;
 import io.swagger.v3.oas.annotations.Operation;
@@ -13,9 +15,11 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.Map;
-import java.util.UUID;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -29,20 +33,26 @@ public class AdminController {
     private final UsageLogRepository usageLogRepository;
     private final PendingApprovalRepository pendingApprovalRepository;
     private final ConnectionRepository connectionRepository;
+    private final ModelPricingRepository modelPricingRepository;
     private final WorkflowEngine workflowEngine;
+    private final TraceService traceService;
 
     public AdminController(ActionLogRepository actionLogRepository,
                             AuditLogRepository auditLogRepository,
                             UsageLogRepository usageLogRepository,
                             PendingApprovalRepository pendingApprovalRepository,
                             ConnectionRepository connectionRepository,
-                            WorkflowEngine workflowEngine) {
+                            ModelPricingRepository modelPricingRepository,
+                            WorkflowEngine workflowEngine,
+                            TraceService traceService) {
         this.actionLogRepository = actionLogRepository;
         this.auditLogRepository = auditLogRepository;
         this.usageLogRepository = usageLogRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
         this.connectionRepository = connectionRepository;
+        this.modelPricingRepository = modelPricingRepository;
         this.workflowEngine = workflowEngine;
+        this.traceService = traceService;
     }
 
     @GetMapping("/dashboard")
@@ -88,6 +98,29 @@ public class AdminController {
             @RequestParam(defaultValue = "50") int size
     ) {
         return ApiResponse.page(usageLogRepository.findAllByOrderByCreatedAtDesc(PageRequest.of(page, size)));
+    }
+
+    @GetMapping("/traces")
+    @Operation(summary = "LLM 트레이스 조회", description = "PRD-112: LLM 호출 트레이스 조회. session_id, model, from/to 필터 지원.")
+    public ApiResponse<?> traces(
+            @RequestParam(value = "session_id", required = false) String sessionId,
+            @RequestParam(required = false) String model,
+            @RequestParam(required = false) OffsetDateTime from,
+            @RequestParam(required = false) OffsetDateTime to,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        var pageable = PageRequest.of(page, size);
+        if (sessionId != null && !sessionId.isBlank()) {
+            return ApiResponse.page(traceService.findBySessionId(sessionId, pageable));
+        }
+        if (model != null && !model.isBlank()) {
+            return ApiResponse.page(traceService.findByModel(model, pageable));
+        }
+        if (from != null && to != null) {
+            return ApiResponse.page(traceService.findByDateRange(from, to, pageable));
+        }
+        return ApiResponse.page(traceService.findAll(pageable));
     }
 
     @GetMapping("/approvals")
@@ -137,6 +170,95 @@ public class AdminController {
         resumeWorkflowIfNeeded(approval, false, reason);
 
         return ApiResponse.ok(approval);
+    }
+
+    @GetMapping("/cost-breakdown")
+    @Operation(summary = "모델별 비용 집계", description = "PRD-109: 모델별 토큰 사용량 및 비용 집계")
+    public ApiResponse<List<Map<String, Object>>> costBreakdown(
+            @RequestParam(defaultValue = "30") int days
+    ) {
+        Instant since = Instant.now().minus(days, ChronoUnit.DAYS);
+        List<Object[]> rows = usageLogRepository.aggregateByModel(since);
+
+        // 모델명 → 단가 매핑
+        Map<String, ModelPricingEntity> pricingMap = new HashMap<>();
+        modelPricingRepository.findByIsActiveTrue()
+                .forEach(p -> pricingMap.put(p.getModelName(), p));
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            String model = (String) row[0];
+            long totalInput = ((Number) row[1]).longValue();
+            long totalOutput = ((Number) row[2]).longValue();
+
+            BigDecimal costUsd = BigDecimal.ZERO;
+            String provider = "unknown";
+            ModelPricingEntity pricing = pricingMap.get(model);
+            if (pricing != null) {
+                provider = pricing.getProvider();
+                // price_per_1k → price_per_token = price / 1000
+                BigDecimal inputCost = pricing.getInputPricePer1k()
+                        .multiply(BigDecimal.valueOf(totalInput))
+                        .divide(BigDecimal.valueOf(1000), 6, RoundingMode.HALF_UP);
+                BigDecimal outputCost = pricing.getOutputPricePer1k()
+                        .multiply(BigDecimal.valueOf(totalOutput))
+                        .divide(BigDecimal.valueOf(1000), 6, RoundingMode.HALF_UP);
+                costUsd = inputCost.add(outputCost);
+            }
+
+            result.add(Map.of(
+                    "model", model,
+                    "provider", provider,
+                    "total_input_tokens", totalInput,
+                    "total_output_tokens", totalOutput,
+                    "total_cost_usd", costUsd
+            ));
+        }
+
+        return ApiResponse.ok(result);
+    }
+
+    @GetMapping("/cost-trend")
+    @Operation(summary = "일별 비용 추이", description = "PRD-110: 일별/모델별 토큰 사용량 및 비용 추이")
+    public ApiResponse<List<Map<String, Object>>> costTrend(
+            @RequestParam(defaultValue = "30") int days
+    ) {
+        Instant since = Instant.now().minus(days, ChronoUnit.DAYS);
+        List<Object[]> rows = usageLogRepository.aggregateByDateAndModel(since);
+
+        Map<String, ModelPricingEntity> pricingMap = new HashMap<>();
+        modelPricingRepository.findByIsActiveTrue()
+                .forEach(p -> pricingMap.put(p.getModelName(), p));
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            String date = row[0].toString();
+            String model = (String) row[1];
+            long inputTokens = ((Number) row[2]).longValue();
+            long outputTokens = ((Number) row[3]).longValue();
+
+            BigDecimal costUsd = BigDecimal.ZERO;
+            ModelPricingEntity pricing = pricingMap.get(model);
+            if (pricing != null) {
+                BigDecimal inputCost = pricing.getInputPricePer1k()
+                        .multiply(BigDecimal.valueOf(inputTokens))
+                        .divide(BigDecimal.valueOf(1000), 6, RoundingMode.HALF_UP);
+                BigDecimal outputCost = pricing.getOutputPricePer1k()
+                        .multiply(BigDecimal.valueOf(outputTokens))
+                        .divide(BigDecimal.valueOf(1000), 6, RoundingMode.HALF_UP);
+                costUsd = inputCost.add(outputCost);
+            }
+
+            result.add(Map.of(
+                    "date", date,
+                    "model", model,
+                    "input_tokens", inputTokens,
+                    "output_tokens", outputTokens,
+                    "cost_usd", costUsd
+            ));
+        }
+
+        return ApiResponse.ok(result);
     }
 
     /**

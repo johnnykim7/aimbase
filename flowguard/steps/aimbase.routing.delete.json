@@ -1,0 +1,14 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "DELETE",
+    "endpoint": "/routing-rules/{{steps.aimbase.routing.create.output.routingId}}",
+    "headers": {}
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "soft"
+}

@@ -1,0 +1,25 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-4o",
+      "stream": true,
+      "messages": [
+        {
+          "role": "user",
+          "content": "1부터 5까지 세어줘"
+        }
+      ]
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 },
+    { "field": "$.headers.content-type", "operator": "contains", "value": "text/event-stream" }
+  ],
+  "failMode": "hard"
+}

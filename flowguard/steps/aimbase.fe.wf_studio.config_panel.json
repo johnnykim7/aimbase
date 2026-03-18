@@ -1,0 +1,15 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "FE-003 설정패널: 노드 클릭 시 config 편집 폼",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/workflows/new",
+    "checkpoints": [
+      {"selector": "[data-testid=config-panel], .config-panel", "exists": true}
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

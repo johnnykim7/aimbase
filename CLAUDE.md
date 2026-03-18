@@ -149,12 +149,15 @@ frontend/src/
 - [x] Sprint 1-10: BE 구현
 - [x] Sprint 11-14: FE 구현
 - [x] Sprint 15-18: Python 사이드카 (RAG Pipeline, Safety, Evaluation, 고급 기능)
+- [x] Sprint 19: FE 워크플로우 스튜디오 (React Flow 기반 비주얼 DAG 에디터) [CR-005]
+- [ ] Sprint 20: 도구 선택 제어 (ToolFilterContext, tool_choice) [CR-006]
+- [ ] Sprint 21: 구조화된 출력 (response_format, output_schema, FE 스키마 편집) [CR-007]
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)
 - `docs/T2-*` — 아키텍처 설계 (T2-1 ~ T2-2)
 - `docs/T3-*` — 상세 설계 (T3-1 ~ T3-6)
-- `docs/T4-*` — 검증/운영 산출물 (T4-1 ~ T4-8)
+- `docs/T4-*` — 검증/운영 산출물 (T4-1 ~ T4-7)
 - `docs/T3-6_실행_지시서.md` — 구현 마스터 문서
 
 ## 주의사항

@@ -23,19 +23,19 @@ class TestE2ECustomerServiceScenario:
         )
 
         # 탐지
-        detections = detect_pii(text, language="ko")
+        detections = detect_pii(text, language="en")
         detected_types = {d["entity_type"] for d in detections}
         assert "KR_RRN" in detected_types
         assert "KR_PHONE_NUMBER" in detected_types
 
         # 마스킹
-        masked = mask_pii(text, language="ko")
+        masked = mask_pii(text, language="en")
         assert masked["pii_found"] is True
         assert "880101-1234567" not in masked["masked_text"]
         assert "010-9876-5432" not in masked["masked_text"]
 
         # 마스킹 결과 재검증 — 마스킹된 텍스트에는 PII가 없어야 함
-        validation = validate_output(masked["masked_text"], language="ko")
+        validation = validate_output(masked["masked_text"], language="en")
         assert validation["safe"] is True, (
             f"Masked text still contains PII: {validation['violations']}"
         )
@@ -45,10 +45,10 @@ class TestE2ECustomerServiceScenario:
         safe_response = "고객님의 주문이 정상 처리되었습니다. 3~5일 내 배송됩니다."
         unsafe_response = "고객님의 주민번호 901234-1234567로 확인되었습니다."
 
-        safe_result = validate_output(safe_response, language="ko")
+        safe_result = validate_output(safe_response, language="en")
         assert safe_result["safe"] is True
 
-        unsafe_result = validate_output(unsafe_response, language="ko")
+        unsafe_result = validate_output(unsafe_response, language="en")
         assert unsafe_result["safe"] is False
         assert unsafe_result["violation_count"] >= 1
 
@@ -59,7 +59,7 @@ class TestE2EMultiplePiiTypes:
     def test_email_and_korean_pii_mixed(self):
         """이메일 + 한국 PII 혼합 텍스트."""
         text = "이메일: hong@example.com, 전화: 010-1111-2222"
-        result = mask_pii(text, language="ko")
+        result = mask_pii(text, language="en")
         assert result["pii_found"] is True
         assert "hong@example.com" not in result["masked_text"]
         assert "010-1111-2222" not in result["masked_text"]
@@ -67,13 +67,13 @@ class TestE2EMultiplePiiTypes:
     def test_credit_card_detection(self):
         """신용카드 번호 탐지."""
         text = "카드번호: 1234-5678-9012-3456"
-        result = mask_pii(text, language="ko")
+        result = mask_pii(text, language="en")
         assert result["pii_found"] is True
         assert "1234-5678-9012-3456" not in result["masked_text"]
 
     def test_empty_text(self):
         """빈 텍스트 처리."""
-        result = mask_pii("", language="ko")
+        result = mask_pii("", language="en")
         assert result["pii_found"] is False
         assert result["masked_text"] == ""
 
@@ -81,7 +81,7 @@ class TestE2EMultiplePiiTypes:
         """긴 텍스트 처리 (성능 확인)."""
         base = "고객 연락처: 010-1234-5678. 주문이 완료되었습니다. "
         text = base * 100  # ~5000자
-        result = mask_pii(text, language="ko")
+        result = mask_pii(text, language="en")
         assert result["pii_found"] is True
         assert "010-1234-5678" not in result["masked_text"]
 
@@ -93,7 +93,7 @@ class TestE2EMCPToolOutput:
         """detect_pii 도구 JSON 출력 형식."""
         from safety.server import detect_pii as tool_detect
 
-        result_json = tool_detect("주민번호: 901234-1234567", language="ko")
+        result_json = tool_detect("주민번호: 901234-1234567", language="en")
         result = json.loads(result_json)
         assert "detections" in result
         assert "count" in result
@@ -103,7 +103,7 @@ class TestE2EMCPToolOutput:
         """mask_pii 도구 JSON 출력 형식."""
         from safety.server import mask_pii as tool_mask
 
-        result_json = tool_mask("전화: 010-1234-5678", language="ko")
+        result_json = tool_mask("전화: 010-1234-5678", language="en")
         result = json.loads(result_json)
         assert "masked_text" in result
         assert "pii_found" in result
@@ -113,7 +113,7 @@ class TestE2EMCPToolOutput:
         """validate_output 도구 JSON 출력 형식."""
         from safety.server import validate_output as tool_validate
 
-        result_json = tool_validate("안전한 텍스트입니다.", language="ko")
+        result_json = tool_validate("안전한 텍스트입니다.", language="en")
         result = json.loads(result_json)
         assert "safe" in result
         assert "violations" in result

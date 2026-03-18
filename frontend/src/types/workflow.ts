@@ -3,6 +3,7 @@ export interface WorkflowStep {
   name: string;
   type: "llm" | "tool" | "condition" | "parallel" | "approval" | "action";
   config?: Record<string, unknown>;
+  dependsOn?: string[];
   nextSteps?: string[];
   conditionBranches?: { condition: string; nextStep: string }[];
 }
@@ -13,6 +14,7 @@ export interface Workflow {
   description?: string;
   trigger?: string;
   steps?: WorkflowStep[];
+  outputSchema?: Record<string, unknown>;
   stepCount?: number;
   runCount?: number;
   successRate?: number;
@@ -37,5 +39,6 @@ export interface WorkflowRequest {
   description?: string;
   trigger?: string;
   steps?: WorkflowStep[];
+  outputSchema?: Record<string, unknown>;
   status?: string;
 }

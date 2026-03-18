@@ -20,7 +20,7 @@ dependencies {
     // ── Spring AI ──
     implementation(platform("org.springframework.ai:spring-ai-bom:1.0.0"))
     implementation("org.springframework.ai:spring-ai-starter-model-openai")
-    implementation("org.springframework.ai:spring-ai-starter-model-anthropic")
+    // Anthropic은 직접 SDK(com.anthropic:anthropic-java) 사용 — Spring AI starter 불필요
     implementation("org.springframework.ai:spring-ai-starter-vector-store-pgvector")
 
     // ── MCP Java SDK ──
@@ -40,6 +40,11 @@ dependencies {
     implementation("org.apache.tika:tika-core:3.1.0")
     implementation("org.apache.pdfbox:pdfbox:3.0.4")
     implementation("org.apache.poi:poi-ooxml:5.4.0")
+
+    // ── JWT ──
+    implementation("io.jsonwebtoken:jjwt-api:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
 
     // ── JSON Schema Validation ──
     implementation("com.networknt:json-schema-validator:1.5.4")

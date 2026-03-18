@@ -1,0 +1,20 @@
+{
+  "scenarioKey": "aimbase.s10.platform",
+  "name": "Sprint 10: 플랫폼 관리 전체 흐름 (Master DB)",
+  "description": "테넌트 생성 → 목록 → 정지 → 활성화 → 구독 조회 → 대시보드 → 삭제 (UAT-S10-001~005)",
+  "tags": ["sprint-10", "platform", "tenant", "master-db"],
+  "coverage": {
+    "T4-1": ["V-022", "V-035", "V-036", "V-037", "V-038"],
+    "T4-2": ["UAT-S10-001", "UAT-S10-002", "UAT-S10-003", "UAT-S10-004", "UAT-S10-005"]
+  },
+  "vars": {},
+  "steps": [
+    "aimbase.platform.tenant.create",
+    "aimbase.platform.tenant.list",
+    "aimbase.platform.tenant.suspend",
+    "aimbase.platform.tenant.activate",
+    "aimbase.platform.subscription.get",
+    "aimbase.platform.dashboard",
+    "aimbase.platform.tenant.delete"
+  ]
+}

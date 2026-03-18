@@ -1,0 +1,30 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/policies",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-Test-Approval",
+      "domain": "CHAT",
+      "action": "REQUIRE_APPROVAL",
+      "priority": 1,
+      "isActive": true,
+      "rules": [
+        {
+          "field": "model",
+          "operator": "==",
+          "value": "approval-model"
+        }
+      ]
+    }
+  },
+  "extract": {
+    "approvalPolicyId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

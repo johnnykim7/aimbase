@@ -1,0 +1,18 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "GET",
+    "endpoint": "/workflows/{{steps.aimbase.workflow.condition.create.output.workflowId}}/runs/{{steps.aimbase.workflow.condition.run.output.runId}}",
+    "headers": {}
+  },
+  "extract": {
+    "status": "$.body.data.status",
+    "stepResults": "$.body.data.stepResults"
+  },
+  "assert": [
+    { "field": "$.body.data.status", "operator": "==", "value": "completed" }
+  ],
+  "retry": {"maxAttempts": 5, "intervalMs": 3000},
+  "failMode": "hard"
+}

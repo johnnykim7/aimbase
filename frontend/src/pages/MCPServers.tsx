@@ -130,9 +130,9 @@ export default function MCPServers() {
               </div>
 
               {/* Tool chips */}
-              {server.discoveredTools && server.discoveredTools.length > 0 && (
+              {(server.toolsCache ?? server.discoveredTools) && (server.toolsCache ?? server.discoveredTools)!.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-                  {server.discoveredTools.map((tool) => (
+                  {(server.toolsCache ?? server.discoveredTools)!.map((tool) => (
                     <span
                       key={tool.name}
                       style={{
@@ -154,7 +154,7 @@ export default function MCPServers() {
                 </div>
               )}
 
-              {server.toolCount != null && !server.discoveredTools && (
+              {server.toolCount != null && !server.toolsCache && !server.discoveredTools && (
                 <div
                   style={{
                     fontSize: 12,

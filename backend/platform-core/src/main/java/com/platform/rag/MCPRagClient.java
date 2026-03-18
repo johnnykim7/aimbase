@@ -143,6 +143,43 @@ public class MCPRagClient {
     }
 
     /**
+     * Python MCP Server의 transform_query 도구 호출 (PY-005).
+     *
+     * @param query 원본 사용자 쿼리
+     * @param strategy "hyde", "multi_query", "step_back"
+     * @return {original_query, transformed_queries: [...], strategy_used, metadata}
+     */
+    public Map<String, Object> transformQuery(String query, String strategy) {
+        Map<String, Object> input = Map.of(
+                "query", query,
+                "strategy", strategy != null ? strategy : "multi_query",
+                "llm_config", "{}"
+        );
+
+        String result = mcpClient.callTool("transform_query", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 finetune_embeddings 도구 호출 (PY-012).
+     *
+     * @return {model_path, metrics: {loss, training_samples, ...}, success}
+     */
+    public Map<String, Object> finetuneEmbeddings(String baseModel,
+                                                     List<Map<String, String>> trainingData,
+                                                     int epochs, int batchSize) {
+        Map<String, Object> input = Map.of(
+                "base_model", baseModel != null ? baseModel : "",
+                "training_data", toJsonString(trainingData),
+                "epochs", epochs,
+                "batch_size", batchSize
+        );
+
+        String result = mcpClient.callTool("finetune_embeddings", input);
+        return parseJson(result);
+    }
+
+    /**
      * Python MCP Server의 embed_texts 도구 호출.
      */
     public Map<String, Object> embedTexts(List<String> texts, String model) {
@@ -152,6 +189,92 @@ public class MCPRagClient {
         );
 
         String result = mcpClient.callTool("embed_texts", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 parse_document 도구 호출.
+     *
+     * @return {content, metadata, file_type, success}
+     */
+    public Map<String, Object> parseDocument(String fileContent, String fileType) {
+        Map<String, Object> input = Map.of(
+                "file_content", fileContent,
+                "file_type", fileType != null ? fileType : ""
+        );
+
+        String result = mcpClient.callTool("parse_document", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 self_rag_search 도구 호출.
+     *
+     * @return {query, results, iterations, relevance_scores, success}
+     */
+    public Map<String, Object> selfRagSearch(String query, String sourceId, int topK,
+                                                double minScore, int maxIterations) {
+        Map<String, Object> input = Map.of(
+                "query", query,
+                "source_id", sourceId,
+                "top_k", topK,
+                "min_score", minScore,
+                "max_iterations", maxIterations
+        );
+
+        String result = mcpClient.callTool("self_rag_search", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 compress_context 도구 호출.
+     *
+     * @param documents JSON string of [{content, metadata}]
+     * @return {compressed_documents, original_count, compressed_count, success}
+     */
+    public Map<String, Object> compressContext(String query, String documents,
+                                                  double similarityThreshold) {
+        Map<String, Object> input = Map.of(
+                "query", query,
+                "documents", documents,
+                "similarity_threshold", similarityThreshold
+        );
+
+        String result = mcpClient.callTool("compress_context", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 embed_multimodal 도구 호출.
+     *
+     * @param items JSON string of [{type, content}]
+     * @return {embeddings, model, dimensions, success}
+     */
+    public Map<String, Object> embedMultimodal(String items, String model) {
+        Map<String, Object> input = Map.of(
+                "items", items,
+                "model", model != null ? model : ""
+        );
+
+        String result = mcpClient.callTool("embed_multimodal", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 scrape_url 도구 호출.
+     *
+     * @return {content, pages_scraped, url, success}
+     */
+    public Map<String, Object> scrapeUrl(String url, String mode, int maxPages,
+                                            int timeoutMs) {
+        Map<String, Object> input = Map.of(
+                "url", url,
+                "mode", mode != null ? mode : "single",
+                "max_pages", maxPages,
+                "timeout_ms", timeoutMs
+        );
+
+        String result = mcpClient.callTool("scrape_url", input);
         return parseJson(result);
     }
 

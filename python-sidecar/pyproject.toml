@@ -32,6 +32,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+multimodal = ["transformers>=4.40.0", "Pillow>=10.0.0"]
+scraping = ["playwright>=1.40.0"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -41,6 +43,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rag_pipeline", "src/safety", "src/evaluation", "src/agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

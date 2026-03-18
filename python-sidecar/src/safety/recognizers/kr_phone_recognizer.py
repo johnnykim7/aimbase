@@ -39,5 +39,5 @@ class KrPhoneRecognizer(PatternRecognizer):
             supported_entity="KR_PHONE_NUMBER",
             patterns=self.PATTERNS,
             context=self.CONTEXT,
-            supported_language="ko",
+            supported_language="en",
         )

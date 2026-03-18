@@ -1,0 +1,16 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "라우팅: /workflows/new → 빈 캔버스",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/workflows/new",
+    "checkpoints": [
+      {"selector": ".react-flow, [data-testid=workflow-canvas]", "visible": true},
+      {"selector": ".react-flow__node", "maxCount": 0}
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

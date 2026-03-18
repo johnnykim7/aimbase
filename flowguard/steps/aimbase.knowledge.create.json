@@ -1,0 +1,22 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/knowledge-sources",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-Test-KS",
+      "description": "FlowGuard 테스트용 지식소스",
+      "type": "TEXT",
+      "content": "대한민국의 수도는 서울이며, 인구는 약 5100만명이다. 공식 화폐는 원(KRW)이다."
+    }
+  },
+  "extract": {
+    "knowledgeSourceId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

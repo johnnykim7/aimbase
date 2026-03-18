@@ -58,6 +58,37 @@ public class ToolRegistry {
     }
 
     /**
+     * 필터 컨텍스트에 따라 도구 정의를 필터링하여 반환.
+     * filter가 null이면 전체 도구 반환 (하위호환).
+     *
+     * @param filter 도구 필터 컨텍스트
+     * @return 필터링된 도구 정의 목록
+     */
+    public List<UnifiedToolDef> getToolDefs(ToolFilterContext filter) {
+        if (filter == null) {
+            return getToolDefs();
+        }
+        return executors.values().stream()
+                .map(ToolExecutor::getDefinition)
+                .filter(def -> {
+                    // allowedTools가 지정되면 해당 목록에 포함된 도구만 허용
+                    if (filter.allowedTools() != null && !filter.allowedTools().isEmpty()) {
+                        if (!filter.allowedTools().contains(def.name())) {
+                            return false;
+                        }
+                    }
+                    // excludeTools가 지정되면 해당 목록에 포함된 도구는 제외
+                    if (filter.excludeTools() != null && !filter.excludeTools().isEmpty()) {
+                        if (filter.excludeTools().contains(def.name())) {
+                            return false;
+                        }
+                    }
+                    return true;
+                })
+                .toList();
+    }
+
+    /**
      * ToolCall 실행.
      * @throws IllegalArgumentException 등록되지 않은 도구 이름인 경우
      */

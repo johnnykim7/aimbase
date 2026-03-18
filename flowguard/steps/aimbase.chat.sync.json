@@ -1,0 +1,27 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-4o",
+      "messages": [
+        {
+          "role": "user",
+          "content": "2+2는 얼마야?"
+        }
+      ]
+    }
+  },
+  "extract": {
+    "sessionId": "$.body.data.session_id",
+    "content": "$.body.data.content[0].text"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.content[0].type", "operator": "==", "value": "text" }
+  ],
+  "failMode": "hard"
+}

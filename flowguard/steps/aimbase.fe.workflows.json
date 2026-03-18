@@ -1,0 +1,15 @@
+{
+  "type": "UI_SMOKE",
+  "connector": "aimbase-fe",
+  "name": "Workflows 페이지 DAG 시각화",
+  "action": {
+    "url": "{{vars.feBaseUrl}}/workflows",
+    "checkpoints": [
+      {"selector": "table, [data-testid=data-table]", "visible": true}
+    ]
+  },
+  "assert": [
+    { "field": "$.status", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

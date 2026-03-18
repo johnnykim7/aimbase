@@ -7,6 +7,7 @@ import Schemas from "./pages/Schemas";
 import Policies from "./pages/Policies";
 import Prompts from "./pages/Prompts";
 import Workflows from "./pages/Workflows";
+import WorkflowStudio from "./pages/WorkflowStudio";
 import Knowledge from "./pages/Knowledge";
 import Auth from "./pages/Auth";
 import Monitoring from "./pages/Monitoring";
@@ -25,6 +26,8 @@ export default function App() {
         <Route path="policies" element={<Policies />} />
         <Route path="prompts" element={<Prompts />} />
         <Route path="workflows" element={<Workflows />} />
+        <Route path="workflows/new" element={<WorkflowStudio />} />
+        <Route path="workflows/:id/edit" element={<WorkflowStudio />} />
         <Route path="knowledge" element={<Knowledge />} />
         <Route path="auth" element={<Auth />} />
         <Route path="monitoring" element={<Monitoring />} />

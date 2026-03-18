@@ -1,0 +1,24 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "PUT",
+    "endpoint": "/connections/{{steps.aimbase.connection.create.output.connectionId}}",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-Test-LLM-Updated",
+      "type": "LLM",
+      "adapterType": "OPENAI",
+      "config": {
+        "apiKey": "{{vars.openaiApiKey}}",
+        "model": "gpt-4o"
+      }
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.name", "operator": "==", "value": "FlowGuard-Test-LLM-Updated" }
+  ],
+  "failMode": "hard"
+}

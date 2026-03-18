@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,12 +18,6 @@ import java.util.concurrent.Executor;
 @EnableCaching
 public class AppConfig {
 
-    @Value("${spring.ai.anthropic.api-key:}")
-    private String anthropicApiKey;
-
-    @Value("${spring.ai.openai.api-key:}")
-    private String openaiApiKey;
-
     @Bean
     public ObjectMapper objectMapper() {
         ObjectMapper mapper = new ObjectMapper();
@@ -33,17 +26,21 @@ public class AppConfig {
         return mapper;
     }
 
+    /**
+     * LLMAdapterRegistry용 기본 클라이언트 빈.
+     * 실제 채팅은 ConnectionAdapterFactory에서 Connection별 API Key로 클라이언트를 생성.
+     */
     @Bean
     public AnthropicClient anthropicClient() {
         return AnthropicOkHttpClient.builder()
-                .apiKey(anthropicApiKey.isBlank() ? "placeholder" : anthropicApiKey)
+                .apiKey("placeholder")
                 .build();
     }
 
     @Bean
     public OpenAIClient openAIClient() {
         return OpenAIOkHttpClient.builder()
-                .apiKey(openaiApiKey.isBlank() ? "placeholder" : openaiApiKey)
+                .apiKey("placeholder")
                 .build();
     }
 

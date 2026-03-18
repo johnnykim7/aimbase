@@ -1,0 +1,54 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/workflows",
+    "headers": {},
+    "body": {
+      "name": "FlowGuard-Condition-WF",
+      "description": "조건 분기 테스트 워크플로우",
+      "domain": "test",
+      "triggerConfig": {"type": "manual"},
+      "steps": [
+        {
+          "id": "check",
+          "type": "CONDITION",
+          "config": {
+            "expression": "{{input.route}} == 'A'"
+          },
+          "dependsOn": [],
+          "onSuccess": "branchA",
+          "onFailure": "branchB"
+        },
+        {
+          "id": "branchA",
+          "type": "LLM_CALL",
+          "config": {
+            "prompt": "A 경로 실행됨",
+            "model": "auto",
+            "connection_id": "{{vars.connectionId}}"
+          },
+          "dependsOn": ["check"]
+        },
+        {
+          "id": "branchB",
+          "type": "LLM_CALL",
+          "config": {
+            "prompt": "B 경로 실행됨",
+            "model": "auto",
+            "connection_id": "{{vars.connectionId}}"
+          },
+          "dependsOn": ["check"]
+        }
+      ]
+    }
+  },
+  "extract": {
+    "workflowId": "$.body.data.id"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

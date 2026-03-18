@@ -1,0 +1,17 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "GET",
+    "endpoint": "/dashboard/stats",
+    "headers": {}
+  },
+  "extract": {
+    "totalRequests": "$.body.data.totalRequests",
+    "totalTokens": "$.body.data.totalTokens"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true }
+  ],
+  "failMode": "hard"
+}

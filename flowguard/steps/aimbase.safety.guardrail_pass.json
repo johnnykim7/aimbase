@@ -1,0 +1,24 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "POST",
+    "endpoint": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-4o",
+      "messages": [
+        {
+          "role": "user",
+          "content": "오늘 날씨가 좋네요"
+        }
+      ]
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.content[0].type", "operator": "==", "value": "text" }
+  ],
+  "failMode": "hard"
+}

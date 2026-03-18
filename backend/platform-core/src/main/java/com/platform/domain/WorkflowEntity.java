@@ -34,6 +34,11 @@ public class WorkflowEntity {
     @Column(name = "error_handling", columnDefinition = "jsonb")
     private Map<String, Object> errorHandling;
 
+    /** CR-007: 워크플로우 출력 JSON Schema. 마지막 LLM 스텝에 자동 주입. */
+    @Type(JsonBinaryType.class)
+    @Column(name = "output_schema", columnDefinition = "jsonb")
+    private Map<String, Object> outputSchema;
+
     @Column(name = "is_active")
     private boolean isActive = true;
 
@@ -60,6 +65,8 @@ public class WorkflowEntity {
     public void setSteps(List<Map<String, Object>> steps) { this.steps = steps; }
     public Map<String, Object> getErrorHandling() { return errorHandling; }
     public void setErrorHandling(Map<String, Object> errorHandling) { this.errorHandling = errorHandling; }
+    public Map<String, Object> getOutputSchema() { return outputSchema; }
+    public void setOutputSchema(Map<String, Object> outputSchema) { this.outputSchema = outputSchema; }
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
