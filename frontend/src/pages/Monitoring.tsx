@@ -3,16 +3,29 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { COLORS, FONTS } from "../theme";
 import { Badge } from "../components/common/Badge";
 import { StatCard } from "../components/common/StatCard";
 import { DataTable, type Column } from "../components/common/DataTable";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
-import { PageHeader } from "../components/layout/PageHeader";
+import { Page } from "../components/layout/Page";
 import { useUsage, useCostBreakdown, useCostTrend } from "../hooks/useAdmin";
 import { useModels } from "../hooks/useMonitoring";
 import type { UsageStat } from "../types/admin";
 import type { CostBreakdown, CostTrendPoint } from "../types/admin";
+
+/* Recharts는 Tailwind 클래스를 지원하지 않으므로 raw color 상수 사용 */
+const CHART_COLORS = {
+  primary: "#2563eb",
+  purple: "#7c3aed",
+  warning: "#d97706",
+  success: "#059669",
+  danger: "#dc2626",
+  border: "#e5e7eb",
+  textMuted: "#6b7280",
+  surface: "#ffffff",
+};
+
+const BAR_COLORS = [CHART_COLORS.primary, CHART_COLORS.purple, CHART_COLORS.warning, CHART_COLORS.success, CHART_COLORS.danger];
 
 export default function Monitoring() {
   const { data: usageRaw, isLoading: usageLoading } = useUsage();
@@ -59,7 +72,7 @@ export default function Monitoring() {
     {
       header: "모델",
       render: (u) => (
-        <span style={{ fontFamily: FONTS.mono, color: COLORS.accent, fontSize: 13 }}>
+        <span className="font-mono text-primary text-[13px]">
           {u.modelName ?? u.modelId ?? "—"}
         </span>
       ),
@@ -67,21 +80,21 @@ export default function Monitoring() {
     {
       header: "요청 수",
       render: (u) => (
-        <span style={{ fontFamily: FONTS.mono }}>{(u.requestCount ?? 0).toLocaleString()}</span>
+        <span className="font-mono">{(u.requestCount ?? 0).toLocaleString()}</span>
       ),
       width: "100px",
     },
     {
       header: "토큰",
       render: (u) => (
-        <span style={{ fontFamily: FONTS.mono }}>{(u.tokenCount ?? 0).toLocaleString()}</span>
+        <span className="font-mono">{(u.tokenCount ?? 0).toLocaleString()}</span>
       ),
       width: "110px",
     },
     {
       header: "비용",
       render: (u) => (
-        <span style={{ fontFamily: FONTS.mono, color: COLORS.purple }}>
+        <span className="font-mono text-info">
           ${(u.costUsd ?? 0).toFixed(4)}
         </span>
       ),
@@ -90,7 +103,7 @@ export default function Monitoring() {
     {
       header: "평균 응답시간",
       render: (u) => (
-        <span style={{ fontFamily: FONTS.mono }}>{u.avgLatencyMs != null ? `${u.avgLatencyMs}ms` : "—"}</span>
+        <span className="font-mono">{u.avgLatencyMs != null ? `${u.avgLatencyMs}ms` : "—"}</span>
       ),
       width: "120px",
     },
@@ -102,7 +115,7 @@ export default function Monitoring() {
             {u.successRate.toFixed(1)}%
           </Badge>
         ) : (
-          <span style={{ color: COLORS.textDim }}>—</span>
+          <span className="text-muted-foreground/40">—</span>
         ),
       width: "90px",
     },
@@ -111,20 +124,19 @@ export default function Monitoring() {
   if (usageLoading) return <LoadingSpinner fullPage />;
 
   return (
-    <div>
-      <PageHeader title="모니터링" subtitle="비용 추적 및 모델 성능" />
+    <Page>
 
       {/* Stat Cards */}
-      <div style={{ display: "flex", gap: 16, marginBottom: 28, flexWrap: "wrap" }}>
-        <StatCard label="총 비용 (오늘)" value={`$${totalCost.toFixed(2)}`} sub="LLM API 총액" color={COLORS.purple} />
-        <StatCard label="총 토큰" value={totalTokens.toLocaleString()} sub="Input + Output 합계" color={COLORS.accent} />
-        <StatCard label="총 요청" value={totalRequests.toLocaleString()} sub="모든 모델 합산" color={COLORS.success} />
-        <StatCard label="평균 응답시간" value={avgLatency > 0 ? `${avgLatency.toFixed(0)}ms` : "—"} sub="전체 평균" color={COLORS.warning} />
+      <div className="flex gap-4 mb-7 flex-wrap">
+        <StatCard label="총 비용 (오늘)" value={`$${totalCost.toFixed(2)}`} sub="LLM API 총액" color="hsl(var(--info))" />
+        <StatCard label="총 토큰" value={totalTokens.toLocaleString()} sub="Input + Output 합계" color="hsl(var(--primary))" />
+        <StatCard label="총 요청" value={totalRequests.toLocaleString()} sub="모든 모델 합산" color="hsl(var(--success))" />
+        <StatCard label="평균 응답시간" value={avgLatency > 0 ? `${avgLatency.toFixed(0)}ms` : "—"} sub="전체 평균" color="hsl(var(--warning))" />
       </div>
 
       {/* Model Performance Table */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 12 }}>
+      <div className="mb-6">
+        <div className="text-sm font-semibold text-foreground mb-3">
           모델별 성능
         </div>
         <DataTable
@@ -137,38 +149,28 @@ export default function Monitoring() {
 
       {/* Cost bar chart */}
       {usageList.length > 0 && (
-        <div
-          style={{
-            background: COLORS.surface,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 12,
-            padding: 20,
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 16 }}>
+        <div className="bg-card border border-border rounded-xl p-5">
+          <div className="text-sm font-semibold text-foreground mb-4">
             모델별 비용 비교
           </div>
           {usageList.map((u, i) => {
             const pct = totalCost > 0 ? ((u.costUsd ?? 0) / totalCost) * 100 : 0;
-            const barColors = [COLORS.accent, COLORS.purple, COLORS.warning, COLORS.success, COLORS.danger];
             return (
-              <div key={u.modelId ?? i} style={{ marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, fontFamily: FONTS.sans, color: COLORS.text }}>
+              <div key={u.modelId ?? i} className="mb-3.5">
+                <div className="flex justify-between mb-1.5">
+                  <span className="text-xs text-foreground">
                     {u.modelName ?? u.modelId ?? `Model ${i + 1}`}
                   </span>
-                  <span style={{ fontSize: 11, fontFamily: FONTS.mono, color: COLORS.textMuted }}>
+                  <span className="text-[11px] font-mono text-muted-foreground">
                     ${(u.costUsd ?? 0).toFixed(4)} · {pct.toFixed(1)}%
                   </span>
                 </div>
-                <div style={{ height: 6, background: COLORS.surfaceActive, borderRadius: 3, overflow: "hidden" }}>
+                <div className="h-1.5 bg-muted rounded-sm overflow-hidden">
                   <div
+                    className="h-full rounded-sm transition-[width] duration-1000 ease-out"
                     style={{
-                      height: "100%",
-                      borderRadius: 3,
                       width: `${pct}%`,
-                      background: barColors[i % barColors.length],
-                      transition: "width 1s ease",
+                      background: BAR_COLORS[i % BAR_COLORS.length],
                     }}
                   />
                 </div>
@@ -180,27 +182,19 @@ export default function Monitoring() {
 
       {/* Available Models */}
       {models.length > 0 && (
-        <div style={{ marginTop: 24 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 12 }}>
+        <div className="mt-6">
+          <div className="text-sm font-semibold text-foreground mb-3">
             사용 가능한 모델
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div className="flex flex-wrap gap-2">
             {models.map((m) => (
               <div
                 key={m.id}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  background: COLORS.surface,
-                  border: `1px solid ${COLORS.border}`,
-                  fontSize: 12,
-                  fontFamily: FONTS.mono,
-                  color: COLORS.text,
-                }}
+                className="py-2 px-3.5 rounded-lg bg-card border border-border text-xs font-mono text-foreground"
               >
                 {m.name ?? m.id}
                 {m.provider && (
-                  <span style={{ color: COLORS.textDim, marginLeft: 6 }}>({m.provider})</span>
+                  <span className="text-muted-foreground/40 ml-1.5">({m.provider})</span>
                 )}
               </div>
             ))}
@@ -210,36 +204,27 @@ export default function Monitoring() {
 
       {/* 모델별 비용 분석 (BarChart) */}
       {costBreakdown.length > 0 && (
-        <div
-          style={{
-            marginTop: 28,
-            background: COLORS.surface,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 12,
-            padding: 20,
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 16 }}>
+        <div className="mt-7 bg-card border border-border rounded-xl p-5">
+          <div className="text-sm font-semibold text-foreground mb-4">
             모델별 비용 분석
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={costBreakdown} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} />
               <XAxis
                 dataKey="model"
-                tick={{ fontSize: 11, fontFamily: FONTS.mono, fill: COLORS.textMuted }}
+                tick={{ fontSize: 11, fontFamily: "monospace", fill: CHART_COLORS.textMuted }}
               />
               <YAxis
-                tick={{ fontSize: 11, fontFamily: FONTS.mono, fill: COLORS.textMuted }}
+                tick={{ fontSize: 11, fontFamily: "monospace", fill: CHART_COLORS.textMuted }}
                 tickFormatter={(v: number) => `$${v.toFixed(2)}`}
               />
               <Tooltip
                 contentStyle={{
-                  background: COLORS.surface,
-                  border: `1px solid ${COLORS.border}`,
+                  background: CHART_COLORS.surface,
+                  border: `1px solid ${CHART_COLORS.border}`,
                   borderRadius: 8,
                   fontSize: 12,
-                  fontFamily: FONTS.sans,
                 }}
                 formatter={(value: unknown, name: unknown) => [
                   `$${Number(value).toFixed(4)}`,
@@ -251,8 +236,8 @@ export default function Monitoring() {
                   value === "inputCost" ? "입력 비용" : "출력 비용"
                 }
               />
-              <Bar dataKey="inputCost" stackId="cost" fill={COLORS.accent} radius={[0, 0, 0, 0]} />
-              <Bar dataKey="outputCost" stackId="cost" fill={COLORS.purple} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="inputCost" stackId="cost" fill={CHART_COLORS.primary} radius={[0, 0, 0, 0]} />
+              <Bar dataKey="outputCost" stackId="cost" fill={CHART_COLORS.purple} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -260,58 +245,46 @@ export default function Monitoring() {
 
       {/* 일별 비용 추세 (LineChart) */}
       {costTrendData.chartData.length > 0 && (
-        <div
-          style={{
-            marginTop: 20,
-            background: COLORS.surface,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 12,
-            padding: 20,
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 16 }}>
+        <div className="mt-5 bg-card border border-border rounded-xl p-5">
+          <div className="text-sm font-semibold text-foreground mb-4">
             일별 비용 추세
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={costTrendData.chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} />
               <XAxis
                 dataKey="date"
-                tick={{ fontSize: 11, fontFamily: FONTS.mono, fill: COLORS.textMuted }}
+                tick={{ fontSize: 11, fontFamily: "monospace", fill: CHART_COLORS.textMuted }}
               />
               <YAxis
-                tick={{ fontSize: 11, fontFamily: FONTS.mono, fill: COLORS.textMuted }}
+                tick={{ fontSize: 11, fontFamily: "monospace", fill: CHART_COLORS.textMuted }}
                 tickFormatter={(v: number) => `$${v.toFixed(2)}`}
               />
               <Tooltip
                 contentStyle={{
-                  background: COLORS.surface,
-                  border: `1px solid ${COLORS.border}`,
+                  background: CHART_COLORS.surface,
+                  border: `1px solid ${CHART_COLORS.border}`,
                   borderRadius: 8,
                   fontSize: 12,
-                  fontFamily: FONTS.sans,
                 }}
                 formatter={(value: unknown) => [`$${Number(value).toFixed(4)}`, ""]}
               />
               <Legend />
-              {costTrendData.modelNames.map((name, i) => {
-                const lineColors = [COLORS.accent, COLORS.purple, COLORS.warning, COLORS.success, COLORS.danger];
-                return (
-                  <Line
-                    key={name}
-                    type="monotone"
-                    dataKey={name}
-                    stroke={lineColors[i % lineColors.length]}
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    activeDot={{ r: 5 }}
-                  />
-                );
-              })}
+              {costTrendData.modelNames.map((name, i) => (
+                <Line
+                  key={name}
+                  type="monotone"
+                  dataKey={name}
+                  stroke={BAR_COLORS[i % BAR_COLORS.length]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
       )}
-    </div>
+    </Page>
   );
 }

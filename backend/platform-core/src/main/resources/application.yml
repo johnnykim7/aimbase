@@ -10,6 +10,11 @@ spring:
       max-file-size: 50MB
       max-request-size: 50MB
 
+  # MCP SSE 연결 유지를 위한 async 타임아웃 (기본 30s → 10분)
+  mvc:
+    async:
+      request-timeout: 600000
+
   # ─── Master DataSource (테넌트 레지스트리, 구독 관리) ─────────────
   datasource:
     master:
@@ -45,8 +50,10 @@ spring:
       port: ${SPRING_REDIS_PORT:6379}
       timeout: 5000ms
 
-  # LLM 채팅은 Connection DB 기반 (AppConfig에서 직접 SDK 사용)
-  # Spring AI는 임베딩(RAG)용으로만 사용
+  # ─── 임베딩 설정 (CR-012) ─────────────────────────────────────────────
+  # 기본: Python MCP 사이드카 경유 BGE-M3 (무료, 1024d)
+  # 선택: OpenAI API key 설정 시 Java EmbeddingService 활성화 (유료 Fallback)
+  # key가 비어있으면 OpenAI 임베딩 빈 미생성 → MCP 사이드카로만 동작
   ai:
     openai:
       api-key: ${OPENAI_API_KEY:}
@@ -55,8 +62,8 @@ spring:
           model: gpt-4o
       embedding:
         options:
-          model: text-embedding-3-small
-          dimensions: 1536
+          model: ${OPENAI_EMBED_MODEL:text-embedding-3-small}
+          dimensions: ${OPENAI_EMBED_DIMENSIONS:1536}
     # ─── MCP Server SSE 설정 (FlowGuard 교훈 반영) ──────────────────────
     # context-path 사용 시 base-url 필수. 미설정 시 SSE data에 prefix 누락되어 클라이언트 연결 실패.
     mcp:
@@ -71,8 +78,8 @@ spring.threads.virtual.enabled: true
 # ─── RAG MCP 설정 (Python 사이드카 연동, CR-002) ─────────────────────
 rag:
   mcp:
-    url: ${RAG_MCP_URL:http://localhost:8000}
-    enabled: ${RAG_MCP_ENABLED:false}
+    url: ${RAG_MCP_URL:http://localhost:8002}
+    enabled: ${RAG_MCP_ENABLED:true}
 
 # ─── Safety MCP 설정 (PII Detection, Sprint 16) ──────────────────────
 safety:
@@ -98,6 +105,10 @@ platform:
   default-db-port: ${TENANT_DB_PORT:5432}
   default-db-username: ${TENANT_DB_USERNAME:platform}
   default-db-password: ${TENANT_DB_PASSWORD:platform}
+
+tenant:
+  db:
+    host-override: ${TENANT_DB_HOST_OVERRIDE:}
 
 management:
   endpoints:
@@ -128,11 +139,11 @@ jwt:
 # ─── 스토리지 설정 ────────────────────────────────────────────────────
 storage:
   local:
-    base-path: ${STORAGE_BASE_PATH:/data/aimbase}
+    base-path: ${STORAGE_BASE_PATH:./data/storage}
 
 logging:
   level:
-    com.platform: INFO
+    com.platform: DEBUG
     com.platform.tenant: DEBUG
     org.springframework.ai: INFO
     org.springframework.security: WARN

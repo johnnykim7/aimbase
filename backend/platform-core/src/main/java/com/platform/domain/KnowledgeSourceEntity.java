@@ -33,6 +33,9 @@ public class KnowledgeSourceEntity {
     @Column(name = "embedding_config", columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> embeddingConfig;
 
+    @Column(name = "embedding_model", length = 100)
+    private String embeddingModel = "BAAI/bge-m3";
+
     @Type(JsonBinaryType.class)
     @Column(name = "sync_config", columnDefinition = "jsonb")
     private Map<String, Object> syncConfig;
@@ -48,6 +51,10 @@ public class KnowledgeSourceEntity {
 
     @Column(name = "last_synced_at")
     private OffsetDateTime lastSyncedAt;
+
+    /** CR-022: 리소스 생성자 (users.id) */
+    @Column(name = "created_by", length = 100)
+    private String createdBy;
 
     @Column(name = "created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
@@ -72,6 +79,8 @@ public class KnowledgeSourceEntity {
     public void setChunkingConfig(Map<String, Object> chunkingConfig) { this.chunkingConfig = chunkingConfig; }
     public Map<String, Object> getEmbeddingConfig() { return embeddingConfig; }
     public void setEmbeddingConfig(Map<String, Object> embeddingConfig) { this.embeddingConfig = embeddingConfig; }
+    public String getEmbeddingModel() { return embeddingModel; }
+    public void setEmbeddingModel(String embeddingModel) { this.embeddingModel = embeddingModel; }
     public Map<String, Object> getSyncConfig() { return syncConfig; }
     public void setSyncConfig(Map<String, Object> syncConfig) { this.syncConfig = syncConfig; }
     public String getStatus() { return status; }
@@ -82,6 +91,8 @@ public class KnowledgeSourceEntity {
     public void setChunkCount(int chunkCount) { this.chunkCount = chunkCount; }
     public OffsetDateTime getLastSyncedAt() { return lastSyncedAt; }
     public void setLastSyncedAt(OffsetDateTime lastSyncedAt) { this.lastSyncedAt = lastSyncedAt; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }

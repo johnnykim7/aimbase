@@ -1,9 +1,9 @@
 import { apiClient } from "./client";
 import type { ApiResponse, PagedResponse } from "../types/api";
-import type { Tenant, TenantRequest, Subscription, PlatformUsage } from "../types/tenant";
+import type { Tenant, TenantRequest, Subscription, PlatformUsage, ApiKey, CreateApiKeyRequest } from "../types/tenant";
 
 export const platformApi = {
-  listTenants: (params?: { page?: number; size?: number }) =>
+  listTenants: (params?: { page?: number; size?: number; domain_app?: string }) =>
     apiClient.get<ApiResponse<PagedResponse<Tenant> | Tenant[]>>("/platform/tenants", { params }),
 
   getTenant: (id: string) =>
@@ -32,4 +32,17 @@ export const platformApi = {
 
   platformUsage: () =>
     apiClient.get<ApiResponse<PlatformUsage>>("/platform/usage"),
+
+  // API Keys (CR-025)
+  listApiKeys: (tenantId?: string) =>
+    apiClient.get<ApiResponse<ApiKey[]>>("/platform/api-keys", { params: tenantId ? { tenantId } : undefined }),
+
+  createApiKey: (data: CreateApiKeyRequest) =>
+    apiClient.post<ApiResponse<ApiKey & { apiKey: string }>>("/platform/api-keys", data),
+
+  revokeApiKey: (id: string) =>
+    apiClient.delete(`/platform/api-keys/${id}`),
+
+  regenerateApiKey: (id: string) =>
+    apiClient.post<ApiResponse<ApiKey & { apiKey: string }>>(`/platform/api-keys/${id}/regenerate`),
 };

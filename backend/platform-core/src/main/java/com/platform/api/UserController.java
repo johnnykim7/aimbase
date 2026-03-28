@@ -7,12 +7,18 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import com.platform.tenant.TenantContext;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.UUID;
 
 @RestController
@@ -21,11 +27,12 @@ import java.util.UUID;
 public class UserController {
 
     private final UserRepository userRepository;
-    private final BCryptPasswordEncoder passwordEncoder;
+    private final JdbcTemplate masterJdbcTemplate;
 
-    public UserController(UserRepository userRepository) {
+    public UserController(UserRepository userRepository,
+                          @Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate) {
         this.userRepository = userRepository;
-        this.passwordEncoder = new BCryptPasswordEncoder();
+        this.masterJdbcTemplate = masterJdbcTemplate;
     }
 
     @GetMapping
@@ -51,7 +58,18 @@ public class UserController {
         entity.setName(request.name());
         entity.setRoleId(request.roleId());
         entity.setActive(true);
-        return ApiResponse.ok(userRepository.save(entity));
+        UserEntity saved = userRepository.save(entity);
+
+        // CR-027: Master DB user_tenant_map에 매핑 등록
+        String tenantId = TenantContext.getTenantId();
+        if (tenantId != null) {
+            masterJdbcTemplate.update(
+                "INSERT INTO user_tenant_map (email, tenant_id) VALUES (?, ?) ON CONFLICT (email) DO NOTHING",
+                request.email(), tenantId
+            );
+        }
+
+        return ApiResponse.ok(saved);
     }
 
     @GetMapping("/{id}")
@@ -84,6 +102,11 @@ public class UserController {
                         "User not found: " + id));
         entity.setActive(false);
         userRepository.save(entity);
+
+        // CR-027: Master DB user_tenant_map에서 매핑 삭제
+        masterJdbcTemplate.update(
+            "DELETE FROM user_tenant_map WHERE email = ?", entity.getEmail()
+        );
     }
 
     @PostMapping("/{id}/api-key")
@@ -93,10 +116,20 @@ public class UserController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "User not found: " + id));
         String rawKey = "plat-" + UUID.randomUUID().toString().replace("-", "");
-        entity.setApiKeyHash(passwordEncoder.encode(rawKey));
+        entity.setApiKeyHash(sha256(rawKey));
         userRepository.save(entity);
         return ApiResponse.ok(java.util.Map.of("apiKey", rawKey,
                 "note", "이 키는 다시 조회할 수 없습니다. 안전한 곳에 저장하세요."));
+    }
+
+    private static String sha256(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 
     public record UserRequest(

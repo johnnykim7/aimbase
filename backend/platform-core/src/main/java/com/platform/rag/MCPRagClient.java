@@ -4,10 +4,14 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.mcp.MCPServerClient;
+import com.platform.mcp.MCPToolExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.ToolRegistry;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -21,6 +25,7 @@ import java.util.Map;
  * 기존 Java IngestionPipeline/VectorSearcher 기능을 Python 사이드카에 위임.
  *
  * v2.0 (CR-002): AI 특화 기능을 Python MCP Server로 전환.
+ * v3.7 (CR-019): 연결 시 MCP 도구를 ToolRegistry에 자동 등록.
  */
 @Component
 public class MCPRagClient {
@@ -28,8 +33,9 @@ public class MCPRagClient {
     private static final Logger log = LoggerFactory.getLogger(MCPRagClient.class);
 
     private final ObjectMapper objectMapper;
+    private final ToolRegistry toolRegistry;
 
-    @Value("${rag.mcp.url:http://localhost:8000}")
+    @Value("${rag.mcp.url:http://localhost:8002}")
     private String mcpServerUrl;
 
     @Value("${rag.mcp.enabled:false}")
@@ -38,8 +44,9 @@ public class MCPRagClient {
     private MCPServerClient mcpClient;
     private boolean connected = false;
 
-    public MCPRagClient(ObjectMapper objectMapper) {
+    public MCPRagClient(ObjectMapper objectMapper, ToolRegistry toolRegistry) {
         this.objectMapper = objectMapper;
+        this.toolRegistry = toolRegistry;
     }
 
     @PostConstruct
@@ -50,11 +57,27 @@ public class MCPRagClient {
                 mcpClient.connect();
                 connected = true;
                 log.info("Connected to RAG Pipeline MCP Server at {}", mcpServerUrl);
+                registerToolsInRegistry();
             } catch (Exception e) {
                 log.warn("Failed to connect to RAG Pipeline MCP Server at {}: {}. Falling back to Java implementation.",
                         mcpServerUrl, e.getMessage());
                 connected = false;
             }
+        }
+    }
+
+    /**
+     * 사이드카의 MCP 도구를 ToolRegistry에 등록하여 워크플로우/채팅에서 사용 가능하게 함.
+     */
+    private void registerToolsInRegistry() {
+        try {
+            List<UnifiedToolDef> tools = mcpClient.discoverTools();
+            for (UnifiedToolDef tool : tools) {
+                toolRegistry.register(new MCPToolExecutor(mcpClient, tool));
+            }
+            log.info("Registered {} MCP tool(s) from RAG Pipeline sidecar in ToolRegistry", tools.size());
+        } catch (Exception e) {
+            log.warn("Failed to register sidecar tools in ToolRegistry: {}", e.getMessage());
         }
     }
 
@@ -88,6 +111,43 @@ public class MCPRagClient {
         );
 
         String result = mcpClient.callTool("ingest_document", input);
+        log.info("MCP ingest_document result: {}", result);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 ingest_file 도구 호출.
+     * 파일 경로를 전달하면 사이드카가 파싱→청킹→임베딩→저장 전체를 처리.
+     *
+     * @return {source_id, document_id, chunks_created, success, errors}
+     */
+    public Map<String, Object> ingestFile(String sourceId, String filePath,
+                                           String storageBasePath, String documentId,
+                                           String chunkingStrategy, Map<String, Object> chunkingConfig) {
+        return ingestFile(sourceId, filePath, storageBasePath, documentId, chunkingStrategy, chunkingConfig, null);
+    }
+
+    /**
+     * Python MCP Server의 ingest_file 도구 호출 (임베딩 모델 지정).
+     *
+     * @param embeddingModel 임베딩에 사용할 모델 (null이면 사이드카 기본 모델)
+     * @return {source_id, document_id, chunks_created, success, errors}
+     */
+    public Map<String, Object> ingestFile(String sourceId, String filePath,
+                                           String storageBasePath, String documentId,
+                                           String chunkingStrategy, Map<String, Object> chunkingConfig,
+                                           String embeddingModel) {
+        Map<String, Object> input = new java.util.HashMap<>();
+        input.put("source_id", sourceId);
+        input.put("file_path", filePath);
+        input.put("storage_base_path", storageBasePath);
+        input.put("document_id", documentId != null ? documentId : "");
+        input.put("chunking_strategy", chunkingStrategy != null ? chunkingStrategy : "fixed");
+        input.put("chunking_config", toJsonString(chunkingConfig != null ? chunkingConfig : Map.of()));
+        input.put("embedding_model", embeddingModel != null ? embeddingModel : "");
+
+        String result = mcpClient.callTool("ingest_file", input);
+        log.info("MCP ingest_file result: {}", result);
         return parseJson(result);
     }
 
@@ -98,13 +158,27 @@ public class MCPRagClient {
      */
     public Map<String, Object> searchHybrid(String query, String sourceId, int topK,
                                               double vectorWeight, double keywordWeight) {
-        Map<String, Object> input = Map.of(
-                "query", query,
-                "source_id", sourceId,
-                "top_k", topK,
-                "vector_weight", vectorWeight,
-                "keyword_weight", keywordWeight
-        );
+        return searchHybrid(query, sourceId, topK, vectorWeight, keywordWeight, null);
+    }
+
+    /**
+     * Python MCP Server의 search_hybrid 도구 호출 (임베딩 모델 지정).
+     *
+     * @param embeddingModel 쿼리 임베딩에 사용할 모델 (null이면 사이드카 기본 모델)
+     * @return {query, results: [{content, metadata, vector_score, keyword_score, combined_score}]}
+     */
+    public Map<String, Object> searchHybrid(String query, String sourceId, int topK,
+                                              double vectorWeight, double keywordWeight,
+                                              String embeddingModel) {
+        Map<String, Object> input = new java.util.HashMap<>();
+        input.put("query", query);
+        input.put("source_id", sourceId);
+        input.put("top_k", topK);
+        input.put("vector_weight", vectorWeight);
+        input.put("keyword_weight", keywordWeight);
+        if (embeddingModel != null && !embeddingModel.isBlank()) {
+            input.put("embedding_model", embeddingModel);
+        }
 
         String result = mcpClient.callTool("search_hybrid", input);
         return parseJson(result);
@@ -275,6 +349,72 @@ public class MCPRagClient {
         );
 
         String result = mcpClient.callTool("scrape_url", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 contextual_chunk 도구 호출 (PY-023).
+     * Anthropic Contextual Retrieval: 청크별 LLM 문맥 접두사 생성.
+     *
+     * @return {chunks: [{content, context_prefix, metadata}], success}
+     */
+    public Map<String, Object> contextualChunk(String content, String documentContext,
+                                                  Map<String, Object> chunkingConfig) {
+        Map<String, Object> input = Map.of(
+                "content", content,
+                "document_context", documentContext != null ? documentContext : "",
+                "chunking_config", toJsonString(chunkingConfig != null ? chunkingConfig : Map.of())
+        );
+
+        String result = mcpClient.callTool("contextual_chunk", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 parent_child_search 도구 호출 (PY-024).
+     * Parent-Child 계층적 검색: child 매칭 → parent 반환.
+     *
+     * @return {results: [{content, parent_content, score, metadata}], success}
+     */
+    public Map<String, Object> parentChildSearch(String query, String sourceId, int topK) {
+        Map<String, Object> input = Map.of(
+                "query", query,
+                "source_id", sourceId,
+                "top_k", topK
+        );
+
+        String result = mcpClient.callTool("parent_child_search", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 evaluate_rag 도구 호출 (PY-026).
+     * RAGAS 메트릭 평가.
+     *
+     * @return {metrics: {faithfulness, context_relevancy, ...}, sample_count, success}
+     */
+    public Map<String, Object> evaluateRag(String sourceId, List<Map<String, Object>> testSet,
+                                              Map<String, Object> config) {
+        return evaluateRag(sourceId, testSet, config, "fast");
+    }
+
+    public Map<String, Object> evaluateRag(String sourceId, List<Map<String, Object>> testSet,
+                                              Map<String, Object> config, String mode) {
+        Map<String, Object> input = new java.util.HashMap<>();
+        input.put("source_id", sourceId);
+        input.put("test_set", toJsonString(testSet != null ? testSet : List.of()));
+        input.put("config", toJsonString(config != null ? config : Map.of()));
+        input.put("mode", mode != null ? mode : "fast");
+
+        String result = mcpClient.callTool("evaluate_rag", input);
+        return parseJson(result);
+    }
+
+    /**
+     * 범용 MCP 도구 호출. 새 도구 추가 시 개별 메서드 없이도 호출 가능.
+     */
+    public Map<String, Object> callToolRaw(String toolName, Map<String, Object> input) {
+        String result = mcpClient.callTool(toolName, input);
         return parseJson(result);
     }
 

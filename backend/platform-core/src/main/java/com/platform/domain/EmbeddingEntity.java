@@ -36,6 +36,15 @@ public class EmbeddingEntity {
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metadata;
 
+    @Column(name = "parent_id", length = 100)
+    private String parentId;
+
+    @Column(name = "context_prefix", columnDefinition = "text")
+    private String contextPrefix;
+
+    @Column(name = "content_hash", length = 64)
+    private String contentHash;
+
     @Column(name = "created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
@@ -52,5 +61,11 @@ public class EmbeddingEntity {
     public void setEmbedding(String embedding) { this.embedding = embedding; }
     public Map<String, Object> getMetadata() { return metadata; }
     public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }
+    public String getParentId() { return parentId; }
+    public void setParentId(String parentId) { this.parentId = parentId; }
+    public String getContextPrefix() { return contextPrefix; }
+    public void setContextPrefix(String contextPrefix) { this.contextPrefix = contextPrefix; }
+    public String getContentHash() { return contentHash; }
+    public void setContentHash(String contentHash) { this.contentHash = contentHash; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
 }

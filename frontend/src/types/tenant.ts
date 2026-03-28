@@ -1,6 +1,7 @@
 export interface Tenant {
   id: string;
   name: string;
+  domainApp?: string; // CR-023: 소비앱 식별
   dbHost?: string;
   dbPort?: number;
   dbName?: string;
@@ -16,6 +17,7 @@ export interface TenantRequest {
   name: string;
   adminEmail?: string;
   plan?: string;
+  domainApp?: string; // CR-023
   dbHost?: string;
   dbName?: string;
 }
@@ -49,4 +51,27 @@ export interface TenantUsage {
   tokenCount?: number;
   costUsd?: number;
   status?: string;
+}
+
+// CR-025: 시스템 API Key
+export interface ApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  tenantId?: string;
+  domainApp: string;
+  scope?: Record<string, unknown>;
+  lastUsedAt?: string;
+  expiresAt?: string;
+  isActive: boolean;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface CreateApiKeyRequest {
+  name: string;
+  domainApp: string;
+  tenantId?: string;
+  scope?: Record<string, unknown>;
+  expiresAt?: string;
 }

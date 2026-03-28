@@ -24,26 +24,56 @@ export function workflowToFlow(workflow: Workflow): { nodes: Node[]; edges: Edge
   }));
 
   const edges: Edge[] = [];
+  const edgeSet = new Set<string>();
+  const addEdge = (source: string, target: string) => {
+    const edgeId = `${source}->${target}`;
+    if (!edgeSet.has(edgeId)) {
+      edgeSet.add(edgeId);
+      edges.push({ id: edgeId, source, target, animated: false });
+    }
+  };
+
+  const stepIds = new Set(steps.map((s) => s.id));
+  let hasAnyLink = false;
+
   steps.forEach((step) => {
+    // dependsOn 기반 엣지
     const deps = step.dependsOn ?? [];
     deps.forEach((depId) => {
-      edges.push({
-        id: `${depId}->${step.id}`,
-        source: depId,
-        target: step.id,
-        animated: false,
-      });
+      if (stepIds.has(depId)) {
+        addEdge(depId, step.id);
+        hasAnyLink = true;
+      }
     });
 
-    if (deps.length === 0 && step.nextSteps) {
+    // nextSteps 기반 엣지
+    if (step.nextSteps) {
       step.nextSteps.forEach((nextId) => {
-        const edgeId = `${step.id}->${nextId}`;
-        if (!edges.find((e) => e.id === edgeId)) {
-          edges.push({ id: edgeId, source: step.id, target: nextId, animated: false });
+        if (stepIds.has(nextId)) {
+          addEdge(step.id, nextId);
+          hasAnyLink = true;
         }
       });
     }
+
+    // BE onSuccess/onFailure 기반 엣지
+    const raw = step as unknown as Record<string, unknown>;
+    if (typeof raw.onSuccess === "string" && stepIds.has(raw.onSuccess as string)) {
+      addEdge(step.id, raw.onSuccess as string);
+      hasAnyLink = true;
+    }
+    if (typeof raw.onFailure === "string" && stepIds.has(raw.onFailure as string)) {
+      addEdge(step.id, raw.onFailure as string);
+      hasAnyLink = true;
+    }
   });
+
+  // 어떤 연결도 없으면 순서대로 연결
+  if (!hasAnyLink && steps.length > 1) {
+    for (let i = 0; i < steps.length - 1; i++) {
+      addEdge(steps[i].id, steps[i + 1].id);
+    }
+  }
 
   return autoLayout(nodes, edges);
 }

@@ -50,7 +50,9 @@ public class PolicyController {
     @Operation(summary = "정책 생성")
     public ApiResponse<PolicyEntity> create(@Valid @RequestBody PolicyRequest request) {
         PolicyEntity entity = new PolicyEntity();
-        entity.setId(request.id());
+        entity.setId(request.id() != null && !request.id().isBlank()
+                ? request.id()
+                : java.util.UUID.randomUUID().toString());
         entity.setName(request.name());
         entity.setDomain(request.domain());
         entity.setPriority(request.priority() != null ? request.priority() : 0);
@@ -119,7 +121,7 @@ public class PolicyController {
     }
 
     public record PolicyRequest(
-            @NotBlank String id,
+            String id,
             @NotBlank String name,
             String domain,
             Integer priority,

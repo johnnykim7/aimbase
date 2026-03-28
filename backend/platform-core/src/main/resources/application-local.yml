@@ -1,29 +1,32 @@
 spring:
   jpa:
     show-sql: true
+  data:
+    redis:
+      password: "263ca230d0de693a57111e8b6ca353967e5582b08bdadccfc0c48e77e95ea4ef"
 
   ai:
     openai:
       api-key: ${OPENAI_API_KEY:}
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}/v1
 
-# Python RAG Pipeline MCP Server (Docker Compose: rag-pipeline:8000)
+# Python RAG Pipeline MCP Server
 rag:
   mcp:
-    url: ${RAG_MCP_URL:http://localhost:8000}
+    url: ${RAG_MCP_URL:http://localhost:8002}
     enabled: ${RAG_MCP_ENABLED:true}
 
-# Python Safety MCP Server (Docker Compose: safety:8001)
+# Python Safety MCP Server (별도 사이드카 미기동)
 safety:
   mcp:
-    url: ${SAFETY_MCP_URL:http://localhost:8001}
-    enabled: ${SAFETY_MCP_ENABLED:true}
+    url: ${SAFETY_MCP_URL:http://localhost:8003}
+    enabled: ${SAFETY_MCP_ENABLED:false}
 
-# Python Evaluation MCP Server (Docker Compose: evaluation:8002)
+# Python Evaluation MCP Server (별도 사이드카 미기동)
 evaluation:
   mcp:
-    url: ${EVALUATION_MCP_URL:http://localhost:8002}
-    enabled: ${EVALUATION_MCP_ENABLED:true}
+    url: ${EVALUATION_MCP_URL:http://localhost:8004}
+    enabled: ${EVALUATION_MCP_ENABLED:false}
 
 logging:
   level:

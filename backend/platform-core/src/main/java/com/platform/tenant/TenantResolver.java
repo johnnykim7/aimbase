@@ -20,12 +20,11 @@ import java.io.IOException;
  * /api/v1/platform/** 경로는 슈퍼어드민 전용 → Master DB 사용 (TenantContext 설정 안 함)
  */
 @Component
-@Order(1)
+@Order(-200)
 public class TenantResolver implements Filter {
 
     private static final Logger log = LoggerFactory.getLogger(TenantResolver.class);
     private static final String TENANT_HEADER = "X-Tenant-Id";
-    private static final String PLATFORM_API_PREFIX = "/api/v1/platform";
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
@@ -35,13 +34,12 @@ public class TenantResolver implements Filter {
         String path = httpRequest.getRequestURI();
 
         try {
-            // 슈퍼어드민 API는 Master DB만 사용 — TenantContext 설정 안 함
-            if (!path.startsWith(PLATFORM_API_PREFIX)) {
-                String tenantId = resolveTenantId(httpRequest);
-                if (tenantId != null && !tenantId.isBlank()) {
-                    TenantContext.setTenantId(tenantId);
-                    log.debug("Tenant resolved: {} for path: {}", tenantId, path);
-                }
+            // Platform API 경로도 JWT 인증을 위해 tenant context 설정 필요
+            // (ROLE_SUPER_ADMIN 권한 검증은 SecurityConfig에서 별도 수행)
+            String tenantId = resolveTenantId(httpRequest);
+            if (tenantId != null && !tenantId.isBlank()) {
+                TenantContext.setTenantId(tenantId);
+                log.debug("Tenant resolved: {} for path: {}", tenantId, path);
             }
             chain.doFilter(request, response);
         } finally {
@@ -57,7 +55,13 @@ public class TenantResolver implements Filter {
             return headerTenantId.trim();
         }
 
-        // 2. 서브도메인 (예: acme.platform.com)
+        // 2. 쿼리 파라미터 tenant_id (MCP SSE 클라이언트용 — 헤더 전달 불가)
+        String queryTenantId = request.getParameter("tenant_id");
+        if (queryTenantId != null && !queryTenantId.isBlank()) {
+            return queryTenantId.trim();
+        }
+
+        // 3. 서브도메인 (예: acme.platform.com)
         String host = request.getServerName();
         if (host != null && host.contains(".")) {
             String subdomain = host.split("\\.")[0];
@@ -67,7 +71,7 @@ public class TenantResolver implements Filter {
             }
         }
 
-        // 3. JWT tenant_id claim (Phase 5에서 구현)
+        // 4. JWT tenant_id claim (Phase 5에서 구현)
         // String authHeader = request.getHeader("Authorization");
         // if (authHeader != null && authHeader.startsWith("Bearer ")) { ... }
 

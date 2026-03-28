@@ -85,6 +85,7 @@ public class ConnectionAdapterFactory {
         String apiKey = (String) conn.getConfig().get("apiKey");
 
         if (apiKey == null || apiKey.isBlank()) {
+            log.warn("Connection '{}' ping skipped — no 'apiKey'. Available keys: {}", connectionId, conn.getConfig().keySet());
             return new HealthStatus(false, 0);
         }
 
@@ -153,6 +154,8 @@ public class ConnectionAdapterFactory {
         String apiKey = (String) conn.getConfig().get("apiKey");
 
         if (apiKey == null || apiKey.isBlank()) {
+            log.error("Connection '{}' config has no 'apiKey'. Available keys: {}, config: {}",
+                    connectionId, conn.getConfig().keySet(), conn.getConfig());
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Connection '" + connectionId + "' has no apiKey configured");
         }

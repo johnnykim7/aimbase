@@ -20,6 +20,9 @@
 ### Frontend
 - React 18 + TypeScript 5.6
 - Vite 5.4
+- Tailwind CSS 4 + Metronic 9.4.3 (UI 프레임워크)
+- Lucide React (아이콘)
+- class-variance-authority (cva) + clsx + tailwind-merge
 - TanStack React Query 5.90
 - React Router 6.27
 - Axios 1.7
@@ -68,25 +71,31 @@ backend/platform-core/src/main/java/com/platform/
 ### 프로젝트 구조
 ```
 frontend/src/
-├── App.tsx        # 라우팅 정의
-├── main.tsx       # 엔트리포인트
-├── theme.ts       # 디자인 토큰
-├── api/           # API 클라이언트 (Axios)
-├── pages/         # 라우트 컴포넌트
-│   └── platform/  # Super Admin 페이지
-├── components/    # 재사용 컴포넌트
-│   ├── layout/    # AppShell, Sidebar, PageHeader
-│   └── common/    # DataTable, Modal, Badge, FormField 등
-├── hooks/         # 커스텀 훅 (useXxx)
-├── types/         # TypeScript 인터페이스
-└── store/         # 상태 관리
+├── App.tsx           # 라우팅 정의
+├── main.tsx          # 엔트리포인트
+├── lib/utils.ts      # cn() 유틸 (clsx + tailwind-merge)
+├── styles/           # Tailwind CSS 변수 + 레이아웃
+├── api/              # API 클라이언트 (Axios)
+├── pages/            # 라우트 컴포넌트
+│   └── platform/     # Super Admin 페이지
+├── components/       # 재사용 컴포넌트
+│   ├── layout/       # AppShell, Sidebar, PageHeader
+│   ├── common/       # DataTable, Modal, Badge, FormField 등
+│   ├── ui/           # Metronic 기반 UI 프리미티브 (Button, Card, Dialog 등)
+│   └── workflow/     # WorkflowStudio 전용 컴포넌트
+├── hooks/            # 커스텀 훅 (useXxx)
+├── types/            # TypeScript 인터페이스
+└── store/            # 상태 관리
 ```
 
 ### 컴포넌트 규칙
 - 페이지 컴포넌트: pages/ 에 위치, 라우트 단위
-- 공통 컴포넌트: components/common/ 에 위치
+- 공통 컴포넌트: components/common/ 에 위치 (Metronic UI 래퍼)
+- UI 프리미티브: components/ui/ 에 위치 (Metronic 9에서 복사)
 - 모든 API 호출은 hooks/ 에서 React Query로 래핑
-- 스타일: theme.ts 색상/폰트 변수 직접 참조 (인라인 스타일)
+- 스타일: Tailwind CSS 4 + Metronic 9 컴포넌트 (CSS 변수 기반, `cn()` 유틸 사용)
+- 아이콘: Lucide React
+- 동적 색상 (recharts, React Flow): 직접 hex 상수 사용 (Tailwind 클래스 불가 영역)
 
 ### 상태 관리 규칙
 - 서버 상태: React Query (useQuery/useMutation)
@@ -121,7 +130,7 @@ frontend/src/
 - Database-per-Tenant 격리 (BIZ-003)
 - 정책 평가: priority 내림차순, 첫 DENY/REQUIRE_APPROVAL에서 중단 (BIZ-005)
 - 워크플로우 DAG 실행: Kahn 알고리즘 위상 정렬 (BIZ-009)
-- 임베딩: text-embedding-3-small, 1536차원 (BIZ-012)
+- 임베딩: BGE-M3, 1024차원 기본. OpenAI text-embedding-3-small 선택 가능 (BIZ-012)
 - 모든 주요 이벤트 감사 로깅 필수 (BIZ-020)
 
 ## 테스트 전략
@@ -150,8 +159,23 @@ frontend/src/
 - [x] Sprint 11-14: FE 구현
 - [x] Sprint 15-18: Python 사이드카 (RAG Pipeline, Safety, Evaluation, 고급 기능)
 - [x] Sprint 19: FE 워크플로우 스튜디오 (React Flow 기반 비주얼 DAG 에디터) [CR-005]
-- [ ] Sprint 20: 도구 선택 제어 (ToolFilterContext, tool_choice) [CR-006]
-- [ ] Sprint 21: 구조화된 출력 (response_format, output_schema, FE 스키마 편집) [CR-007]
+- [x] Sprint 20: 도구 선택 제어 (ToolFilterContext, tool_choice) [CR-006]
+- [x] Sprint 21: 구조화된 출력 (response_format, output_schema, FE 스키마 편집) [CR-007]
+- [x] Sprint 22-25: Python 알파 + 플랫폼 강화 [CR-009, CR-010]
+- [x] Sprint 26: RAG A++ Phase 1 — Contextual Retrieval + Parent-Child + Query Transform [CR-011]
+- [x] Sprint 27: RAG A++ Phase 2 — RAGAS 평가 + 고급 파싱 [CR-011]
+- [x] Sprint 28: RAG A++ Phase 3 — 시맨틱 캐시 + Citation + 증분 인제스션 + TTS/STT [CR-011]
+- [x] Sprint 29: 로컬 임베딩 전환 (BGE-M3 기본화, 가변 차원) [CR-012]
+- [x] Sprint 30-31: 플랫폼 공통 Tool 확장 + 문서 생성 MCP [CR-018, CR-019]
+- [x] Sprint 32: CR-015 정책 UI 개선 + CR-016 LLM Judge + CR-017 ConfigPanel 완성 + 인프라 수정
+- [x] Sprint 33: CR-020 MCP 관리 도구 (14개) + CR-021 프로젝트 계층 (BE+FE)
+- [x] Sprint 34: Metronic 인프라 + 레이아웃 교체 [CR-026]
+- [x] Sprint 35: 공통 컴포넌트 교체 (8개 + theme.ts) [CR-026]
+- [x] Sprint 36: 기본 CRUD 페이지 9개 스타일 교체 [CR-026]
+- [x] Sprint 37: 고급 페이지 6개 스타일 교체 [CR-026]
+- [x] Sprint 38: WorkflowStudio + 플랫폼 4개 교체 [CR-026]
+- [x] Sprint 39: 정리 + 최종 검증 [CR-026]
+- [x] Sprint 40: LLM_CALL 토큰 초과 자동 처리 — 에스컬레이션 + 자동분할 [CR-028]
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)
@@ -159,8 +183,27 @@ frontend/src/
 - `docs/T3-*` — 상세 설계 (T3-1 ~ T3-6)
 - `docs/T4-*` — 검증/운영 산출물 (T4-1 ~ T4-7)
 - `docs/T3-6_실행_지시서.md` — 구현 마스터 문서
+- `docs/guides/aimbase-api-guide.md` — REST API 통합 가이드 (소비앱 연동용, 버전 관리됨)
+- `docs/guides/aimbase-ops-guide.md` — 운용 가이드 (플랫폼/테넌트 관리자용, 버전 관리됨)
+
+## 가이드 문서 유지보수 규칙
+
+### API 가이드 (`docs/guides/aimbase-api-guide.md`)
+- 소비앱이 호출하는 API 엔드포인트 추가/변경/삭제 시 반드시 업데이트
+- 하단 변경 이력 테이블에 버전 번호, 날짜, 변경 내용 추가
+- 버전: 엔드포인트 추가 = minor(x.Y.0), 설명 보정 = patch(x.y.Z)
+
+### 운용 가이드 (`docs/guides/aimbase-ops-guide.md`)
+- 관리자용 기능(Connection, 정책, RAG, 워크플로우, 테넌트 등) 추가/변경/삭제 시 반드시 업데이트
+- 새 운영 시나리오 추가 시 § 4에 시나리오 추가
+- 하단 변경 이력 테이블에 버전 번호, 날짜, 변경 내용 추가
+- 버전: 관리 기능 추가 = minor(x.Y.0), 설명/시나리오 보정 = patch(x.y.Z)
 
 ## 주의사항
+- **PostgreSQL은 호스트 로컬(localhost:5432)에서 공용 운영. Docker 컨테이너 DB(aimbase-postgres) 접근 금지.**
+  - DB 조회/생성/수정: `psql -U platform -h localhost -p 5432` 사용
+  - `docker exec aimbase-postgres psql ...` 절대 사용 금지
+  - 테넌트 API 성공 시 로컬 DB에 이미 프로비저닝됨 — Docker DB 확인하러 가지 말 것
 - `/api/v1/platform/**` 엔드포인트는 Master DB만 접근 (BIZ-024)
 - JSONB 컬럼 변경 시 기존 데이터 호환성 확인 필수
 - Flyway 마이그레이션은 Master/Tenant 별도 경로 사용

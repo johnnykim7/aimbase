@@ -1,0 +1,88 @@
+version: "3.8"
+
+# Aimbase 통합 Docker Compose
+# PostgreSQL / Redis 는 로컬(호스트) 사용, 앱 컨테이너만 기동
+#
+# 사전 준비:
+#   1) BE 빌드:  cd backend && ./gradlew :platform-core:bootJar
+#   2) 실행:     docker compose up --build
+#   3) 접속:     http://localhost:3200
+
+services:
+  # ── Frontend (nginx + React 빌드) ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3200:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # ── Backend (Spring Boot) ──
+  api:
+    build:
+      context: ./backend
+      dockerfile: platform-core/Dockerfile
+    ports:
+      - "8280:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SERVER_PORT: "8080"
+      # DB → 호스트 로컬 PostgreSQL
+      MASTER_DB_URL: jdbc:postgresql://host.docker.internal:5432/aimbase_master
+      MASTER_DB_USERNAME: platform
+      MASTER_DB_PASSWORD: platform
+      TENANT_DB_HOST: host.docker.internal
+      TENANT_DB_PORT: "5432"
+      TENANT_DB_USERNAME: platform
+      TENANT_DB_PASSWORD: platform
+      # 테넌트 DB host 오버라이드 (DB에 localhost로 저장된 값 대신 사용)
+      TENANT_DB_HOST_OVERRIDE: host.docker.internal
+      # Redis → 호스트 로컬
+      SPRING_REDIS_HOST: host.docker.internal
+      SPRING_REDIS_PORT: "6379"
+      # MCP → 사이드카 컨테이너
+      RAG_MCP_URL: http://rag-pipeline:8000
+      RAG_MCP_ENABLED: "true"
+      # Security
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-min-32-characters-here!}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-local-dev-enc-key-32-characters!!}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@platform.local}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-Admin1234!}
+      # LLM keys (호스트 .env에서 주입)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-dummy}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Python Sidecar — RAG Pipeline MCP Server ──
+  rag-pipeline:
+    build:
+      context: ./python-sidecar
+      dockerfile: Dockerfile
+    ports:
+      - "8281:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DB_HOST: host.docker.internal
+      DB_PORT: "5432"
+      DB_NAME: aimbase_axopm_companyA
+      DB_USER: platform
+      DB_PASSWORD: platform
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/sse')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s

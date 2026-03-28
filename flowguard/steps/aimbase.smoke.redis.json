@@ -1,0 +1,15 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api-raw",
+  "name": "T4-4 #3: Redis 연결 확인 (Actuator 경유)",
+  "action": {
+    "method": "GET",
+    "endpoint": "/actuator/health",
+    "headers": {}
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.statusCode", "operator": "==", "value": 200 }
+  ],
+  "failMode": "hard"
+}

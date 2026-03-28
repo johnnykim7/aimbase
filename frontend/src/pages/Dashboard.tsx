@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
-import { COLORS, FONTS } from "../theme";
+import { cn } from "@/lib/utils";
+
 import { Badge } from "../components/common/Badge";
 import { StatCard } from "../components/common/StatCard";
 import { ActionButton } from "../components/common/ActionButton";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
-import { PageHeader } from "../components/layout/PageHeader";
+import { Page } from "../components/layout/Page";
 import { useDashboard, useActionLogs, useApprovals, useApprove, useReject, useUsage } from "../hooks/useAdmin";
 import type { ActionLog, Approval, UsageStat } from "../types/admin";
 
@@ -23,15 +23,9 @@ function statusIcon(status: string) {
   return "🛡";
 }
 
-const modelColors = [COLORS.accent, COLORS.purple, COLORS.warning, COLORS.success];
+const modelColors = ["hsl(var(--primary))", "hsl(var(--info))", "hsl(var(--warning))", "hsl(var(--success))"];
 
 export default function Dashboard() {
-  const [time, setTime] = useState(new Date());
-  useEffect(() => {
-    const t = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
   const { data: stats, isLoading: statsLoading } = useDashboard();
   const { data: logs = [], isLoading: logsLoading } = useActionLogs();
   const { data: approvals = [], isLoading: approvalsLoading } = useApprovals();
@@ -51,109 +45,62 @@ export default function Dashboard() {
   const maxCount = Math.max(...usageList.map((u) => u.requestCount ?? 0), 1);
 
   return (
-    <div>
-      <PageHeader
-        title="대시보드"
-        subtitle={`${time.toLocaleTimeString("ko-KR")} · 실시간 업데이트`}
-        actions={
-          <>
-            <ActionButton variant="ghost" icon="📊" small>리포트</ActionButton>
-            <ActionButton variant="ghost" icon="⚙️" small>설정</ActionButton>
-          </>
-        }
-      />
+    <Page
+      actions={
+        <>
+          <ActionButton variant="ghost" icon="📊" small>리포트</ActionButton>
+          <ActionButton variant="ghost" icon="⚙️" small>설정</ActionButton>
+        </>
+      }
+    >
 
       {/* Stat Cards */}
-      <div style={{ display: "flex", gap: 16, marginBottom: 28, flexWrap: "wrap" }}>
+      <div className="flex gap-4 mb-7 flex-wrap">
         {statsLoading ? (
-          <div style={{ flex: 1, display: "flex", justifyContent: "center", padding: 20 }}>
+          <div className="flex-1 flex justify-center py-5">
             <LoadingSpinner />
           </div>
         ) : (
           <>
-            <StatCard
-              label="오늘 토큰"
-              value={stats?.tokens_today?.toLocaleString() ?? "—"}
-              sub="LLM 총 사용량"
-              color={COLORS.accent}
-            />
-            <StatCard
-              label="활성 연결"
-              value={stats?.active_connections ?? "—"}
-              sub="연결된 외부 시스템"
-              color={COLORS.success}
-            />
-            <StatCard
-              label="승인 대기"
-              value={stats?.pending_approvals ?? "—"}
-              sub="즉각 처리 필요"
-              color={COLORS.warning}
-            />
-            <StatCard
-              label="오늘 비용"
-              value={stats?.cost_today_usd != null ? `$${Number(stats.cost_today_usd).toFixed(2)}` : "—"}
-              sub="LLM API 비용"
-              color={COLORS.purple}
-            />
+            <StatCard label="오늘 토큰" value={stats?.tokens_today?.toLocaleString() ?? "—"} sub="LLM 총 사용량" color="hsl(var(--primary))" />
+            <StatCard label="활성 연결" value={stats?.active_connections ?? "—"} sub="연결된 외부 시스템" color="hsl(var(--success))" />
+            <StatCard label="승인 대기" value={stats?.pending_approvals ?? "—"} sub="즉각 처리 필요" color="hsl(var(--warning))" />
+            <StatCard label="오늘 비용" value={stats?.cost_today_usd != null ? `$${Number(stats.cost_today_usd).toFixed(2)}` : "—"} sub="LLM API 비용" color="hsl(var(--info))" />
           </>
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
+      <div className="grid grid-cols-[1fr_380px] gap-5">
         {/* Action Log */}
-        <div
-          style={{
-            background: COLORS.surface,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 12,
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              padding: "16px 20px",
-              borderBottom: `1px solid ${COLORS.border}`,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <span style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text }}>
-              실시간 액션 로그
-            </span>
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-border flex justify-between items-center">
+            <span className="text-sm font-semibold text-foreground">실시간 액션 로그</span>
             <Badge color="success" pulse>LIVE</Badge>
           </div>
-          <div style={{ maxHeight: 440, overflowY: "auto" }}>
+          <div className="max-h-[440px] overflow-y-auto">
             {logsLoading ? (
               <LoadingSpinner fullPage />
             ) : logs.length === 0 ? (
-              <div style={{ padding: 32, textAlign: "center", color: COLORS.textDim, fontFamily: FONTS.mono, fontSize: 13 }}>
+              <div className="p-8 text-center text-muted-foreground/60 font-mono text-[13px]">
                 액션 로그가 없습니다
               </div>
             ) : (
               logs.map((log: ActionLog, i) => (
                 <div
                   key={log.id ?? i}
-                  style={{
-                    padding: "12px 20px",
-                    borderBottom: `1px solid ${COLORS.border}08`,
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "flex-start",
-                    animation: i === 0 ? "fadeIn 0.5s ease" : undefined,
-                  }}
+                  className={cn("px-5 py-3 border-b border-border/5 flex gap-3 items-start", i === 0 && "animate-fade-in")}
                 >
-                  <span style={{ fontSize: 11, fontFamily: FONTS.mono, color: COLORS.textDim, minWidth: 45, paddingTop: 2 }}>
+                  <span className="text-[11px] font-mono text-muted-foreground/60 min-w-[45px] pt-0.5">
                     {log.executedAt ? new Date(log.executedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "--:--"}
                   </span>
                   <Badge color={statusColor(log.status)}>
                     {statusIcon(log.status)}
                   </Badge>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 2 }}>
+                  <div className="flex-1">
+                    <div className="text-[13px] text-foreground mb-0.5">
                       {log.message ?? log.actionType ?? log.adapterId ?? "액션"}
                     </div>
-                    <div style={{ fontSize: 11, fontFamily: FONTS.mono, color: COLORS.textDim }}>
+                    <div className="text-[11px] font-mono text-muted-foreground/60">
                       {log.actions ?? (log.durationMs != null ? `${log.durationMs}ms` : "")}
                     </div>
                   </div>
@@ -164,43 +111,32 @@ export default function Dashboard() {
         </div>
 
         {/* Right Panel */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <div className="flex flex-col gap-5">
           {/* Model Usage */}
-          <div
-            style={{
-              background: COLORS.surface,
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 12,
-              padding: 20,
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 16 }}>
-              모델별 사용량
-            </div>
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="text-sm font-semibold text-foreground mb-4">모델별 사용량</div>
             {usageList.length === 0 ? (
-              <div style={{ fontSize: 12, color: COLORS.textDim, fontFamily: FONTS.mono, textAlign: "center", padding: "12px 0" }}>
+              <div className="text-xs text-muted-foreground/60 font-mono text-center py-3">
                 사용 데이터 없음
               </div>
             ) : (
               usageList.slice(0, 5).map((m, i) => (
-                <div key={m.modelId ?? i} style={{ marginBottom: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, fontFamily: FONTS.sans, color: COLORS.text }}>
+                <div key={m.modelId ?? i} className="mb-3.5">
+                  <div className="flex justify-between mb-1.5">
+                    <span className="text-xs text-foreground">
                       {m.modelName ?? m.modelId ?? `Model ${i + 1}`}
                     </span>
-                    <span style={{ fontSize: 11, fontFamily: FONTS.mono, color: COLORS.textMuted }}>
+                    <span className="text-[11px] font-mono text-muted-foreground">
                       {m.requestCount ?? 0}건
                       {m.costUsd != null ? ` · $${Number(m.costUsd).toFixed(2)}` : ""}
                     </span>
                   </div>
-                  <div style={{ height: 6, background: COLORS.surfaceActive, borderRadius: 3, overflow: "hidden" }}>
+                  <div className="h-1.5 bg-accent rounded-sm overflow-hidden">
                     <div
+                      className="h-full rounded-sm transition-[width] duration-1000 ease-out"
                       style={{
-                        height: "100%",
-                        borderRadius: 3,
                         width: `${Math.round(((m.requestCount ?? 0) / maxCount) * 100)}%`,
                         background: modelColors[i % modelColors.length],
-                        transition: "width 1s ease",
                       }}
                     />
                   </div>
@@ -210,54 +146,36 @@ export default function Dashboard() {
           </div>
 
           {/* Pending Approvals */}
-          <div
-            style={{
-              background: COLORS.surface,
-              border: `1px solid ${COLORS.warning}30`,
-              borderRadius: 12,
-              padding: 20,
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text }}>
-                승인 대기
-              </span>
+          <div className="bg-card border border-warning/20 rounded-xl p-5">
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-sm font-semibold text-foreground">승인 대기</span>
               <Badge color="warning">{approvals.length}건</Badge>
             </div>
             {approvalsLoading ? (
               <LoadingSpinner fullPage />
             ) : approvals.length === 0 ? (
-              <div style={{ fontSize: 12, color: COLORS.textDim, fontFamily: FONTS.mono, textAlign: "center", padding: "8px 0" }}>
+              <div className="text-xs text-muted-foreground/60 font-mono text-center py-2">
                 대기 중인 승인 없음
               </div>
             ) : (
               approvals.slice(0, 5).map((item: Approval) => (
-                <div
-                  key={item.id}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    marginBottom: 8,
-                    background: COLORS.surfaceHover,
-                    border: `1px solid ${COLORS.border}`,
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, fontFamily: FONTS.mono, color: COLORS.accent }}>
+                <div key={item.id} className="p-2.5 px-3 rounded-lg mb-2 bg-accent border border-border">
+                  <div className="flex justify-between mb-1.5">
+                    <span className="text-xs font-mono text-primary">
                       {item.workflowRunId ?? item.id}
                     </span>
                     {item.amount != null && (
-                      <span style={{ fontSize: 12, fontFamily: FONTS.mono, color: COLORS.warning }}>
+                      <span className="text-xs font-mono text-warning">
                         {item.currency ?? "₩"}{item.amount.toLocaleString()}
                       </span>
                     )}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 11, color: COLORS.textDim }}>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[11px] text-muted-foreground/60">
                       {item.approver ?? item.requestedBy ?? "승인자"}
                       {item.requestedAt ? ` · ${new Date(item.requestedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 요청` : ""}
                     </span>
-                    <div style={{ display: "flex", gap: 4 }}>
+                    <div className="flex gap-1">
                       <ActionButton
                         variant="success"
                         small
@@ -284,6 +202,6 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-    </div>
+    </Page>
   );
 }

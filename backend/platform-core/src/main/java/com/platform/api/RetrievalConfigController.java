@@ -39,7 +39,7 @@ public class RetrievalConfigController {
     @Operation(summary = "검색 설정 생성")
     public ApiResponse<RetrievalConfigEntity> create(@Valid @RequestBody RetrievalConfigRequest request) {
         RetrievalConfigEntity entity = new RetrievalConfigEntity();
-        entity.setId(request.id());
+        entity.setId(request.id() != null && !request.id().isBlank() ? request.id() : java.util.UUID.randomUUID().toString());
         entity.setName(request.name());
         if (request.topK() != null) entity.setTopK(request.topK());
         if (request.similarityThreshold() != null) entity.setSimilarityThreshold(request.similarityThreshold());
@@ -87,7 +87,7 @@ public class RetrievalConfigController {
     }
 
     public record RetrievalConfigRequest(
-            @NotBlank String id,
+            String id,
             @NotBlank String name,
             Integer topK,
             BigDecimal similarityThreshold,

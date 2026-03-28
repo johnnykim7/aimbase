@@ -1,0 +1,28 @@
+{
+  "scenarioKey": "aimbase.smoke.t4-4",
+  "name": "T4-4 스모크 테스트 (배포 후 15분 생존 확인)",
+  "description": "인프라 생존 → 인증 → 핵심 비즈니스 → RAG A++ 순서로 검증. hard 실패 시 즉시 중단 (롤백 판단).",
+  "tags": ["smoke", "t4-4", "deployment", "critical"],
+  "coverage": {
+    "T4-4": ["SM-001", "SM-002", "SM-003", "SM-004", "SM-005", "SM-006", "SM-007", "SM-008", "SM-009", "SM-010", "SM-011", "SM-012", "SM-013", "SM-014", "SM-015", "SM-016"]
+  },
+  "vars": {
+    "tenantId": "tenant_dev",
+    "adminEmail": "admin@dev.local",
+    "adminPassword": "admin123"
+  },
+  "steps": [
+    "aimbase.smoke.health",
+    "aimbase.smoke.redis",
+    "aimbase.smoke.swagger",
+    "aimbase.smoke.fe_load",
+    "aimbase.smoke.login",
+    "aimbase.smoke.connections",
+    "aimbase.smoke.dashboard",
+    "aimbase.smoke.tenants",
+    "aimbase.smoke.users",
+    "aimbase.smoke.sidecar_health",
+    "aimbase.smoke.tts",
+    "aimbase.smoke.stt"
+  ]
+}

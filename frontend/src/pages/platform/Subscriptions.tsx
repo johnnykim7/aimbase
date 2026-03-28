@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { COLORS, FONTS } from "../../theme";
 import { Badge } from "../../components/common/Badge";
 import { ActionButton } from "../../components/common/ActionButton";
 import { DataTable, type Column } from "../../components/common/DataTable";
 import { LoadingSpinner } from "../../components/common/LoadingSpinner";
 import { EmptyState } from "../../components/common/EmptyState";
 import { FormField, inputStyle } from "../../components/common/FormField";
-import { PageHeader } from "../../components/layout/PageHeader";
+import { Page } from "../../components/layout/Page";
+import { CreditCard } from "lucide-react";
 import { useSubscriptions, useUpdateSubscription } from "../../hooks/usePlatform";
 import type { Subscription } from "../../types/tenant";
 
@@ -35,8 +35,8 @@ export default function Subscriptions() {
       header: "테넌트",
       render: (s) => (
         <div>
-          <div style={{ fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text }}>{s.tenantName ?? s.tenantId}</div>
-          <div style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.textDim }}>{s.tenantId}</div>
+          <div className="font-semibold text-foreground">{s.tenantName ?? s.tenantId}</div>
+          <div className="font-mono text-[11px] text-muted-foreground/40">{s.tenantId}</div>
         </div>
       ),
     },
@@ -53,11 +53,11 @@ export default function Subscriptions() {
       header: "월간 토큰 한도",
       render: (s) => (
         <div>
-          <div style={{ fontFamily: FONTS.mono, fontSize: 12, color: COLORS.text }}>
+          <div className="font-mono text-xs text-foreground">
             {s.monthlyTokenQuota?.toLocaleString() ?? "무제한"}
           </div>
           {s.usedTokens != null && s.monthlyTokenQuota != null && (
-            <div style={{ fontSize: 10, fontFamily: FONTS.mono, color: COLORS.textDim }}>
+            <div className="text-[10px] font-mono text-muted-foreground/40">
               사용: {((s.usedTokens / s.monthlyTokenQuota) * 100).toFixed(0)}%
             </div>
           )}
@@ -68,7 +68,7 @@ export default function Subscriptions() {
     {
       header: "일일 요청 한도",
       render: (s) => (
-        <span style={{ fontFamily: FONTS.mono, fontSize: 12 }}>
+        <span className="font-mono text-xs">
           {s.dailyRequestQuota?.toLocaleString() ?? "무제한"}
         </span>
       ),
@@ -77,7 +77,7 @@ export default function Subscriptions() {
     {
       header: "최대 연결",
       render: (s) => (
-        <span style={{ fontFamily: FONTS.mono, fontSize: 12 }}>
+        <span className="font-mono text-xs">
           {s.maxConnections ?? "무제한"}
         </span>
       ),
@@ -86,7 +86,7 @@ export default function Subscriptions() {
     {
       header: "만료일",
       render: (s) => (
-        <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.textMuted }}>
+        <span className="font-mono text-[11px] text-muted-foreground">
           {s.expiresAt ? new Date(s.expiresAt).toLocaleDateString("ko-KR") : "—"}
         </span>
       ),
@@ -106,30 +106,21 @@ export default function Subscriptions() {
   if (isLoading) return <LoadingSpinner fullPage />;
 
   return (
-    <div>
-      <PageHeader title="구독/쿼터 관리" subtitle="Super Admin — 테넌트별 사용 한도 설정" />
+    <Page>
 
       {subscriptions.length === 0 ? (
-        <EmptyState icon="💳" title="구독 정보가 없습니다" description="테넌트를 먼저 생성하세요" />
+        <EmptyState icon={<CreditCard className="size-6" />} title="구독 정보가 없습니다" description="테넌트를 먼저 생성하세요" />
       ) : (
         <DataTable columns={columns} data={subscriptions} keyExtractor={(s) => s.tenantId} />
       )}
 
       {/* Inline Edit Panel */}
       {editing && editForm && (
-        <div
-          style={{
-            marginTop: 20,
-            background: COLORS.surface,
-            border: `1px solid ${COLORS.accent}40`,
-            borderRadius: 12,
-            padding: 24,
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text, marginBottom: 20 }}>
+        <div className="mt-5 bg-card border border-primary/25 rounded-xl p-6">
+          <div className="text-sm font-semibold text-foreground mb-5">
             쿼터 편집 — {editForm.tenantName ?? editing}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+          <div className="grid grid-cols-3 gap-4">
             <FormField label="월간 토큰 한도">
               <input
                 type="number"
@@ -155,7 +146,7 @@ export default function Subscriptions() {
               />
             </FormField>
           </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+          <div className="flex gap-2 justify-end mt-2">
             <ActionButton variant="ghost" onClick={() => setEditing(null)}>취소</ActionButton>
             <ActionButton variant="primary" icon="💾" disabled={updateSubscription.isPending} onClick={saveEdit}>
               저장
@@ -163,6 +154,6 @@ export default function Subscriptions() {
           </div>
         </div>
       )}
-    </div>
+    </Page>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { COLORS, FONTS } from "../theme";
+import { cn } from "@/lib/utils";
 import { Badge } from "../components/common/Badge";
 import { ActionButton } from "../components/common/ActionButton";
 import { DataTable, type Column } from "../components/common/DataTable";
@@ -7,7 +7,8 @@ import { Modal } from "../components/common/Modal";
 import { FormField, inputStyle, selectStyle } from "../components/common/FormField";
 import { EmptyState } from "../components/common/EmptyState";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
-import { PageHeader } from "../components/layout/PageHeader";
+import { Page } from "../components/layout/Page";
+import { Users, KeyRound } from "lucide-react";
 import {
   useUsers, useCreateUser, useDeleteUser, useGenerateApiKey,
   useRoles, useCreateRole, useDeleteRole,
@@ -58,12 +59,12 @@ export default function Auth() {
   const userColumns: Column<User>[] = [
     {
       header: "사용자명",
-      render: (u) => <span style={{ fontFamily: FONTS.mono, color: COLORS.accent }}>{u.username}</span>,
+      render: (u) => <span className="font-mono text-primary">{u.username}</span>,
     },
     { header: "이메일", render: (u) => u.email ?? "—" },
     {
       header: "역할",
-      render: (u) => u.role ? <Badge color="purple">{u.role}</Badge> : <span style={{ color: COLORS.textDim }}>—</span>,
+      render: (u) => u.role ? <Badge color="purple">{u.role}</Badge> : <span className="text-muted-foreground/60">—</span>,
     },
     {
       header: "상태",
@@ -75,22 +76,16 @@ export default function Auth() {
       render: (u) => {
         const key = apiKeys[u.id] ?? u.apiKey;
         return key ? (
-          <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.textDim }}>
-            {key.slice(0, 12)}...
-          </span>
+          <span className="font-mono text-[11px] text-muted-foreground/60">{key.slice(0, 12)}...</span>
         ) : (
-          <ActionButton small variant="ghost" disabled={generateApiKey.isPending} onClick={() => handleGenerateKey(u.id)}>
-            생성
-          </ActionButton>
+          <ActionButton small variant="ghost" disabled={generateApiKey.isPending} onClick={() => handleGenerateKey(u.id)}>생성</ActionButton>
         );
       },
       width: "160px",
     },
     {
       header: "액션",
-      render: (u) => (
-        <ActionButton small variant="danger" onClick={() => deleteUser.mutate(u.id)}>삭제</ActionButton>
-      ),
+      render: (u) => <ActionButton small variant="danger" onClick={() => deleteUser.mutate(u.id)}>삭제</ActionButton>,
       width: "70px",
     },
   ];
@@ -98,13 +93,13 @@ export default function Auth() {
   const roleColumns: Column<Role>[] = [
     {
       header: "역할명",
-      render: (r) => <span style={{ fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text }}>{r.name}</span>,
+      render: (r) => <span className="font-semibold text-foreground">{r.name}</span>,
     },
     { header: "설명", render: (r) => r.description ?? "—" },
     {
       header: "권한",
       render: (r) => (
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        <div className="flex gap-1 flex-wrap">
           {(r.permissions ?? []).slice(0, 4).map((p) => (
             <Badge key={p} color="accent">{p}</Badge>
           ))}
@@ -116,9 +111,7 @@ export default function Auth() {
     },
     {
       header: "액션",
-      render: (r) => (
-        <ActionButton small variant="danger" onClick={() => deleteRole.mutate(r.id)}>삭제</ActionButton>
-      ),
+      render: (r) => <ActionButton small variant="danger" onClick={() => deleteRole.mutate(r.id)}>삭제</ActionButton>,
       width: "70px",
     },
   ];
@@ -126,37 +119,28 @@ export default function Auth() {
   const isLoading = activeTab === "users" ? usersLoading : rolesLoading;
 
   return (
-    <div>
-      <PageHeader
-        title="사용자/권한 관리"
-        actions={
-          activeTab === "users" ? (
-            <ActionButton variant="primary" icon="+" onClick={() => setShowUserModal(true)}>사용자 추가</ActionButton>
-          ) : (
-            <ActionButton variant="primary" icon="+" onClick={() => setShowRoleModal(true)}>역할 추가</ActionButton>
-          )
-        }
-      />
+    <Page
+      actions={
+        activeTab === "users" ? (
+          <ActionButton variant="primary" icon="+" onClick={() => setShowUserModal(true)}>사용자 추가</ActionButton>
+        ) : (
+          <ActionButton variant="primary" icon="+" onClick={() => setShowRoleModal(true)}>역할 추가</ActionButton>
+        )
+      }
+    >
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: `1px solid ${COLORS.border}` }}>
+      <div className="flex gap-0 mb-5 border-b border-border">
         {(["users", "roles"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            style={{
-              padding: "10px 20px",
-              background: "transparent",
-              border: "none",
-              borderBottom: activeTab === tab ? `2px solid ${COLORS.accent}` : "2px solid transparent",
-              color: activeTab === tab ? COLORS.accent : COLORS.textMuted,
-              fontSize: 13,
-              fontFamily: FONTS.sans,
-              fontWeight: 600,
-              cursor: "pointer",
-              transition: "color 0.15s",
-              marginBottom: -1,
-            }}
+            className={cn(
+              "px-5 py-2.5 bg-transparent border-none text-[13px] font-semibold cursor-pointer transition-colors -mb-px",
+              activeTab === tab
+                ? "border-b-2 border-b-primary text-primary"
+                : "border-b-2 border-b-transparent text-muted-foreground hover:text-foreground"
+            )}
           >
             {tab === "users" ? "👤 사용자 관리" : "🔑 역할/권한"}
           </button>
@@ -167,13 +151,13 @@ export default function Auth() {
         <LoadingSpinner fullPage />
       ) : activeTab === "users" ? (
         users.length === 0 ? (
-          <EmptyState icon="👤" title="등록된 사용자가 없습니다" action={<ActionButton variant="primary" icon="+" onClick={() => setShowUserModal(true)}>사용자 추가</ActionButton>} />
+          <EmptyState icon={<Users className="size-6" />} title="등록된 사용자가 없습니다" action={<ActionButton variant="primary" icon="+" onClick={() => setShowUserModal(true)}>사용자 추가</ActionButton>} />
         ) : (
           <DataTable columns={userColumns} data={users} keyExtractor={(u) => u.id} />
         )
       ) : (
         roles.length === 0 ? (
-          <EmptyState icon="🔑" title="등록된 역할이 없습니다" action={<ActionButton variant="primary" icon="+" onClick={() => setShowRoleModal(true)}>역할 추가</ActionButton>} />
+          <EmptyState icon={<KeyRound className="size-6" />} title="등록된 역할이 없습니다" action={<ActionButton variant="primary" icon="+" onClick={() => setShowRoleModal(true)}>역할 추가</ActionButton>} />
         ) : (
           <DataTable columns={roleColumns} data={roles} keyExtractor={(r) => r.id} />
         )
@@ -196,7 +180,7 @@ export default function Auth() {
             {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </FormField>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+        <div className="flex gap-2 justify-end mt-2">
           <ActionButton variant="ghost" onClick={() => setShowUserModal(false)}>취소</ActionButton>
           <ActionButton variant="primary" icon="💾" disabled={createUser.isPending} onClick={() => createUser.mutate(userForm, { onSuccess: () => setShowUserModal(false) })}>저장</ActionButton>
         </div>
@@ -211,33 +195,28 @@ export default function Auth() {
           <input style={inputStyle} value={roleForm.description} onChange={(e) => setRoleForm((p) => ({ ...p, description: e.target.value }))} />
         </FormField>
         <FormField label="권한">
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+          <div className="flex gap-1.5 flex-wrap mt-1">
             {AVAILABLE_PERMISSIONS.map((perm) => (
               <span
                 key={perm}
                 onClick={() => togglePermission(perm)}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontFamily: FONTS.mono,
-                  cursor: "pointer",
-                  border: `1px solid ${roleForm.permissions?.includes(perm) ? COLORS.accent : COLORS.border}`,
-                  background: roleForm.permissions?.includes(perm) ? COLORS.accentDim + "30" : COLORS.surfaceHover,
-                  color: roleForm.permissions?.includes(perm) ? COLORS.accent : COLORS.textMuted,
-                  transition: "all 0.15s",
-                }}
+                className={cn(
+                  "py-1 px-2.5 rounded-md text-[11px] font-mono cursor-pointer border transition-all",
+                  roleForm.permissions?.includes(perm)
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-accent text-muted-foreground hover:bg-muted"
+                )}
               >
                 {perm}
               </span>
             ))}
           </div>
         </FormField>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+        <div className="flex gap-2 justify-end mt-2">
           <ActionButton variant="ghost" onClick={() => setShowRoleModal(false)}>취소</ActionButton>
           <ActionButton variant="primary" icon="💾" disabled={createRole.isPending} onClick={() => createRole.mutate(roleForm, { onSuccess: () => setShowRoleModal(false) })}>저장</ActionButton>
         </div>
       </Modal>
-    </div>
+    </Page>
   );
 }

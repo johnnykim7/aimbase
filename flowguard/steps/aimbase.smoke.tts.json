@@ -1,0 +1,22 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api-raw",
+  "name": "T4-4 #15: TTS API 엔드포인트 확인",
+  "action": {
+    "method": "POST",
+    "endpoint": "/api/v1/speech/tts",
+    "headers": {
+      "Authorization": "Bearer {{steps.aimbase.smoke.login.output.accessToken}}",
+      "X-Tenant-Id": "{{vars.tenantId}}",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "text": "스모크 테스트"
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.statusCode", "operator": "in", "value": [200, 503] }
+  ],
+  "failMode": "soft"
+}
