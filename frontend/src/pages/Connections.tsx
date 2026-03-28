@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { COLORS, FONTS } from "../theme";
+import { cn } from "@/lib/utils";
 import { Badge } from "../components/common/Badge";
 import { ActionButton } from "../components/common/ActionButton";
 import { Modal } from "../components/common/Modal";
 import { FormField, inputStyle } from "../components/common/FormField";
 import { EmptyState } from "../components/common/EmptyState";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
-import { PageHeader } from "../components/layout/PageHeader";
+import { Page } from "../components/layout/Page";
+import { PlugZap } from "lucide-react";
 import {
   useConnections,
   useCreateConnection,
@@ -94,7 +95,7 @@ export default function Connections() {
     setSelectedAdapter(conn.adapter ?? "");
     const cfg = conn.config ?? {};
     setForm({
-      "연결 ID": conn.id,
+      "연결 이름": conn.name ?? conn.id,
       "이름": conn.name ?? "",
       "호스트": (cfg.host as string) ?? "",
       "포트": (cfg.port as string) ?? "",
@@ -142,19 +143,17 @@ export default function Connections() {
   if (isLoading) return <LoadingSpinner fullPage />;
 
   return (
-    <div>
-      <PageHeader
-        title="연결 관리"
-        actions={
-          <ActionButton variant="primary" icon="+" onClick={openCreateModal}>
-            새 연결
-          </ActionButton>
-        }
-      />
+    <Page
+      actions={
+        <ActionButton variant="primary" icon="+" onClick={openCreateModal}>
+          새 연결
+        </ActionButton>
+      }
+    >
 
       {connections.length === 0 ? (
         <EmptyState
-          icon="🔌"
+          icon={<PlugZap className="size-6" />}
           title="연결된 시스템이 없습니다"
           description="DB, 메시징, LLM, 실시간 연결을 추가하세요"
           action={
@@ -164,115 +163,50 @@ export default function Connections() {
           }
         />
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-            gap: 16,
-          }}
-        >
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {connections.map((conn: Connection) => {
             const testResult = testResults[conn.id];
             return (
               <div
                 key={conn.id}
-                style={{
-                  background: COLORS.surface,
-                  border: `1px solid ${COLORS.border}`,
-                  borderRadius: 12,
-                  padding: 20,
-                  position: "relative",
-                  borderLeft: `3px solid ${
-                    conn.status === "connected" ? COLORS.success : COLORS.warning
-                  }`,
-                }}
+                className={cn(
+                  "bg-card border border-border rounded-xl p-5 relative",
+                  conn.status === "connected" ? "border-l-[3px] border-l-success" : "border-l-[3px] border-l-warning"
+                )}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    marginBottom: 12,
-                  }}
-                >
-                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <span style={{ fontSize: 24 }}>{getIcon(conn)}</span>
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex gap-2.5 items-center">
+                    <span className="text-2xl">{getIcon(conn)}</span>
                     <div>
-                      <div
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 600,
-                          fontFamily: FONTS.mono,
-                          color: COLORS.text,
-                        }}
-                      >
-                        {conn.id}
+                      <div className="text-sm font-semibold font-mono text-foreground">
+                        {conn.name || conn.id}
                       </div>
-                      <div style={{ fontSize: 12, color: COLORS.textMuted }}>{conn.adapter}</div>
+                      <div className="text-xs text-muted-foreground">{conn.adapter}</div>
                     </div>
                   </div>
                   <Badge color={statusColor(conn.status)}>{conn.type}</Badge>
                 </div>
 
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontFamily: FONTS.mono,
-                    color: COLORS.textDim,
-                    marginBottom: 8,
-                  }}
-                >
+                <div className="text-xs font-mono text-muted-foreground/60 mb-2">
                   {conn.name}
                 </div>
 
                 {testResult && (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontFamily: FONTS.mono,
-                      color: testResult.ok ? COLORS.success : COLORS.danger,
-                      marginBottom: 8,
-                    }}
-                  >
+                  <div className={cn("text-[11px] font-mono mb-2", testResult.ok ? "text-success" : "text-destructive")}>
                     {testResult.ok ? `✓ 연결 성공 (${testResult.latencyMs}ms)` : "✕ 연결 실패"}
                   </div>
                 )}
 
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span style={{ fontSize: 11, fontFamily: FONTS.mono, color: COLORS.textDim }}>
+                <div className="flex justify-between items-center">
+                  <span className="text-[11px] font-mono text-muted-foreground/60">
                     {conn.lastHealthCheckAt
                       ? `${new Date(conn.lastHealthCheckAt).toLocaleTimeString("ko-KR")} 확인`
                       : conn.status ?? "—"}
                   </span>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <ActionButton
-                      variant="ghost"
-                      small
-                      onClick={() => openEditModal(conn)}
-                    >
-                      수정
-                    </ActionButton>
-                    <ActionButton
-                      variant="ghost"
-                      small
-                      disabled={testConnection.isPending}
-                      onClick={() => handleTest(conn.id)}
-                    >
-                      테스트
-                    </ActionButton>
-                    <ActionButton
-                      variant="ghost"
-                      small
-                      onClick={() => deleteConnection.mutate(conn.id)}
-                    >
-                      삭제
-                    </ActionButton>
+                  <div className="flex gap-1">
+                    <ActionButton variant="ghost" small onClick={() => openEditModal(conn)}>수정</ActionButton>
+                    <ActionButton variant="ghost" small disabled={testConnection.isPending} onClick={() => handleTest(conn.id)}>테스트</ActionButton>
+                    <ActionButton variant="ghost" small onClick={() => deleteConnection.mutate(conn.id)}>삭제</ActionButton>
                   </div>
                 </div>
               </div>
@@ -284,7 +218,7 @@ export default function Connections() {
       {/* New Connection Modal */}
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditingConn(null); }} title={editingConn ? "연결 수정" : "새 연결 추가"}>
         <FormField label="연결 유형">
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <div className="flex gap-2 mt-2">
             {CONNECTION_TYPES.map((t) => (
               <button
                 key={t.id}
@@ -292,45 +226,32 @@ export default function Connections() {
                   setSelectedType(t.id);
                   setSelectedAdapter(ADAPTERS[t.id]?.[0] ?? "");
                 }}
-                style={{
-                  flex: 1,
-                  padding: "12px 8px",
-                  borderRadius: 10,
-                  border: `1px solid ${selectedType === t.id ? COLORS.accent : COLORS.border}`,
-                  background:
-                    selectedType === t.id ? COLORS.accentDim + "30" : COLORS.surfaceHover,
-                  color: selectedType === t.id ? COLORS.accent : COLORS.textMuted,
-                  cursor: "pointer",
-                  textAlign: "center",
-                  transition: "all 0.15s",
-                }}
+                className={cn(
+                  "flex-1 py-3 px-2 rounded-lg border text-center cursor-pointer transition-all",
+                  selectedType === t.id
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-accent text-muted-foreground"
+                )}
               >
-                <div style={{ fontSize: 20, marginBottom: 4 }}>{t.icon}</div>
-                <div style={{ fontSize: 11, fontFamily: FONTS.mono, fontWeight: 600 }}>
-                  {t.label}
-                </div>
+                <div className="text-xl mb-1">{t.icon}</div>
+                <div className="text-[11px] font-mono font-semibold">{t.label}</div>
               </button>
             ))}
           </div>
         </FormField>
 
         <FormField label="어댑터">
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+          <div className="flex gap-2 flex-wrap mt-1">
             {(ADAPTERS[selectedType] ?? []).map((a) => (
               <button
                 key={a}
                 onClick={() => setSelectedAdapter(a)}
-                style={{
-                  padding: "7px 14px",
-                  borderRadius: 8,
-                  border: `1px solid ${selectedAdapter === a ? COLORS.accent : COLORS.border}`,
-                  background:
-                    selectedAdapter === a ? COLORS.accentDim + "30" : COLORS.surfaceHover,
-                  color: selectedAdapter === a ? COLORS.accent : COLORS.textMuted,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontFamily: FONTS.mono,
-                }}
+                className={cn(
+                  "py-1.5 px-3.5 rounded-lg border text-xs font-mono cursor-pointer transition-all",
+                  selectedAdapter === a
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-accent text-muted-foreground"
+                )}
               >
                 {a}
               </button>
@@ -362,27 +283,13 @@ export default function Connections() {
               />
             </FormField>
             <FormField label="이름">
-              <input
-                style={inputStyle}
-                value={form["이름"] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, 이름: e.target.value }))}
-              />
+              <input style={inputStyle} value={form["이름"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, 이름: e.target.value }))} />
             </FormField>
             <FormField label="API Key">
-              <input
-                type="password"
-                style={inputStyle}
-                value={form["API Key"] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, "API Key": e.target.value }))}
-              />
+              <input type="password" style={inputStyle} value={form["API Key"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "API Key": e.target.value }))} />
             </FormField>
             <FormField label="모델 (선택사항)">
-              <input
-                style={inputStyle}
-                placeholder="claude-sonnet-4-6"
-                value={form["모델"] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, 모델: e.target.value }))}
-              />
+              <input style={inputStyle} placeholder="claude-sonnet-4-6" value={form["모델"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, 모델: e.target.value }))} />
             </FormField>
           </>
         )}
@@ -390,41 +297,22 @@ export default function Connections() {
         {(selectedType === "messaging" || selectedType === "realtime") && (
           <>
             <FormField label="연결 ID">
-              <input
-                style={inputStyle}
-                value={form["연결 ID"] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, "연결 ID": e.target.value }))}
-              />
+              <input style={inputStyle} value={form["연결 ID"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "연결 ID": e.target.value }))} />
             </FormField>
             <FormField label="이름">
-              <input
-                style={inputStyle}
-                value={form["이름"] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, 이름: e.target.value }))}
-              />
+              <input style={inputStyle} value={form["이름"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, 이름: e.target.value }))} />
             </FormField>
             <FormField label="URL / Endpoint">
-              <input
-                style={inputStyle}
-                value={form["URL"] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, URL: e.target.value }))}
-              />
+              <input style={inputStyle} value={form["URL"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, URL: e.target.value }))} />
             </FormField>
             <FormField label="Token / Webhook Key">
-              <input
-                type="password"
-                style={inputStyle}
-                value={form["Token"] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, Token: e.target.value }))}
-              />
+              <input type="password" style={inputStyle} value={form["Token"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, Token: e.target.value }))} />
             </FormField>
           </>
         )}
 
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
-          <ActionButton variant="ghost" onClick={() => { setShowModal(false); setEditingConn(null); }}>
-            취소
-          </ActionButton>
+        <div className="flex gap-2 justify-end mt-2">
+          <ActionButton variant="ghost" onClick={() => { setShowModal(false); setEditingConn(null); }}>취소</ActionButton>
           <ActionButton
             variant="primary"
             icon="💾"
@@ -435,6 +323,6 @@ export default function Connections() {
           </ActionButton>
         </div>
       </Modal>
-    </div>
+    </Page>
   );
 }

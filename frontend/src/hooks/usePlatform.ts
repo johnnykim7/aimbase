@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { platformApi } from "../api/platform";
 import type { PagedResponse } from "../types/api";
-import type { Tenant, TenantRequest, Subscription } from "../types/tenant";
+import type { Tenant, TenantRequest, Subscription, ApiKey, CreateApiKeyRequest } from "../types/tenant";
 
 const extractList = <T>(d: unknown): T[] => {
   if (!d) return [];
@@ -10,10 +10,10 @@ const extractList = <T>(d: unknown): T[] => {
   return [];
 };
 
-export const useTenants = () =>
+export const useTenants = (domainApp?: string) =>
   useQuery({
-    queryKey: ["tenants"],
-    queryFn: () => platformApi.listTenants().then((r) => extractList<Tenant>(r.data.data)),
+    queryKey: ["tenants", { domainApp }],
+    queryFn: () => platformApi.listTenants(domainApp ? { domain_app: domainApp } : undefined).then((r) => extractList<Tenant>(r.data.data)),
     retry: false,
   });
 
@@ -81,3 +81,35 @@ export const usePlatformUsage = () =>
     queryFn: () => platformApi.platformUsage().then((r) => r.data.data),
     retry: false,
   });
+
+// CR-025: API Keys
+export const useApiKeys = (tenantId?: string) =>
+  useQuery({
+    queryKey: ["apiKeys", { tenantId }],
+    queryFn: () => platformApi.listApiKeys(tenantId).then((r) => (r.data.data ?? []) as ApiKey[]),
+    retry: false,
+  });
+
+export const useCreateApiKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateApiKeyRequest) => platformApi.createApiKey(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
+  });
+};
+
+export const useRevokeApiKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.revokeApiKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
+  });
+};
+
+export const useRegenerateApiKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.regenerateApiKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
+  });
+};

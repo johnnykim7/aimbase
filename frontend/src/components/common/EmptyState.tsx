@@ -1,48 +1,23 @@
-import { COLORS, FONTS } from "../../theme";
-
 interface EmptyStateProps {
-  icon?: string;
+  icon?: React.ReactNode;
   title: string;
   description?: string;
   action?: React.ReactNode;
 }
 
-export const EmptyState = ({ icon = "📭", title, description, action }: EmptyStateProps) => (
-  <div
-    style={{
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "60px 40px",
-      textAlign: "center",
-      gap: 12,
-    }}
-  >
-    <div style={{ fontSize: 48, marginBottom: 4 }}>{icon}</div>
-    <div
-      style={{
-        fontSize: 16,
-        fontWeight: 600,
-        fontFamily: FONTS.sans,
-        color: COLORS.textMuted,
-      }}
-    >
-      {title}
-    </div>
+export const EmptyState = ({ icon, title, description, action }: EmptyStateProps) => (
+  <div className="flex flex-col items-center justify-center py-20 px-10 text-center gap-2.5">
+    {icon && (
+      <div className="size-14 rounded-2xl bg-muted/80 border border-border flex items-center justify-center text-muted-foreground mb-2">
+        {icon}
+      </div>
+    )}
+    <div className="text-sm font-semibold text-foreground">{title}</div>
     {description && (
-      <div
-        style={{
-          fontSize: 12,
-          fontFamily: FONTS.mono,
-          color: COLORS.textDim,
-          maxWidth: 360,
-          lineHeight: 1.6,
-        }}
-      >
+      <div className="text-xs text-muted-foreground max-w-[360px] leading-relaxed">
         {description}
       </div>
     )}
-    {action && <div style={{ marginTop: 8 }}>{action}</div>}
+    {action && <div className="mt-3">{action}</div>}
   </div>
 );

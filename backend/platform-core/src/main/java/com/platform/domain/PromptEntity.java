@@ -35,6 +35,10 @@ public class PromptEntity {
     @Column(name = "ab_test", columnDefinition = "jsonb")
     private Map<String, Object> abTest;
 
+    /** CR-022: 리소스 생성자 (users.id) */
+    @Column(name = "created_by", length = 100)
+    private String createdBy;
+
     @Column(name = "created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
@@ -52,5 +56,7 @@ public class PromptEntity {
     public void setActive(boolean active) { isActive = active; }
     public Map<String, Object> getAbTest() { return abTest; }
     public void setAbTest(Map<String, Object> abTest) { this.abTest = abTest; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
 }

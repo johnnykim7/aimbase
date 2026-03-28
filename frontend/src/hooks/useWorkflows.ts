@@ -11,10 +11,10 @@ const extractList = (d: unknown): Workflow[] => {
   return [];
 };
 
-export const useWorkflows = () =>
+export const useWorkflows = (my?: boolean) =>
   useQuery({
-    queryKey: ["workflows"],
-    queryFn: () => workflowsApi.list().then((r) => extractList(r.data.data)),
+    queryKey: ["workflows", { my }],
+    queryFn: () => workflowsApi.list(my ? { my: true } : undefined).then((r) => extractList(r.data.data)),
     retry: false,
   });
 

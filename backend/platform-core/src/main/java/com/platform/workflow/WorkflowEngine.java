@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -71,8 +72,17 @@ public class WorkflowEngine {
         run.setWorkflowId(workflowId);
         run.setSessionId(sessionId);
         run.setStatus("running");
-        run.setInputData(input != null ? input : Map.of());
+        Map<String, Object> effectiveInput = input != null ? input : Map.of();
+        run.setInputData(effectiveInput);
         run.setStepResults(new LinkedHashMap<>());
+        // 디버그: inputData 키 및 값 길이 로깅
+        log.info("Workflow '{}' run started. inputData keys: {}, value lengths: {}",
+                workflowId,
+                effectiveInput.keySet(),
+                effectiveInput.entrySet().stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                Map.Entry::getKey,
+                                e -> e.getValue() != null ? String.valueOf(e.getValue()).length() : 0)));
         WorkflowRunEntity saved = workflowRunRepository.save(run);
 
         // Virtual Thread에 TenantContext 전파
@@ -139,9 +149,18 @@ public class WorkflowEngine {
         WorkflowEntity workflowEntity = workflowRepository.findById(run.getWorkflowId())
                 .orElseThrow(() -> new IllegalStateException("Workflow not found: " + run.getWorkflowId()));
 
+        // Virtual Thread에 TenantContext 전파
+        String tenantId = TenantContext.getTenantId();
         Thread.ofVirtual()
                 .name("workflow-resume-" + runId)
-                .start(() -> doExecuteAsync(workflowEntity, run));
+                .start(() -> {
+                    if (tenantId != null) TenantContext.setTenantId(tenantId);
+                    try {
+                        doExecuteAsync(workflowEntity, run);
+                    } finally {
+                        TenantContext.clear();
+                    }
+                });
 
         return run;
     }
@@ -228,14 +247,23 @@ public class WorkflowEngine {
                 log.debug("Run '{}': executing step '{}' (type={})", run.getId(), step.id(), step.type());
 
                 try {
+                    long stepStart = System.currentTimeMillis();
                     Map<String, Object> result = executeWithRetry(step, context, errorHandling);
-                    context = context.withStepResult(step.id(), result);
+                    long stepEnd = System.currentTimeMillis();
+
+                    // 타이밍 메타데이터 추가
+                    Map<String, Object> enriched = new LinkedHashMap<>(result);
+                    enriched.put("_startedAt", Instant.ofEpochMilli(stepStart).toString());
+                    enriched.put("_completedAt", Instant.ofEpochMilli(stepEnd).toString());
+                    enriched.put("_durationMs", stepEnd - stepStart);
+
+                    context = context.withStepResult(step.id(), enriched);
 
                     // 진행 상태 DB에 저장
                     run.setStepResults(new LinkedHashMap<>(context.stepResults()));
                     workflowRunRepository.save(run);
 
-                    log.debug("Run '{}': step '{}' succeeded", run.getId(), step.id());
+                    log.debug("Run '{}': step '{}' succeeded ({}ms)", run.getId(), step.id(), stepEnd - stepStart);
 
                     // CONDITION 분기 처리
                     if (step.type() == WorkflowStep.StepType.CONDITION) {
@@ -247,7 +275,7 @@ public class WorkflowEngine {
                     run.setStatus("failed");
                     run.setError(Map.of("step", step.id(), "error", e.getMessage()));
                     run.setCompletedAt(OffsetDateTime.now());
-                    workflowRunRepository.save(run);
+                    workflowRunRepository.saveAndFlush(run);
                     platformMetrics.recordWorkflowExecution("failed");
                     return;
                 }
@@ -257,7 +285,7 @@ public class WorkflowEngine {
             run.setStatus("completed");
             run.setCompletedAt(OffsetDateTime.now());
             run.setStepResults(new LinkedHashMap<>(context.stepResults()));
-            workflowRunRepository.save(run);
+            workflowRunRepository.saveAndFlush(run);
             platformMetrics.recordWorkflowExecution("completed");
             log.info("Run '{}' (workflow='{}') completed: {} step results",
                     run.getId(), workflowEntity.getId(), context.stepResults().size());
@@ -267,7 +295,7 @@ public class WorkflowEngine {
             run.setStatus("failed");
             run.setError(Map.of("error", e.getMessage()));
             run.setCompletedAt(OffsetDateTime.now());
-            workflowRunRepository.save(run);
+            workflowRunRepository.saveAndFlush(run);
         }
     }
 
@@ -385,7 +413,7 @@ public class WorkflowEngine {
                 Map<String, Object> newConfig = new HashMap<>(step.config() != null ? step.config() : Map.of());
                 newConfig.put("response_schema", outputSchema);
                 steps.set(i, new WorkflowStep(
-                        step.id(), step.type(), newConfig,
+                        step.id(), step.name(), step.type(), newConfig,
                         step.dependsOn(), step.onSuccess(), step.onFailure(), step.timeoutMs()));
                 log.debug("Injected output_schema into last LLM_CALL step '{}'", step.id());
                 return;

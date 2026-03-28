@@ -1,5 +1,8 @@
 package com.platform.workflow;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -17,6 +20,7 @@ public record StepContext(
         Map<String, Object> stepResults  // {"stepId": {"output": ..., ...}}
 ) {
 
+    private static final Logger log = LoggerFactory.getLogger(StepContext.class);
     private static final Pattern TEMPLATE_PATTERN = Pattern.compile("\\{\\{([^}]+)}}");
 
     /**
@@ -81,6 +85,17 @@ public record StepContext(
 
         if ("input".equals(namespace)) {
             Object val = inputData != null ? inputData.get(key) : null;
+            // 폴백: 호출 측이 {"input": {"key": "..."}} 형태로 이중 래핑한 경우 처리
+            if (val == null && inputData != null && inputData.get("input") instanceof Map nestedInput) {
+                val = nestedInput.get(key);
+                if (val != null) {
+                    log.warn("Template '{{input.{}}}': resolved via nested 'input' wrapper (caller should send flat structure)", key);
+                }
+            }
+            if (val == null) {
+                log.warn("Template variable '{{input.{}}}' resolved to null. inputData keys: {}",
+                        key, inputData != null ? inputData.keySet() : "null");
+            }
             return val != null ? val.toString() : "";
         }
 

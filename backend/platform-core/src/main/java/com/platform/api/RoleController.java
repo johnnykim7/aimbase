@@ -38,11 +38,12 @@ public class RoleController {
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "역할 생성")
     public ApiResponse<RoleEntity> create(@Valid @RequestBody RoleRequest request) {
-        if (roleRepository.existsById(request.id())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Role already exists: " + request.id());
+        String resolvedId = request.id() != null && !request.id().isBlank() ? request.id() : java.util.UUID.randomUUID().toString();
+        if (roleRepository.existsById(resolvedId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Role already exists: " + resolvedId);
         }
         RoleEntity entity = new RoleEntity();
-        entity.setId(request.id());
+        entity.setId(resolvedId);
         entity.setName(request.name());
         entity.setPermissions(request.permissions());
         return ApiResponse.ok(roleRepository.save(entity));
@@ -77,7 +78,7 @@ public class RoleController {
     }
 
     public record RoleRequest(
-            @NotBlank String id,
+            String id,
             @NotBlank String name,
             @NotNull Map<String, Object> permissions
     ) {}

@@ -3,10 +3,20 @@
 Combines BM25 keyword search and pgvector semantic search using RRF.
 """
 
+import re
+
 from rank_bm25 import BM25Okapi
 
 from rag_pipeline.db import keyword_search_contents, vector_search
 from rag_pipeline.tools.embedder import embed_single
+
+
+def _tokenize(text: str) -> list[str]:
+    """Simple tokenizer that handles Korean and English."""
+    # Split on whitespace and punctuation, keep meaningful tokens
+    tokens = re.findall(r'[가-힣]+|[a-zA-Z]+|[0-9]+', text.lower())
+    # Filter very short tokens
+    return [t for t in tokens if len(t) > 1]
 
 
 def _rrf_score(rank: int, k: int = 60) -> float:
@@ -20,6 +30,7 @@ def search_hybrid(
     top_k: int = 5,
     vector_weight: float = 0.7,
     keyword_weight: float = 0.3,
+    embedding_model: str = "",
 ) -> list[dict]:
     """Hybrid search combining BM25 and vector similarity.
 
@@ -29,12 +40,13 @@ def search_hybrid(
         top_k: Number of results to return
         vector_weight: Weight for vector search scores
         keyword_weight: Weight for BM25 keyword scores
+        embedding_model: 쿼리 임베딩에 사용할 모델 (빈 문자열이면 기본 모델)
 
     Returns:
         List of {content, metadata, vector_score, keyword_score, combined_score}
     """
     # 1) Vector search via pgvector
-    query_vector = embed_single(query)
+    query_vector = embed_single(query, model=embedding_model)
     vector_results = vector_search(source_id, query_vector, top_k=top_k * 2)
 
     # 2) BM25 keyword search
@@ -42,9 +54,9 @@ def search_hybrid(
     if not all_chunks:
         return vector_results[:top_k]
 
-    tokenized_corpus = [doc["content"].split() for doc in all_chunks]
+    tokenized_corpus = [_tokenize(doc["content"]) for doc in all_chunks]
     bm25 = BM25Okapi(tokenized_corpus)
-    bm25_scores = bm25.get_scores(query.split())
+    bm25_scores = bm25.get_scores(_tokenize(query))
 
     # Build BM25 ranked results
     bm25_ranked = sorted(

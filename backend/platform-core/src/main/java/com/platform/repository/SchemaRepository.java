@@ -16,4 +16,11 @@ public interface SchemaRepository extends JpaRepository<SchemaEntity, SchemaEnti
 
     @Query("SELECT s FROM SchemaEntity s WHERE s.pk.id = :id AND s.pk.version = (SELECT MAX(s2.pk.version) FROM SchemaEntity s2 WHERE s2.pk.id = :id)")
     Optional<SchemaEntity> findLatestById(String id);
+
+    // CR-021: 프로젝트 스코핑 — resource_id는 schema id (pk.id)
+    @Query("SELECT s FROM SchemaEntity s WHERE s.pk.id IN :ids")
+    List<SchemaEntity> findByIdIn(List<String> ids);
+
+    // CR-022: 사용자별 리소스 소유
+    List<SchemaEntity> findByCreatedBy(String createdBy);
 }

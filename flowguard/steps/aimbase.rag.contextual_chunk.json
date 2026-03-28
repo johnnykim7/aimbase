@@ -1,0 +1,29 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-mcp-rag",
+  "action": {
+    "method": "POST",
+    "endpoint": "/mcp",
+    "headers": {},
+    "body": {
+      "tool": "contextual_chunk",
+      "arguments": {
+        "full_document": "Aimbase는 멀티테넌트 LLM 오케스트레이션 플랫폼입니다. 여러 LLM 프로바이더를 통합 관리합니다.",
+        "document_summary": "Aimbase 플랫폼 소개 문서",
+        "config": null
+      }
+    }
+  },
+  "extract": {
+    "chunkCount": "$.body.result.chunk_count",
+    "success": "$.body.result.success",
+    "firstChunkPrefix": "$.body.result.chunks[0].context_prefix",
+    "firstChunkHash": "$.body.result.chunks[0].content_hash"
+  },
+  "assert": [
+    { "field": "$.body.result.success", "operator": "==", "value": true },
+    { "field": "$.body.result.chunk_count", "operator": ">=", "value": 1 },
+    { "field": "$.body.result.chunks[0].context_prefix", "operator": "!=", "value": null }
+  ],
+  "failMode": "hard"
+}

@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { COLORS, FONTS } from "../../theme";
+import { cn } from "@/lib/utils";
 import { LoadingSpinner } from "./LoadingSpinner";
 
 export interface Column<T> {
@@ -25,43 +24,24 @@ export function DataTable<T>({
   loading,
   emptyMessage = "데이터가 없습니다",
 }: DataTableProps<T>) {
-  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
-
   if (loading) {
     return (
-      <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+      <div className="flex justify-center py-10">
         <LoadingSpinner />
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        background: COLORS.surface,
-        border: `1px solid ${COLORS.border}`,
-        borderRadius: 12,
-        overflow: "hidden",
-      }}
-    >
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+    <div className="bg-card border border-border rounded-xl shadow-xs shadow-black/5 overflow-hidden">
+      <table className="w-full border-collapse">
         <thead>
-          <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+          <tr className="border-b border-border">
             {columns.map((col, i) => (
               <th
                 key={i}
-                style={{
-                  padding: "12px 16px",
-                  textAlign: "left",
-                  fontSize: 11,
-                  fontFamily: FONTS.mono,
-                  color: COLORS.textMuted,
-                  textTransform: "uppercase",
-                  letterSpacing: 1,
-                  fontWeight: 600,
-                  width: col.width,
-                  background: COLORS.surfaceHover,
-                }}
+                className="px-4 py-3 text-left text-xs font-medium text-muted-foreground"
+                style={{ width: col.width }}
               >
                 {col.header}
               </th>
@@ -73,13 +53,7 @@ export function DataTable<T>({
             <tr>
               <td
                 colSpan={columns.length}
-                style={{
-                  padding: 32,
-                  textAlign: "center",
-                  color: COLORS.textDim,
-                  fontFamily: FONTS.mono,
-                  fontSize: 13,
-                }}
+                className="p-8 text-center text-muted-foreground/60 text-sm"
               >
                 {emptyMessage}
               </td>
@@ -91,24 +65,16 @@ export function DataTable<T>({
                 <tr
                   key={key}
                   onClick={() => onRowClick?.(row)}
-                  onMouseEnter={() => setHoveredRow(key)}
-                  onMouseLeave={() => setHoveredRow(null)}
-                  style={{
-                    background: hoveredRow === key ? COLORS.surfaceHover : "transparent",
-                    cursor: onRowClick ? "pointer" : "default",
-                    transition: "background 0.15s",
-                  }}
+                  className={cn(
+                    "transition-colors duration-150 border-b border-border last:border-b-0",
+                    onRowClick ? "cursor-pointer" : "cursor-default",
+                    "hover:bg-muted/50"
+                  )}
                 >
                   {columns.map((col, i) => (
                     <td
                       key={i}
-                      style={{
-                        padding: "12px 16px",
-                        borderBottom: `1px solid ${COLORS.border}`,
-                        fontSize: 13,
-                        fontFamily: FONTS.sans,
-                        color: COLORS.text,
-                      }}
+                      className="px-4 py-3 text-[13px] text-foreground"
                     >
                       {col.render(row)}
                     </td>

@@ -1,0 +1,2558 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LexAI Engine API Reference</title>
+<style>
+  :root {
+    --primary: #0d9488;
+    --primary-light: #14b8a6;
+    --primary-dark: #0f766e;
+    --code-bg: #1e293b;
+    --code-text: #e2e8f0;
+    --bg: #ffffff;
+    --bg-alt: #f8fafc;
+    --bg-sidebar: #f1f5f9;
+    --text: #1e293b;
+    --text-secondary: #64748b;
+    --border: #e2e8f0;
+    --get: #3b82f6;
+    --post: #22c55e;
+    --put: #f59e0b;
+    --delete: #ef4444;
+    --patch: #a855f7;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 24px 0;
+    z-index: 10;
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+  .sidebar-logo {
+    padding: 0 24px 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .sidebar-logo h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--primary);
+  }
+  .sidebar-logo p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+  .sidebar-section {
+    padding: 8px 24px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+  .sidebar a {
+    display: block;
+    padding: 5px 24px 5px 32px;
+    font-size: 13px;
+    color: var(--text);
+    transition: all 0.15s;
+    border-left: 3px solid transparent;
+  }
+  .sidebar a:hover {
+    background: rgba(13,148,136,0.08);
+    color: var(--primary);
+    text-decoration: none;
+    border-left-color: var(--primary);
+  }
+  .main {
+    flex: 1;
+    max-width: 960px;
+    padding: 40px 48px 80px;
+  }
+
+  /* Headers */
+  h2 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 56px 0 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--primary);
+    color: var(--text);
+  }
+  h2:first-of-type { margin-top: 0; }
+  h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 40px 0 12px;
+    color: var(--text);
+  }
+  h4 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 24px 0 8px;
+    color: var(--text);
+  }
+  p { margin: 8px 0; color: var(--text); }
+  .desc { color: var(--text-secondary); margin-bottom: 16px; }
+
+  /* Method Pills */
+  .method {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    letter-spacing: 0.03em;
+    color: #fff;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  .method.get { background: var(--get); }
+  .method.post { background: var(--post); }
+  .method.put { background: var(--put); }
+  .method.delete { background: var(--delete); }
+  .method.patch { background: var(--patch); }
+
+  /* Endpoint block */
+  .endpoint {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 16px 0 24px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .endpoint-header {
+    display: flex;
+    align-items: center;
+    padding: 14px 20px;
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+  .endpoint-path {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .endpoint-desc {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .endpoint-body {
+    padding: 16px 20px;
+  }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 16px 20px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 8px 0 12px;
+  }
+  code {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--primary-dark);
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0 16px;
+    font-size: 13px;
+  }
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    background: #f1f5f9;
+    border: 1px solid var(--border);
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  td {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  td code { font-size: 12px; }
+  .required {
+    color: var(--delete);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .optional {
+    color: var(--text-secondary);
+    font-size: 11px;
+  }
+
+  /* MCP tool card */
+  .mcp-tool {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 8px 0;
+    box-shadow: var(--shadow);
+  }
+  .mcp-tool-name {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary);
+  }
+  .mcp-tool-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 4px 0;
+  }
+  .mcp-tool-params {
+    font-size: 12px;
+    color: var(--text);
+    margin-top: 6px;
+  }
+  .mcp-tool-params span {
+    display: inline-block;
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin: 2px 4px 2px 0;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+  }
+
+  /* Info box */
+  .info-box {
+    background: #f0fdfa;
+    border: 1px solid #99f6e4;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    font-size: 13px;
+  }
+  .info-box strong { color: var(--primary-dark); }
+  .warn-box {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    font-size: 13px;
+  }
+
+  /* Category label */
+  .cat-label {
+    display: inline-block;
+    background: var(--primary);
+    color: #fff;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-left: 8px;
+    vertical-align: middle;
+    font-weight: 500;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { padding: 24px 20px; max-width: 100%; }
+  }
+
+  /* Header banner */
+  .hero {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: #fff;
+    padding: 32px;
+    border-radius: 12px;
+    margin-bottom: 32px;
+  }
+  .hero h1 { font-size: 32px; margin-bottom: 8px; }
+  .hero p { opacity: 0.9; font-size: 15px; }
+  .hero .version { opacity: 0.7; font-size: 13px; margin-top: 12px; }
+
+  .json-key { color: #7dd3fc; }
+  .json-str { color: #86efac; }
+  .json-num { color: #fbbf24; }
+  .json-bool { color: #c084fc; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<!-- ===== SIDEBAR ===== -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <h1>LexAI Engine</h1>
+    <p>API Reference v3.0</p>
+  </div>
+
+  <div class="sidebar-section">공통</div>
+  <a href="#common">공통 사항</a>
+
+  <div class="sidebar-section">인증</div>
+  <a href="#auth">Auth API</a>
+
+  <div class="sidebar-section">핵심 API</div>
+  <a href="#chat">Chat Completions</a>
+  <a href="#conversations">Conversations</a>
+  <a href="#knowledge">Knowledge Sources</a>
+  <a href="#retrieval-config">Retrieval Config</a>
+  <a href="#documents">Documents</a>
+  <a href="#workflows">Workflows</a>
+  <a href="#policies">Policies</a>
+  <a href="#prompts">Prompts</a>
+  <a href="#schemas">Schemas</a>
+  <a href="#speech">Speech (TTS/STT)</a>
+  <a href="#evaluations">Evaluations</a>
+
+  <div class="sidebar-section">설정</div>
+  <a href="#connections">Connections</a>
+  <a href="#roles">Roles</a>
+  <a href="#users">Users</a>
+  <a href="#routing">Routing</a>
+  <a href="#mcp-servers">MCP Servers</a>
+  <a href="#tools">Tools</a>
+  <a href="#models">Models</a>
+  <a href="#extensions">Extensions</a>
+
+  <div class="sidebar-section">관리</div>
+  <a href="#admin">Admin</a>
+  <a href="#platform">Platform (Super Admin)</a>
+
+  <div class="sidebar-section">내부 도구</div>
+  <a href="#mcp-tools">MCP Tool 목록</a>
+</nav>
+
+<!-- ===== MAIN CONTENT ===== -->
+<main class="main">
+
+<div class="hero">
+  <h1>LexAI Engine API Reference</h1>
+  <p>멀티테넌트 LLM 오케스트레이션 플랫폼 API 문서</p>
+  <div class="version">v3.0 &middot; 최종 업데이트: 2026-03-25</div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="common">공통 사항</h2>
+
+<h3>Base URL</h3>
+<pre><code>http://localhost:8080/api/v1</code></pre>
+
+<h3>인증</h3>
+<p>모든 API 요청에는 JWT 토큰을 <code>Authorization</code> 헤더에 포함해야 합니다. <code>/api/v1/auth/login</code>으로 토큰을 발급받으세요.</p>
+<pre><code>Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</code></pre>
+
+<h3>테넌트 식별</h3>
+<p>멀티테넌트 환경에서 요청마다 <code>X-Tenant-Id</code> 헤더를 포함해야 합니다.</p>
+<pre><code>X-Tenant-Id: tenant-001</code></pre>
+
+<h3>공통 응답 포맷</h3>
+<p>모든 API는 <code>ApiResponse&lt;T&gt;</code> 래퍼로 응답합니다.</p>
+<pre><code>{
+  <span class="json-key">"success"</span>: <span class="json-bool">true</span>,
+  <span class="json-key">"data"</span>: { ... },
+  <span class="json-key">"error"</span>: <span class="json-bool">null</span>,
+  <span class="json-key">"pagination"</span>: <span class="json-bool">null</span>
+}</code></pre>
+
+<h4>페이지네이션 응답</h4>
+<pre><code>{
+  <span class="json-key">"success"</span>: <span class="json-bool">true</span>,
+  <span class="json-key">"data"</span>: [ ... ],
+  <span class="json-key">"pagination"</span>: {
+    <span class="json-key">"page"</span>: <span class="json-num">0</span>,
+    <span class="json-key">"size"</span>: <span class="json-num">20</span>,
+    <span class="json-key">"totalElements"</span>: <span class="json-num">42</span>,
+    <span class="json-key">"totalPages"</span>: <span class="json-num">3</span>
+  }
+}</code></pre>
+
+<h3>에러 응답</h3>
+<pre><code>{
+  <span class="json-key">"success"</span>: <span class="json-bool">false</span>,
+  <span class="json-key">"data"</span>: <span class="json-bool">null</span>,
+  <span class="json-key">"error"</span>: <span class="json-str">"에러 메시지"</span>
+}</code></pre>
+
+<h4>HTTP 상태 코드</h4>
+<table>
+  <tr><th>코드</th><th>의미</th></tr>
+  <tr><td><code>200</code></td><td>성공</td></tr>
+  <tr><td><code>201</code></td><td>생성 완료</td></tr>
+  <tr><td><code>202</code></td><td>비동기 처리 수락</td></tr>
+  <tr><td><code>204</code></td><td>삭제 완료 (본문 없음)</td></tr>
+  <tr><td><code>400</code></td><td>잘못된 요청</td></tr>
+  <tr><td><code>401</code></td><td>인증 실패</td></tr>
+  <tr><td><code>404</code></td><td>리소스 없음</td></tr>
+  <tr><td><code>409</code></td><td>리소스 충돌 (중복)</td></tr>
+  <tr><td><code>500</code></td><td>서버 내부 오류</td></tr>
+  <tr><td><code>502</code></td><td>외부 서비스 오류</td></tr>
+  <tr><td><code>503</code></td><td>서비스 불가 (연결 미설정)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="auth">Auth API</h2>
+<p class="desc">인증 (로그인, 토큰 갱신). 이 엔드포인트는 JWT 없이 접근 가능합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/auth/login</span>
+    <span class="endpoint-desc">로그인 (이메일 + 비밀번호)</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>email</code></td><td>string</td><td><span class="required">필수</span></td><td>사용자 이메일</td></tr>
+      <tr><td><code>password</code></td><td>string</td><td><span class="required">필수</span></td><td>비밀번호</td></tr>
+    </table>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"success"</span>: <span class="json-bool">true</span>,
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"access_token"</span>: <span class="json-str">"eyJ..."</span>,
+    <span class="json-key">"refresh_token"</span>: <span class="json-str">"eyJ..."</span>,
+    <span class="json-key">"token_type"</span>: <span class="json-str">"Bearer"</span>,
+    <span class="json-key">"user_id"</span>: <span class="json-str">"uuid"</span>,
+    <span class="json-key">"email"</span>: <span class="json-str">"user@example.com"</span>,
+    <span class="json-key">"role"</span>: <span class="json-str">"admin"</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/auth/refresh</span>
+    <span class="endpoint-desc">토큰 갱신</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>refreshToken</code></td><td>string</td><td><span class="required">필수</span></td><td>Refresh Token</td></tr>
+    </table>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"access_token"</span>: <span class="json-str">"eyJ..."</span>,
+    <span class="json-key">"token_type"</span>: <span class="json-str">"Bearer"</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="chat">Chat Completions API</h2>
+<p class="desc">LLM 채팅 API. 플랫폼의 핵심 엔드포인트로, 다양한 LLM 프로바이더에 통합 인터페이스를 제공합니다. 도구 호출, 멀티모달 입력, 스트리밍, 구조화된 출력을 지원합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/chat/completions</span>
+    <span class="endpoint-desc">채팅 완성 요청</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>model</code></td><td>string</td><td><span class="optional">선택</span></td><td>LLM 모델명 (예: <code>claude-3-5-sonnet-20241022</code>, <code>gpt-4o</code>). 미지정 시 라우팅 규칙 적용</td></tr>
+      <tr><td><code>session_id</code></td><td>string</td><td><span class="optional">선택</span></td><td>세션 ID. 미지정 시 자동 생성. 동일 세션에서 대화 이력 유지 (TTL 24h)</td></tr>
+      <tr><td><code>messages</code></td><td>array</td><td><span class="required">필수</span></td><td>메시지 배열. 각 메시지는 <code>role</code>과 <code>content</code> 포함</td></tr>
+      <tr><td><code>stream</code></td><td>boolean</td><td><span class="optional">선택</span></td><td><code>true</code> 시 SSE(Server-Sent Events) 스트리밍 응답</td></tr>
+      <tr><td><code>actions_enabled</code></td><td>boolean</td><td><span class="optional">선택</span></td><td>액션(쓰기/알림) 실행 허용 여부</td></tr>
+      <tr><td><code>connection_id</code></td><td>string</td><td><span class="optional">선택</span></td><td>특정 LLM 연결 지정</td></tr>
+      <tr><td><code>tool_filter</code></td><td>object</td><td><span class="optional">선택</span></td><td>도구 필터링 (CR-006)</td></tr>
+      <tr><td><code>tool_choice</code></td><td>string</td><td><span class="optional">선택</span></td><td>도구 선택 모드: <code>auto</code>, <code>none</code>, 또는 특정 도구명</td></tr>
+      <tr><td><code>response_format</code></td><td>object</td><td><span class="optional">선택</span></td><td>구조화된 출력 요청 (CR-007)</td></tr>
+    </table>
+
+    <h4>messages[] 구조</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>role</code></td><td>string</td><td><code>user</code>, <code>assistant</code>, <code>system</code></td></tr>
+      <tr><td><code>content</code></td><td>string | array</td><td>텍스트 문자열 또는 멀티모달 파트 배열</td></tr>
+    </table>
+
+    <h4>멀티모달 content 파트</h4>
+<pre><code>[
+  { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"이 이미지를 설명해주세요"</span> },
+  { <span class="json-key">"type"</span>: <span class="json-str">"image_url"</span>, <span class="json-key">"image_url"</span>: { <span class="json-key">"url"</span>: <span class="json-str">"data:image/png;base64,..."</span> } }
+]</code></pre>
+
+    <h4>tool_filter 구조 (CR-006)</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>allowed_tools</code></td><td>string[]</td><td>허용할 도구 이름 목록 (화이트리스트)</td></tr>
+      <tr><td><code>exclude_tools</code></td><td>string[]</td><td>제외할 도구 이름 목록 (블랙리스트)</td></tr>
+    </table>
+
+    <h4>response_format 구조 (CR-007)</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>type</code></td><td>string</td><td><code>json_schema</code></td></tr>
+      <tr><td><code>schema_ref</code></td><td>string</td><td>저장된 스키마 참조 (예: <code>order-response/1</code>)</td></tr>
+      <tr><td><code>schema</code></td><td>object</td><td>인라인 JSON Schema 정의</td></tr>
+    </table>
+
+    <h4>Response (비스트리밍)</h4>
+<pre><code>{
+  <span class="json-key">"success"</span>: <span class="json-bool">true</span>,
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"id"</span>: <span class="json-str">"chat-uuid"</span>,
+    <span class="json-key">"model"</span>: <span class="json-str">"claude-3-5-sonnet-20241022"</span>,
+    <span class="json-key">"session_id"</span>: <span class="json-str">"session-uuid"</span>,
+    <span class="json-key">"content"</span>: [
+      { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"응답 텍스트"</span> }
+    ],
+    <span class="json-key">"actions_executed"</span>: [],
+    <span class="json-key">"usage"</span>: {
+      <span class="json-key">"input_tokens"</span>: <span class="json-num">150</span>,
+      <span class="json-key">"output_tokens"</span>: <span class="json-num">320</span>,
+      <span class="json-key">"cost_usd"</span>: <span class="json-num">0.0021</span>
+    }
+  }
+}</code></pre>
+
+    <h4>Response (구조화된 출력, CR-007)</h4>
+<pre><code>{
+  <span class="json-key">"content"</span>: [
+    {
+      <span class="json-key">"type"</span>: <span class="json-str">"structured"</span>,
+      <span class="json-key">"schema"</span>: <span class="json-str">"order-response/1"</span>,
+      <span class="json-key">"data"</span>: { <span class="json-key">"order_id"</span>: <span class="json-str">"ORD-001"</span>, <span class="json-key">"status"</span>: <span class="json-str">"confirmed"</span> }
+    }
+  ]
+}</code></pre>
+
+    <h4>스트리밍 응답 (SSE)</h4>
+    <p><code>stream: true</code> 시 <code>text/event-stream</code>으로 응답합니다.</p>
+<pre><code>event: delta
+data: {"delta": "응답 텍스"}
+
+event: delta
+data: {"delta": "트입니다."}
+
+event: done
+data: {"done": true}</code></pre>
+  </div>
+</div>
+
+<div class="info-box">
+  <strong>도구 호출 루프:</strong> 오케스트레이터는 LLM 도구 호출을 자동 실행하며, 최대 5회 루프합니다 (BIZ-001). 도구 결과를 다시 LLM에 전달하여 최종 응답을 생성합니다.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="conversations">Conversations API</h2>
+<p class="desc">대화 히스토리 관리. 세션별 대화 목록 조회, 상세 조회, 삭제를 지원합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/conversations</span>
+    <span class="endpoint-desc">대화 세션 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Query Parameters</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>기본값</th><th>설명</th></tr>
+      <tr><td><code>page</code></td><td>int</td><td>0</td><td>페이지 번호</td></tr>
+      <tr><td><code>size</code></td><td>int</td><td>20</td><td>페이지 크기</td></tr>
+      <tr><td><code>query</code></td><td>string</td><td>-</td><td>제목 검색어</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/conversations/{sessionId}</span>
+    <span class="endpoint-desc">대화 세션 상세 조회 (메시지 포함)</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"session"</span>: { <span class="json-key">"sessionId"</span>: <span class="json-str">"..."</span>, <span class="json-key">"title"</span>: <span class="json-str">"..."</span> },
+    <span class="json-key">"messages"</span>: [
+      { <span class="json-key">"role"</span>: <span class="json-str">"user"</span>, <span class="json-key">"content"</span>: <span class="json-str">"..."</span>, <span class="json-key">"createdAt"</span>: <span class="json-str">"..."</span> },
+      { <span class="json-key">"role"</span>: <span class="json-str">"assistant"</span>, <span class="json-key">"content"</span>: <span class="json-str">"..."</span>, <span class="json-key">"createdAt"</span>: <span class="json-str">"..."</span> }
+    ]
+  }
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/conversations/{sessionId}</span>
+    <span class="endpoint-desc">대화 세션 삭제</span>
+  </div>
+  <div class="endpoint-body">
+    <p>메시지, 세션, Redis 캐시를 모두 삭제합니다. 응답 본문 없음 (204).</p>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="knowledge">Knowledge Sources API</h2>
+<p class="desc">RAG 지식 소스 관리. 문서 업로드, 벡터 인제스션, 시맨틱 검색을 지원합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources</span>
+    <span class="endpoint-desc">지식 소스 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Query Parameters</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>기본값</th><th>설명</th></tr>
+      <tr><td><code>page</code></td><td>int</td><td>0</td><td>페이지 번호</td></tr>
+      <tr><td><code>size</code></td><td>int</td><td>20</td><td>페이지 크기</td></tr>
+      <tr><td><code>type</code></td><td>string</td><td>-</td><td>타입 필터 (예: <code>file</code>, <code>web</code>)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources</span>
+    <span class="endpoint-desc">지식 소스 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="required">필수</span></td><td>소스 이름</td></tr>
+      <tr><td><code>type</code></td><td>string</td><td><span class="required">필수</span></td><td>소스 유형 (<code>file</code>, <code>web</code>, <code>api</code>)</td></tr>
+      <tr><td><code>config</code></td><td>object</td><td><span class="optional">선택</span></td><td>소스별 설정 (JSONB)</td></tr>
+      <tr><td><code>chunkingConfig</code></td><td>object</td><td><span class="optional">선택</span></td><td>청킹 설정. 기본: <code>{strategy: "fixed", size: 512, overlap: 50}</code></td></tr>
+      <tr><td><code>embeddingConfig</code></td><td>object</td><td><span class="optional">선택</span></td><td>임베딩 설정</td></tr>
+      <tr><td><code>embeddingModel</code></td><td>string</td><td><span class="optional">선택</span></td><td>임베딩 모델. 기본: <code>BAAI/bge-m3</code></td></tr>
+      <tr><td><code>syncConfig</code></td><td>object</td><td><span class="optional">선택</span></td><td>동기화 스케줄 설정</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources/{id}</span>
+    <span class="endpoint-desc">지식 소스 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources/{id}</span>
+    <span class="endpoint-desc">지식 소스 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources/{id}</span>
+    <span class="endpoint-desc">지식 소스 삭제 (임베딩, 인제스션 로그 포함)</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources/{id}/upload</span>
+    <span class="endpoint-desc">파일 업로드</span>
+  </div>
+  <div class="endpoint-body">
+    <p><code>multipart/form-data</code> 형식. 지원 확장자: <code>pdf, docx, xlsx, pptx, csv, txt, md, html</code></p>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>file</code></td><td>file</td><td>업로드할 파일</td></tr>
+    </table>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"sourceId"</span>: <span class="json-str">"source-uuid"</span>,
+    <span class="json-key">"filePath"</span>: <span class="json-str">"tenant-001/knowledge/report.pdf"</span>,
+    <span class="json-key">"fileSize"</span>: <span class="json-num">1048576</span>,
+    <span class="json-key">"status"</span>: <span class="json-str">"uploaded"</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources/{id}/sync</span>
+    <span class="endpoint-desc">동기화 (인제스션 파이프라인 실행)</span>
+  </div>
+  <div class="endpoint-body">
+    <p>파싱 &rarr; 청킹 &rarr; 임베딩 &rarr; pgvector 저장 파이프라인을 비동기 실행합니다. 202 Accepted 반환.</p>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources/search</span>
+    <span class="endpoint-desc">벡터 유사도 검색</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>query</code></td><td>string</td><td><span class="required">필수</span></td><td>검색 쿼리</td></tr>
+      <tr><td><code>sourceId</code></td><td>string</td><td><span class="optional">선택</span></td><td>특정 소스에서만 검색. 미지정 시 전체 소스에서 병합 검색</td></tr>
+      <tr><td><code>topK</code></td><td>int</td><td><span class="optional">선택</span></td><td>반환할 결과 수 (기본: 5)</td></tr>
+    </table>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"query"</span>: <span class="json-str">"검색어"</span>,
+    <span class="json-key">"results"</span>: [
+      {
+        <span class="json-key">"content"</span>: <span class="json-str">"관련 텍스트 청크"</span>,
+        <span class="json-key">"score"</span>: <span class="json-num">0.87</span>,
+        <span class="json-key">"sourceId"</span>: <span class="json-str">"source-uuid"</span>,
+        <span class="json-key">"sourceName"</span>: <span class="json-str">"제품 매뉴얼"</span>,
+        <span class="json-key">"metadata"</span>: {}
+      }
+    ]
+  }
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/knowledge-sources/{id}/ingestion-logs</span>
+    <span class="endpoint-desc">수집 로그 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>기본값</th><th>설명</th></tr>
+      <tr><td><code>page</code></td><td>int</td><td>0</td><td>페이지 번호</td></tr>
+      <tr><td><code>size</code></td><td>int</td><td>20</td><td>페이지 크기</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="retrieval-config">Retrieval Config API</h2>
+<p class="desc">RAG 검색 설정 관리. 소스 필터, 유사도 임계값, 쿼리 전처리 등을 설정합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/retrieval-config</span>
+    <span class="endpoint-desc">검색 설정 목록 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/retrieval-config</span>
+    <span class="endpoint-desc">검색 설정 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="required">필수</span></td><td>설정 이름</td></tr>
+      <tr><td><code>topK</code></td><td>int</td><td><span class="optional">선택</span></td><td>검색 결과 수 (기본: 5)</td></tr>
+      <tr><td><code>similarityThreshold</code></td><td>decimal</td><td><span class="optional">선택</span></td><td>유사도 임계값 (0.0~1.0)</td></tr>
+      <tr><td><code>maxContextTokens</code></td><td>int</td><td><span class="optional">선택</span></td><td>최대 컨텍스트 토큰 수</td></tr>
+      <tr><td><code>searchType</code></td><td>string</td><td><span class="optional">선택</span></td><td>검색 유형 (<code>vector</code>, <code>hybrid</code>, <code>keyword</code>)</td></tr>
+      <tr><td><code>sourceFilters</code></td><td>object</td><td><span class="optional">선택</span></td><td>소스 필터 조건 (JSONB)</td></tr>
+      <tr><td><code>queryProcessing</code></td><td>object</td><td><span class="optional">선택</span></td><td>쿼리 전처리 설정 (JSONB)</td></tr>
+      <tr><td><code>contextTemplate</code></td><td>string</td><td><span class="optional">선택</span></td><td>컨텍스트 템플릿</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/retrieval-config/{id}</span>
+    <span class="endpoint-desc">검색 설정 상세</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/retrieval-config/{id}</span>
+    <span class="endpoint-desc">검색 설정 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/retrieval-config/{id}</span>
+    <span class="endpoint-desc">검색 설정 삭제</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="documents">Documents API</h2>
+<p class="desc">AI 문서 생성 (CR-018). LLM이 생성한 코드를 실행하여 PPTX, DOCX, PDF, XLSX, CSV, HTML, 이미지 파일을 생성합니다. 템플릿 저장/렌더링, 스키마 기반 생성(CR-013)을 지원합니다.</p>
+
+<h3>코드 기반 생성</h3>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/generate</span>
+    <span class="endpoint-desc">문서 생성 (파일 다운로드 응답)</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>code</code></td><td>string</td><td><span class="required">필수</span></td><td>Python 코드 (python-pptx, python-docx, reportlab 등)</td></tr>
+      <tr><td><code>outputFormat</code></td><td>string</td><td><span class="optional">선택</span></td><td>출력 포맷 (기본: <code>pptx</code>)</td></tr>
+      <tr><td><code>outputFilename</code></td><td>string</td><td><span class="optional">선택</span></td><td>출력 파일명</td></tr>
+    </table>
+    <p>성공 시 바이너리 파일 응답 (<code>Content-Disposition: attachment</code>)</p>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/generate-json</span>
+    <span class="endpoint-desc">문서 생성 (JSON 응답, base64)</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/documents/formats</span>
+    <span class="endpoint-desc">지원 포맷 목록</span>
+  </div>
+</div>
+
+<h3>템플릿 관리</h3>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/templates</span>
+    <span class="endpoint-desc">문서 템플릿 저장</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>name</code></td><td>string</td><td>템플릿 이름</td></tr>
+      <tr><td><code>format</code></td><td>string</td><td>출력 포맷 (기본: pptx)</td></tr>
+      <tr><td><code>templateType</code></td><td>string</td><td><code>code</code> 또는 <code>file</code></td></tr>
+      <tr><td><code>codeTemplate</code></td><td>string</td><td>{{변수}} 플레이스홀더 포함 Python 코드</td></tr>
+      <tr><td><code>variables</code></td><td>string</td><td>변수 정의 JSON 배열</td></tr>
+      <tr><td><code>description</code></td><td>string</td><td>설명</td></tr>
+      <tr><td><code>tags</code></td><td>string</td><td>태그 JSON 배열</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/documents/templates</span>
+    <span class="endpoint-desc">템플릿 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>format</code></td><td>string</td><td>포맷 필터</td></tr>
+      <tr><td><code>templateType</code></td><td>string</td><td>타입 필터 (<code>code</code>/<code>file</code>)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/documents/templates/{templateId}</span>
+    <span class="endpoint-desc">템플릿 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/documents/templates/{templateId}</span>
+    <span class="endpoint-desc">템플릿 삭제</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/templates/{templateId}/render</span>
+    <span class="endpoint-desc">템플릿으로 문서 생성 (파일 응답)</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>variables</code></td><td>string</td><td>변수 값 JSON 객체</td></tr>
+      <tr><td><code>outputFormat</code></td><td>string</td><td>출력 포맷 (기본: 템플릿 포맷)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/templates/{templateId}/render-json</span>
+    <span class="endpoint-desc">템플릿으로 문서 생성 (JSON 응답)</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/templates/upload</span>
+    <span class="endpoint-desc">파일 업로드로 템플릿 등록 (PPTX/DOCX/PDF)</span>
+  </div>
+  <div class="endpoint-body">
+    <p><code>multipart/form-data</code> 형식.</p>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>file</code></td><td>file</td><td>PPTX, DOCX, 또는 PDF 파일</td></tr>
+      <tr><td><code>name</code></td><td>string</td><td>템플릿 이름</td></tr>
+      <tr><td><code>description</code></td><td>string</td><td>설명</td></tr>
+      <tr><td><code>tags</code></td><td>string</td><td>태그 JSON 배열</td></tr>
+    </table>
+  </div>
+</div>
+
+<h3>스키마 기반 생성 (CR-013)</h3>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/schema/generate</span>
+    <span class="endpoint-desc">스키마 기반 문서 생성 (파일 응답)</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>schema</code></td><td>string</td><td><span class="required">필수</span></td><td>문서 구조 JSON</td></tr>
+      <tr><td><code>outputFormat</code></td><td>string</td><td><span class="optional">선택</span></td><td><code>pptx</code>, <code>docx</code>, <code>pdf</code> (기본: pptx)</td></tr>
+      <tr><td><code>themeName</code></td><td>string</td><td><span class="optional">선택</span></td><td>테마 프리셋: <code>default</code>, <code>corporate_blue</code>, <code>modern_dark</code>, <code>minimal</code>, <code>warm</code></td></tr>
+      <tr><td><code>customTheme</code></td><td>string</td><td><span class="optional">선택</span></td><td>커스텀 테마 JSON</td></tr>
+      <tr><td><code>outputFilename</code></td><td>string</td><td><span class="optional">선택</span></td><td>출력 파일명</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/schema/generate-json</span>
+    <span class="endpoint-desc">스키마 기반 문서 생성 (JSON 응답)</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/documents/schema/validate</span>
+    <span class="endpoint-desc">문서 스키마 검증</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/documents/themes</span>
+    <span class="endpoint-desc">문서 테마 프리셋 목록</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="workflows">Workflows API</h2>
+<p class="desc">워크플로우 관리. DAG 기반 워크플로우를 정의하고 실행합니다. Kahn 알고리즘으로 위상 정렬 실행.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/workflows</span>
+    <span class="endpoint-desc">워크플로우 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>page</code></td><td>int</td><td>페이지 번호 (기본: 0)</td></tr>
+      <tr><td><code>size</code></td><td>int</td><td>페이지 크기 (기본: 20)</td></tr>
+      <tr><td><code>domain</code></td><td>string</td><td>도메인 필터</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/workflows</span>
+    <span class="endpoint-desc">워크플로우 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="required">필수</span></td><td>워크플로우 이름</td></tr>
+      <tr><td><code>domain</code></td><td>string</td><td><span class="optional">선택</span></td><td>도메인 (예: <code>cs</code>, <code>sales</code>)</td></tr>
+      <tr><td><code>triggerConfig</code></td><td>object</td><td><span class="required">필수</span></td><td>트리거 설정 (JSONB)</td></tr>
+      <tr><td><code>steps</code></td><td>array</td><td><span class="required">필수</span></td><td>스텝 배열. 각 스텝: <code>{id, type, config, dependsOn}</code></td></tr>
+      <tr><td><code>errorHandling</code></td><td>object</td><td><span class="optional">선택</span></td><td>에러 핸들링 정책</td></tr>
+      <tr><td><code>outputSchema</code></td><td>object</td><td><span class="optional">선택</span></td><td>출력 스키마</td></tr>
+    </table>
+    <p>스텝 타입: <code>LLM_CALL</code>, <code>TOOL_CALL</code>, <code>CONDITION</code>, <code>PARALLEL</code>, <code>HUMAN_INPUT</code></p>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/workflows/{id}</span>
+    <span class="endpoint-desc">워크플로우 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/workflows/{id}</span>
+    <span class="endpoint-desc">워크플로우 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/workflows/{id}</span>
+    <span class="endpoint-desc">워크플로우 삭제</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/workflows/{id}/run</span>
+    <span class="endpoint-desc">워크플로우 실행</span>
+  </div>
+  <div class="endpoint-body">
+    <p>202 Accepted. DAG를 비동기로 실행합니다.</p>
+    <h4>Request Body (선택)</h4>
+    <p>워크플로우 입력 변수 (JSON object)</p>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"id"</span>: <span class="json-str">"run-uuid"</span>,
+    <span class="json-key">"workflowId"</span>: <span class="json-str">"wf-uuid"</span>,
+    <span class="json-key">"status"</span>: <span class="json-str">"running"</span>,
+    <span class="json-key">"startedAt"</span>: <span class="json-str">"2026-03-25T10:00:00Z"</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/workflows/runs/{runId}/approve</span>
+    <span class="endpoint-desc">HUMAN_INPUT 스텝 승인/거부</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>approved</code></td><td>boolean</td><td>승인 여부</td></tr>
+      <tr><td><code>reason</code></td><td>string</td><td>사유</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/workflows/{id}/runs</span>
+    <span class="endpoint-desc">실행 이력 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/workflows/{id}/runs/{runId}</span>
+    <span class="endpoint-desc">실행 상세 조회</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="policies">Policies API</h2>
+<p class="desc">정책 관리. 액션 실행 전 정책 평가를 수행합니다. priority 내림차순으로 평가하며, 첫 DENY/REQUIRE_APPROVAL에서 중단합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/policies</span>
+    <span class="endpoint-desc">정책 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>page</code></td><td>int</td><td>페이지 번호 (기본: 0)</td></tr>
+      <tr><td><code>size</code></td><td>int</td><td>페이지 크기 (기본: 20)</td></tr>
+      <tr><td><code>domain</code></td><td>string</td><td>도메인 필터</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/policies</span>
+    <span class="endpoint-desc">정책 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="required">필수</span></td><td>정책 이름</td></tr>
+      <tr><td><code>domain</code></td><td>string</td><td><span class="optional">선택</span></td><td>적용 도메인</td></tr>
+      <tr><td><code>priority</code></td><td>int</td><td><span class="optional">선택</span></td><td>우선순위 (높을수록 먼저 평가, 기본: 0)</td></tr>
+      <tr><td><code>matchRules</code></td><td>object</td><td><span class="required">필수</span></td><td>매칭 규칙 (JSONB)</td></tr>
+      <tr><td><code>rules</code></td><td>array</td><td><span class="required">필수</span></td><td>정책 규칙 배열. 각 규칙의 action: <code>ALLOW</code>, <code>DENY</code>, <code>REQUIRE_APPROVAL</code></td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/policies/{id}</span>
+    <span class="endpoint-desc">정책 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/policies/{id}</span>
+    <span class="endpoint-desc">정책 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/policies/{id}</span>
+    <span class="endpoint-desc">정책 삭제</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method patch">PATCH</span>
+    <span class="endpoint-path">/api/v1/policies/{id}/activate?active={boolean}</span>
+    <span class="endpoint-desc">정책 활성화/비활성화</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/policies/simulate</span>
+    <span class="endpoint-desc">정책 시뮬레이션</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>intent</code></td><td>string</td><td><span class="required">필수</span></td><td>시뮬레이션할 인텐트</td></tr>
+      <tr><td><code>adapter</code></td><td>string</td><td><span class="optional">선택</span></td><td>어댑터 이름</td></tr>
+      <tr><td><code>sessionId</code></td><td>string</td><td><span class="optional">선택</span></td><td>세션 ID</td></tr>
+    </table>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"action"</span>: <span class="json-str">"ALLOW"</span>,
+    <span class="json-key">"triggered"</span>: <span class="json-num">2</span>,
+    <span class="json-key">"denyReason"</span>: <span class="json-str">""</span>,
+    <span class="json-key">"requiresApproval"</span>: <span class="json-bool">false</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="prompts">Prompts API</h2>
+<p class="desc">프롬프트 템플릿 관리. 버전 관리를 지원하며, <code>{{변수}}</code> 플레이스홀더로 동적 렌더링합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/prompts</span>
+    <span class="endpoint-desc">프롬프트 목록 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/prompts</span>
+    <span class="endpoint-desc">프롬프트 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>id</code></td><td>string</td><td><span class="optional">선택</span></td><td>프롬프트 ID (자동 생성)</td></tr>
+      <tr><td><code>version</code></td><td>int</td><td><span class="required">필수</span></td><td>버전 번호</td></tr>
+      <tr><td><code>domain</code></td><td>string</td><td><span class="optional">선택</span></td><td>도메인</td></tr>
+      <tr><td><code>type</code></td><td>string</td><td><span class="required">필수</span></td><td>프롬프트 타입 (<code>system</code>, <code>user</code>)</td></tr>
+      <tr><td><code>template</code></td><td>string</td><td><span class="required">필수</span></td><td>프롬프트 템플릿 (<code>{{변수}}</code> 사용)</td></tr>
+      <tr><td><code>variables</code></td><td>array</td><td><span class="optional">선택</span></td><td>변수 정의 배열</td></tr>
+      <tr><td><code>isActive</code></td><td>boolean</td><td><span class="optional">선택</span></td><td>활성 여부</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/prompts/{id}/{version}</span>
+    <span class="endpoint-desc">프롬프트 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/prompts/{id}/{version}</span>
+    <span class="endpoint-desc">프롬프트 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/prompts/{id}/{version}</span>
+    <span class="endpoint-desc">프롬프트 삭제</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/prompts/{id}/{version}/test</span>
+    <span class="endpoint-desc">프롬프트 테스트 렌더링</span>
+  </div>
+  <div class="endpoint-body">
+    <p>변수 값을 전달하여 렌더링된 결과와 토큰 추정치를 반환합니다.</p>
+    <h4>Request Body</h4>
+    <p>변수 키-값 JSON 객체</p>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"rendered"</span>: <span class="json-str">"렌더링된 프롬프트 텍스트"</span>,
+    <span class="json-key">"tokenEstimate"</span>: <span class="json-num">125</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="schemas">Schemas API</h2>
+<p class="desc">JSON 스키마 관리. 구조화된 출력(CR-007)에서 참조하거나, 데이터 유효성 검증에 사용합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/schemas</span>
+    <span class="endpoint-desc">스키마 목록 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/schemas</span>
+    <span class="endpoint-desc">스키마 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>id</code></td><td>string</td><td><span class="optional">선택</span></td><td>스키마 ID</td></tr>
+      <tr><td><code>version</code></td><td>int</td><td><span class="required">필수</span></td><td>버전 번호</td></tr>
+      <tr><td><code>domain</code></td><td>string</td><td><span class="optional">선택</span></td><td>도메인</td></tr>
+      <tr><td><code>description</code></td><td>string</td><td><span class="optional">선택</span></td><td>설명</td></tr>
+      <tr><td><code>jsonSchema</code></td><td>object</td><td><span class="required">필수</span></td><td>JSON Schema 정의</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/schemas/{id}/{version}</span>
+    <span class="endpoint-desc">스키마 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/schemas/{id}/{version}</span>
+    <span class="endpoint-desc">스키마 삭제</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/schemas/{id}/{version}/validate</span>
+    <span class="endpoint-desc">데이터 유효성 검증</span>
+  </div>
+  <div class="endpoint-body">
+    <p>Request Body로 검증할 데이터 JSON을 전달합니다.</p>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"valid"</span>: <span class="json-bool">true</span>,
+    <span class="json-key">"errors"</span>: []
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="speech">Speech API (TTS/STT)</h2>
+<p class="desc">OpenAI TTS/STT API 프록시. 테넌트의 OpenAI Connection에서 API 키를 자동으로 가져와 요청을 중계합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/speech/tts</span>
+    <span class="endpoint-desc">Text-to-Speech</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Request Body</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>text</code></td><td>string</td><td><span class="required">필수</span></td><td>음성으로 변환할 텍스트</td></tr>
+      <tr><td><code>model</code></td><td>string</td><td><span class="optional">선택</span></td><td>모델 (기본: <code>tts-1</code>). <code>tts-1-hd</code> 가능</td></tr>
+      <tr><td><code>voice</code></td><td>string</td><td><span class="optional">선택</span></td><td>음성 (기본: <code>alloy</code>). <code>echo</code>, <code>fable</code>, <code>onyx</code>, <code>nova</code>, <code>shimmer</code></td></tr>
+      <tr><td><code>speed</code></td><td>double</td><td><span class="optional">선택</span></td><td>재생 속도 (기본: 1.0, 범위: 0.25~4.0)</td></tr>
+    </table>
+    <p>Response: <code>audio/mpeg</code> 바이너리 스트림</p>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/speech/stt</span>
+    <span class="endpoint-desc">Speech-to-Text (Whisper)</span>
+  </div>
+  <div class="endpoint-body">
+    <p><code>multipart/form-data</code> 형식.</p>
+    <h4>Request Parameters</h4>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>file</code></td><td>file</td><td><span class="required">필수</span></td><td>오디오 파일</td></tr>
+      <tr><td><code>model</code></td><td>string</td><td><span class="optional">선택</span></td><td>모델 (기본: <code>whisper-1</code>)</td></tr>
+      <tr><td><code>language</code></td><td>string</td><td><span class="optional">선택</span></td><td>언어 코드 (기본: <code>ko</code>)</td></tr>
+    </table>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"text"</span>: <span class="json-str">"인식된 텍스트"</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="evaluations">Evaluations API</h2>
+<p class="desc">RAG 품질 평가, LLM 출력 평가, 프롬프트 회귀 테스트, RAGAS 배치 평가를 지원합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/evaluations/status</span>
+    <span class="endpoint-desc">평가 서비스 가용 상태 확인</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/evaluations/rag</span>
+    <span class="endpoint-desc">RAG 품질 평가 (단건)</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>question</code></td><td>string</td><td><span class="required">필수</span></td><td>질문</td></tr>
+      <tr><td><code>answer</code></td><td>string</td><td><span class="required">필수</span></td><td>생성된 답변</td></tr>
+      <tr><td><code>contexts</code></td><td>string[]</td><td><span class="required">필수</span></td><td>검색된 컨텍스트 목록</td></tr>
+      <tr><td><code>groundTruth</code></td><td>string</td><td><span class="optional">선택</span></td><td>정답 (없으면 ground_truth 없이 평가)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/evaluations/llm-output</span>
+    <span class="endpoint-desc">LLM 출력 평가</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>inputText</code></td><td>string</td><td><span class="required">필수</span></td><td>입력 텍스트</td></tr>
+      <tr><td><code>outputText</code></td><td>string</td><td><span class="required">필수</span></td><td>LLM 출력 텍스트</td></tr>
+      <tr><td><code>context</code></td><td>string</td><td><span class="optional">선택</span></td><td>컨텍스트</td></tr>
+      <tr><td><code>metrics</code></td><td>string[]</td><td><span class="optional">선택</span></td><td>평가 메트릭: <code>hallucination</code>, <code>toxicity</code></td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/evaluations/prompt-comparison</span>
+    <span class="endpoint-desc">프롬프트 회귀 테스트</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>testCases</code></td><td>array</td><td><span class="required">필수</span></td><td><code>[{input, expected_output}]</code></td></tr>
+      <tr><td><code>promptA</code></td><td>object</td><td><span class="required">필수</span></td><td><code>{id, version, template}</code></td></tr>
+      <tr><td><code>promptB</code></td><td>object</td><td><span class="required">필수</span></td><td><code>{id, version, template}</code></td></tr>
+      <tr><td><code>metrics</code></td><td>string[]</td><td><span class="optional">선택</span></td><td>평가 메트릭 (<code>relevancy</code> 등)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/evaluations/rag-quality</span>
+    <span class="endpoint-desc">RAGAS 배치 평가 실행 (비동기)</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>sourceId</code></td><td>string</td><td><span class="required">필수</span></td><td>평가 대상 소스 ID</td></tr>
+      <tr><td><code>testSet</code></td><td>array</td><td><span class="optional">선택</span></td><td><code>[{question, ground_truth?, expected_contexts?}]</code></td></tr>
+      <tr><td><code>config</code></td><td>object</td><td><span class="optional">선택</span></td><td><code>{top_k, metrics}</code></td></tr>
+      <tr><td><code>mode</code></td><td>string</td><td><span class="optional">선택</span></td><td><code>fast</code> (임베딩 유사도) 또는 <code>accurate</code> (LLM Judge)</td></tr>
+    </table>
+    <h4>Response (202)</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"evaluation_id"</span>: <span class="json-str">"uuid"</span>,
+    <span class="json-key">"status"</span>: <span class="json-str">"running"</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/evaluations/rag-quality/{id}</span>
+    <span class="endpoint-desc">평가 결과 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/evaluations/rag-quality?source_id={sourceId}</span>
+    <span class="endpoint-desc">소스별 평가 이력 조회</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="connections">Connections API</h2>
+<p class="desc">외부 시스템 연결 관리. LLM 프로바이더, 쓰기 어댑터, 알림 어댑터를 등록하고 테스트합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/connections</span>
+    <span class="endpoint-desc">연결 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>page</code></td><td>int</td><td>페이지 번호 (기본: 0)</td></tr>
+      <tr><td><code>size</code></td><td>int</td><td>페이지 크기 (기본: 20)</td></tr>
+      <tr><td><code>type</code></td><td>string</td><td>타입 필터 (<code>llm</code>, <code>write</code>, <code>notify</code>)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/connections</span>
+    <span class="endpoint-desc">연결 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="required">필수</span></td><td>연결 이름</td></tr>
+      <tr><td><code>adapter</code></td><td>string</td><td><span class="required">필수</span></td><td>어댑터 (<code>anthropic</code>, <code>openai</code>, <code>ollama</code>, ...)</td></tr>
+      <tr><td><code>type</code></td><td>string</td><td><span class="required">필수</span></td><td>타입: <code>llm</code>, <code>write</code>, <code>notify</code></td></tr>
+      <tr><td><code>config</code></td><td>object</td><td><span class="optional">선택</span></td><td>어댑터별 설정 (예: <code>{api_key, model}</code>)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/connections/{id}</span>
+    <span class="endpoint-desc">연결 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/connections/{id}</span>
+    <span class="endpoint-desc">연결 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/connections/{id}</span>
+    <span class="endpoint-desc">연결 삭제</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/connections/{id}/test</span>
+    <span class="endpoint-desc">연결 테스트</span>
+  </div>
+  <div class="endpoint-body">
+    <p>실제 API 호출로 연결 상태를 확인합니다. 성공 시 상태를 <code>connected</code>로, 실패 시 <code>error</code>로 업데이트합니다.</p>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"ok"</span>: <span class="json-bool">true</span>,
+    <span class="json-key">"latencyMs"</span>: <span class="json-num">245</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="roles">Roles API</h2>
+<p class="desc">역할 관리. RBAC 기반 권한 제어를 위한 역할을 정의합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/roles</span>
+    <span class="endpoint-desc">역할 목록 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/roles</span>
+    <span class="endpoint-desc">역할 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="required">필수</span></td><td>역할 이름</td></tr>
+      <tr><td><code>permissions</code></td><td>object</td><td><span class="required">필수</span></td><td>권한 설정 (JSONB)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/roles/{id}</span>
+    <span class="endpoint-desc">역할 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/roles/{id}</span>
+    <span class="endpoint-desc">역할 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/roles/{id}</span>
+    <span class="endpoint-desc">역할 삭제</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="users">Users API</h2>
+<p class="desc">사용자 관리. 생성, 수정, 비활성화, API 키 발급을 지원합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/users</span>
+    <span class="endpoint-desc">사용자 목록 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/users</span>
+    <span class="endpoint-desc">사용자 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>email</code></td><td>string</td><td><span class="required">필수</span></td><td>이메일 (유일)</td></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="optional">선택</span></td><td>사용자 이름</td></tr>
+      <tr><td><code>roleId</code></td><td>string</td><td><span class="optional">선택</span></td><td>역할 ID</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/users/{id}</span>
+    <span class="endpoint-desc">사용자 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/users/{id}</span>
+    <span class="endpoint-desc">사용자 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/users/{id}</span>
+    <span class="endpoint-desc">사용자 비활성화 (soft delete)</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/users/{id}/api-key</span>
+    <span class="endpoint-desc">API 키 재발급</span>
+  </div>
+  <div class="endpoint-body">
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"apiKey"</span>: <span class="json-str">"plat-a1b2c3d4e5f6..."</span>,
+    <span class="json-key">"note"</span>: <span class="json-str">"이 키는 다시 조회할 수 없습니다. 안전한 곳에 저장하세요."</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="routing">Routing API</h2>
+<p class="desc">LLM 라우팅 설정 관리. 모델 선택 전략, 라우팅 규칙, 폴백 체인을 설정합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/routing</span>
+    <span class="endpoint-desc">라우팅 설정 목록 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/routing/active</span>
+    <span class="endpoint-desc">활성 라우팅 설정 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/routing</span>
+    <span class="endpoint-desc">라우팅 설정 생성</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>strategy</code></td><td>string</td><td><span class="required">필수</span></td><td>전략 (<code>cost_optimized</code>, <code>performance</code>, <code>round_robin</code>)</td></tr>
+      <tr><td><code>rules</code></td><td>array</td><td><span class="required">필수</span></td><td>라우팅 규칙 배열 (JSONB)</td></tr>
+      <tr><td><code>fallbackChain</code></td><td>string[]</td><td><span class="optional">선택</span></td><td>폴백 연결 ID 체인</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/routing/{id}</span>
+    <span class="endpoint-desc">라우팅 설정 상세</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/routing/{id}</span>
+    <span class="endpoint-desc">라우팅 설정 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/routing/{id}</span>
+    <span class="endpoint-desc">라우팅 설정 삭제</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="mcp-servers">MCP Servers API</h2>
+<p class="desc">MCP(Model Context Protocol) 서버 관리. 외부 MCP 서버를 등록하고 도구를 탐색합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/mcp-servers</span>
+    <span class="endpoint-desc">MCP 서버 목록 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/mcp-servers</span>
+    <span class="endpoint-desc">MCP 서버 등록</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="required">필수</span></td><td>서버 이름</td></tr>
+      <tr><td><code>transport</code></td><td>string</td><td><span class="required">필수</span></td><td>전송 방식: <code>sse</code>, <code>stdio</code></td></tr>
+      <tr><td><code>config</code></td><td>object</td><td><span class="required">필수</span></td><td>서버 설정 (예: <code>{url, command, args}</code>)</td></tr>
+      <tr><td><code>autoStart</code></td><td>boolean</td><td><span class="optional">선택</span></td><td>자동 시작 (기본: true)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/mcp-servers/{id}</span>
+    <span class="endpoint-desc">MCP 서버 상세 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/mcp-servers/{id}</span>
+    <span class="endpoint-desc">MCP 서버 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/mcp-servers/{id}</span>
+    <span class="endpoint-desc">MCP 서버 삭제</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/mcp-servers/{id}/discover</span>
+    <span class="endpoint-desc">도구 목록 탐색 및 등록</span>
+  </div>
+  <div class="endpoint-body">
+    <p>MCP 서버에 연결하여 제공하는 도구 목록을 자동 탐색하고 ToolRegistry에 등록합니다.</p>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"serverId"</span>: <span class="json-str">"server-uuid"</span>,
+    <span class="json-key">"toolCount"</span>: <span class="json-num">12</span>,
+    <span class="json-key">"tools"</span>: [
+      { <span class="json-key">"name"</span>: <span class="json-str">"search_hybrid"</span>, <span class="json-key">"description"</span>: <span class="json-str">"..."</span>, <span class="json-key">"inputSchema"</span>: {} }
+    ]
+  }
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/mcp-servers/{id}/disconnect</span>
+    <span class="endpoint-desc">MCP 서버 연결 해제</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tools">Tools API</h2>
+<p class="desc">ToolRegistry에 등록된 모든 도구(빌트인 + MCP 도구) 목록을 조회합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/tools</span>
+    <span class="endpoint-desc">등록된 도구 전체 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>source</code></td><td>string</td><td>소스 필터</td></tr>
+      <tr><td><code>category</code></td><td>string</td><td>카테고리 필터</td></tr>
+    </table>
+    <h4>Response</h4>
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"tools"</span>: [
+      {
+        <span class="json-key">"name"</span>: <span class="json-str">"search_hybrid"</span>,
+        <span class="json-key">"description"</span>: <span class="json-str">"Hybrid search combining BM25 and vector"</span>,
+        <span class="json-key">"parameters"</span>: { ... }
+      }
+    ],
+    <span class="json-key">"count"</span>: <span class="json-num">42</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="models">Models API</h2>
+<p class="desc">사용 가능한 LLM 모델 목록을 조회합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/models</span>
+    <span class="endpoint-desc">지원 모델 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+<pre><code>{
+  <span class="json-key">"data"</span>: [
+    { <span class="json-key">"id"</span>: <span class="json-str">"anthropic/claude-3-5-sonnet-20241022"</span>, <span class="json-key">"provider"</span>: <span class="json-str">"anthropic"</span>, <span class="json-key">"model"</span>: <span class="json-str">"claude-3-5-sonnet-20241022"</span> },
+    { <span class="json-key">"id"</span>: <span class="json-str">"openai/gpt-4o"</span>, <span class="json-key">"provider"</span>: <span class="json-str">"openai"</span>, <span class="json-key">"model"</span>: <span class="json-str">"gpt-4o"</span> }
+  ]
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="extensions">Extensions API</h2>
+<p class="desc">플랫폼에 로드된 Extension 목록과 각 Extension이 제공하는 Tool을 조회합니다.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/extensions</span>
+    <span class="endpoint-desc">로드된 Extension 목록 조회</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="admin">Admin API</h2>
+<p class="desc">관리 및 모니터링 API. 대시보드, 사용량, 비용, 감사 로그, 트레이스, 승인 관리.</p>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/admin/dashboard</span>
+    <span class="endpoint-desc">대시보드 통계</span>
+  </div>
+  <div class="endpoint-body">
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"cost_today_usd"</span>: <span class="json-num">12.34</span>,
+    <span class="json-key">"tokens_today"</span>: <span class="json-num">45000</span>,
+    <span class="json-key">"pending_approvals"</span>: <span class="json-num">3</span>,
+    <span class="json-key">"active_connections"</span>: <span class="json-num">5</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/admin/action-logs</span>
+    <span class="endpoint-desc">액션 실행 로그</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/admin/audit-logs</span>
+    <span class="endpoint-desc">감사 로그</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/admin/usage</span>
+    <span class="endpoint-desc">사용량/비용 통계</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/admin/traces</span>
+    <span class="endpoint-desc">LLM 트레이스 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>session_id</code></td><td>string</td><td>세션 ID 필터</td></tr>
+      <tr><td><code>model</code></td><td>string</td><td>모델명 필터</td></tr>
+      <tr><td><code>from</code></td><td>datetime</td><td>시작 일시</td></tr>
+      <tr><td><code>to</code></td><td>datetime</td><td>종료 일시</td></tr>
+      <tr><td><code>page</code></td><td>int</td><td>페이지 번호 (기본: 0)</td></tr>
+      <tr><td><code>size</code></td><td>int</td><td>페이지 크기 (기본: 50)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/admin/approvals</span>
+    <span class="endpoint-desc">승인 대기 목록</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/admin/approvals/{id}/approve</span>
+    <span class="endpoint-desc">승인</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>reason</code></td><td>string</td><td>승인 사유</td></tr>
+      <tr><td><code>approved_by</code></td><td>string</td><td>승인자</td></tr>
+    </table>
+    <p>워크플로우 HUMAN_INPUT 스텝인 경우 자동으로 <code>WorkflowEngine.resume()</code> 호출</p>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/admin/approvals/{id}/reject</span>
+    <span class="endpoint-desc">거부</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>reason</code></td><td>string</td><td>거부 사유</td></tr>
+      <tr><td><code>rejected_by</code></td><td>string</td><td>거부자</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/admin/cost-breakdown?days={n}</span>
+    <span class="endpoint-desc">모델별 비용 집계</span>
+  </div>
+  <div class="endpoint-body">
+<pre><code>{
+  <span class="json-key">"data"</span>: [
+    {
+      <span class="json-key">"model"</span>: <span class="json-str">"claude-3-5-sonnet-20241022"</span>,
+      <span class="json-key">"provider"</span>: <span class="json-str">"anthropic"</span>,
+      <span class="json-key">"total_input_tokens"</span>: <span class="json-num">1500000</span>,
+      <span class="json-key">"total_output_tokens"</span>: <span class="json-num">450000</span>,
+      <span class="json-key">"total_cost_usd"</span>: <span class="json-num">15.75</span>
+    }
+  ]
+}</code></pre>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/admin/cost-trend?days={n}</span>
+    <span class="endpoint-desc">일별 비용 추이</span>
+  </div>
+  <div class="endpoint-body">
+<pre><code>{
+  <span class="json-key">"data"</span>: [
+    {
+      <span class="json-key">"date"</span>: <span class="json-str">"2026-03-25"</span>,
+      <span class="json-key">"model"</span>: <span class="json-str">"claude-3-5-sonnet-20241022"</span>,
+      <span class="json-key">"input_tokens"</span>: <span class="json-num">50000</span>,
+      <span class="json-key">"output_tokens"</span>: <span class="json-num">15000</span>,
+      <span class="json-key">"cost_usd"</span>: <span class="json-num">0.52</span>
+    }
+  ]
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="platform">Platform API (Super Admin)</h2>
+<p class="desc">슈퍼어드민 전용 플랫폼 관리 API. Master DB만 접근하며, 테넌트 프로비저닝/구독 관리를 담당합니다.</p>
+
+<div class="warn-box">
+  <strong>접근 제한:</strong> <code>/api/v1/platform/**</code> 경로는 Super Admin 전용입니다. TenantResolver가 이 경로에서는 TenantContext 설정을 건너뛰며, Master DB만 사용합니다.
+</div>
+
+<h3>테넌트 관리</h3>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/platform/tenants</span>
+    <span class="endpoint-desc">테넌트 목록 조회</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>status</code></td><td>string</td><td>상태 필터 (<code>active</code>, <code>suspended</code>)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/platform/tenants</span>
+    <span class="endpoint-desc">테넌트 생성 (자동 프로비저닝)</span>
+  </div>
+  <div class="endpoint-body">
+    <p>DB 생성, Flyway 마이그레이션, 관리자 계정 생성, 구독 초기화를 자동 수행합니다.</p>
+    <table>
+      <tr><th>필드</th><th>타입</th><th>필수</th><th>설명</th></tr>
+      <tr><td><code>tenantId</code></td><td>string</td><td><span class="required">필수</span></td><td>테넌트 ID</td></tr>
+      <tr><td><code>name</code></td><td>string</td><td><span class="required">필수</span></td><td>테넌트 이름</td></tr>
+      <tr><td><code>adminEmail</code></td><td>string</td><td><span class="required">필수</span></td><td>관리자 이메일</td></tr>
+      <tr><td><code>initialAdminPassword</code></td><td>string</td><td><span class="required">필수</span></td><td>초기 관리자 비밀번호</td></tr>
+      <tr><td><code>plan</code></td><td>string</td><td><span class="optional">선택</span></td><td>구독 플랜 (<code>free</code>, <code>pro</code>, <code>enterprise</code>)</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/platform/tenants/{id}</span>
+    <span class="endpoint-desc">테넌트 상세 조회 (구독, 사용량 포함)</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/platform/tenants/{id}</span>
+    <span class="endpoint-desc">테넌트 정보 수정</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/platform/tenants/{id}/suspend</span>
+    <span class="endpoint-desc">테넌트 중지 (DataSource 캐시 제거)</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method post">POST</span>
+    <span class="endpoint-path">/api/v1/platform/tenants/{id}/activate</span>
+    <span class="endpoint-desc">테넌트 활성화 (DataSource 재등록)</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method delete">DELETE</span>
+    <span class="endpoint-path">/api/v1/platform/tenants/{id}</span>
+    <span class="endpoint-desc">테넌트 삭제 (DB 포함 완전 삭제)</span>
+  </div>
+</div>
+
+<h3>구독/쿼터 관리</h3>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/platform/subscriptions</span>
+    <span class="endpoint-desc">구독 목록 조회</span>
+  </div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method put">PUT</span>
+    <span class="endpoint-path">/api/v1/platform/subscriptions/{tenantId}</span>
+    <span class="endpoint-desc">쿼터/플랜 변경</span>
+  </div>
+  <div class="endpoint-body">
+    <table>
+      <tr><th>필드</th><th>타입</th><th>설명</th></tr>
+      <tr><td><code>plan</code></td><td>string</td><td>구독 플랜</td></tr>
+      <tr><td><code>llmMonthlyTokenQuota</code></td><td>long</td><td>월간 토큰 쿼터</td></tr>
+      <tr><td><code>maxConnections</code></td><td>int</td><td>최대 연결 수</td></tr>
+      <tr><td><code>maxKnowledgeSources</code></td><td>int</td><td>최대 지식 소스 수</td></tr>
+      <tr><td><code>maxWorkflows</code></td><td>int</td><td>최대 워크플로우 수</td></tr>
+      <tr><td><code>storageGb</code></td><td>int</td><td>스토리지 용량 (GB)</td></tr>
+    </table>
+  </div>
+</div>
+
+<h3>플랫폼 사용량</h3>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method get">GET</span>
+    <span class="endpoint-path">/api/v1/platform/usage</span>
+    <span class="endpoint-desc">전체 플랫폼 사용량 대시보드</span>
+  </div>
+  <div class="endpoint-body">
+<pre><code>{
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"totalTenants"</span>: <span class="json-num">10</span>,
+    <span class="json-key">"activeTenants"</span>: <span class="json-num">8</span>,
+    <span class="json-key">"suspendedTenants"</span>: <span class="json-num">2</span>,
+    <span class="json-key">"totalSubscriptions"</span>: <span class="json-num">10</span>
+  }
+}</code></pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="mcp-tools">내부 MCP Tool 목록</h2>
+<p class="desc">Python Sidecar(FastMCP)에서 제공하는 내부 MCP 도구 전체 목록. LLM 오케스트레이터가 도구 호출 시 자동으로 사용합니다.</p>
+
+<h3>RAG 기본 도구</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">chunk_document</div>
+  <div class="mcp-tool-desc">문서를 시맨틱 청크로 분할. semantic, recursive, fixed 전략 지원. 한국어 문장 분리 지원.</div>
+  <div class="mcp-tool-params">
+    <span>content: str</span> <span>strategy: str = "semantic"</span> <span>config: str = "{}"</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">embed_texts</div>
+  <div class="mcp-tool-desc">텍스트 배열의 임베딩 벡터 생성. 기본 모델: BGE-M3 (1024차원).</div>
+  <div class="mcp-tool-params">
+    <span>texts: list[str]</span> <span>model: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">search_hybrid</div>
+  <div class="mcp-tool-desc">BM25 키워드 + 벡터 시맨틱 하이브리드 검색. RRF(Reciprocal Rank Fusion) 점수 결합.</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>source_id: str</span> <span>top_k: int = 5</span> <span>vector_weight: float = 0.7</span> <span>keyword_weight: float = 0.3</span> <span>embedding_model: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">rerank_results</div>
+  <div class="mcp-tool-desc">Cross-encoder로 검색 결과 재정렬. 기본: ms-marco-MiniLM-L-6-v2.</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>documents: str</span> <span>top_k: int = 5</span> <span>model: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">ingest_document</div>
+  <div class="mcp-tool-desc">전체 인제스션 파이프라인: 파싱 &rarr; 청킹 &rarr; 임베딩 &rarr; pgvector 저장.</div>
+  <div class="mcp-tool-params">
+    <span>source_id: str</span> <span>content: str</span> <span>document_id: str = ""</span> <span>chunking_strategy: str = "semantic"</span> <span>chunking_config: str = "{}"</span> <span>embedding_model: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">ingest_file</div>
+  <div class="mcp-tool-desc">파일 기반 인제스션: 파일 읽기 &rarr; 파싱 &rarr; 청킹 &rarr; 임베딩 &rarr; 저장. PDF, DOCX, PPTX, CSV 등 지원.</div>
+  <div class="mcp-tool-params">
+    <span>source_id: str</span> <span>file_path: str</span> <span>storage_base_path: str</span> <span>document_id: str = ""</span> <span>chunking_strategy: str = "semantic"</span> <span>chunking_config: str = "{}"</span> <span>embedding_model: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">parse_document</div>
+  <div class="mcp-tool-desc">Base64 인코딩된 문서 파일을 텍스트 + 메타데이터로 파싱. PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT, MD 지원.</div>
+  <div class="mcp-tool-params">
+    <span>file_content: str</span> <span>file_type: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">compress_context</div>
+  <div class="mcp-tool-desc">쿼리와 유사도가 낮은 문장을 제거하여 컨텍스트 압축. 한국어 문장 경계 처리.</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>documents: str</span> <span>similarity_threshold: float = 0.5</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">self_rag_search</div>
+  <div class="mcp-tool-desc">Self-RAG: 자동 쿼리 리파인먼트 검색. 결과 품질 평가 후 쿼리 변환 재검색.</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>source_id: str</span> <span>top_k: int = 5</span> <span>min_score: float = 0.5</span> <span>max_iterations: int = 2</span>
+  </div>
+</div>
+
+<h3>RAG 고급 도구 (A++)</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">contextual_chunk</div>
+  <div class="mcp-tool-desc">Anthropic Contextual Retrieval 기법. 각 청크에 문서 전체 맥락 접두사 부여 (검색 정확도 49% 향상).</div>
+  <div class="mcp-tool-params">
+    <span>content: str</span> <span>document_context: str = ""</span> <span>chunking_config: str = "{}"</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">parent_child_search</div>
+  <div class="mcp-tool-desc">Parent-Child 계층 검색. 작은 child 청크로 정밀 매칭 &rarr; 큰 parent 청크 반환.</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>source_id: str</span> <span>top_k: int = 5</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">transform_query</div>
+  <div class="mcp-tool-desc">쿼리 변환. HyDE(가상 문서 임베딩), Multi-Query(다양한 변형), Step-Back(추상화).</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>strategy: str = "multi_query"</span> <span>llm_config: str = "{}"</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">advanced_parse</div>
+  <div class="mcp-tool-desc">고급 문서 파싱. 섹션(제목), 테이블, 메타데이터 구조 보존. PDF, HTML, Markdown 지원.</div>
+  <div class="mcp-tool-params">
+    <span>file_content: str</span> <span>file_type: str = ""</span> <span>config: str = "{}"</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">cache_lookup</div>
+  <div class="mcp-tool-desc">시맨틱 캐시 조회. pgvector 코사인 유사도 기반, 임계값 0.95.</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>source_id: str</span> <span>threshold: float = 0.95</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">cache_store</div>
+  <div class="mcp-tool-desc">시맨틱 캐시 저장. 쿼리-응답 쌍을 벡터와 함께 저장.</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>source_id: str</span> <span>response_text: str</span> <span>metadata: str = "{}"</span> <span>ttl_hours: int = 24</span>
+  </div>
+</div>
+
+<h3>평가 도구</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">evaluate_rag</div>
+  <div class="mcp-tool-desc">RAGAS 메트릭 기반 RAG 품질 평가. faithfulness, context_relevancy, answer_relevancy 등. fast/accurate 모드.</div>
+  <div class="mcp-tool-params">
+    <span>source_id: str</span> <span>test_set: str = "[]"</span> <span>config: str = "{}"</span> <span>mode: str = "fast"</span>
+  </div>
+</div>
+
+<h3>임베딩 고급 도구</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">embed_multimodal</div>
+  <div class="mcp-tool-desc">CLIP 모델 멀티모달 임베딩. 텍스트와 이미지를 동일 벡터 공간에 임베딩.</div>
+  <div class="mcp-tool-params">
+    <span>items: str</span> <span>model: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">finetune_embeddings</div>
+  <div class="mcp-tool-desc">도메인 특화 임베딩 모델 파인튜닝. (query, positive, negative) 트리플렛 기반.</div>
+  <div class="mcp-tool-params">
+    <span>base_model: str = ""</span> <span>training_data: str = "[]"</span> <span>epochs: int = 3</span> <span>batch_size: int = 16</span> <span>output_dir: str = ""</span>
+  </div>
+</div>
+
+<h3>웹 도구</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">scrape_url</div>
+  <div class="mcp-tool-desc">웹 페이지 스크래핑 (robots.txt 준수). basic, js_render, sitemap 모드.</div>
+  <div class="mcp-tool-params">
+    <span>url: str</span> <span>mode: str = "basic"</span> <span>max_pages: int = 10</span> <span>timeout_ms: int = 30000</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">web_search</div>
+  <div class="mcp-tool-desc">웹 검색 수행 후 결과 반환.</div>
+  <div class="mcp-tool-params">
+    <span>query: str</span> <span>max_results: int = 5</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">web_fetch</div>
+  <div class="mcp-tool-desc">URL에서 깨끗한 콘텐츠 추출. text, html, markdown 모드.</div>
+  <div class="mcp-tool-params">
+    <span>url: str</span> <span>extract_mode: str = "text"</span>
+  </div>
+</div>
+
+<h3>문서 생성 도구</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">generate_document</div>
+  <div class="mcp-tool-desc">LLM 생성 Python 코드 실행으로 문서 생성. PPTX, DOCX, PDF, XLSX, CSV, HTML 지원.</div>
+  <div class="mcp-tool-params">
+    <span>code: str</span> <span>output_format: str = "pptx"</span> <span>output_filename: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">list_document_formats</div>
+  <div class="mcp-tool-desc">지원 문서 포맷 목록 및 라이브러리 설치 상태 반환.</div>
+  <div class="mcp-tool-params">(파라미터 없음)</div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">generate_document_from_schema</div>
+  <div class="mcp-tool-desc">구조화된 JSON 스키마에서 테마 적용하여 문서 생성 (CR-013). 코드 실행 없이 안정적.</div>
+  <div class="mcp-tool-params">
+    <span>schema: str</span> <span>output_format: str = "pptx"</span> <span>theme_name: str = "default"</span> <span>custom_theme: str = "{}"</span> <span>output_filename: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">validate_document_schema</div>
+  <div class="mcp-tool-desc">문서 스키마 구조 검증. 필수 필드, 레이아웃 타입, 콘텐츠 형식 확인.</div>
+  <div class="mcp-tool-params">
+    <span>schema: str</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">list_document_themes</div>
+  <div class="mcp-tool-desc">사용 가능한 문서 테마/프리셋 목록. default, corporate_blue, modern_dark, minimal, warm.</div>
+  <div class="mcp-tool-params">(파라미터 없음)</div>
+</div>
+
+<h3>템플릿 관리 도구</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">save_document_template</div>
+  <div class="mcp-tool-desc">재사용 가능한 문서 템플릿 저장. {{variable}} 플레이스홀더 자동 추출.</div>
+  <div class="mcp-tool-params">
+    <span>name: str</span> <span>format: str</span> <span>template_type: str = "code"</span> <span>code_template: str = ""</span> <span>variables: str = "[]"</span> <span>description: str = ""</span> <span>tags: str = "[]"</span> <span>created_by: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">list_document_templates</div>
+  <div class="mcp-tool-desc">저장된 문서 템플릿 목록 조회. format, template_type 필터 지원.</div>
+  <div class="mcp-tool-params">
+    <span>format: str = ""</span> <span>template_type: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">get_document_template</div>
+  <div class="mcp-tool-desc">문서 템플릿 상세 조회 (코드 포함).</div>
+  <div class="mcp-tool-params">
+    <span>template_id: str</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">delete_document_template</div>
+  <div class="mcp-tool-desc">문서 템플릿 삭제.</div>
+  <div class="mcp-tool-params">
+    <span>template_id: str</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">render_document_template</div>
+  <div class="mcp-tool-desc">저장된 템플릿으로 문서 생성. code 타입: 변수 치환 후 코드 실행. file 타입: PPTX/DOCX 내 텍스트 치환.</div>
+  <div class="mcp-tool-params">
+    <span>template_id: str</span> <span>variables: str = "{}"</span> <span>output_format: str = ""</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">upload_file_template</div>
+  <div class="mcp-tool-desc">PPTX/DOCX 파일을 템플릿으로 업로드. {{variable}} 플레이스홀더 자동 추출.</div>
+  <div class="mcp-tool-params">
+    <span>name: str</span> <span>format: str</span> <span>file_base64: str</span> <span>original_filename: str = ""</span> <span>description: str = ""</span> <span>tags: str = "[]"</span>
+  </div>
+</div>
+
+<h3>문서 읽기 도구</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">read_pptx</div>
+  <div class="mcp-tool-desc">PPTX 파일 읽기. 모든 슬라이드의 텍스트, 테이블, 이미지, 레이아웃 추출.</div>
+  <div class="mcp-tool-params">
+    <span>file_base64: str</span> <span>output_mode: str = "json"</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">read_docx</div>
+  <div class="mcp-tool-desc">DOCX 파일 읽기. 문단, 테이블, 이미지, 헤더/푸터, 스타일 추출.</div>
+  <div class="mcp-tool-params">
+    <span>file_base64: str</span> <span>output_mode: str = "json"</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">read_excel</div>
+  <div class="mcp-tool-desc">XLSX/CSV 파일 읽기. 시트별 JSON 변환.</div>
+  <div class="mcp-tool-params">
+    <span>file_base64: str</span> <span>sheet_name: str = ""</span> <span>max_rows: int = 0</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">read_pdf</div>
+  <div class="mcp-tool-desc">PDF 파일 읽기. 페이지별 텍스트/구조 추출. OCR 선택 가능.</div>
+  <div class="mcp-tool-params">
+    <span>file_base64: str</span> <span>extract_images: bool = False</span> <span>ocr_enabled: bool = False</span>
+  </div>
+</div>
+
+<h3>유틸리티 도구</h3>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">convert_format</div>
+  <div class="mcp-tool-desc">문서 포맷 변환 (LibreOffice 사용). DOCX, PDF, PPTX, HTML, XLSX 등 상호 변환.</div>
+  <div class="mcp-tool-params">
+    <span>file_base64: str</span> <span>input_format: str</span> <span>output_format: str</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">run_python</div>
+  <div class="mcp-tool-desc">샌드박스 환경에서 Python 코드 실행. OUTPUT_DIR로 파일 생성 가능.</div>
+  <div class="mcp-tool-params">
+    <span>code: str</span> <span>timeout: int = 30</span>
+  </div>
+</div>
+
+<div class="mcp-tool">
+  <div class="mcp-tool-name">render_chart</div>
+  <div class="mcp-tool-desc">데이터를 차트 이미지로 렌더링. bar, line, pie, scatter, hbar 지원.</div>
+  <div class="mcp-tool-params">
+    <span>chart_type: str</span> <span>data: str</span> <span>title: str = ""</span> <span>options: str = "{}"</span>
+  </div>
+</div>
+
+<div style="text-align: center; padding: 40px 0; color: var(--text-secondary); font-size: 13px; border-top: 1px solid var(--border); margin-top: 48px;">
+  LexAI Engine API Reference v3.0 &middot; Generated 2026-03-25
+</div>
+
+</main>
+</div>
+
+</body>
+</html>

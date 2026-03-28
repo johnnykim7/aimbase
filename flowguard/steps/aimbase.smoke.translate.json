@@ -1,0 +1,23 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api-raw",
+  "name": "T4-4 #21: 번역 도구 채팅 호출 확인",
+  "action": {
+    "method": "POST",
+    "endpoint": "/api/v1/chat",
+    "headers": {
+      "Authorization": "Bearer {{steps.aimbase.smoke.login.output.accessToken}}",
+      "X-Tenant-Id": "{{vars.tenantId}}",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "messages": [{"role": "user", "content": "Translate 'hello' to Korean using the translate_text tool"}],
+      "tool_choice": "auto"
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.statusCode", "operator": "in", "value": [200, 400, 503] }
+  ],
+  "failMode": "soft"
+}

@@ -46,7 +46,7 @@ public class RoutingController {
     @Operation(summary = "라우팅 설정 생성")
     public ApiResponse<RoutingConfigEntity> create(@Valid @RequestBody RoutingRequest request) {
         RoutingConfigEntity entity = new RoutingConfigEntity();
-        entity.setId(request.id());
+        entity.setId(request.id() != null && !request.id().isBlank() ? request.id() : java.util.UUID.randomUUID().toString());
         entity.setStrategy(request.strategy());
         entity.setRules(request.rules());
         entity.setFallbackChain(request.fallbackChain());
@@ -84,7 +84,7 @@ public class RoutingController {
     }
 
     public record RoutingRequest(
-            @NotBlank String id,
+            String id,
             @NotBlank String strategy,
             @NotNull List<Map<String, Object>> rules,
             List<String> fallbackChain

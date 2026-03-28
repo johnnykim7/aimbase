@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LexAI Engine 개발 가이드</title>
+<style>
+  :root {
+    --primary: #0d9488; --primary-light: #ccfbf1; --primary-dark: #065f56;
+    --accent: #f59e0b; --accent-light: #fef3c7;
+    --bg: #f8fafc; --card: #ffffff; --text: #1e293b; --muted: #64748b; --border: #e2e8f0;
+    --code-bg: #1e293b; --code-text: #e2e8f0;
+    --ok: #10b981; --err: #ef4444; --info: #3b82f6;
+    --purple: #7c3aed; --purple-light: #ede9fe;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg); color:var(--text); line-height:1.7; }
+
+  .hero { background:linear-gradient(135deg,var(--primary-dark),var(--primary),#14b8a6); color:white; padding:44px 40px; text-align:center; }
+  .hero h1 { font-size:2.1rem; margin-bottom:8px; }
+  .hero p { font-size:1.05rem; opacity:0.9; max-width:780px; margin:0 auto; }
+  .hero .badge { display:inline-block; background:rgba(255,255,255,0.2); border-radius:20px; padding:3px 14px; font-size:0.82rem; margin-bottom:10px; }
+
+  .container { max-width:1240px; margin:0 auto; padding:0 20px; }
+  .layout { display:grid; grid-template-columns:240px 1fr; gap:24px; margin-top:-32px; position:relative; z-index:1; }
+
+  .toc { position:sticky; top:14px; align-self:start; background:var(--card); border-radius:12px; padding:18px; box-shadow:0 1px 3px rgba(0,0,0,0.07); max-height:calc(100vh - 28px); overflow-y:auto; font-size:0.82rem; }
+  .toc h3 { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+  .toc ul { list-style:none; }
+  .toc li { margin-bottom:3px; }
+  .toc a { color:var(--muted); text-decoration:none; padding:2px 6px; border-radius:5px; display:block; }
+  .toc a:hover { color:var(--primary); background:var(--primary-light); }
+  .toc .g { font-weight:700; color:var(--text); margin-top:10px; font-size:0.7rem; }
+
+  .main { padding-bottom:60px; }
+  section { background:var(--card); border-radius:12px; padding:26px 28px; margin-bottom:18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
+  section h2 { font-size:1.35rem; margin-bottom:14px; padding-bottom:8px; border-bottom:2px solid var(--primary-light); color:var(--primary-dark); }
+  section h3 { font-size:1.05rem; margin:18px 0 8px; color:var(--text); }
+  section h4 { font-size:0.92rem; margin:12px 0 6px; color:var(--primary-dark); }
+  p { margin-bottom:8px; }
+  ul,ol { margin:4px 0 12px 18px; }
+  li { margin-bottom:2px; }
+
+  pre { background:var(--code-bg); color:var(--code-text); padding:16px; border-radius:9px; overflow-x:auto; font-size:0.82rem; line-height:1.5; margin:12px 0; position:relative; }
+  pre .c { color:#6b7280; } pre .k { color:#93c5fd; } pre .s { color:#86efac; } pre .n { color:#fcd34d; }
+  pre .tag { position:absolute; top:6px; right:10px; background:rgba(255,255,255,0.1); padding:2px 8px; border-radius:5px; font-size:0.7rem; color:#94a3b8; }
+  code { background:#f1f5f9; padding:1px 4px; border-radius:3px; font-size:0.82rem; color:var(--primary-dark); }
+
+  table.t { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.85rem; }
+  table.t th { background:var(--primary); color:white; padding:9px 12px; text-align:left; font-weight:600; font-size:0.8rem; }
+  table.t th:first-child { border-radius:7px 0 0 0; } table.t th:last-child { border-radius:0 7px 0 0; }
+  table.t td { padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  table.t tr:hover td { background:#f0fdfa; }
+
+  .callout { padding:12px 16px; border-radius:9px; margin:12px 0; font-size:0.86rem; border-left:4px solid; }
+  .callout-info { background:#eff6ff; border-color:var(--info); }
+  .callout-warn { background:var(--accent-light); border-color:var(--accent); }
+  .callout-ok { background:#ecfdf5; border-color:var(--ok); }
+  .callout b { display:block; margin-bottom:2px; }
+
+  .screen-box { border:2px solid var(--border); border-radius:12px; padding:22px; margin:14px 0; }
+  .screen-box:hover { border-color:var(--primary); }
+  .screen-box .title { font-size:1.1rem; font-weight:700; color:var(--primary-dark); margin-bottom:4px; display:flex; align-items:center; gap:6px; }
+  .screen-box .desc { font-size:0.88rem; color:var(--muted); margin-bottom:12px; }
+  .ai-tag { display:inline-block; background:linear-gradient(135deg,#667eea,#764ba2); color:white; font-size:0.7rem; padding:2px 8px; border-radius:9px; font-weight:600; }
+  .no-tag { display:inline-block; background:var(--border); color:var(--muted); font-size:0.7rem; padding:2px 8px; border-radius:9px; font-weight:600; }
+
+  .flow-h { display:flex; align-items:center; gap:0; margin:14px 0; flex-wrap:wrap; justify-content:center; }
+  .flow-box { background:white; border:2px solid var(--primary); padding:8px 14px; border-radius:7px; text-align:center; font-size:0.8rem; min-width:90px; }
+  .flow-box b { display:block; color:var(--primary-dark); }
+  .flow-box.ai { border-color:var(--purple); background:linear-gradient(135deg,#667eea10,#764ba210); }
+  .flow-box.ai b { color:var(--purple); }
+  .flow-arr { font-size:1rem; color:var(--primary); padding:0 5px; }
+
+  .mcp-card { background:#f8f7ff; border:1px solid #e0deff; border-radius:8px; padding:10px 14px; margin:6px 0; font-size:0.85rem; }
+  .mcp-card .name { font-weight:700; color:var(--purple); font-family:monospace; font-size:0.88rem; }
+  .mcp-card .desc { color:var(--muted); font-size:0.82rem; }
+  .mcp-card .params { font-size:0.8rem; color:var(--text); margin-top:4px; }
+  .mcp-card .params code { font-size:0.78rem; }
+
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+  .opt-box { border:1px solid var(--border); border-radius:10px; padding:16px; text-align:center; }
+  .opt-box h4 { margin:0 0 6px; }
+  .opt-box p { font-size:0.84rem; color:var(--muted); margin:0; }
+  .opt-box.rec { border:2px solid var(--primary); background:#f0fdfa; }
+
+  .pill { display:inline-block; padding:2px 7px; border-radius:9px; font-size:0.7rem; font-weight:700; }
+  .pill-get { background:#dbeafe; color:#1e40af; }
+  .pill-post { background:#dcfce7; color:#166534; }
+
+  @media(max-width:900px){.layout{grid-template-columns:1fr;}.toc{position:static;max-height:none;}.grid-2,.grid-3{grid-template-columns:1fr;}.flow-h{flex-direction:column;}.flow-arr{transform:rotate(90deg);}}
+  [id]{scroll-margin-top:18px;}
+  @media print{.toc{display:none;}.layout{grid-template-columns:1fr;}section{break-inside:avoid;}}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="badge">Developer Guide v2.0 — 2026.03.25</div>
+  <h1>LexAI Engine 개발 가이드</h1>
+  <p>법률 AI SaaS <strong>Lexflow</strong> 개발자를 위한 <strong>LexAI Engine</strong> 연동 가이드<br>
+  화면별 AI 연동 · MCP 서버/Tool 사용법 · 내부 MCP 도구 목록</p>
+</div>
+
+<div class="container"><div class="layout">
+
+<nav class="toc">
+  <h3>목차</h3>
+  <ul>
+    <li class="g">개요</li>
+    <li><a href="#s1">1. LexAI Engine 기능</a></li>
+    <li><a href="#s2">2. 연동 방식 3가지</a></li>
+    <li class="g">화면별 연동</li>
+    <li><a href="#s3">3. 회원가입 → 테넌트</a></li>
+    <li><a href="#s4">4. 사건 기록 (검색)</a></li>
+    <li><a href="#s5">5. 사건 등록 (AI 초안)</a></li>
+    <li><a href="#s6">6. 검토·승인</a></li>
+    <li><a href="#s7">7. 아카이브</a></li>
+    <li><a href="#s8">8. 대시보드 / 통계</a></li>
+    <li class="g">MCP 서버 구성</li>
+    <li><a href="#mcp-arch">9. MCP 아키텍처</a></li>
+    <li><a href="#mcp-code">10. MCP 서버 코드</a></li>
+    <li><a href="#mcp-tools">11. 커스텀 MCP Tool 목록</a></li>
+    <li class="g">내부 MCP 도구</li>
+    <li><a href="#internal-rag">12. RAG 핵심 (13개)</a></li>
+    <li><a href="#internal-rag-adv">13. RAG 고급 (6개)</a></li>
+    <li><a href="#internal-doc">14. 문서 생성 (11개)</a></li>
+    <li><a href="#internal-util">15. 유틸리티 (9개)</a></li>
+    <li class="g">부록</li>
+    <li><a href="#roadmap">16. 도입 로드맵</a></li>
+  </ul>
+</nav>
+
+<div class="main">
+
+<!-- ============ 1 ============ -->
+<section id="s1">
+  <h2>1. LexAI Engine이 제공하는 기능</h2>
+  <p><strong>LexAI Engine</strong>은 Lexflow의 모든 AI 기능을 담당하는 백엔드 AI 엔진입니다. Lexflow 앱은 LexAI Engine REST API만 호출하면 됩니다.</p>
+
+  <div class="grid-3">
+    <div class="opt-box" style="text-align:left;padding:14px;">
+      <h4 style="margin-bottom:8px;">🤖 LLM 통합 관리</h4>
+      <ul style="font-size:0.83rem;margin:0;">
+        <li>Claude, GPT, Ollama 단일 API</li>
+        <li>모델 자동 라우팅 / 폴백</li>
+        <li>SSE 스트리밍 응답</li>
+        <li>구조화 출력 (JSON Schema)</li>
+        <li>도구 자동 호출 (최대 5회)</li>
+      </ul>
+    </div>
+    <div class="opt-box" style="text-align:left;padding:14px;">
+      <h4 style="margin-bottom:8px;">📚 RAG 파이프라인</h4>
+      <ul style="font-size:0.83rem;margin:0;">
+        <li>문서 업로드 → 자동 파싱·청킹·임베딩</li>
+        <li>BM25 + 벡터 하이브리드 검색</li>
+        <li>Cross-encoder 재랭킹</li>
+        <li>Contextual Retrieval (검색 정확도 49%↑)</li>
+        <li>Parent-Child 계층 검색</li>
+        <li>시맨틱 캐시</li>
+      </ul>
+    </div>
+    <div class="opt-box" style="text-align:left;padding:14px;">
+      <h4 style="margin-bottom:8px;">📝 문서 자동 생성</h4>
+      <ul style="font-size:0.83rem;margin:0;">
+        <li>소장/고소장/계약서 AI 생성</li>
+        <li>DOCX, PDF, PPTX, XLSX 지원</li>
+        <li>템플릿 관리 (변수 바인딩)</li>
+        <li>스키마 기반 문서 생성</li>
+        <li>테마 프리셋</li>
+      </ul>
+    </div>
+  </div>
+  <div class="grid-3" style="margin-top:12px;">
+    <div class="opt-box" style="text-align:left;padding:14px;">
+      <h4 style="margin-bottom:8px;">🛡️ 정책 엔진 (가드레일)</h4>
+      <ul style="font-size:0.83rem;margin:0;">
+        <li>PII 자동 마스킹 (Presidio)</li>
+        <li>금지어 차단 (DENY)</li>
+        <li>승인 필요 (REQUIRE_APPROVAL)</li>
+        <li>레이트 리밋 (비용 한도)</li>
+        <li>감사 로깅 (법적 추적성)</li>
+      </ul>
+    </div>
+    <div class="opt-box" style="text-align:left;padding:14px;">
+      <h4 style="margin-bottom:8px;">⚙️ 워크플로우 엔진</h4>
+      <ul style="font-size:0.83rem;margin:0;">
+        <li>DAG 기반 멀티스텝 자동화</li>
+        <li>LLM 호출 / 도구 실행 / 조건 분기</li>
+        <li>사람 승인 스텝 (HUMAN_INPUT)</li>
+        <li>병렬 실행</li>
+        <li>실행 이력 추적</li>
+      </ul>
+    </div>
+    <div class="opt-box" style="text-align:left;padding:14px;">
+      <h4 style="margin-bottom:8px;">🎙️ 음성 + 평가</h4>
+      <ul style="font-size:0.83rem;margin:0;">
+        <li>STT — 상담 녹음 텍스트 변환</li>
+        <li>TTS — 판결문 읽어주기</li>
+        <li>RAGAS 품질 평가</li>
+        <li>LLM Judge (환각/독성 탐지)</li>
+        <li>프롬프트 A/B 비교</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout callout-ok" style="margin-top:16px;">
+    <b>멀티테넌시 내장</b>
+    Database-per-Tenant 아키텍처로 법률사무소별 데이터 완전 격리. 플랜(Starter/Pro/Enterprise)별 API 쿼터 자동 관리.
+  </div>
+</section>
+
+<!-- ============ 2 ============ -->
+<section id="s2">
+  <h2>2. 연동 방식 3가지</h2>
+  <div class="grid-3">
+    <div class="opt-box rec">
+      <h4>A. REST API 직접 호출</h4>
+      <p>Lexflow BE → LexAI Engine REST API<br><br><strong>가장 간단, 권장</strong><br>HTTP 호출만으로 모든 AI 기능 사용</p>
+    </div>
+    <div class="opt-box">
+      <h4>B. MCP 서버 래핑</h4>
+      <p>Lexflow 전용 MCP 서버 구축<br>→ LexAI Engine API를 MCP Tool로 노출<br><br>AI 에이전트가 도구를 자율 선택할 때</p>
+    </div>
+    <div class="opt-box">
+      <h4>C. LexAI Engine 내부 MCP 직접 연결</h4>
+      <p>Lexflow → Python Sidecar MCP<br><br>39개 내부 도구를 세밀하게 제어할 때</p>
+    </div>
+  </div>
+  <div class="callout callout-ok">
+    <b>권장 전략: A 먼저 → 필요 시 B/C 추가</b>
+    대부분 REST API로 충분합니다. MCP는 "에이전트 자율 도구 선택"이 필요한 고급 시나리오에서 사용.
+  </div>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="s3">
+  <h2>3. 회원가입 → 테넌트 프로비저닝</h2>
+  <div class="screen-box">
+    <div class="title">📱 회원가입 <span class="no-tag">백엔드</span></div>
+    <div class="desc">소셜 로그인(카카오/네이버) → 사업자 정보 → 대표 계정 → 플랜(Starter/Pro/Enterprise) → 결제</div>
+    <table class="t">
+      <tr><th>단계</th><th>LexAI Engine 호출</th><th>동작</th></tr>
+      <tr><td>STEP 3. 대표 계정 생성</td><td><code>POST /api/v1/platform/tenants</code></td><td>전용 DB 자동 생성 + 마이그레이션 + 기본 정책</td></tr>
+      <tr><td>STEP 4. 플랜 선택</td><td><code>PUT /api/v1/platform/subscriptions/{tenantId}</code></td><td>API 쿼터/토큰 한도 설정</td></tr>
+      <tr><td>STEP 5. 온보딩</td><td><code>POST /api/v1/knowledge-sources</code></td><td>기본 법률 지식소스 초기화</td></tr>
+    </table>
+    <pre><span class="tag">Lexflow BE</span>
+<span class="c">// 회원가입 완료 시 자동 호출</span>
+<span class="k">const</span> tenant = <span class="k">await</span> lexai.post(<span class="s">'/api/v1/platform/tenants'</span>, {
+  name: <span class="s">"법무법인 대정"</span>,
+  slug: <span class="s">"daejung-law"</span>,
+  plan: <span class="s">"PROFESSIONAL"</span>,
+  admin_email: <span class="s">"admin@daejung-law.com"</span>
+});
+<span class="c">// → DB 자동 생성: lexai_daejung_law</span>
+<span class="c">// → PII 마스킹 정책 자동 등록</span></pre>
+  </div>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="s4">
+  <h2>4. 전체 사건 기록 → AI 검색·요약</h2>
+  <div class="screen-box">
+    <div class="title">📋 전체 사건 기록 <span class="ai-tag">AI</span></div>
+    <div class="desc">통합검색 → 권한분기(Admin: 전체/계정별, 일반: 본인) → 진행중/종료 → 사건상세</div>
+    <table class="t">
+      <tr><th>화면 위치</th><th>AI 기능</th><th>API / MCP Tool</th></tr>
+      <tr>
+        <td><strong>통합 검색</strong></td>
+        <td>의미 기반 사건 검색<br><em>"매매 위반 비슷한 사건"</em></td>
+        <td>REST: <code>POST /knowledge-sources/search</code><br>MCP: <code>search_precedents</code></td>
+      </tr>
+      <tr>
+        <td><strong>사건 상세 카드</strong></td>
+        <td>AI 사건 요약 브리핑</td>
+        <td>REST: <code>POST /chat/completions</code><br>MCP: <code>summarize_case</code></td>
+      </tr>
+      <tr>
+        <td><strong>사건 상세 카드</strong></td>
+        <td>유사 판례 추천 (사이드패널)</td>
+        <td>REST: <code>POST /knowledge-sources/search</code><br>MCP: <code>search_precedents</code></td>
+      </tr>
+      <tr>
+        <td><strong>종료 사건 상세</strong></td>
+        <td>결과 분석 리포트 PDF</td>
+        <td>REST: <code>POST /documents/templates/{id}/render</code><br>MCP: <code>generate_report</code></td>
+      </tr>
+    </table>
+    <pre><span class="tag">유사 판례 검색 (REST)</span>
+<span class="k">const</span> { data } = <span class="k">await</span> axios.post(<span class="s">`${LEXAI_ENGINE}/api/v1/knowledge-sources/search`</span>, {
+  query: currentCase.summary,  <span class="c">// "부동산 매매 계약 해제 위약금 분쟁"</span>
+  source_ids: [<span class="s">"ks-precedents"</span>],
+  top_k: <span class="n">5</span>,
+  search_type: <span class="s">"HYBRID"</span>       <span class="c">// BM25 + 벡터 + RRF 융합</span>
+}, { headers: { <span class="s">'X-Tenant-Id'</span>: tenantId } });
+
+<span class="c">// data.results → [{ content: "대법원 2023다12345...", score: 0.89, source: "민사판례.pdf" }]</span></pre>
+  </div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="s5">
+  <h2>5. 사건 등록 → AI 초안 생성 (핵심)</h2>
+  <div class="screen-box">
+    <div class="title">➕ 사건 등록 <span class="ai-tag">핵심 AI</span></div>
+    <div class="desc">신규: 유형→AI초안→AI검토→승인 / 기존: 직접입력·엑셀·문서 업로드</div>
+
+    <h4>신규 사건 흐름</h4>
+    <div class="flow-h">
+      <div class="flow-box"><b>유형 선택</b>형사/민사</div>
+      <div class="flow-arr">→</div>
+      <div class="flow-box ai"><b>AI 초안</b>고소장/소송장</div>
+      <div class="flow-arr">→</div>
+      <div class="flow-box ai"><b>AI 검토</b>RAG 교차 검증</div>
+      <div class="flow-arr">→</div>
+      <div class="flow-box"><b>변호사 승인</b></div>
+      <div class="flow-arr">→</div>
+      <div class="flow-box"><b>기록 저장</b></div>
+    </div>
+
+    <table class="t">
+      <tr><th>단계</th><th>API (REST)</th><th>MCP Tool</th><th>상세</th></tr>
+      <tr><td><strong>AI 초안</strong></td><td><code>POST /documents/generate</code></td><td><code>draft_complaint</code></td><td>사건 정보 → DOCX 문서</td></tr>
+      <tr><td><strong>또는 템플릿</strong></td><td><code>POST /documents/templates/{id}/render</code></td><td><code>render_document_template</code></td><td>변수 바인딩 → 문서</td></tr>
+      <tr><td><strong>AI 검토</strong></td><td><code>POST /chat/completions</code> (+ RAG)</td><td><code>review_document</code></td><td>법조문 교차 검증 JSON</td></tr>
+      <tr><td><strong>승인</strong></td><td><code>POST /workflows/runs/{id}/approve</code></td><td>—</td><td>워크플로우 사용 시</td></tr>
+    </table>
+
+    <pre><span class="tag">AI 초안 생성 (REST)</span>
+<span class="k">const</span> res = <span class="k">await</span> axios.post(<span class="s">`${LEXAI_ENGINE}/api/v1/documents/generate`</span>, {
+  prompt: <span class="s">`민사 소장을 작성하세요.
+[원고] ${form.plaintiff}  [피고] ${form.defendant}
+[관할] ${form.court}  [유형] ${form.caseType}
+[사건 개요] ${form.caseSummary}
+청구 취지와 원인을 포함하여 법원 제출 양식에 맞게 작성.`</span>,
+  format: <span class="s">"docx"</span>,
+  connection_id: <span class="s">"conn-claude-sonnet"</span>
+}, { headers: { <span class="s">'X-Tenant-Id'</span>: tenantId }, responseType: <span class="s">'blob'</span> });
+<span class="c">// → DOCX 바이너리 다운로드</span></pre>
+
+    <pre><span class="tag">AI 검토 — 구조화 결과 (REST)</span>
+<span class="k">const</span> review = <span class="k">await</span> axios.post(<span class="s">`${LEXAI_ENGINE}/api/v1/chat/completions`</span>, {
+  messages: [
+    { role: <span class="s">"system"</span>, content: <span class="s">"법률 문서 검토 전문가. JSON 결과 반환."</span> },
+    { role: <span class="s">"user"</span>, content: <span class="s">`이 소송장을 검토:\n${draftText}`</span> }
+  ],
+  knowledge_source_ids: [<span class="s">"ks-civil-law"</span>],
+  response_format: { type: <span class="s">"json_schema"</span>, schema_id: <span class="s">"doc-review"</span> }
+});
+<span class="c">// → { overall_score: 82, issues: [{severity, description, suggestion}], recommendation }</span></pre>
+
+    <h4>기존 사건 — 문서 업로드 시 RAG 인제스트</h4>
+    <pre><span class="tag">기존 사건 문서 → RAG 자동 지식화</span>
+<span class="c">// 1) 파일 업로드</span>
+<span class="k">await</span> axios.post(<span class="s">`${LEXAI_ENGINE}/api/v1/knowledge-sources/${ksId}/upload`</span>, formData);
+<span class="c">// 2) 인제스션 (비동기 — 파싱→청킹→임베딩→저장)</span>
+<span class="k">await</span> axios.post(<span class="s">`${LEXAI_ENGINE}/api/v1/knowledge-sources/${ksId}/sync`</span>);
+<span class="c">// → 향후 유사 사건 검색에 자동 반영</span></pre>
+  </div>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="s6">
+  <h2>6. 검토·승인</h2>
+  <div class="screen-box">
+    <div class="title">✅ 검토·승인 <span class="ai-tag">AI</span></div>
+    <div class="desc">미검토/완료 탭 — Step별 승인 카드 (변호사 승인 게이트)</div>
+    <table class="t">
+      <tr><th>동작</th><th>API</th></tr>
+      <tr><td>미검토 목록</td><td><code>GET /admin/approvals?status=PENDING</code></td></tr>
+      <tr><td>상세 (이전 스텝 결과)</td><td><code>GET /workflows/{id}/runs/{runId}</code></td></tr>
+      <tr><td>승인</td><td><code>POST /workflows/runs/{runId}/approve</code> — <code>{ approved: true }</code></td></tr>
+      <tr><td>거부</td><td><code>POST /workflows/runs/{runId}/approve</code> — <code>{ approved: false, comment }</code></td></tr>
+    </table>
+    <div class="callout callout-info">
+      <b>간단 구현</b> AI 초안 + AI 검토만 LexAI Engine 호출하고, 승인/거부는 Lexflow 자체 DB 관리도 가능합니다. 워크플로우 엔진은 다단계 자동화가 필요할 때 사용.
+    </div>
+  </div>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="s7">
+  <h2>7. 아카이브 → 데이터 축적</h2>
+  <div class="screen-box">
+    <div class="title">🗄️ 아카이브 <span class="ai-tag">데이터 축적</span></div>
+    <div class="desc">완료 사건 → RAG 지식 소스 자동 인제스트 → 유사 사건 검색에 활용</div>
+    <p><strong>"사건 → 서면 → 기록 → 데이터 축적"</strong> 사이클의 마지막 단계. 완료된 사건이 쌓일수록 AI가 더 정확한 판례를 추천합니다.</p>
+    <pre><span class="tag">사건 완료 → 지식화</span>
+<span class="k">async function</span> onCaseComplete(caseId, docs) {
+  <span class="k">await</span> lexflowDb.archiveCase(caseId);
+  <span class="k">for</span> (<span class="k">const</span> doc <span class="k">of</span> docs) {
+    <span class="k">await</span> lexai.upload(<span class="s">`/knowledge-sources/${ksArchiveId}/upload`</span>, doc);
+  }
+  <span class="k">await</span> lexai.post(<span class="s">`/knowledge-sources/${ksArchiveId}/sync`</span>);
+}</pre>
+  </div>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="s8">
+  <h2>8. 대시보드 / 통계</h2>
+  <div class="screen-box">
+    <div class="title">📊 대시보드 & 📈 통계 <span class="ai-tag">선택</span></div>
+    <table class="t">
+      <tr><th>위젯</th><th>API</th><th>비고</th></tr>
+      <tr><td>AI 브리핑</td><td><code>POST /chat/completions</code></td><td>사건 데이터 주입 → 자연어 요약 (선택)</td></tr>
+      <tr><td>비용 추이</td><td><code>GET /admin/cost-trend?days=30</code></td><td>일별 모델별 비용 차트</td></tr>
+      <tr><td>사용량</td><td><code>GET /admin/usage</code></td><td>토큰, 요청 수, 모델 분포</td></tr>
+      <tr><td>감사 로그</td><td><code>GET /admin/audit-logs</code></td><td>법적 추적성</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 9 ============ -->
+<section id="mcp-arch">
+  <h2>9. MCP 서버 아키텍처</h2>
+  <p>Lexflow 전용 MCP 서버를 만들어 LexAI Engine API를 Tool로 노출하면, AI 에이전트가 사건 맥락에 따라 도구를 자율 선택할 수 있습니다.</p>
+
+  <div class="flow-h">
+    <div class="flow-box"><b>Lexflow FE</b>사용자</div>
+    <div class="flow-arr">→</div>
+    <div class="flow-box"><b>Lexflow BE</b>비즈니스</div>
+    <div class="flow-arr">→</div>
+    <div class="flow-box ai"><b>Lexflow MCP</b>Tool 래핑</div>
+    <div class="flow-arr">→</div>
+    <div class="flow-box"><b>LexAI Engine</b>오케스트레이션</div>
+    <div class="flow-arr">→</div>
+    <div class="flow-box"><b>LLM/pgvector</b></div>
+  </div>
+
+  <h3>또는: LexAI Engine 내부 MCP 직접 연결</h3>
+  <div class="flow-h">
+    <div class="flow-box"><b>Lexflow BE</b></div>
+    <div class="flow-arr">→</div>
+    <div class="flow-box ai"><b>LexAI MCP</b>Python Sidecar<br>:8000</div>
+    <div class="flow-arr">→</div>
+    <div class="flow-box"><b>39개 내부 도구</b></div>
+  </div>
+
+  <div class="callout callout-warn">
+    <b>내부 MCP 직접 연결 시</b>
+    <code>http://localhost:8000/sse</code> (SSE 엔드포인트)로 MCP 프로토콜 연결. 정책 엔진/라우팅은 우회되므로, 세밀한 RAG 파이프라인 제어가 필요한 경우에만 사용.
+  </div>
+</section>
+
+<!-- ============ 10 ============ -->
+<section id="mcp-code">
+  <h2>10. MCP 서버 코드 예시</h2>
+  <pre><span class="tag">lexflow_mcp_server.py</span>
+<span class="k">from</span> mcp.server <span class="k">import</span> Server
+<span class="k">from</span> mcp.types <span class="k">import</span> Tool, TextContent
+<span class="k">import</span> httpx
+
+LEXAI_ENGINE = <span class="s">"http://localhost:8080"</span>
+server = Server(<span class="s">"lexflow-ai"</span>)
+
+<span class="k">class</span> LexAIClient:
+    <span class="k">def</span> __init__(self, tenant_id, token):
+        self.headers = {
+            <span class="s">"Authorization"</span>: <span class="s">f"Bearer {token}"</span>,
+            <span class="s">"X-Tenant-Id"</span>: tenant_id,
+            <span class="s">"Content-Type"</span>: <span class="s">"application/json"</span>
+        }
+
+    <span class="k">async def</span> _post(self, path, body):
+        <span class="k">async with</span> httpx.AsyncClient(timeout=<span class="n">60</span>) <span class="k">as</span> c:
+            r = <span class="k">await</span> c.post(<span class="s">f"{LEXAI_ENGINE}{path}"</span>, json=body, headers=self.headers)
+            <span class="k">return</span> r.json()
+
+    <span class="k">async def</span> chat(self, messages, **kw):
+        <span class="k">return await</span> self._post(<span class="s">"/api/v1/chat/completions"</span>, {<span class="s">"messages"</span>: messages, **kw})
+
+    <span class="k">async def</span> search(self, query, sources, top_k=<span class="n">5</span>):
+        <span class="k">return await</span> self._post(<span class="s">"/api/v1/knowledge-sources/search"</span>,
+            {<span class="s">"query"</span>: query, <span class="s">"source_ids"</span>: sources, <span class="s">"top_k"</span>: top_k, <span class="s">"search_type"</span>: <span class="s">"HYBRID"</span>})
+
+    <span class="k">async def</span> gen_doc(self, prompt, fmt=<span class="s">"docx"</span>):
+        <span class="k">return await</span> self._post(<span class="s">"/api/v1/documents/generate-json"</span>,
+            {<span class="s">"prompt"</span>: prompt, <span class="s">"format"</span>: fmt})
+
+client = LexAIClient(<span class="s">"daejung-law"</span>, <span class="s">"JWT_TOKEN"</span>)
+
+<span class="c"># ──── MCP Tool 등록 ────</span>
+@server.tool()
+<span class="k">async def</span> analyze_case(case_summary: str, case_type: str) -> list[TextContent]:
+    <span class="s">"""사건 분석 — 쟁점 추출, 관련 법조문, 위험도 평가"""</span>
+    r = <span class="k">await</span> client.chat([
+        {<span class="s">"role"</span>:<span class="s">"system"</span>, <span class="s">"content"</span>:<span class="s">"법률 AI. 쟁점·관련법·위험도를 JSON으로 분석."</span>},
+        {<span class="s">"role"</span>:<span class="s">"user"</span>, <span class="s">"content"</span>:<span class="s">f"[{case_type}] {case_summary}"</span>}
+    ], knowledge_source_ids=[<span class="s">"ks-civil-law"</span>],
+       response_format={<span class="s">"type"</span>:<span class="s">"json_schema"</span>, <span class="s">"schema_id"</span>:<span class="s">"case-analysis"</span>})
+    <span class="k">return</span> [TextContent(type=<span class="s">"text"</span>, text=str(r[<span class="s">"data"</span>]))]
+
+@server.tool()
+<span class="k">async def</span> search_precedents(query: str, top_k: int = <span class="n">5</span>) -> list[TextContent]:
+    <span class="s">"""유사 판례 검색 — 벡터+키워드 하이브리드"""</span>
+    r = <span class="k">await</span> client.search(query, [<span class="s">"ks-precedents"</span>], top_k)
+    <span class="k">return</span> [TextContent(type=<span class="s">"text"</span>, text=str(r[<span class="s">"data"</span>]))]
+
+@server.tool()
+<span class="k">async def</span> draft_complaint(case_info: str, case_type: str) -> list[TextContent]:
+    <span class="s">"""소장/고소장 AI 초안 생성 (DOCX)"""</span>
+    doc_type = <span class="s">"고소장"</span> <span class="k">if</span> case_type == <span class="s">"형사"</span> <span class="k">else</span> <span class="s">"소장"</span>
+    r = <span class="k">await</span> client.gen_doc(<span class="s">f"{case_type} {doc_type} 작성:\n{case_info}"</span>)
+    <span class="k">return</span> [TextContent(type=<span class="s">"text"</span>, text=str(r[<span class="s">"data"</span>]))]
+
+@server.tool()
+<span class="k">async def</span> review_document(document_text: str) -> list[TextContent]:
+    <span class="s">"""서면 AI 검토 — RAG 법조문 교차 검증"""</span>
+    r = <span class="k">await</span> client.chat([
+        {<span class="s">"role"</span>:<span class="s">"system"</span>, <span class="s">"content"</span>:<span class="s">"법률 문서 검토 전문가. JSON으로 결과 반환."</span>},
+        {<span class="s">"role"</span>:<span class="s">"user"</span>, <span class="s">"content"</span>:<span class="s">f"검토:\n{document_text}"</span>}
+    ], knowledge_source_ids=[<span class="s">"ks-civil-law"</span>],
+       response_format={<span class="s">"type"</span>:<span class="s">"json_schema"</span>, <span class="s">"schema_id"</span>:<span class="s">"doc-review"</span>})
+    <span class="k">return</span> [TextContent(type=<span class="s">"text"</span>, text=str(r[<span class="s">"data"</span>]))]</pre>
+</section>
+
+<!-- ============ 11 ============ -->
+<section id="mcp-tools">
+  <h2>11. Lexflow 커스텀 MCP Tool 설계</h2>
+  <p>Lexflow MCP 서버에 등록할 추천 Tool 목록입니다. 내부적으로 LexAI Engine REST API를 호출합니다.</p>
+  <div class="mcp-card"><span class="name">analyze_case</span> <span class="desc">— 사건 분석 (쟁점 추출, 관련 법조문, 위험도)</span><div class="params"><code>case_summary: str</code>, <code>case_type: str</code> → JSON</div></div>
+  <div class="mcp-card"><span class="name">search_precedents</span> <span class="desc">— 유사 판례 벡터 검색 (하이브리드)</span><div class="params"><code>query: str</code>, <code>top_k: int=5</code> → JSON 배열</div></div>
+  <div class="mcp-card"><span class="name">draft_complaint</span> <span class="desc">— 소장/고소장 AI 초안 생성 (DOCX)</span><div class="params"><code>case_info: str</code>, <code>case_type: str</code> → base64 DOCX</div></div>
+  <div class="mcp-card"><span class="name">review_document</span> <span class="desc">— 서면 AI 검토 (RAG 교차 검증)</span><div class="params"><code>document_text: str</code> → JSON (score, issues, recommendation)</div></div>
+  <div class="mcp-card"><span class="name">summarize_case</span> <span class="desc">— 사건 현황 요약 브리핑</span><div class="params"><code>case_data: str</code> → 자연어 요약</div></div>
+  <div class="mcp-card"><span class="name">transcribe_audio</span> <span class="desc">— 상담 녹음 텍스트 변환 (STT)</span><div class="params"><code>audio_base64: str</code>, <code>language: str="ko"</code> → 텍스트</div></div>
+  <div class="mcp-card"><span class="name">generate_report</span> <span class="desc">— 사건 결과 리포트 생성 (PDF)</span><div class="params"><code>case_data: str</code>, <code>template_id: str</code> → base64 PDF</div></div>
+  <div class="mcp-card"><span class="name">ingest_document</span> <span class="desc">— 문서를 RAG 지식소스에 추가</span><div class="params"><code>source_id: str</code>, <code>file_base64: str</code> → 성공 여부</div></div>
+</section>
+
+<!-- ============ 12 ============ -->
+<section id="internal-rag">
+  <h2>12. 내부 MCP 도구 — RAG 핵심 (13개)</h2>
+  <p>LexAI Engine Python Sidecar (<code>localhost:8000</code>)에서 직접 호출 가능한 내부 MCP 도구입니다.</p>
+  <div class="mcp-card"><span class="name">chunk_document</span> <span class="desc">— 문서 시맨틱 청킹 (semantic/recursive/fixed)</span><div class="params"><code>content: str</code>, <code>strategy: str="semantic"</code>, <code>config: str="{}"</code></div></div>
+  <div class="mcp-card"><span class="name">embed_texts</span> <span class="desc">— 텍스트 임베딩 벡터 생성 (KoSimCSE 기본, 768d)</span><div class="params"><code>texts: list[str]</code>, <code>model: str=""</code></div></div>
+  <div class="mcp-card"><span class="name">search_hybrid</span> <span class="desc">— BM25 + 벡터 하이브리드 검색 (RRF 융합)</span><div class="params"><code>query: str</code>, <code>source_id: str</code>, <code>top_k: int=5</code>, <code>vector_weight: float=0.7</code>, <code>keyword_weight: float=0.3</code></div></div>
+  <div class="mcp-card"><span class="name">rerank_results</span> <span class="desc">— Cross-encoder 재랭킹</span><div class="params"><code>query: str</code>, <code>documents: str</code> (JSON), <code>top_k: int=5</code></div></div>
+  <div class="mcp-card"><span class="name">ingest_document</span> <span class="desc">— 전체 인제스션 파이프라인 (파싱→청킹→임베딩→저장)</span><div class="params"><code>source_id: str</code>, <code>content: str</code>, <code>chunking_strategy: str="semantic"</code>, <code>embedding_model: str=""</code></div></div>
+  <div class="mcp-card"><span class="name">ingest_file</span> <span class="desc">— 파일 기반 인제스션 (pdf/docx/pptx/csv/txt/md/html)</span><div class="params"><code>source_id: str</code>, <code>file_path: str</code>, <code>storage_base_path: str</code></div></div>
+  <div class="mcp-card"><span class="name">transform_query</span> <span class="desc">— 쿼리 변환 (HyDE/Multi-query/Step-back)</span><div class="params"><code>query: str</code>, <code>strategy: str="multi_query"</code></div></div>
+  <div class="mcp-card"><span class="name">parse_document</span> <span class="desc">— 문서 파싱 (base64 → 텍스트+메타데이터)</span><div class="params"><code>file_content: str</code>, <code>file_type: str=""</code></div></div>
+  <div class="mcp-card"><span class="name">compress_context</span> <span class="desc">— 컨텍스트 압축 (유사도 낮은 문장 제거)</span><div class="params"><code>query: str</code>, <code>documents: str</code> (JSON), <code>similarity_threshold: float=0.5</code></div></div>
+  <div class="mcp-card"><span class="name">self_rag_search</span> <span class="desc">— Self-RAG (자동 쿼리 정제 + 품질 평가)</span><div class="params"><code>query: str</code>, <code>source_id: str</code>, <code>top_k: int=5</code>, <code>max_iterations: int=2</code></div></div>
+  <div class="mcp-card"><span class="name">embed_multimodal</span> <span class="desc">— CLIP 멀티모달 임베딩 (텍스트+이미지)</span><div class="params"><code>items: str</code> (JSON: [{type, content}])</div></div>
+  <div class="mcp-card"><span class="name">finetune_embeddings</span> <span class="desc">— 도메인 특화 임베딩 파인튜닝</span><div class="params"><code>training_data: str</code> (JSON: [{query, positive, negative?}]), <code>epochs: int=3</code></div></div>
+  <div class="mcp-card"><span class="name">scrape_url</span> <span class="desc">— 웹 스크래핑 (basic/js_render/sitemap)</span><div class="params"><code>url: str</code>, <code>mode: str="basic"</code>, <code>max_pages: int=10</code></div></div>
+</section>
+
+<!-- ============ 13 ============ -->
+<section id="internal-rag-adv">
+  <h2>13. 내부 MCP 도구 — RAG 고급 (6개)</h2>
+  <div class="mcp-card"><span class="name">contextual_chunk</span> <span class="desc">— Contextual Retrieval 청킹 (LLM 컨텍스트 접두사 부여, 검색 정확도 49%↑)</span><div class="params"><code>content: str</code>, <code>document_context: str=""</code>, <code>chunking_config: str="{}"</code></div></div>
+  <div class="mcp-card"><span class="name">parent_child_search</span> <span class="desc">— Parent-Child 계층 검색 (자식으로 매칭, 부모로 반환)</span><div class="params"><code>query: str</code>, <code>source_id: str</code>, <code>top_k: int=5</code></div></div>
+  <div class="mcp-card"><span class="name">advanced_parse</span> <span class="desc">— 구조 보존 파싱 (표/이미지/복잡 레이아웃)</span><div class="params"><code>file_content: str</code>, <code>file_type: str=""</code>, <code>config: str="{}"</code></div></div>
+  <div class="mcp-card"><span class="name">cache_lookup</span> <span class="desc">— 시맨틱 캐시 조회 (유사 쿼리 캐시 히트)</span><div class="params"><code>query: str</code>, <code>source_id: str</code>, <code>threshold: float=0.95</code></div></div>
+  <div class="mcp-card"><span class="name">cache_store</span> <span class="desc">— 시맨틱 캐시 저장</span><div class="params"><code>query: str</code>, <code>source_id: str</code>, <code>response_text: str</code>, <code>ttl_hours: int=24</code></div></div>
+  <div class="mcp-card"><span class="name">evaluate_rag</span> <span class="desc">— RAGAS 품질 평가 (faithfulness, relevancy, precision, recall)</span><div class="params"><code>source_id: str</code>, <code>test_set: str</code> (JSON), <code>mode: str="fast"</code></div></div>
+</section>
+
+<!-- ============ 14 ============ -->
+<section id="internal-doc">
+  <h2>14. 내부 MCP 도구 — 문서 생성 (11개)</h2>
+  <div class="mcp-card"><span class="name">generate_document</span> <span class="desc">— LLM Python 코드 실행으로 문서 생성</span><div class="params"><code>code: str</code>, <code>output_format: str="pptx"</code></div></div>
+  <div class="mcp-card"><span class="name">list_document_formats</span> <span class="desc">— 지원 형식 및 라이브러리 상태 조회</span></div>
+  <div class="mcp-card"><span class="name">save_document_template</span> <span class="desc">— 템플릿 저장 ({{변수}} 플레이스홀더 지원)</span><div class="params"><code>name: str</code>, <code>format: str</code>, <code>code_template: str</code>, <code>variables: str</code></div></div>
+  <div class="mcp-card"><span class="name">list_document_templates</span> <span class="desc">— 템플릿 목록</span></div>
+  <div class="mcp-card"><span class="name">get_document_template</span> <span class="desc">— 템플릿 상세 조회</span><div class="params"><code>template_id: str</code></div></div>
+  <div class="mcp-card"><span class="name">delete_document_template</span> <span class="desc">— 템플릿 삭제</span></div>
+  <div class="mcp-card"><span class="name">render_document_template</span> <span class="desc">— 템플릿 변수 바인딩 → 문서 생성</span><div class="params"><code>template_id: str</code>, <code>variables: str</code> (JSON)</div></div>
+  <div class="mcp-card"><span class="name">upload_file_template</span> <span class="desc">— PPTX/DOCX 파일 → 템플릿 등록</span><div class="params"><code>name: str</code>, <code>format: str</code>, <code>file_base64: str</code></div></div>
+  <div class="mcp-card"><span class="name">generate_document_from_schema</span> <span class="desc">— JSON 스키마 + 테마 → 문서 생성 (코드 실행 없음)</span><div class="params"><code>schema: str</code> (JSON), <code>output_format: str="pptx"</code>, <code>theme_name: str="default"</code></div></div>
+  <div class="mcp-card"><span class="name">validate_document_schema</span> <span class="desc">— 문서 스키마 유효성 검사</span><div class="params"><code>schema: str</code></div></div>
+  <div class="mcp-card"><span class="name">list_document_themes</span> <span class="desc">— 테마 프리셋 목록</span></div>
+</section>
+
+<!-- ============ 15 ============ -->
+<section id="internal-util">
+  <h2>15. 내부 MCP 도구 — 유틸리티 (9개)</h2>
+  <div class="mcp-card"><span class="name">read_pptx</span> <span class="desc">— PPTX 읽기 → JSON/HTML</span><div class="params"><code>file_base64: str</code>, <code>output_mode: str="json"</code></div></div>
+  <div class="mcp-card"><span class="name">read_docx</span> <span class="desc">— DOCX 읽기 → JSON/HTML</span><div class="params"><code>file_base64: str</code>, <code>output_mode: str="json"</code></div></div>
+  <div class="mcp-card"><span class="name">read_excel</span> <span class="desc">— XLSX/CSV 읽기 → 시트별 JSON</span><div class="params"><code>file_base64: str</code>, <code>sheet_name: str=""</code>, <code>max_rows: int=0</code></div></div>
+  <div class="mcp-card"><span class="name">read_pdf</span> <span class="desc">— PDF 읽기 → 페이지별 텍스트 추출</span><div class="params"><code>file_base64: str</code>, <code>extract_images: bool=False</code>, <code>ocr_enabled: bool=False</code></div></div>
+  <div class="mcp-card"><span class="name">convert_format</span> <span class="desc">— 문서 형식 변환 (LibreOffice)</span><div class="params"><code>file_base64: str</code>, <code>input_format: str</code>, <code>output_format: str</code></div></div>
+  <div class="mcp-card"><span class="name">run_python</span> <span class="desc">— 샌드박스 Python 코드 실행</span><div class="params"><code>code: str</code>, <code>timeout: int=30</code></div></div>
+  <div class="mcp-card"><span class="name">render_chart</span> <span class="desc">— 데이터 차트 렌더링 (bar/line/pie/scatter)</span><div class="params"><code>chart_type: str</code>, <code>data: str</code> (JSON), <code>title: str=""</code></div></div>
+  <div class="mcp-card"><span class="name">web_search</span> <span class="desc">— 웹 검색</span><div class="params"><code>query: str</code>, <code>max_results: int=5</code></div></div>
+  <div class="mcp-card"><span class="name">web_fetch</span> <span class="desc">— URL 콘텐츠 추출 (text/html/markdown)</span><div class="params"><code>url: str</code>, <code>extract_mode: str="text"</code></div></div>
+</section>
+
+<!-- ============ 16 ============ -->
+<section id="roadmap">
+  <h2>16. 도입 로드맵</h2>
+  <div class="grid-3">
+    <div class="opt-box" style="border-left:4px solid var(--primary);text-align:left;">
+      <h4 style="color:var(--primary);">Phase 1: 기본 AI</h4>
+      <ul style="font-size:0.84rem;">
+        <li>회원가입 → 테넌트 프로비저닝</li>
+        <li>JWT 인증 + X-Tenant-Id</li>
+        <li>AI 채팅 (사건 분석, 요약)</li>
+        <li>지식 소스 + RAG 검색</li>
+        <li>PII 마스킹 정책</li>
+      </ul>
+    </div>
+    <div class="opt-box" style="border-left:4px solid var(--accent);text-align:left;">
+      <h4 style="color:var(--accent);">Phase 2: 문서+워크플로우</h4>
+      <ul style="font-size:0.84rem;">
+        <li>고소장/소송장 AI 초안 생성</li>
+        <li>AI 검토 (RAG 교차 검증)</li>
+        <li>변호사 승인 워크플로우</li>
+        <li>상담 녹음 STT</li>
+        <li>아카이브 → RAG 지식화</li>
+      </ul>
+    </div>
+    <div class="opt-box" style="border-left:4px solid var(--info);text-align:left;">
+      <h4 style="color:var(--info);">Phase 3: 품질+MCP</h4>
+      <ul style="font-size:0.84rem;">
+        <li>RAGAS 품질 모니터링</li>
+        <li>비용 대시보드 + 감사 로그</li>
+        <li>MCP 서버 구축 (자율 에이전트)</li>
+        <li>프롬프트 버전 관리</li>
+        <li>내부 MCP 직접 연결 (고급)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout callout-ok">
+    <b>API 레퍼런스</b>
+    상세 API 문서(엔드포인트, 파라미터, 응답 형식)는 별도 문서를 참조하세요: <code>aimbase-api-reference.html</code>
+  </div>
+</section>
+
+</div></div></div>
+
+<footer style="background:var(--code-bg);color:var(--code-text);text-align:center;padding:18px;font-size:0.8rem;">
+  LexAI Engine × Lexflow Developer Guide v2.0 — 2026.03.25
+</footer>
+
+</body>
+</html>

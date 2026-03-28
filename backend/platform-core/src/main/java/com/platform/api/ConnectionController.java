@@ -53,7 +53,9 @@ public class ConnectionController {
     @Operation(summary = "연결 생성")
     public ApiResponse<ConnectionEntity> create(@Valid @RequestBody ConnectionRequest request) {
         ConnectionEntity entity = new ConnectionEntity();
-        entity.setId(request.id());
+        entity.setId(request.id() != null && !request.id().isBlank()
+                ? request.id()
+                : java.util.UUID.randomUUID().toString());
         entity.setName(request.name());
         entity.setAdapter(request.adapter());
         entity.setType(request.type());
@@ -118,7 +120,7 @@ public class ConnectionController {
     }
 
     public record ConnectionRequest(
-            @NotBlank String id,
+            String id,
             @NotBlank String name,
             @NotBlank String adapter,
             @NotBlank String type,

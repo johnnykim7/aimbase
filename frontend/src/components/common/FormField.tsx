@@ -1,5 +1,3 @@
-import { COLORS, FONTS } from "../../theme";
-
 interface FormFieldProps {
   label: string;
   children: React.ReactNode;
@@ -7,47 +5,38 @@ interface FormFieldProps {
 }
 
 export const FormField = ({ label, children, hint }: FormFieldProps) => (
-  <div style={{ marginBottom: 16 }}>
-    <label
-      style={{
-        display: "block",
-        fontSize: 11,
-        fontFamily: FONTS.mono,
-        color: COLORS.textMuted,
-        textTransform: "uppercase",
-        letterSpacing: 1,
-        marginBottom: 6,
-      }}
-    >
+  <div className="mb-4">
+    <label className="block text-xs font-medium text-foreground mb-1.5">
       {label}
     </label>
     {children}
     {hint && (
-      <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 4, fontFamily: FONTS.mono }}>
-        {hint}
-      </div>
+      <div className="text-[11px] text-muted-foreground/60 mt-1">{hint}</div>
     )}
   </div>
 );
 
+/** @deprecated Use Tailwind classes directly */
 export const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "10px 14px",
+  padding: "9px 12px",
   borderRadius: 8,
-  border: `1px solid ${COLORS.border}`,
-  background: COLORS.surfaceActive,
-  color: COLORS.text,
+  border: "1px solid hsl(var(--border))",
+  background: "hsl(var(--card))",
+  color: "hsl(var(--foreground))",
   fontSize: 13,
-  fontFamily: FONTS.mono,
+  fontFamily: "var(--font-mono, monospace)",
   boxSizing: "border-box",
   transition: "border-color 0.15s",
 };
 
+/** @deprecated Use Tailwind classes directly */
 export const selectStyle: React.CSSProperties = {
   ...inputStyle,
   cursor: "pointer",
 };
 
+/** @deprecated Use Tailwind classes directly */
 export const textareaStyle: React.CSSProperties = {
   ...inputStyle,
   resize: "vertical",

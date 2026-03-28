@@ -1,0 +1,18 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api-raw",
+  "name": "T4-4 #1: API 서버 헬스체크",
+  "action": {
+    "method": "GET",
+    "endpoint": "/actuator/health",
+    "headers": {}
+  },
+  "extract": {
+    "status": "$.body.status"
+  },
+  "assert": [
+    { "field": "$.statusCode", "operator": "==", "value": 200 },
+    { "field": "$.body.status", "operator": "==", "value": "UP" }
+  ],
+  "failMode": "hard"
+}

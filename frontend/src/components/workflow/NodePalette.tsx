@@ -1,11 +1,9 @@
-import { COLORS, FONTS } from "../../theme";
-
 const PALETTE_ITEMS = [
-  { type: "llm", label: "LLM 호출", icon: "🤖", color: COLORS.accent },
-  { type: "tool", label: "도구 실행", icon: "🔧", color: COLORS.purple },
-  { type: "condition", label: "조건 분기", icon: "⑂", color: COLORS.warning },
-  { type: "parallel", label: "병렬 실행", icon: "⚡", color: COLORS.success },
-  { type: "approval", label: "승인 게이트", icon: "✋", color: COLORS.danger },
+  { type: "llm", label: "LLM 호출", icon: "🤖", color: "#2563eb" },
+  { type: "tool", label: "도구 실행", icon: "🔧", color: "#7c3aed" },
+  { type: "condition", label: "조건 분기", icon: "⑂", color: "#d97706" },
+  { type: "parallel", label: "병렬 실행", icon: "⚡", color: "#059669" },
+  { type: "approval", label: "승인 게이트", icon: "✋", color: "#dc2626" },
   { type: "action", label: "액션", icon: "▶", color: "#6366f1" },
 ] as const;
 
@@ -17,29 +15,8 @@ export function NodePalette() {
   };
 
   return (
-    <div
-      style={{
-        width: 200,
-        background: COLORS.surface,
-        borderRight: `1px solid ${COLORS.border}`,
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        flexShrink: 0,
-        overflowY: "auto",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          fontFamily: FONTS.mono,
-          color: COLORS.textMuted,
-          textTransform: "uppercase",
-          letterSpacing: 1,
-          marginBottom: 4,
-        }}
-      >
+    <div className="w-[200px] bg-card border-r border-border p-4 flex flex-col gap-2 shrink-0 overflow-y-auto">
+      <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-wider mb-1">
         노드 팔레트
       </div>
 
@@ -48,16 +25,11 @@ export function NodePalette() {
           key={item.type}
           draggable
           onDragStart={(e) => onDragStart(e, item.type, item.label)}
+          className="cursor-grab flex items-center gap-2 transition-colors rounded-xl"
           style={{
             padding: "10px 12px",
-            borderRadius: 10,
             border: `1px solid ${item.color}40`,
             background: item.color + "0a",
-            cursor: "grab",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            transition: "background 0.15s, border-color 0.15s",
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = item.color + "18";
@@ -69,42 +41,23 @@ export function NodePalette() {
           }}
         >
           <span
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: item.color + "18",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 14,
-              flexShrink: 0,
-            }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0"
+            style={{ background: item.color + "18" }}
           >
             {item.icon}
           </span>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 600, fontFamily: FONTS.sans, color: COLORS.text }}>
+            <div className="text-xs font-semibold text-foreground">
               {item.label}
             </div>
-            <div style={{ fontSize: 10, fontFamily: FONTS.mono, color: item.color, textTransform: "uppercase" }}>
+            <div className="text-[10px] font-mono uppercase" style={{ color: item.color }}>
               {item.type}
             </div>
           </div>
         </div>
       ))}
 
-      <div
-        style={{
-          marginTop: "auto",
-          padding: "10px 0",
-          borderTop: `1px solid ${COLORS.border}`,
-          fontSize: 11,
-          fontFamily: FONTS.mono,
-          color: COLORS.textDim,
-          lineHeight: 1.5,
-        }}
-      >
+      <div className="mt-auto pt-2.5 border-t border-border text-[11px] font-mono text-muted-foreground/40 leading-normal">
         팔레트에서 노드를 캔버스로 드래그하세요
       </div>
     </div>

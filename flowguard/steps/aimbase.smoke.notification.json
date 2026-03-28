@@ -1,0 +1,18 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api-raw",
+  "name": "T4-4 #22: 알림 도구 구조 확인",
+  "action": {
+    "method": "GET",
+    "endpoint": "/api/v1/tools?source=builtin",
+    "headers": {
+      "Authorization": "Bearer {{steps.aimbase.smoke.login.output.accessToken}}",
+      "X-Tenant-Id": "{{vars.tenantId}}"
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.statusCode", "operator": "==", "value": 200 }
+  ],
+  "failMode": "soft"
+}

@@ -96,6 +96,12 @@ public class TenantDataSourceConfig {
         return routing;
     }
 
+    @Bean
+    @Primary
+    public JdbcTemplate jdbcTemplate(@Qualifier("tenantDataSource") DataSource tenantDataSource) {
+        return new JdbcTemplate(tenantDataSource);
+    }
+
     @Bean(name = "tenantEntityManagerFactory")
     @Primary
     public LocalContainerEntityManagerFactoryBean tenantEntityManagerFactory(

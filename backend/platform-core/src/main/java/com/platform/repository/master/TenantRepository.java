@@ -12,4 +12,7 @@ public interface TenantRepository extends JpaRepository<TenantEntity, String> {
     List<TenantEntity> findByStatus(String status);
     Optional<TenantEntity> findByDbName(String dbName);
     boolean existsByAdminEmail(String adminEmail);
+
+    // CR-023: 소비앱별 필터링
+    List<TenantEntity> findByDomainApp(String domainApp);
 }

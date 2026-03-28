@@ -29,6 +29,10 @@ public class TenantDataSourceManager {
     private final JdbcTemplate masterJdbcTemplate;
     private final Map<String, HikariDataSource> tenantDataSources = new ConcurrentHashMap<>();
 
+    /** Docker 환경에서 DB 호스트를 오버라이드하기 위한 환경변수 */
+    @org.springframework.beans.factory.annotation.Value("${tenant.db.host-override:}")
+    private String dbHostOverride;
+
     public TenantDataSourceManager(@Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate) {
         this.masterJdbcTemplate = masterJdbcTemplate;
     }
@@ -91,13 +95,42 @@ public class TenantDataSourceManager {
         return tenantDataSources.get(tenantId);
     }
 
+    /**
+     * 테넌트 DataSource가 캐시에 없으면 Master DB에서 조회하여 동적 생성.
+     * MCP SSE 연결 시 endpoint 이벤트 발행 전에 DataSource를 보장하기 위해 사용.
+     */
+    public void ensureDataSource(String tenantId) {
+        if (tenantDataSources.containsKey(tenantId)) {
+            return;
+        }
+        try {
+            List<Map<String, Object>> rows = masterJdbcTemplate.queryForList(
+                "SELECT db_host, db_port, db_name, db_username, db_password_encrypted " +
+                "FROM tenants WHERE id = ? AND status = 'active'",
+                tenantId
+            );
+            if (rows.isEmpty()) {
+                log.warn("ensureDataSource: tenant '{}' not found or inactive", tenantId);
+                return;
+            }
+            Map<String, Object> tenant = rows.get(0);
+            HikariDataSource ds = createDataSource(tenant);
+            tenantDataSources.put(tenantId, ds);
+            log.info("ensureDataSource: dynamically created DataSource for tenant '{}'", tenantId);
+        } catch (Exception e) {
+            log.error("ensureDataSource: failed for tenant '{}': {}", tenantId, e.getMessage());
+        }
+    }
+
     public Map<String, HikariDataSource> getAllCachedDataSources() {
         return Map.copyOf(tenantDataSources);
     }
 
     private HikariDataSource createDataSource(Map<String, Object> tenant) {
         HikariConfig config = new HikariConfig();
-        String host = (String) tenant.get("db_host");
+        String host = (dbHostOverride != null && !dbHostOverride.isBlank())
+                ? dbHostOverride
+                : (String) tenant.get("db_host");
         Object portObj = tenant.get("db_port");
         int port = portObj instanceof Number n ? n.intValue() : Integer.parseInt(portObj.toString());
         String dbName = (String) tenant.get("db_name");
