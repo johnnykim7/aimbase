@@ -21,6 +21,7 @@
 | CR-010 | 플랫폼 핵심 강화 | 변경 | High | v3.0.0 |
 | CR-011 | ClaudeCodeTool 안정화 및 확장성 개선 | 변경 | High | v3.1.0 |
 | CR-012 | LLM 컨텍스트 설계 보강 | 변경 | High | v3.2.0 |
+| CR-013 | API Rate Limit 방어 (TokenBucket) | 변경 | Medium | v3.3.0 |
 
 ---
 
