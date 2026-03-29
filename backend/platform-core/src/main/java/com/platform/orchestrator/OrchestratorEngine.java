@@ -7,6 +7,7 @@ import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.LLMAdapterRegistry;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
+import com.platform.llm.router.FallbackChainExecutor;
 import com.platform.llm.router.ModelRouter;
 import com.platform.policy.AuditLogger;
 import com.platform.policy.MCPSafetyClient;
@@ -19,6 +20,8 @@ import com.platform.repository.UsageLogRepository;
 import com.platform.schema.SchemaRegistry;
 import com.platform.schema.SchemaValidator;
 import com.platform.session.ContextWindowManager;
+import com.platform.session.MemoryService;
+import com.platform.session.ResponseCacheService;
 import com.platform.session.SessionStore;
 import com.platform.tool.ToolCallHandler;
 import com.platform.tool.ToolRegistry;
@@ -53,6 +56,7 @@ public class OrchestratorEngine {
     private static final Logger log = LoggerFactory.getLogger(OrchestratorEngine.class);
 
     private final ModelRouter modelRouter;
+    private final FallbackChainExecutor fallbackChainExecutor;
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final SessionStore sessionStore;
     private final ContextWindowManager contextWindowManager;
@@ -69,11 +73,14 @@ public class OrchestratorEngine {
     private final SchemaRegistry schemaRegistry;
     private final SchemaValidator schemaValidator;
     private final ObjectMapper objectMapper;
+    private final ResponseCacheService responseCacheService;
+    private final MemoryService memoryService;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
     public OrchestratorEngine(
             ModelRouter modelRouter,
+            FallbackChainExecutor fallbackChainExecutor,
             ConnectionAdapterFactory connectionAdapterFactory,
             SessionStore sessionStore,
             ContextWindowManager contextWindowManager,
@@ -89,9 +96,12 @@ public class OrchestratorEngine {
             TraceService traceService,
             SchemaRegistry schemaRegistry,
             SchemaValidator schemaValidator,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ResponseCacheService responseCacheService,
+            MemoryService memoryService
     ) {
         this.modelRouter = modelRouter;
+        this.fallbackChainExecutor = fallbackChainExecutor;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.sessionStore = sessionStore;
         this.contextWindowManager = contextWindowManager;
@@ -108,6 +118,8 @@ public class OrchestratorEngine {
         this.schemaRegistry = schemaRegistry;
         this.schemaValidator = schemaValidator;
         this.objectMapper = objectMapper;
+        this.responseCacheService = responseCacheService;
+        this.memoryService = memoryService;
     }
 
     /**
@@ -121,8 +133,12 @@ public class OrchestratorEngine {
         // 1. 세션 히스토리 로드
         List<UnifiedMessage> history = sessionStore.getMessages(sessionId);
 
+        // 1.5 PRD-130: 메모리 컨텍스트 주입 (SYSTEM_RULES + LONG_TERM + USER_PROFILE)
+        List<UnifiedMessage> memoryContext = memoryService.buildMemoryContext(sessionId, request.userId());
+
         // 2. 현재 요청 메시지 추가
-        List<UnifiedMessage> allMessages = new ArrayList<>(history);
+        List<UnifiedMessage> allMessages = new ArrayList<>(memoryContext);
+        allMessages.addAll(history);
         allMessages.addAll(request.messages());
 
         // 3. 컨텍스트 윈도우 트리밍
@@ -161,6 +177,24 @@ public class OrchestratorEngine {
         // 4-1. CR-007: 구조화 출력 — 스키마 해석
         Map<String, Object> resolvedSchema = resolveResponseSchema(request.responseFormat());
 
+        // 4-2. PRD-128: 응답 캐시 조회 (세션 없는 단발 요청만 캐시 적용)
+        String lastUserMsg = extractLastUserMessage(request);
+        if (request.sessionId() == null && lastUserMsg != null && !lastUserMsg.isBlank()) {
+            try {
+                var cached = responseCacheService.get(resolvedModel, null, lastUserMsg);
+                if (cached.isPresent()) {
+                    log.info("캐시 히트: model={}", resolvedModel);
+                    // 세션 저장은 스킵, 캐시 응답 직접 반환
+                    return new ChatResponse(
+                            "cache-hit", resolvedModel, sessionId,
+                            List.of(new ContentBlock.Text(cached.get())),
+                            List.of(), new TokenUsage(0, 0), 0.0, null);
+                }
+            } catch (Exception e) {
+                log.debug("캐시 조회 실패 (무시): {}", e.getMessage());
+            }
+        }
+
         // 5. LLM 호출 (Phase 2: actionsEnabled=true 시 tool use 루프)
         LLMResponse llmResponse = null;
         long llmStart = System.currentTimeMillis();
@@ -177,7 +211,13 @@ public class OrchestratorEngine {
                         resolvedModel, trimmedMessages, null,
                         ModelConfig.defaults(), false, sessionId, null, resolvedSchema);
                 try {
-                    llmResponse = adapter.chat(llmRequest).get();
+                    // PRD-122: Fallback Chain — connectionId 직접 지정이 아닌 경우 fallback 적용
+                    if (request.connectionId() == null || request.connectionId().isBlank()) {
+                        llmResponse = fallbackChainExecutor.execute(
+                                llmRequest, adapter, resolvedModel, modelRouter.getFallbackChain());
+                    } else {
+                        llmResponse = adapter.chat(llmRequest).get();
+                    }
                 } catch (Exception e) {
                     log.error("LLM call failed", e);
                     throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
@@ -228,6 +268,18 @@ public class OrchestratorEngine {
         request.messages().forEach(m -> sessionStore.appendMessage(sessionId, m));
         sessionStore.appendMessage(sessionId,
                 UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, llmResponse.textContent()));
+
+        // 7.5 PRD-128: 응답 캐시 저장 (세션 없는 단발 요청만)
+        if (request.sessionId() == null && lastUserMsg != null && !lastUserMsg.isBlank()) {
+            try {
+                int totalTokens = llmResponse.usage() != null
+                        ? llmResponse.usage().inputTokens() + llmResponse.usage().outputTokens() : 0;
+                responseCacheService.put(resolvedModel, null, lastUserMsg,
+                        llmResponse.textContent(), totalTokens);
+            } catch (Exception e) {
+                log.debug("캐시 저장 실패 (무시): {}", e.getMessage());
+            }
+        }
 
         // 8. 사용량 로그 저장
         saveUsageLog(request.userId(), sessionId, resolvedModel, llmResponse);
@@ -439,6 +491,19 @@ public class OrchestratorEngine {
             }
         }
         return trimmed;
+    }
+
+    /** 마지막 사용자 메시지 텍스트 추출 (캐시 키용) */
+    private String extractLastUserMessage(ChatRequest request) {
+        if (request.messages() == null) return null;
+        return request.messages().stream()
+                .filter(m -> m.role() == UnifiedMessage.Role.USER)
+                .reduce((a, b) -> b)
+                .map(m -> m.content().stream()
+                        .filter(b -> b instanceof ContentBlock.Text)
+                        .map(b -> ((ContentBlock.Text) b).text())
+                        .reduce("", String::concat))
+                .orElse(null);
     }
 
     private void saveUsageLog(String userId, String sessionId, String model, LLMResponse response) {

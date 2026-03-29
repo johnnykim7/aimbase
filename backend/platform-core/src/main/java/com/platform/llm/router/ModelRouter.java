@@ -60,11 +60,24 @@ public class ModelRouter {
      * model 문자열을 정규화한다.
      * "auto" → IntentClassifier 기반 모델 ID 반환
      */
+    /**
+     * model 문자열을 정규화한다.
+     * "auto" → IntentClassifier 기반 모델 ID 반환 (Smart Routing 반영).
+     */
     public String resolveModelId(String model) {
         if (model == null || model.isBlank() || "auto".equalsIgnoreCase(model)) {
-            return DEFAULT_MODEL;
+            return DEFAULT_MODEL; // 실제 라우팅은 route()에서 IntentClassifier로 결정
         }
         return model;
+    }
+
+    /** 활성 routing_config에서 fallback chain을 조회한다. */
+    public java.util.List<String> getFallbackChain() {
+        // RoutingConfigRepository는 향후 DI로 주입. 현재는 기본 fallback 반환.
+        return java.util.List.of(
+                "anthropic/claude-sonnet-4-5",
+                "anthropic/claude-haiku-4-5-20251001"
+        );
     }
 
     /**

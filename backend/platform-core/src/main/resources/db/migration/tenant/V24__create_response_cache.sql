@@ -14,3 +14,7 @@ CREATE TABLE response_cache (
 
 CREATE UNIQUE INDEX idx_response_cache_key ON response_cache (cache_key);
 CREATE INDEX idx_response_cache_expires ON response_cache (expires_at);
+
+-- PRD-129: Semantic Match용 HNSW 인덱스
+CREATE INDEX idx_response_cache_embedding ON response_cache
+    USING hnsw (query_embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);

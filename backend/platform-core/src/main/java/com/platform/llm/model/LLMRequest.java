@@ -37,4 +37,9 @@ public record LLMRequest(
                       ModelConfig config, boolean stream, String sessionId, String toolChoice) {
         this(model, messages, tools, config, stream, sessionId, toolChoice, null);
     }
+
+    /** 모델만 교체한 복사본 반환 (Fallback Chain용) */
+    public LLMRequest withModel(String newModel) {
+        return new LLMRequest(newModel, messages, tools, config, stream, sessionId, toolChoice, responseSchema);
+    }
 }
