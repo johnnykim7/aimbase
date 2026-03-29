@@ -1,10 +1,40 @@
+export interface App {
+  id: string;
+  name: string;
+  description?: string;
+  status: "active" | "suspended" | "deleted";
+  dbName?: string;
+  ownerEmail?: string;
+  maxTenants?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AppCreateRequest {
+  appId: string;
+  name: string;
+  description?: string;
+  ownerEmail: string;
+  ownerPassword: string;
+  maxTenants?: number;
+}
+
+export interface AppUpdateRequest {
+  name?: string;
+  description?: string;
+  ownerEmail?: string;
+  maxTenants?: number;
+}
+
 export interface Tenant {
   id: string;
+  appId?: string;
   name: string;
   dbHost?: string;
   dbPort?: number;
   dbName?: string;
   dbUsername?: string;
+  adminEmail?: string;
   status: "active" | "suspended" | "terminated";
   plan?: "free" | "standard" | "enterprise";
   createdAt?: string;
@@ -13,11 +43,20 @@ export interface Tenant {
 
 export interface TenantRequest {
   id: string;
+  appId?: string;
   name: string;
   adminEmail?: string;
   plan?: string;
   dbHost?: string;
   dbName?: string;
+}
+
+export interface AppTenantCreateRequest {
+  tenantId: string;
+  name: string;
+  adminEmail: string;
+  initialAdminPassword: string;
+  plan?: string;
 }
 
 export interface Subscription {

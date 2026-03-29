@@ -33,6 +33,9 @@ public class TenantEntity {
     @Column(name = "db_password_encrypted", nullable = false)
     private String dbPasswordEncrypted;
 
+    @Column(name = "app_id", length = 100)
+    private String appId;
+
     @Column(name = "admin_email", length = 255)
     private String adminEmail;
 
@@ -63,6 +66,8 @@ public class TenantEntity {
     public void setDbUsername(String dbUsername) { this.dbUsername = dbUsername; }
     public String getDbPasswordEncrypted() { return dbPasswordEncrypted; }
     public void setDbPasswordEncrypted(String dbPasswordEncrypted) { this.dbPasswordEncrypted = dbPasswordEncrypted; }
+    public String getAppId() { return appId; }
+    public void setAppId(String appId) { this.appId = appId; }
     public String getAdminEmail() { return adminEmail; }
     public void setAdminEmail(String adminEmail) { this.adminEmail = adminEmail; }
     public OffsetDateTime getCreatedAt() { return createdAt; }

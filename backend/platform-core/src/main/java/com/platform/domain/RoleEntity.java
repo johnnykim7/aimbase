@@ -4,7 +4,6 @@ import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Type;
 
-import java.util.List;
 import java.util.Map;
 
 @Entity
@@ -18,9 +17,9 @@ public class RoleEntity {
     @Column(length = 100, nullable = false)
     private String name;
 
-    @Type(JsonBinaryType.class)
-    @Column(columnDefinition = "jsonb")
-    private List<String> inherits;
+    @Column(columnDefinition = "varchar(50)[]")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.ARRAY)
+    private String[] inherits;
 
     @Type(JsonBinaryType.class)
     @Column(columnDefinition = "jsonb", nullable = false)
@@ -30,8 +29,8 @@ public class RoleEntity {
     public void setId(String id) { this.id = id; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
-    public List<String> getInherits() { return inherits; }
-    public void setInherits(List<String> inherits) { this.inherits = inherits; }
+    public String[] getInherits() { return inherits; }
+    public void setInherits(String[] inherits) { this.inherits = inherits; }
     public Map<String, Object> getPermissions() { return permissions; }
     public void setPermissions(Map<String, Object> permissions) { this.permissions = permissions; }
 }

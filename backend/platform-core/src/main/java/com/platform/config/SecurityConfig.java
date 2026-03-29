@@ -62,6 +62,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // RBAC
                 .requestMatchers("/api/v1/platform/**").hasRole("SUPER_ADMIN")
+                .requestMatchers("/api/v1/apps/*/auth/**").permitAll()
+                .requestMatchers("/api/v1/apps/**").authenticated()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 // 그 외 API — 인증 필요
                 .requestMatchers("/api/v1/**").authenticated()

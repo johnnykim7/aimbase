@@ -35,6 +35,9 @@ public class ConversationSessionEntity {
     @Column(name = "created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
+    @Column(name = "summary_text", columnDefinition = "text")
+    private String summaryText;
+
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt = OffsetDateTime.now();
 
@@ -57,6 +60,8 @@ public class ConversationSessionEntity {
     public void setMessageCount(int messageCount) { this.messageCount = messageCount; }
     public long getTotalTokens() { return totalTokens; }
     public void setTotalTokens(long totalTokens) { this.totalTokens = totalTokens; }
+    public String getSummaryText() { return summaryText; }
+    public void setSummaryText(String summaryText) { this.summaryText = summaryText; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }

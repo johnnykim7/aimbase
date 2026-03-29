@@ -153,6 +153,7 @@ public class TenantOnboardingService {
     private TenantEntity createTenantEntity(TenantOnboardingRequest request) {
         TenantEntity tenant = new TenantEntity();
         tenant.setId(request.tenantId());
+        tenant.setAppId(request.appId());
         tenant.setName(request.name());
         tenant.setStatus("provisioning");
         tenant.setDbHost(request.dbHost());

@@ -86,6 +86,7 @@ public class PlatformController {
 
         TenantOnboardingRequest onboardingRequest = TenantOnboardingRequest.withLocalDb(
             request.tenantId(),
+            request.appId(),
             request.name(),
             request.adminEmail(),
             request.initialAdminPassword(),
@@ -214,6 +215,7 @@ public class PlatformController {
 
     public record TenantCreateRequest(
         @NotBlank String tenantId,
+        String appId,
         @NotBlank String name,
         @NotBlank String adminEmail,
         @NotBlank String initialAdminPassword,

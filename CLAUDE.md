@@ -150,8 +150,14 @@ frontend/src/
 - [x] Sprint 11-14: FE 구현
 - [x] Sprint 15-18: Python 사이드카 (RAG Pipeline, Safety, Evaluation, 고급 기능)
 - [x] Sprint 19: FE 워크플로우 스튜디오 (React Flow 기반 비주얼 DAG 에디터) [CR-005]
-- [ ] Sprint 20: 도구 선택 제어 (ToolFilterContext, tool_choice) [CR-006]
-- [ ] Sprint 21: 구조화된 출력 (response_format, output_schema, FE 스키마 편집) [CR-007]
+- [x] Sprint 20: 도구 선택 제어 (ToolFilterContext, tool_choice) [CR-006]
+- [x] Sprint 21: 구조화된 출력 (response_format, output_schema, FE 스키마 편집) [CR-007]
+- [x] Sprint 22: ClaudeCodeTool 안정화 및 확장 (cli_options, 에러분류, 서킷브레이커, 알림) [CR-011]
+- [x] Sprint 22: 오케스트레이터 지능화 (GenericCircuitBreaker, FallbackChain, IntentClassifier, ConversationSummarizer) [CR-012]
+- [x] Sprint 23: 캐시 + 메모리 아키텍처 (ResponseCacheService, MemoryService 4계층) [CR-012]
+- [x] Sprint 23: 파일업로드/대화히스토리 (StorageService, ConversationController DB영속) [CR-009/010]
+- [x] Sprint 24: 멀티모달/트레이싱 (멀티모달 API, TraceService, 구조화출력 완성) [CR-009/010]
+- [x] Sprint 25: 비용대시보드/검색설정 (ModelPricing, AdminController, FE 차트) [CR-009/010]
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)

@@ -63,4 +63,19 @@ public class FlywayMultiTenantConfig {
         flyway.migrate();
         log.info("Tenant DB Flyway migration completed");
     }
+
+    /**
+     * App DB용 Flyway 마이그레이션 (AppOnboardingService에서 직접 호출).
+     * App DB는 tenant 스키마를 재사용 — 동일 테이블 구조로 fallback 조회 가능.
+     */
+    public static void migrateAppDatabase(DataSource appDataSource) {
+        Flyway flyway = Flyway.configure()
+            .dataSource(appDataSource)
+            .locations("classpath:db/migration/tenant")
+            .table("flyway_schema_history")
+            .baselineOnMigrate(true)
+            .load();
+        flyway.migrate();
+        log.info("App DB Flyway migration completed");
+    }
 }

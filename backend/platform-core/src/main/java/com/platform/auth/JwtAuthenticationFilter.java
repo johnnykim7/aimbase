@@ -66,26 +66,38 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
 
             String userId = claims.getSubject();
-            UserEntity user = userRepository.findById(userId).orElse(null);
-            if (user == null || !user.isActive()) {
-                filterChain.doFilter(request, response);
-                return;
-            }
-
             String tenantId = claims.get("tenant_id", String.class);
             String role = claims.get("role", String.class);
-            Map<String, Object> permissions = Map.of();
-            if (user.getRoleId() != null) {
-                permissions = roleRepository.findById(user.getRoleId())
-                        .map(RoleEntity::getPermissions)
-                        .orElse(Map.of());
-            }
+            String email = claims.get("email", String.class);
+            String path = request.getRequestURI();
 
-            UserPrincipal principal = new UserPrincipal(userId, user.getEmail(), tenantId, role, permissions);
-            var authentication = new UsernamePasswordAuthenticationToken(
-                    principal, null, principal.getAuthorities());
-            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+            // Platform/App API는 TenantContext가 없으므로 JWT claims만으로 인증
+            if (path.startsWith("/api/v1/platform") || path.startsWith("/api/v1/apps/")) {
+                UserPrincipal principal = new UserPrincipal(userId, email, tenantId, role, Map.of());
+                var authentication = new UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities());
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            } else {
+                UserEntity user = userRepository.findById(userId).orElse(null);
+                if (user == null || !user.isActive()) {
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+
+                Map<String, Object> permissions = Map.of();
+                if (user.getRoleId() != null) {
+                    permissions = roleRepository.findById(user.getRoleId())
+                            .map(RoleEntity::getPermissions)
+                            .orElse(Map.of());
+                }
+
+                UserPrincipal principal = new UserPrincipal(userId, user.getEmail(), tenantId, role, permissions);
+                var authentication = new UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities());
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
 
         } catch (Exception e) {
             log.debug("JWT authentication failed: {}", e.getMessage());

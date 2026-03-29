@@ -19,6 +19,10 @@
 | CR-008 | LLM 연결 테스트 실제 검증 | 버그수정 | Medium | v2.5.1 |
 | CR-009 | Python 사이드카 알파 기능 | 변경 | High | v3.0.0 |
 | CR-010 | 플랫폼 핵심 강화 | 변경 | High | v3.0.0 |
+| CR-011 | ClaudeCodeTool 안정화 및 확장성 개선 | 변경 | High | v3.1.0 |
+| CR-012 | LLM 컨텍스트 설계 보강 | 변경 | High | v3.2.0 |
+| CR-013 | API Rate Limit 방어 (TokenBucket) | 변경 | Medium | v3.3.0 |
+| CR-014 | App-Tenant 3계층 멀티테넌시 | 변경 | High | v3.4.0 |
 
 ---
 
@@ -204,6 +208,76 @@
 - **영향 설계서**: T1-1, T1-2, T2-1, T3-2, T3-3, T3-6, T4-1
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v3.0.0
 - **변경 일자**: 2026-03-19
+
+### CR-011 | ClaudeCodeTool 안정화 및 확장성 개선
+- **대상 기능 ID**: PRD-116~PRD-121(신규)
+- **변경 타입**: 변경
+- **변경 내용**: ClaudeCodeTool(빌트인 Claude Code CLI 래퍼)의 프로덕션 안정화 및 확장성 개선
+  - PRD-116 CLI 옵션 동적 전달: 하드코딩된 buildCommand → `cli_options` 맵 방식 전환. 워크플로우에서 CLI 옵션을 자유롭게 지정, CLI 업데이트 시 소스 변경 불필요
+  - PRD-117 에러 패턴 DB 관리: `claude_code_error_patterns` Master DB 테이블. 문자열 매칭 기반 에러 분류 (AUTH_EXPIRED, RATE_LIMIT, NETWORK, TIMEOUT, MAX_TURNS, UNKNOWN)
+  - PRD-118 서킷 브레이커: 연속 3회 실패 시 OPEN(5분 차단), HALF-OPEN 재시도, 성공 1회 시 CLOSED. 원인 불명 에러 및 타임아웃 재시도 실패 시 적용
+  - PRD-119 알림 연동: 인증만료/Rate limit 즉시 알림, 서킷 OPEN 시 문자 발송, 미복구 시 30분 주기 재알림. Aimbase 알림 모듈 활용
+  - PRD-120 Permission/세션 관리: `--permission-mode` 워크플로우 설정 지원 (도구 승인 자동화), `--continue`/`--resume` 세션 이어가기 지원
+  - PRD-121 도구 파라미터 스키마 개선: `UnifiedToolDef.inputSchema`에 자주 쓰는 옵션(model, effort, permission-mode)은 enum 정의, 나머지는 cli_options 자유 입력. FE 워크플로우 스튜디오에서 동적 폼 렌더링 지원
+- **변경 사유**: Docker 환경 구동 시 다수 문제 발견(인증, 품질, 행 걸림), CLI 옵션 하드코딩으로 확장성 제한, 에러 발생 시 사용자 인지/대응 수단 부재
+- **영향 모듈**: tool/builtin(ClaudeCodeTool), monitoring(서킷 브레이커), workflow(파라미터 전달), FE 워크플로우 스튜디오(도구 설정 UI)
+- **영향도**: High
+- **영향 범위**: PRD-116~PRD-121(신규)
+- **영향 설계서**: T1-1, T1-2, T2-1, T3-2, T3-6, T4-1
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v3.1.0
+- **변경 일자**: 2026-03-29
+
+### CR-012 | LLM 컨텍스트 설계 보강
+- **대상 기능 ID**: PRD-122~PRD-131(신규)
+- **변경 타입**: 변경
+- **변경 내용**: "LLM은 기억하지 않는다 — 컨텍스트 설계가 서비스다" 관점에서 5개 Gap 보강
+  - PRD-122 Fallback Chain 실행기: 모델 A 실패 시 모델 B 자동 전환, 지수 백오프(1s→2s→4s)
+  - PRD-123 범용 서킷 브레이커: ClaudeCodeCircuitBreaker를 일반화한 GenericCircuitBreaker, 모델별 장애 격리
+  - PRD-124 의도 분류기: 규칙 기반 요청 복잡도 분류 (SIMPLE/MODERATE/COMPLEX)
+  - PRD-125 Smart Model Routing: 복잡도에 따라 Haiku/Sonnet/Opus 자동 분기, routing_config DB 참조
+  - PRD-126 대화 요약 생성: Haiku 모델로 이전 대화를 요약하여 컨텍스트 압축
+  - PRD-127 요약 주입 및 ContextWindow 확장: 70% 토큰 도달 시 요약 트리거, 요약본 SYSTEM 뒤 주입
+  - PRD-128 Exact Match 응답 캐시: SHA-256 해시 기반 Redis LLM 응답 캐시
+  - PRD-129 Semantic Match 응답 캐시: 임베딩 유사도 기반 pgvector 의미적 캐시 (cosine≥0.95)
+  - PRD-130 메모리 계층 분리: SYSTEM_RULES/LONG_TERM/SHORT_TERM/USER_PROFILE 4계층 구조
+  - PRD-131 메모리 관리 API: 메모리 CRUD, 계층별 필터, 사용자 프로필 조회
+  - DB: V23(conversation_sessions 컬럼 추가), V24(response_cache 테이블), V25(conversation_memories 테이블)
+- **변경 사유**: 시중 오픈소스(Dify B+, Open WebUI C+, n8n C+) 대비 컨텍스트 설계 성숙도를 A-로 끌어올려 종합 1위 수준 달성. 특히 대화 요약(경쟁사 미보유)은 차별점, Smart Routing과 응답 캐시(Dify만 보유)는 경쟁 동등화
+- **영향 모듈**: 오케스트레이터, 세션, 라우팅, 캐시(신규), 메모리(신규), Resilience(신규), LLM 어댑터
+- **영향도**: High
+- **영향 범위**: PRD-122~PRD-131(신규)
+- **영향 설계서**: T1-1, T1-2, T2-1, T3-1, T3-2, T3-6, T4-1
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v3.2.0
+- **변경 일자**: 2026-03-29
+
+---
+
+### CR-014 | App-Tenant 3계층 멀티테넌시
+- **대상 기능 ID**: PRD-신규 (App 관리, 소비앱 어드민 셀프서비스)
+- **변경 타입**: 변경
+- **변경 내용**: Platform → App → Tenant 3계층 멀티테넌시 아키텍처 도입
+  - **App(소비앱) 계층 신설**: Master DB에 `apps` 테이블, `tenants.app_id` FK 추가
+  - **App 전용 DB**: 소비앱 공통 리소스(워크플로우, 지식저장소, 프롬프트, 정책, 커넥션, 도구) 관리
+  - **리소스 해석 우선순위**: Tenant 설정 > App 공통 설정 > Platform 기본값
+  - **역할 분리**: 슈퍼어드민 = App 등록/관리, 소비앱 어드민 = 하위 Tenant 셀프서비스 생성/관리
+  - **API 신규**:
+    - `POST /api/v1/platform/apps` — 슈퍼어드민: App 등록 (App DB 자동 프로비저닝)
+    - `GET/PUT/DELETE /api/v1/platform/apps/{appId}` — 슈퍼어드민: App CRUD
+    - `POST /api/v1/apps/{appId}/tenants` — 소비앱 어드민: 하위 Tenant 생성
+    - `GET/PUT/DELETE /api/v1/apps/{appId}/tenants/{tenantId}` — 소비앱 어드민: Tenant 관리
+  - **오케스트레이터 변경**: 요청 처리 시 Tenant DB → App DB fallback 조회 로직
+  - **FE**: App 관리 페이지 (슈퍼어드민), Tenant 셀프서비스 페이지 (소비앱 어드민)
+  - **DB 구조**:
+    - `aimbase_master` — apps, tenants(+app_id) 테이블
+    - `aimbase_app_<appId>` — 소비앱 공통 리소스 DB
+    - `aimbase_<tenantId>` — 테넌트 독립 DB (기존과 동일)
+- **변경 사유**: 소비앱 내부 고객(하위 테넌트)별 DB 격리는 되어 있으나, 같은 소비앱 소속 테넌트들이 공통 리소스(워크플로우, 지식저장소 등)를 공유할 방법이 없음. 소비앱 어드민이 직접 하위 테넌트를 관리할 수 있는 셀프서비스 필요
+- **영향 모듈**: tenant, api, orchestrator, config, domain, repository, FE(pages/platform, pages/app)
+- **영향도**: High
+- **영향 범위**: BIZ-003(멀티테넌시), PRD-001~095 전반 (리소스 조회 경로 변경)
+- **영향 설계서**: T1-1, T2-1, T2-2, T3-1, T3-6
+- **요청자**: 프로젝트 오너 | **승인자**: - | **적용 버전**: v3.4.0
+- **변경 일자**: 2026-03-29
 
 ---
 

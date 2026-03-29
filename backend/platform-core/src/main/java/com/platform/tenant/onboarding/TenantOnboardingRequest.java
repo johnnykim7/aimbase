@@ -5,6 +5,7 @@ package com.platform.tenant.onboarding;
  */
 public record TenantOnboardingRequest(
     String tenantId,
+    String appId,       // 소속 App(소비앱) ID — nullable for legacy tenants
     String name,
     String adminEmail,
     String initialAdminPassword,
@@ -15,11 +16,11 @@ public record TenantOnboardingRequest(
     String dbPassword
 ) {
     public static TenantOnboardingRequest withLocalDb(
-            String tenantId, String name, String adminEmail,
+            String tenantId, String appId, String name, String adminEmail,
             String initialAdminPassword, String plan,
             String dbHost, int dbPort, String dbUsername, String dbPassword) {
         return new TenantOnboardingRequest(
-            tenantId, name, adminEmail, initialAdminPassword, plan,
+            tenantId, appId, name, adminEmail, initialAdminPassword, plan,
             dbHost, dbPort, dbUsername, dbPassword
         );
     }
