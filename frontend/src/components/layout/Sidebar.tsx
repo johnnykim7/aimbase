@@ -16,6 +16,7 @@ const NAV_ITEMS = [
 ];
 
 const PLATFORM_ITEMS = [
+  { path: "/platform/apps", icon: "📱", label: "App 관리" },
   { path: "/platform/tenants", icon: "🏢", label: "테넌트 관리" },
   { path: "/platform/subscriptions", icon: "💳", label: "구독 관리" },
   { path: "/platform/monitoring", icon: "🌐", label: "플랫폼 현황" },

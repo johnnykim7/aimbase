@@ -13,13 +13,14 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
+ * @deprecated llm.router.FallbackChainExecutor로 대체됨. 하위호환용 유지.
  * Fallback Chain 실행기 (PRD-122).
  *
  * LLM 호출 실패 시 모델 A → B → C 자동 전환.
  * 지수 백오프(1s → 2s → 4s) 적용.
  * 서킷 브레이커 OPEN 상태인 모델은 skip.
  */
-@Component
+@Component("orchestratorFallbackChainExecutor")
 public class FallbackChainExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(FallbackChainExecutor.class);

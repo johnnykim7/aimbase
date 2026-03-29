@@ -71,9 +71,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String email = claims.get("email", String.class);
             String path = request.getRequestURI();
 
-            // Platform API (/api/v1/platform/**)는 TenantContext가 없으므로
-            // JWT claims만으로 인증 (Tenant DB 조회 불가)
-            if (path.startsWith("/api/v1/platform")) {
+            // Platform/App API는 TenantContext가 없으므로 JWT claims만으로 인증
+            if (path.startsWith("/api/v1/platform") || path.startsWith("/api/v1/apps/")) {
                 UserPrincipal principal = new UserPrincipal(userId, email, tenantId, role, Map.of());
                 var authentication = new UsernamePasswordAuthenticationToken(
                         principal, null, principal.getAuthorities());

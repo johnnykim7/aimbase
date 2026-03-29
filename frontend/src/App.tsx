@@ -11,6 +11,8 @@ import WorkflowStudio from "./pages/WorkflowStudio";
 import Knowledge from "./pages/Knowledge";
 import Auth from "./pages/Auth";
 import Monitoring from "./pages/Monitoring";
+import Apps from "./pages/platform/Apps";
+import AppTenants from "./pages/platform/AppTenants";
 import Tenants from "./pages/platform/Tenants";
 import Subscriptions from "./pages/platform/Subscriptions";
 import PlatformMonitoring from "./pages/platform/PlatformMonitoring";
@@ -32,7 +34,9 @@ export default function App() {
         <Route path="auth" element={<Auth />} />
         <Route path="monitoring" element={<Monitoring />} />
         <Route path="platform">
-          <Route index element={<Navigate to="tenants" replace />} />
+          <Route index element={<Navigate to="apps" replace />} />
+          <Route path="apps" element={<Apps />} />
+          <Route path="apps/:appId/tenants" element={<AppTenants />} />
           <Route path="tenants" element={<Tenants />} />
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="monitoring" element={<PlatformMonitoring />} />

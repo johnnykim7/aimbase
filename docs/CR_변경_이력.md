@@ -22,6 +22,7 @@
 | CR-011 | ClaudeCodeTool 안정화 및 확장성 개선 | 변경 | High | v3.1.0 |
 | CR-012 | LLM 컨텍스트 설계 보강 | 변경 | High | v3.2.0 |
 | CR-013 | API Rate Limit 방어 (TokenBucket) | 변경 | Medium | v3.3.0 |
+| CR-014 | App-Tenant 3계층 멀티테넌시 | 변경 | High | v3.4.0 |
 
 ---
 
@@ -247,6 +248,35 @@
 - **영향 범위**: PRD-122~PRD-131(신규)
 - **영향 설계서**: T1-1, T1-2, T2-1, T3-1, T3-2, T3-6, T4-1
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v3.2.0
+- **변경 일자**: 2026-03-29
+
+---
+
+### CR-014 | App-Tenant 3계층 멀티테넌시
+- **대상 기능 ID**: PRD-신규 (App 관리, 소비앱 어드민 셀프서비스)
+- **변경 타입**: 변경
+- **변경 내용**: Platform → App → Tenant 3계층 멀티테넌시 아키텍처 도입
+  - **App(소비앱) 계층 신설**: Master DB에 `apps` 테이블, `tenants.app_id` FK 추가
+  - **App 전용 DB**: 소비앱 공통 리소스(워크플로우, 지식저장소, 프롬프트, 정책, 커넥션, 도구) 관리
+  - **리소스 해석 우선순위**: Tenant 설정 > App 공통 설정 > Platform 기본값
+  - **역할 분리**: 슈퍼어드민 = App 등록/관리, 소비앱 어드민 = 하위 Tenant 셀프서비스 생성/관리
+  - **API 신규**:
+    - `POST /api/v1/platform/apps` — 슈퍼어드민: App 등록 (App DB 자동 프로비저닝)
+    - `GET/PUT/DELETE /api/v1/platform/apps/{appId}` — 슈퍼어드민: App CRUD
+    - `POST /api/v1/apps/{appId}/tenants` — 소비앱 어드민: 하위 Tenant 생성
+    - `GET/PUT/DELETE /api/v1/apps/{appId}/tenants/{tenantId}` — 소비앱 어드민: Tenant 관리
+  - **오케스트레이터 변경**: 요청 처리 시 Tenant DB → App DB fallback 조회 로직
+  - **FE**: App 관리 페이지 (슈퍼어드민), Tenant 셀프서비스 페이지 (소비앱 어드민)
+  - **DB 구조**:
+    - `aimbase_master` — apps, tenants(+app_id) 테이블
+    - `aimbase_app_<appId>` — 소비앱 공통 리소스 DB
+    - `aimbase_<tenantId>` — 테넌트 독립 DB (기존과 동일)
+- **변경 사유**: 소비앱 내부 고객(하위 테넌트)별 DB 격리는 되어 있으나, 같은 소비앱 소속 테넌트들이 공통 리소스(워크플로우, 지식저장소 등)를 공유할 방법이 없음. 소비앱 어드민이 직접 하위 테넌트를 관리할 수 있는 셀프서비스 필요
+- **영향 모듈**: tenant, api, orchestrator, config, domain, repository, FE(pages/platform, pages/app)
+- **영향도**: High
+- **영향 범위**: BIZ-003(멀티테넌시), PRD-001~095 전반 (리소스 조회 경로 변경)
+- **영향 설계서**: T1-1, T2-1, T2-2, T3-1, T3-6
+- **요청자**: 프로젝트 오너 | **승인자**: - | **적용 버전**: v3.4.0
 - **변경 일자**: 2026-03-29
 
 ---

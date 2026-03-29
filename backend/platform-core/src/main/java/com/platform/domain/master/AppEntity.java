@@ -5,8 +5,8 @@ import jakarta.persistence.*;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "tenants")
-public class TenantEntity {
+@Table(name = "apps")
+public class AppEntity {
 
     @Id
     @Column(length = 100)
@@ -15,8 +15,11 @@ public class TenantEntity {
     @Column(length = 200, nullable = false)
     private String name;
 
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
     @Column(length = 20, nullable = false)
-    private String status = "active"; // active, suspended, deleted
+    private String status = "active";
 
     @Column(name = "db_host", length = 255, nullable = false)
     private String dbHost;
@@ -30,14 +33,14 @@ public class TenantEntity {
     @Column(name = "db_username", length = 100, nullable = false)
     private String dbUsername;
 
-    @Column(name = "db_password_encrypted", nullable = false)
+    @Column(name = "db_password_encrypted", nullable = false, columnDefinition = "TEXT")
     private String dbPasswordEncrypted;
 
-    @Column(name = "app_id", length = 100)
-    private String appId;
+    @Column(name = "owner_email", length = 255)
+    private String ownerEmail;
 
-    @Column(name = "admin_email", length = 255)
-    private String adminEmail;
+    @Column(name = "max_tenants", nullable = false)
+    private Integer maxTenants = 100;
 
     @Column(name = "created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
@@ -50,10 +53,13 @@ public class TenantEntity {
         updatedAt = OffsetDateTime.now();
     }
 
+    // Getters & Setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getDbHost() { return dbHost; }
@@ -66,10 +72,10 @@ public class TenantEntity {
     public void setDbUsername(String dbUsername) { this.dbUsername = dbUsername; }
     public String getDbPasswordEncrypted() { return dbPasswordEncrypted; }
     public void setDbPasswordEncrypted(String dbPasswordEncrypted) { this.dbPasswordEncrypted = dbPasswordEncrypted; }
-    public String getAppId() { return appId; }
-    public void setAppId(String appId) { this.appId = appId; }
-    public String getAdminEmail() { return adminEmail; }
-    public void setAdminEmail(String adminEmail) { this.adminEmail = adminEmail; }
+    public String getOwnerEmail() { return ownerEmail; }
+    public void setOwnerEmail(String ownerEmail) { this.ownerEmail = ownerEmail; }
+    public Integer getMaxTenants() { return maxTenants; }
+    public void setMaxTenants(Integer maxTenants) { this.maxTenants = maxTenants; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }
