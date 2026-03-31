@@ -596,19 +596,26 @@ RAG 품질을 RAGAS 메트릭으로 평가하고, LLM 출력을 검증합니다.
 ### 시나리오 E: Claude Code Tool 원격 사이드카 구성
 
 ```
-1. [인프라 담당자] 원격 서버에서 사이드카 이미지 빌드 & 실행
-   → 아래 "5-3. 독립 사이드카 배포" 참조
+1. [로컬 PC] claude setup-token 실행 → 토큰 문자열 복사
 
-2. [플랫폼 관리자] 계정 등록
+2. [플랫폼 관리자] Aimbase UI에서 Agent Account 생성
    POST /platform/agent-accounts  { id: "remote-1", containerHost: "10.0.1.50", ... }
 
-3. [플랫폼 관리자] 헬스체크 확인
-   POST /platform/agent-accounts/remote-1/test
+3. [플랫폼 관리자] 토큰 등록 (UI의 "토큰설정" 버튼 또는 API)
+   POST /platform/agent-accounts/remote-1/save-token
+   { auth_type: "oauth_token", auth_token: "sk-ant-oat01-..." }
 
-4. [플랫폼 관리자] 테넌트에 할당
+4. [인프라 담당자] 원격 서버에서 사이드카 실행
+   docker run -d -p 9100:9100 \
+     -e AIMBASE_URL=http://aimbase:8080 \
+     -e AGENT_ACCOUNT_ID=remote-1 \
+     claude-sidecar:latest
+   → 사이드카가 Aimbase에서 토큰 자동 조회 → 인증 완료
+
+5. [플랫폼 관리자] 테넌트에 할당
    POST /platform/agent-accounts/assignments  { account_id: "remote-1", tenant_id: "dev" }
 
-5. [테넌트 관리자] 워크플로우에서 claude_code 도구 사용
+6. [테넌트 관리자] 워크플로우에서 claude_code 도구 사용
    → 자동으로 할당된 사이드카로 라우팅
 ```
 
@@ -646,23 +653,21 @@ claude-code:
 
 | 방식 | 설정 | 용도 |
 |------|------|------|
-| **OAuth 토큰** | 호스트에서 `claude login` 후 토큰 파일을 볼륨 마운트 | 개발/스테이징 |
-| **API Key** | `CLAUDE_CODE_API_KEY` 환경변수 설정 | 프로덕션/AWS |
+| **구독 토큰 (Pro/Max)** | `claude setup-token` 실행 후 UI에서 토큰 등록 | 월정액 구독 |
+| **API Key (종량제)** | Anthropic Console에서 API Key 발급 후 UI에서 등록 | 종량제 |
 
-**OAuth 토큰 준비**:
+**토큰 발급 및 등록**:
 
 ```bash
-# 1. 호스트에서 토큰 디렉토리 생성
-mkdir -p ~/.claude/docker-auth
+# 구독(Pro/Max) 사용 시:
+claude setup-token
+# → sk-ant-oat01-... 토큰이 출력됨 → Aimbase UI에서 에이전트 계정에 등록
 
-# 2. 해당 디렉토리에서 로그인 (토큰이 여기에 생성됨)
-HOME=~/.claude/docker-auth claude login
-
-# 3. docker-compose.yml에서 볼륨 마운트 (이미 설정됨)
-# volumes:
-#   - ~/.claude/docker-auth/.claude.json:/home/appuser/.claude.json
-#   - ~/.claude/docker-auth/.claude:/home/appuser/.claude
+# API Key(종량제) 사용 시:
+# → Anthropic Console에서 API Key 발급 → Aimbase UI에서 에이전트 계정에 등록
 ```
+
+> **하나의 토큰으로 여러 사이드카 동시 사용 가능**. `setup-token`으로 발급한 토큰은 여러 Docker 인스턴스에서 공유할 수 있습니다. rate limit/사용량은 계정 단위로 공유됩니다.
 
 ### 5-3. 유형 B — 독립 사이드카 배포
 
@@ -672,45 +677,74 @@ Aimbase와 별도 서버(또는 별도 Docker 호스트)에 Claude CLI만 실행
 
 ```
 claude-sidecar/
-├── Dockerfile     # node:18-alpine + Claude Code CLI
-└── server.js      # HTTP 서버 (health, execute, upload-token)
+├── Dockerfile     # node:18-alpine + Claude Code CLI + poppler
+├── server.js      # HTTP 서버 (health, execute)
+└── package.json   # 메타데이터
 ```
 
 **사이드카 엔드포인트**:
 
 | 엔드포인트 | 메서드 | 용도 |
 |---|---|---|
-| `/health` | GET | 헬스체크 (`claude --version` 실행) |
+| `/health` | GET | 헬스체크 (CLI 버전 + 인증 상태) |
 | `/execute` | POST | CLI 명령 실행 (Aimbase → 사이드카) |
-| `/upload-token` | POST | OAuth 토큰 런타임 배포 |
 
-#### 단일 사이드카 배포
+**인증 방식** — 사이드카는 기동 시 Aimbase에서 토큰을 자동으로 가져옵니다:
+
+```
+사이드카 기동 → GET /api/v1/platform/agent-accounts/{id}/token
+  → 토큰 받아서 환경변수 세팅 (CLAUDE_CODE_OAUTH_TOKEN 또는 ANTHROPIC_API_KEY)
+  → Claude CLI 인증 완료
+```
+
+#### 사이드카 배포 절차
+
+**사전 준비**: Aimbase UI에서 Agent Account 생성 + 토큰 등록
 
 ```bash
-# 원격 서버에서 실행
+# 1. 이미지 빌드 또는 레지스트리에서 Pull
+docker build -t claude-sidecar . 
+# 또는: docker pull registry.example.com/claude-sidecar:latest
 
-# 1. 사이드카 소스 복사 (2개 파일만 필요)
-scp -r backend/claude-sidecar/ user@remote:/opt/claude-sidecar/
-
-# 2. 이미지 빌드
-cd /opt/claude-sidecar
-docker build -t claude-sidecar .
-
-# 3. 컨테이너 실행
+# 2. 컨테이너 실행 (환경변수로 Aimbase 연결 정보 전달)
 docker run -d \
   --name claude-agent-1 \
   --restart unless-stopped \
   -p 9100:9100 \
-  -v /opt/claude-auth/.claude.json:/home/node/.claude.json \
-  -v /opt/claude-auth/.claude:/home/node/.claude \
-  -v /data/workspace:/data/workspace \
-  -e PORT=9100 \
+  -e AIMBASE_URL=http://aimbase-server:8080 \
+  -e AGENT_ACCOUNT_ID=agent-server-1 \
   claude-sidecar
 
-# 4. 헬스체크 확인
+# 3. 헬스체크 확인
 curl http://localhost:9100/health
-# → {"status":"ok","version":"1.x.x","pid":1}
+# → {"status":"ok","authenticated":true,"authType":"oauth_token","version":"2.x.x"}
 ```
+
+> **주의**: `AIMBASE_URL`과 `AGENT_ACCOUNT_ID`는 환경별로 다르므로, `.env` 파일이나 배포 스크립트로 관리하세요. docker-compose.yml에 하드코딩하지 마세요.
+
+#### 다중 서버 배포 예시
+
+```bash
+# 서버 1
+docker run -d -p 9100:9100 \
+  -e AIMBASE_URL=http://aimbase.internal:8080 \
+  -e AGENT_ACCOUNT_ID=agent-server-1 \
+  claude-sidecar:latest
+
+# 서버 2
+docker run -d -p 9100:9100 \
+  -e AIMBASE_URL=http://aimbase.internal:8080 \
+  -e AGENT_ACCOUNT_ID=agent-server-2 \
+  claude-sidecar:latest
+
+# 서버 3
+docker run -d -p 9100:9100 \
+  -e AIMBASE_URL=http://aimbase.internal:8080 \
+  -e AGENT_ACCOUNT_ID=agent-server-3 \
+  claude-sidecar:latest
+```
+
+모든 사이드카가 같은 `setup-token`을 공유해도 됩니다. Aimbase UI에서 각 Agent Account에 동일한 토큰을 등록하면 됩니다.
 
 #### 다중 계정 사이드카 (docker-compose)
 
