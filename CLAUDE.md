@@ -120,7 +120,7 @@ frontend/src/
 - 세션 TTL 24시간 (BIZ-002)
 - Database-per-Tenant 격리 (BIZ-003)
 - 정책 평가: priority 내림차순, 첫 DENY/REQUIRE_APPROVAL에서 중단 (BIZ-005)
-- 워크플로우 DAG 실행: Kahn 알고리즘 위상 정렬 (BIZ-009)
+- 워크플로우 DAG 실행: Kahn 알고리즘 위상 정렬, SUB_WORKFLOW로 공용 워크플로우 참조 실행 (BIZ-009)
 - 임베딩: text-embedding-3-small, 1536차원 (BIZ-012)
 - 모든 주요 이벤트 감사 로깅 필수 (BIZ-020)
 
@@ -158,12 +158,14 @@ frontend/src/
 - [x] Sprint 23: 파일업로드/대화히스토리 (StorageService, ConversationController DB영속) [CR-009/010]
 - [x] Sprint 24: 멀티모달/트레이싱 (멀티모달 API, TraceService, 구조화출력 완성) [CR-009/010]
 - [x] Sprint 25: 비용대시보드/검색설정 (ModelPricing, AdminController, FE 차트) [CR-009/010]
+- [x] Sprint 26: 커넥션 그룹 Resilience + 키 관리 권한 (ConnectionGroup, 커넥션 폴백, 관리모드) [CR-015]
+- [x] Sprint 27: 공용 워크플로우 + 빌트인 도구 확장 (ZipExtractTool, TempCleanupTool, PlatformWorkflow, SUB_WORKFLOW) [CR-016]
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)
 - `docs/T2-*` — 아키텍처 설계 (T2-1 ~ T2-2)
 - `docs/T3-*` — 상세 설계 (T3-1 ~ T3-6)
-- `docs/T4-*` — 검증/운영 산출물 (T4-1 ~ T4-7)
+- `docs/T4-*` — 배포 게이트/데모 (T4-3, T4-7). 검증/운영은 AI-TOLC(aimbase-tolc)에서 관리
 - `docs/T3-6_실행_지시서.md` — 구현 마스터 문서
 
 ## 주의사항

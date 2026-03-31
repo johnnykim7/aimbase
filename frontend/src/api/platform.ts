@@ -5,6 +5,11 @@ import type {
   Tenant, TenantRequest, Subscription, PlatformUsage,
   AppTenantCreateRequest,
 } from "../types/tenant";
+import type {
+  AccountPoolStatus, AgentAccount, AgentAccountCreateRequest,
+  AgentAccountAssignment, AssignmentCreateRequest,
+  GuideEntry, GuideDetail,
+} from "../types/agentAccount";
 
 export const platformApi = {
   // ─── App (소비앱) 관리 ──────────────────────────────────────────
@@ -85,4 +90,47 @@ export const platformApi = {
 
   platformUsage: () =>
     apiClient.get<ApiResponse<PlatformUsage>>("/platform/usage"),
+
+  // ─── Agent Account Pool ────────────────────────────────────────
+
+  listAgentAccounts: () =>
+    apiClient.get<AccountPoolStatus[]>("/platform/agent-accounts"),
+
+  getAgentAccount: (id: string) =>
+    apiClient.get<AgentAccount>(`/platform/agent-accounts/${id}`),
+
+  createAgentAccount: (data: AgentAccountCreateRequest) =>
+    apiClient.post<AgentAccount>("/platform/agent-accounts", data),
+
+  updateAgentAccount: (id: string, data: Partial<AgentAccountCreateRequest>) =>
+    apiClient.put<AgentAccount>(`/platform/agent-accounts/${id}`, data),
+
+  deleteAgentAccount: (id: string) =>
+    apiClient.delete(`/platform/agent-accounts/${id}`),
+
+  testAgentAccount: (id: string) =>
+    apiClient.post<{ status: string; response?: string; message?: string }>(`/platform/agent-accounts/${id}/test`),
+
+  resetCircuit: (id: string) =>
+    apiClient.post<{ account_id: string; circuit_state: string }>(`/platform/agent-accounts/${id}/reset-circuit`),
+
+  saveToken: (id: string, data: { auth_type: string; auth_token: string }) =>
+    apiClient.post<{ status: string; auth_type: string; message: string }>(`/platform/agent-accounts/${id}/save-token`, data),
+
+  listAssignments: () =>
+    apiClient.get<AgentAccountAssignment[]>("/platform/agent-accounts/assignments"),
+
+  createAssignment: (data: AssignmentCreateRequest) =>
+    apiClient.post<AgentAccountAssignment>("/platform/agent-accounts/assignments", data),
+
+  deleteAssignment: (id: number) =>
+    apiClient.delete(`/platform/agent-accounts/assignments/${id}`),
+
+  // ─── Guides (매뉴얼) ───────────────────────────────────────────
+
+  listGuides: () =>
+    apiClient.get<GuideEntry[]>("/guides"),
+
+  getGuide: (slug: string) =>
+    apiClient.get<GuideDetail>(`/guides/${slug}`),
 };

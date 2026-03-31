@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { platformApi } from "../api/platform";
 import type { PagedResponse } from "../types/api";
 import type { App, AppCreateRequest, AppUpdateRequest, Tenant, TenantRequest, Subscription, AppTenantCreateRequest } from "../types/tenant";
+import type { AccountPoolStatus, AgentAccountCreateRequest, AssignmentCreateRequest, AgentAccountAssignment, GuideEntry, GuideDetail } from "../types/agentAccount";
 
 const extractList = <T>(d: unknown): T[] => {
   if (!d) return [];
@@ -150,3 +151,100 @@ export const useAppCreateTenant = (appId: string) => {
     },
   });
 };
+
+// ─── Agent Account Pool Hooks ──────────────────────────────────
+
+export const useAgentAccounts = () =>
+  useQuery({
+    queryKey: ["agentAccounts"],
+    queryFn: () => platformApi.listAgentAccounts().then((r) => r.data as AccountPoolStatus[]),
+    retry: false,
+  });
+
+export const useCreateAgentAccount = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AgentAccountCreateRequest) => platformApi.createAgentAccount(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agentAccounts"] }),
+  });
+};
+
+export const useUpdateAgentAccount = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<AgentAccountCreateRequest> }) =>
+      platformApi.updateAgentAccount(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agentAccounts"] }),
+  });
+};
+
+export const useDeleteAgentAccount = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.deleteAgentAccount(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agentAccounts"] }),
+  });
+};
+
+export const useTestAgentAccount = () =>
+  useMutation({
+    mutationFn: (id: string) => platformApi.testAgentAccount(id).then((r) => r.data),
+  });
+
+export const useSaveToken = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { id: string; auth_type: string; auth_token: string }) =>
+      platformApi.saveToken(params.id, { auth_type: params.auth_type, auth_token: params.auth_token }).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agentAccounts"] }),
+  });
+};
+
+export const useResetCircuit = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.resetCircuit(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agentAccounts"] }),
+  });
+};
+
+export const useAssignments = () =>
+  useQuery({
+    queryKey: ["agentAssignments"],
+    queryFn: () => platformApi.listAssignments().then((r) => r.data as AgentAccountAssignment[]),
+    retry: false,
+  });
+
+export const useCreateAssignment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AssignmentCreateRequest) => platformApi.createAssignment(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agentAssignments"] }),
+  });
+};
+
+export const useDeleteAssignment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => platformApi.deleteAssignment(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agentAssignments"] }),
+  });
+};
+
+// ─── Guides (매뉴얼) Hooks ─────────────────────────────────────
+
+export const useGuides = () =>
+  useQuery({
+    queryKey: ["guides"],
+    queryFn: () => platformApi.listGuides().then((r) => r.data as GuideEntry[]),
+    retry: false,
+  });
+
+export const useGuide = (slug: string) =>
+  useQuery({
+    queryKey: ["guide", slug],
+    queryFn: () => platformApi.getGuide(slug).then((r) => r.data as GuideDetail),
+    enabled: !!slug,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });

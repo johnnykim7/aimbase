@@ -60,11 +60,13 @@ public class SecurityConfig {
                 .requestMatchers("/sse/**", "/mcp/**").permitAll()
                 // 인증 엔드포인트
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                // 사이드카 토큰 조회 (인증 없이 접근 가능 — 사이드카 기동 시 호출)
+                .requestMatchers("/api/v1/platform/agent-accounts/*/token").permitAll()
                 // RBAC
                 .requestMatchers("/api/v1/platform/**").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/apps/*/auth/**").permitAll()
                 .requestMatchers("/api/v1/apps/**").authenticated()
-                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/v1/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 // 그 외 API — 인증 필요
                 .requestMatchers("/api/v1/**").authenticated()
                 .anyRequest().permitAll()

@@ -9,6 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import com.platform.domain.master.AgentAccountEntity;
+import com.platform.tenant.TenantContext;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -37,6 +40,8 @@ import java.util.concurrent.TimeUnit;
  * 설계 원칙:
  * - 오케스트레이션은 Aimbase가, 실행은 Claude Code가 (이중 루프 방지)
  * - 기본 읽기 전용 (Read, Grep, Glob만 허용)
+ * - allowed_tools에 MCP 도구명을 추가하면 외부 서비스 연동 가능 (예: FlowGuard Step 등록)
+ * - 로컬 경로를 working_directory로 지정하면 zip 없이 직접 파일 접근 (패스 모드)
  * - 후속 Step 연결 시 json_schema로 출력 구조 강제
  * - 프로세스 레벨 실패만 처리, 비즈니스 재시도는 워크플로우 엔진 위임
  */
@@ -82,7 +87,9 @@ public class ClaudeCodeTool implements ToolExecutor {
                                     "type", "array",
                                     "items", Map.of("type", "string"),
                                     "description", "허용할 Claude Code 도구 목록. "
-                                            + "레벨1=Read,Grep,Glob(분석) / 레벨2=+Write(생성) / 레벨3=+Bash(실행)"
+                                            + "레벨1=Read,Grep,Glob(분석) / 레벨2=+Write(생성) / 레벨3=+Bash(실행) "
+                                            + "/ 레벨4=+mcp__*(MCP 도구). "
+                                            + "MCP 서버에 등록된 도구명을 직접 지정 가능 (예: mcp__flowguard__create_step)"
                             )),
                             Map.entry("json_schema", Map.of(
                                     "type", "object",
@@ -132,18 +139,23 @@ public class ClaudeCodeTool implements ToolExecutor {
     private final ClaudeCodeCircuitBreaker circuitBreaker;
     private final ErrorClassificationService errorClassificationService;
     private final ClaudeCodeNotificationService notificationService;
+    private final AgentAccountPoolManager poolManager; // nullable — 풀 미설정 시 null
 
     public ClaudeCodeTool(ClaudeCodeToolConfig config,
                           ClaudeCodeCircuitBreaker circuitBreaker,
                           ErrorClassificationService errorClassificationService,
-                          ClaudeCodeNotificationService notificationService) {
+                          ClaudeCodeNotificationService notificationService,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false)
+                          AgentAccountPoolManager poolManager) {
         this.config = config;
         this.circuitBreaker = circuitBreaker;
         this.errorClassificationService = errorClassificationService;
         this.notificationService = notificationService;
-        log.info("ClaudeCodeTool 초기화: executable={}, timeout={}s, maxTurns={}, apiKey={}",
+        this.poolManager = poolManager;
+        log.info("ClaudeCodeTool 초기화: executable={}, timeout={}s, maxTurns={}, apiKey={}, pool={}",
                 config.getExecutable(), config.getTimeoutSeconds(), config.getMaxTurns(),
-                config.getApiKey() != null && !config.getApiKey().isBlank() ? "[설정됨]" : "[미설정-OAuth]");
+                config.getApiKey() != null && !config.getApiKey().isBlank() ? "[설정됨]" : "[미설정-OAuth]",
+                poolManager != null ? "[활성]" : "[미사용]");
     }
 
     @Override
@@ -157,6 +169,20 @@ public class ClaudeCodeTool implements ToolExecutor {
         String prompt = (String) input.get("prompt");
         if (prompt == null || prompt.isBlank()) {
             return toError("INVALID_INPUT", "prompt는 필수 파라미터입니다.");
+        }
+
+        // response_schema가 있으면 프롬프트에 JSON 출력 지시 주입
+        Object responseSchema = input.get("response_schema");
+        if (responseSchema != null) {
+            try {
+                String schemaJson = objectMapper.writeValueAsString(responseSchema);
+                prompt = prompt + "\n\n[출력 규칙] 반드시 아래 JSON 스키마에 맞는 순수 JSON만 출력하라. "
+                        + "마크다운, 코드펜스, 설명 텍스트 없이 JSON 객체만 응답하라.\n"
+                        + "스키마: " + schemaJson;
+                log.debug("response_schema를 프롬프트에 주입");
+            } catch (JsonProcessingException e) {
+                log.warn("response_schema 직렬화 실패: {}", e.getMessage());
+            }
         }
 
         String inputFile = (String) input.getOrDefault("input_file", null);
@@ -207,6 +233,17 @@ public class ClaudeCodeTool implements ToolExecutor {
                     maxTurns, allowedTools, outputFormat, model != null ? model : "default");
             log.debug("ClaudeCodeTool 커맨드: {}", String.join(" ", command));
 
+            // ── 풀 매니저 경로: 사이드카 HTTP 실행 ──
+            if (poolManager != null) {
+                String result = tryExecuteViaPool(input, command, workDir,
+                        config.getTimeoutSeconds(), inputFile, outputFormat);
+                if (result != null) {
+                    return result;
+                }
+                // 풀에서 가용 계정 없으면 로컬 ProcessBuilder 폴백
+            }
+
+            // ── 로컬 ProcessBuilder 경로 (기존) ──
             ProcessBuilder pb = new ProcessBuilder(command);
 
             // 중첩 세션 방지: 부모 프로세스가 Claude Code 세션이면 CLAUDECODE 환경변수 제거
@@ -427,14 +464,24 @@ public class ClaudeCodeTool implements ToolExecutor {
     }
 
     /**
-     * Claude Code의 --output-format json 결과에서 실제 응답 텍스트를 추출.
-     * JSON 구조: {"result": "...", "session_id": "...", "cost_usd": ..., ...}
+     * Claude Code의 --output-format json 결과에서 실제 응답을 추출.
+     *
+     * --json-schema 사용 시: structured_output 필드에 스키마 준수 JSON 객체 반환
+     * 그 외: result 필드의 텍스트 반환
      */
     @SuppressWarnings("unchecked")
     private String extractResultFromJson(String jsonOutput) {
         try {
             Map<String, Object> parsed = objectMapper.readValue(jsonOutput, Map.class);
-            // result 필드가 있으면 그것을 반환
+
+            // structured_output 우선 (--json-schema 사용 시 스키마 준수 JSON)
+            if (parsed.containsKey("structured_output") && parsed.get("structured_output") != null) {
+                Object structured = parsed.get("structured_output");
+                log.debug("structured_output 필드 발견, JSON 반환");
+                return objectMapper.writeValueAsString(structured);
+            }
+
+            // result 필드 fallback
             if (parsed.containsKey("result")) {
                 Object result = parsed.get("result");
                 if (result instanceof String) {
@@ -442,10 +489,8 @@ public class ClaudeCodeTool implements ToolExecutor {
                 }
                 return objectMapper.writeValueAsString(result);
             }
-            // result 필드가 없으면 전체 JSON 반환
             return jsonOutput;
         } catch (Exception e) {
-            // JSON 파싱 실패 시 원본 반환
             log.debug("JSON 결과 추출 실패, 원본 반환: {}", e.getMessage());
             return jsonOutput;
         }
@@ -465,6 +510,55 @@ public class ClaudeCodeTool implements ToolExecutor {
             log.error("스트림 읽기 실패: {}", e.getMessage());
             return "";
         }
+    }
+
+    /**
+     * 풀 매니저를 통한 사이드카 실행 시도.
+     * 가용 계정이 있으면 실행 결과 반환, 없으면 null (로컬 폴백).
+     */
+    private String tryExecuteViaPool(Map<String, Object> input, List<String> command,
+                                      String workDir, int timeoutSeconds,
+                                      String inputFile, String outputFormat) {
+        String explicitAccountId = (String) input.get("_agent_account_id");
+        String tenantId = TenantContext.hasTenant() ? TenantContext.getTenantId() : null;
+
+        AgentAccountEntity account;
+        if (explicitAccountId != null) {
+            account = poolManager.getAccount(explicitAccountId);
+            if (account == null) {
+                log.warn("명시된 계정 없음: {}, 로컬 폴백", explicitAccountId);
+                return null;
+            }
+        } else {
+            account = poolManager.resolveAccount("claude_code", tenantId, null);
+            if (account == null) {
+                return null; // 로컬 폴백
+            }
+        }
+
+        // 계정별 서킷 브레이커 체크
+        if (!poolManager.getCircuitBreaker(account.getId()).allowRequest()) {
+            log.warn("[{}] 서킷 OPEN, 다른 계정 시도 또는 로컬 폴백", account.getId());
+            return null;
+        }
+
+        var result = poolManager.executeViaHttp(account, command, workDir, timeoutSeconds, inputFile);
+
+        if (result.exitCode() != 0) {
+            log.error("[{}] 사이드카 실패: exit={}, stderr={}", account.getId(), result.exitCode(), result.stderr());
+            poolManager.recordFailure(account.getId());
+            handleFailure("EXIT_" + result.exitCode(), result.stderr().isBlank() ? result.stdout() : result.stderr());
+            return toError("EXIT_" + result.exitCode(), result.stderr().isBlank() ? result.stdout() : result.stderr());
+        }
+
+        poolManager.recordSuccess(account.getId());
+
+        log.info("[{}] 사이드카 완료: output_length={}", account.getId(), result.stdout().length());
+
+        if ("json".equals(outputFormat)) {
+            return extractResultFromJson(result.stdout());
+        }
+        return result.stdout();
     }
 
     private String toError(String code, String message) {
