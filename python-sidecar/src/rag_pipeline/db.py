@@ -1,5 +1,6 @@
 """Database utilities for pgvector operations."""
 
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -38,7 +39,7 @@ def store_embeddings(
                     i,
                     chunk["content"],
                     vector,
-                    chunk.get("metadata", {}),
+                    json.dumps(chunk.get("metadata", {})),
                     datetime.now(timezone.utc),
                 ))
 
@@ -98,6 +99,43 @@ def vector_search(
             return results
     finally:
         conn.close()
+
+
+def get_connection_api_key() -> str:
+    """Get first available API key from connections table."""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT config->>'apiKey' FROM connections
+            WHERE config->>'apiKey' IS NOT NULL AND config->>'apiKey' != ''
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else ""
+    except Exception:
+        return ""
+
+
+def get_openai_api_key() -> str:
+    """Get OpenAI API key from connections table (type='OPENAI')."""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT config->>'apiKey' FROM connections
+            WHERE type = 'OPENAI'
+              AND config->>'apiKey' IS NOT NULL AND config->>'apiKey' != ''
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else ""
+    except Exception:
+        return ""
 
 
 def keyword_search_contents(source_id: str) -> list[dict]:

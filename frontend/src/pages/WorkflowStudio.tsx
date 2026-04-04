@@ -18,7 +18,6 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { COLORS } from "../theme";
 import { NodePalette } from "../components/workflow/NodePalette";
 import { ConfigPanel } from "../components/workflow/ConfigPanel";
 import { StudioToolbar } from "../components/workflow/StudioToolbar";
@@ -35,7 +34,7 @@ function nextId() {
   return `node_${Date.now()}_${idCounter++}`;
 }
 
-function StudioInner() {
+function StudioInner({ embedded }: { embedded?: boolean }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isNew = !id;
@@ -55,7 +54,8 @@ function StudioInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([] as Edge[]);
   const [name, setName] = useState("새 워크플로우");
-  const [description] = useState("");
+  const [description, setDescription] = useState("");
+  const [inputSchema, setInputSchema] = useState<string>("");
   const [outputSchema, setOutputSchema] = useState<string>("");
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -69,6 +69,10 @@ function StudioInner() {
       setNodes(n);
       setEdges(e);
       setName(existingWorkflow.name);
+      setDescription(existingWorkflow.description ?? "");
+      if (existingWorkflow.inputSchema) {
+        setInputSchema(JSON.stringify(existingWorkflow.inputSchema, null, 2));
+      }
       if (existingWorkflow.outputSchema) {
         setOutputSchema(JSON.stringify(existingWorkflow.outputSchema, null, 2));
       }
@@ -131,7 +135,6 @@ function StudioInner() {
       setNodes((nds) =>
         nds.map((n) => (n.id === nodeId ? { ...n, data } : n))
       );
-      setSelectedNode(null);
       setDirty(true);
     },
     [setNodes]
@@ -160,6 +163,15 @@ function StudioInner() {
     }
 
     const workflowId = id ?? `wf_${Date.now()}`;
+    let parsedInputSchema: Record<string, unknown> | undefined;
+    if (inputSchema.trim()) {
+      try {
+        parsedInputSchema = JSON.parse(inputSchema);
+      } catch {
+        alert("입력 스키마가 올바른 JSON이 아닙니다.");
+        return;
+      }
+    }
     let parsedSchema: Record<string, unknown> | undefined;
     if (outputSchema.trim()) {
       try {
@@ -174,6 +186,7 @@ function StudioInner() {
       name,
       description,
       status: "draft",
+      inputSchema: parsedInputSchema,
       outputSchema: parsedSchema,
     });
 
@@ -214,25 +227,28 @@ function StudioInner() {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: COLORS.bg }}>
+    <div className="flex flex-col h-full bg-background">
       <StudioToolbar
         name={name}
+        description={description}
         onNameChange={(n) => { setName(n); setDirty(true); }}
+        onDescriptionChange={(d) => { setDescription(d); setDirty(true); }}
         onSave={handleSave}
         onRun={handleRun}
         onAutoLayout={handleAutoLayout}
-        onBack={() => navigate("/workflows")}
+        onBack={() => navigate(embedded ? `/workflows/${id}` : "/workflows")}
         onToggleSchema={() => setShowSchemaPanel((p) => !p)}
         schemaActive={showSchemaPanel}
         saving={createWorkflow.isPending || updateWorkflow.isPending}
         running={runWorkflow.isPending}
         dirty={dirty}
+        compact={embedded}
       />
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+      <div className="flex flex-1 overflow-hidden">
         <NodePalette />
 
-        <div ref={reactFlowWrapper} style={{ flex: 1 }}>
+        <div ref={reactFlowWrapper} className="flex-1">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -245,17 +261,16 @@ function StudioInner() {
             onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
             fitView
+            fitViewOptions={{ maxZoom: 0.85, padding: 0.3 }}
             deleteKeyCode="Delete"
-            style={{ background: COLORS.bg }}
+            className="bg-background"
           >
-            <Controls
-              style={{ borderRadius: 8, border: `1px solid ${COLORS.border}`, overflow: "hidden" }}
-            />
+            <Controls className="rounded-lg border border-border overflow-hidden" />
             <MiniMap
               nodeStrokeWidth={3}
-              style={{ borderRadius: 8, border: `1px solid ${COLORS.border}` }}
+              className="rounded-lg border border-border"
             />
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={COLORS.border} />
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="hsl(var(--border))" />
           </ReactFlow>
         </div>
 
@@ -268,55 +283,80 @@ function StudioInner() {
       </div>
 
       {showSchemaPanel && (
-        <div
-          style={{
-            height: 200,
-            borderTop: `1px solid ${COLORS.border}`,
-            background: COLORS.surface,
-            display: "flex",
-            flexDirection: "column",
-            padding: 12,
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text }}>
-              워크플로우 출력 스키마 (JSON Schema)
+        <div className="border-t border-border bg-card flex shrink-0 overflow-hidden">
+          {/* 입력 스키마 */}
+          <div className="flex-1 flex flex-col p-3 border-r border-border">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-semibold text-foreground">
+                입력 스키마 (JSON Schema)
+              </span>
+            </div>
+            <textarea
+              value={inputSchema}
+              onChange={(e) => { setInputSchema(e.target.value); setDirty(true); }}
+              placeholder={'{\n  "type": "object",\n  "properties": {\n    "contextData": {\n      "type": "string",\n      "description": "검토할 데이터"\n    }\n  },\n  "required": ["contextData"]\n}'}
+              className="flex-1 min-h-[180px] font-mono text-xs p-2 rounded-md border border-border bg-background text-foreground resize-none outline-none"
+            />
+          </div>
+
+          {/* 출력 스키마 */}
+          <div className="flex-1 flex flex-col p-3">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-foreground">
+              출력 스키마 (JSON Schema)
             </span>
-            <button
-              onClick={() => setShowSchemaPanel(false)}
-              style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.textDim }}
-            >
-              ✕
-            </button>
+            <div className="flex items-center gap-2">
+              <select
+                value=""
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__clear__") {
+                    setOutputSchema("");
+                    setDirty(true);
+                  } else if (val) {
+                    setOutputSchema(val);
+                    setDirty(true);
+                  }
+                }}
+                className="text-[11px] py-1 px-2 rounded-md border border-border bg-background text-foreground cursor-pointer outline-none"
+              >
+                <option value="">프리셋 선택...</option>
+                <option value="__clear__">자유 텍스트 (스키마 없음)</option>
+                <option value={JSON.stringify({"type":"object","properties":{"category":{"type":"string"},"confidence":{"type":"number"}},"required":["category","confidence"]}, null, 2)}>
+                  분류 결과
+                </option>
+                <option value={JSON.stringify({"type":"object","properties":{"summary":{"type":"string"},"key_points":{"type":"array","items":{"type":"string"}}},"required":["summary","key_points"]}, null, 2)}>
+                  요약
+                </option>
+                <option value={JSON.stringify({"type":"object","properties":{"entities":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string"},"value":{"type":"string"}},"required":["name","type","value"]}}},"required":["entities"]}, null, 2)}>
+                  추출 결과
+                </option>
+              </select>
+              <button
+                onClick={() => setShowSchemaPanel(false)}
+                className="bg-transparent border-none cursor-pointer text-muted-foreground/40 text-sm p-0.5 hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
           </div>
           <textarea
             value={outputSchema}
             onChange={(e) => { setOutputSchema(e.target.value); setDirty(true); }}
             placeholder={'{\n  "type": "object",\n  "properties": { ... },\n  "required": [ ... ]\n}'}
-            style={{
-              flex: 1,
-              fontFamily: "monospace",
-              fontSize: 12,
-              padding: 8,
-              borderRadius: 6,
-              border: `1px solid ${COLORS.border}`,
-              background: COLORS.bg,
-              color: COLORS.text,
-              resize: "none",
-              outline: "none",
-            }}
+            className="flex-1 min-h-[180px] font-mono text-xs p-2 rounded-md border border-border bg-background text-foreground resize-none outline-none"
           />
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-export default function WorkflowStudio() {
+export default function WorkflowStudio({ embedded }: { embedded?: boolean } = {}) {
   return (
     <ReactFlowProvider>
-      <StudioInner />
+      <StudioInner embedded={embedded} />
     </ReactFlowProvider>
   );
 }

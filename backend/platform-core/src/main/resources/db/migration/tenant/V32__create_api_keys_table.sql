@@ -1,0 +1,2 @@
+-- CR-025: 이 파일은 더 이상 사용하지 않음. api_keys 테이블은 Master DB로 이동 (V3__create_api_keys_table.sql)
+-- Flyway는 이미 적용된 마이그레이션을 건너뛰므로 빈 파일로 유지.

@@ -29,6 +29,7 @@ export interface PolicyRequest {
   enabled?: boolean;
   domain?: string;
   matchPattern?: string;
+  matchRules?: Record<string, unknown>;
   rules?: PolicyRule[];
 }
 

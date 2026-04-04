@@ -2,7 +2,9 @@ package com.platform.api;
 
 import com.platform.domain.PromptEntity;
 import com.platform.domain.PromptEntityId;
+import com.platform.repository.ProjectResourceRepository;
 import com.platform.repository.PromptRepository;
+import com.platform.tenant.ProjectContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -11,6 +13,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+
+import com.platform.auth.UserPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.List;
 import java.util.Map;
@@ -23,17 +28,33 @@ import java.util.regex.Pattern;
 public class PromptController {
 
     private final PromptRepository promptRepository;
+    private final ProjectResourceRepository projectResourceRepository;
 
-    public PromptController(PromptRepository promptRepository) {
+    public PromptController(PromptRepository promptRepository,
+                            ProjectResourceRepository projectResourceRepository) {
         this.promptRepository = promptRepository;
+        this.projectResourceRepository = projectResourceRepository;
     }
 
     @GetMapping
     @Operation(summary = "프롬프트 목록 조회")
     public ApiResponse<?> list(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false, name = "my") Boolean my
     ) {
+        // CR-022: 사용자별 리소스 필터링
+        if (Boolean.TRUE.equals(my)) {
+            String userId = currentUserId();
+            if (userId != null) return ApiResponse.ok(promptRepository.findByCreatedBy(userId));
+        }
+        // CR-021: 프로젝트 스코핑
+        String projectId = ProjectContext.getProjectId();
+        if (projectId != null) {
+            List<String> ids = projectResourceRepository.findResourceIdsByProjectIdAndResourceType(projectId, "prompt");
+            if (ids.isEmpty()) return ApiResponse.ok(List.of());
+            return ApiResponse.ok(promptRepository.findByIdIn(ids));
+        }
         return ApiResponse.page(promptRepository.findAll(PageRequest.of(page, size)));
     }
 
@@ -41,7 +62,8 @@ public class PromptController {
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "프롬프트 생성")
     public ApiResponse<PromptEntity> create(@Valid @RequestBody PromptRequest request) {
-        PromptEntityId pk = new PromptEntityId(request.id(), request.version());
+        String resolvedId = request.id() != null && !request.id().isBlank() ? request.id() : java.util.UUID.randomUUID().toString();
+        PromptEntityId pk = new PromptEntityId(resolvedId, request.version());
         PromptEntity entity = new PromptEntity();
         entity.setPk(pk);
         entity.setDomain(request.domain());
@@ -49,6 +71,7 @@ public class PromptController {
         entity.setTemplate(request.template());
         entity.setVariables(request.variables());
         entity.setActive(request.isActive() != null && request.isActive());
+        entity.setCreatedBy(currentUserId()); // CR-022
         return ApiResponse.ok(promptRepository.save(entity));
     }
 
@@ -108,7 +131,7 @@ public class PromptController {
     }
 
     public record PromptRequest(
-            @NotBlank String id,
+            String id,
             int version,
             String domain,
             @NotBlank String type,
@@ -116,4 +139,15 @@ public class PromptController {
             List<Map<String, Object>> variables,
             Boolean isActive
     ) {}
+
+    /** CR-022: SecurityContext에서 현재 사용자 ID 추출. API Key 인증(system-*)은 users FK 없으므로 null 반환 */
+    private String currentUserId() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof UserPrincipal up) {
+            String id = up.getId();
+            if (id != null && id.startsWith("system-")) return null;
+            return id;
+        }
+        return null;
+    }
 }

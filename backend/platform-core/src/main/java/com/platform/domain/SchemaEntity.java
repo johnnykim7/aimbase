@@ -31,6 +31,10 @@ public class SchemaEntity {
     @Column(columnDefinition = "jsonb")
     private Object validators;
 
+    /** CR-022: 리소스 생성자 (users.id) */
+    @Column(name = "created_by", length = 100)
+    private String createdBy;
+
     @Column(name = "created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
@@ -46,5 +50,7 @@ public class SchemaEntity {
     public void setTransforms(Object transforms) { this.transforms = transforms; }
     public Object getValidators() { return validators; }
     public void setValidators(Object validators) { this.validators = validators; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
 }

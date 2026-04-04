@@ -1,0 +1,28 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-mcp-rag",
+  "action": {
+    "method": "POST",
+    "endpoint": "/mcp",
+    "headers": {},
+    "body": {
+      "tool": "cache_store",
+      "arguments": {
+        "query": "테스트 질문입니다",
+        "source_id": "{{sourceId}}",
+        "response_text": "캐시에 저장할 응답 텍스트",
+        "metadata": "{}",
+        "ttl_hours": 24
+      }
+    }
+  },
+  "extract": {
+    "success": "$.body.result.success",
+    "cacheId": "$.body.result.cache_id"
+  },
+  "assert": [
+    { "field": "$.body.result.success", "operator": "==", "value": true },
+    { "field": "$.body.result.cache_id", "operator": "!=", "value": null }
+  ],
+  "failMode": "hard"
+}

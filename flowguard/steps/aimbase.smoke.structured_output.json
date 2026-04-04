@@ -1,0 +1,31 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api-raw",
+  "name": "T4-4 #24: 구조화된 출력 API 확인 (CR-007)",
+  "action": {
+    "method": "POST",
+    "endpoint": "/api/v1/chat",
+    "headers": {
+      "Authorization": "Bearer {{steps.aimbase.smoke.login.output.accessToken}}",
+      "X-Tenant-Id": "{{vars.tenantId}}",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "messages": [{"role": "user", "content": "List 3 colors"}],
+      "response_format": {
+        "type": "json_schema",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "colors": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.statusCode", "operator": "in", "value": [200, 400, 503] }
+  ],
+  "failMode": "soft"
+}

@@ -1,7 +1,18 @@
 package com.platform.llm.model;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import java.util.Map;
 
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonSubTypes({
+        @JsonSubTypes.Type(value = ContentBlock.Text.class, name = "text"),
+        @JsonSubTypes.Type(value = ContentBlock.Image.class, name = "image"),
+        @JsonSubTypes.Type(value = ContentBlock.ToolUse.class, name = "tool_use"),
+        @JsonSubTypes.Type(value = ContentBlock.ToolResult.class, name = "tool_result"),
+        @JsonSubTypes.Type(value = ContentBlock.Structured.class, name = "structured"),
+})
 public sealed interface ContentBlock
         permits ContentBlock.Text, ContentBlock.Image, ContentBlock.ToolUse, ContentBlock.ToolResult,
                 ContentBlock.Structured {

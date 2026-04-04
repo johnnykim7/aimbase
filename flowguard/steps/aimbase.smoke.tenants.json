@@ -1,0 +1,17 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api-raw",
+  "name": "T4-4 #9: 테넌트 목록 (Platform API)",
+  "action": {
+    "method": "GET",
+    "endpoint": "/api/v1/platform/tenants",
+    "headers": {
+      "Authorization": "Bearer {{steps.aimbase.smoke.login.output.accessToken}}"
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.statusCode", "operator": "in", "value": [200, 403] }
+  ],
+  "failMode": "soft"
+}

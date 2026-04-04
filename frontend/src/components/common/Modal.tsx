@@ -1,5 +1,3 @@
-import { COLORS, FONTS } from "../../theme";
-
 interface ModalProps {
   open: boolean;
   onClose: () => void;
@@ -13,42 +11,15 @@ export const Modal = ({ open, onClose, title, width = 520, children }: ModalProp
 
   return (
     <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-        backdropFilter: "blur(4px)",
-      }}
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
       onClick={onClose}
     >
       <div
-        style={{
-          background: COLORS.surface,
-          border: `1px solid ${COLORS.border}`,
-          borderRadius: 16,
-          padding: 32,
-          width,
-          maxWidth: "90vw",
-          maxHeight: "85vh",
-          overflowY: "auto",
-        }}
+        className="bg-card border border-border rounded-xl shadow-lg p-7 max-w-[90vw] max-h-[85vh] overflow-y-auto"
+        style={{ width }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2
-          style={{
-            fontSize: 18,
-            fontWeight: 700,
-            fontFamily: FONTS.display,
-            color: COLORS.text,
-            margin: "0 0 24px",
-          }}
-        >
-          {title}
-        </h2>
+        <h2 className="text-base font-semibold text-foreground mb-5">{title}</h2>
         {children}
       </div>
     </div>

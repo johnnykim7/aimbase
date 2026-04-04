@@ -70,21 +70,7 @@ public class ToolRegistry {
         }
         return executors.values().stream()
                 .map(ToolExecutor::getDefinition)
-                .filter(def -> {
-                    // allowedTools가 지정되면 해당 목록에 포함된 도구만 허용
-                    if (filter.allowedTools() != null && !filter.allowedTools().isEmpty()) {
-                        if (!filter.allowedTools().contains(def.name())) {
-                            return false;
-                        }
-                    }
-                    // excludeTools가 지정되면 해당 목록에 포함된 도구는 제외
-                    if (filter.excludeTools() != null && !filter.excludeTools().isEmpty()) {
-                        if (filter.excludeTools().contains(def.name())) {
-                            return false;
-                        }
-                    }
-                    return true;
-                })
+                .filter(def -> filter.isToolAllowed(def.name()))
                 .toList();
     }
 

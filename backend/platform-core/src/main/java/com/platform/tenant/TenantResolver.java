@@ -83,7 +83,13 @@ public class TenantResolver implements Filter {
             return headerTenantId.trim();
         }
 
-        // 2. 서브도메인 (예: acme.platform.com)
+        // 2. 쿼리 파라미터 tenant_id (MCP SSE 클라이언트용 — 헤더 전달 불가)
+        String queryTenantId = request.getParameter("tenant_id");
+        if (queryTenantId != null && !queryTenantId.isBlank()) {
+            return queryTenantId.trim();
+        }
+
+        // 3. 서브도메인 (예: acme.platform.com)
         String host = request.getServerName();
         if (host != null && host.contains(".")) {
             String subdomain = host.split("\\.")[0];
@@ -92,7 +98,9 @@ public class TenantResolver implements Filter {
             }
         }
 
-        // 3. JWT tenant_id claim (Phase 5에서 구현)
+        // 4. JWT tenant_id claim (Phase 5에서 구현)
+        // String authHeader = request.getHeader("Authorization");
+        // if (authHeader != null && authHeader.startsWith("Bearer ")) { ... }
 
         return null;
     }

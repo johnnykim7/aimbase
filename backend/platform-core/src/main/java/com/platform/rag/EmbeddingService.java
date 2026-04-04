@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -13,8 +14,11 @@ import java.util.stream.Collectors;
 /**
  * Spring AI EmbeddingModel을 래핑하는 서비스.
  * 기본 모델: OpenAI text-embedding-3-small (1536 차원)
+ *
+ * spring.ai.openai.api-key가 설정되지 않으면 빈이 생성되지 않음.
  */
 @Component
+@ConditionalOnProperty(name = "spring.ai.openai.api-key", matchIfMissing = false)
 public class EmbeddingService {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
@@ -29,7 +33,7 @@ public class EmbeddingService {
      * 단일 텍스트 임베딩 생성.
      *
      * @param text 임베딩할 텍스트
-     * @return float[] 벡터 (1536 차원)
+     * @return float[] 벡터 (차원은 모델에 따라 다름: OpenAI 1536d, BGE-M3 1024d 등)
      */
     public float[] embed(String text) {
         EmbeddingResponse response = embeddingModel.embedForResponse(List.of(text));

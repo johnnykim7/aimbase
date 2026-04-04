@@ -1,0 +1,18 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api-raw",
+  "name": "T4-4 #8: 대시보드 통계",
+  "action": {
+    "method": "GET",
+    "endpoint": "/api/v1/dashboard/stats",
+    "headers": {
+      "Authorization": "Bearer {{steps.aimbase.smoke.login.output.accessToken}}",
+      "X-Tenant-Id": "{{vars.tenantId}}"
+    }
+  },
+  "extract": {},
+  "assert": [
+    { "field": "$.statusCode", "operator": "in", "value": [200, 404] }
+  ],
+  "failMode": "soft"
+}

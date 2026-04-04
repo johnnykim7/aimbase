@@ -206,6 +206,13 @@ public class TenantOnboardingService {
             "Admin"
         );
 
+        // CR-027: Master DB user_tenant_map에 admin 매핑 등록
+        masterJdbcTemplate.update(
+            "INSERT INTO user_tenant_map (email, tenant_id) VALUES (?, ?) ON CONFLICT (email) DO NOTHING",
+            request.adminEmail(),
+            request.tenantId()
+        );
+
         log.info("Seeded initial data for tenant: {}", request.tenantId());
     }
 

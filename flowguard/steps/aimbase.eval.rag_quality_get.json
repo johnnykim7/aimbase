@@ -1,0 +1,19 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-api",
+  "action": {
+    "method": "GET",
+    "endpoint": "/evaluations/rag-quality/{{evaluationId}}",
+    "headers": {}
+  },
+  "extract": {
+    "status": "$.body.data.status",
+    "metrics": "$.body.data.metrics",
+    "sampleCount": "$.body.data.sample_count"
+  },
+  "assert": [
+    { "field": "$.body.success", "operator": "==", "value": true },
+    { "field": "$.body.data.id", "operator": "==", "value": "{{evaluationId}}" }
+  ],
+  "failMode": "hard"
+}

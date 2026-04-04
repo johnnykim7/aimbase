@@ -1,15 +1,6 @@
-import { useState } from "react";
-import { COLORS, FONTS } from "../../theme";
+import { cn } from "@/lib/utils";
 
 type ButtonVariant = "primary" | "danger" | "success" | "default" | "ghost";
-
-const styles: Record<ButtonVariant, { bg: string; text: string; hover: string; border: string }> = {
-  primary: { bg: COLORS.surface, text: COLORS.accent, hover: COLORS.accentDim, border: COLORS.accent },
-  danger: { bg: COLORS.dangerDim, text: COLORS.danger, hover: "#fecaca", border: COLORS.danger },
-  success: { bg: COLORS.successDim, text: COLORS.success, hover: "#a7f3d0", border: COLORS.success },
-  default: { bg: COLORS.surfaceActive, text: COLORS.text, hover: COLORS.borderLight, border: COLORS.border },
-  ghost: { bg: "transparent", text: COLORS.textMuted, hover: COLORS.surfaceHover, border: COLORS.border },
-};
 
 interface ActionButtonProps {
   children?: React.ReactNode;
@@ -21,6 +12,19 @@ interface ActionButtonProps {
   type?: "button" | "submit";
 }
 
+const variantClasses: Record<ButtonVariant, string> = {
+  primary:
+    "bg-foreground text-background shadow-xs shadow-black/20 hover:bg-foreground/85",
+  danger:
+    "bg-destructive text-destructive-foreground shadow-xs shadow-destructive/20 hover:bg-destructive/90",
+  success:
+    "bg-success text-success-foreground shadow-xs shadow-success/20 hover:bg-success/90",
+  default:
+    "bg-card text-foreground border border-border shadow-xs shadow-black/5 hover:bg-accent",
+  ghost:
+    "bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+};
+
 export const ActionButton = ({
   children,
   variant = "default",
@@ -29,37 +33,20 @@ export const ActionButton = ({
   small,
   disabled,
   type = "button",
-}: ActionButtonProps) => {
-  const [hover, setHover] = useState(false);
-  const s = styles[variant];
-
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: small ? "5px 12px" : "8px 16px",
-        borderRadius: 8,
-        border: `1px solid ${s.border}`,
-        background: hover && !disabled ? s.hover : s.bg,
-        color: s.text,
-        fontSize: small ? 12 : 13,
-        fontWeight: 600,
-        fontFamily: FONTS.sans,
-        cursor: disabled ? "not-allowed" : "pointer",
-        transition: "all 0.15s ease",
-        opacity: disabled ? 0.5 : 1,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {icon && <span style={{ fontSize: small ? 13 : 15 }}>{icon}</span>}
-      {children}
-    </button>
-  );
-};
+}: ActionButtonProps) => (
+  <button
+    type={type}
+    onClick={onClick}
+    disabled={disabled}
+    className={cn(
+      "inline-flex items-center gap-1.5 rounded-lg font-medium whitespace-nowrap transition-all duration-150 cursor-pointer",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1",
+      small ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-[13px]",
+      variantClasses[variant],
+      disabled && "opacity-50 cursor-not-allowed pointer-events-none"
+    )}
+  >
+    {icon && <span className={cn("shrink-0", small ? "text-[13px]" : "text-[15px]")}>{icon}</span>}
+    {children}
+  </button>
+);

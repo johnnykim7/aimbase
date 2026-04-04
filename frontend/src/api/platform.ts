@@ -3,7 +3,7 @@ import type { ApiResponse, PagedResponse } from "../types/api";
 import type {
   App, AppCreateRequest, AppUpdateRequest,
   Tenant, TenantRequest, Subscription, PlatformUsage,
-  AppTenantCreateRequest,
+  AppTenantCreateRequest, ApiKey, CreateApiKeyRequest,
 } from "../types/tenant";
 import type {
   AccountPoolStatus, AgentAccount, AgentAccountCreateRequest,
@@ -57,7 +57,7 @@ export const platformApi = {
 
   // ─── Tenant 관리 (기존) ─────────────────────────────────────────
 
-  listTenants: (params?: { page?: number; size?: number }) =>
+  listTenants: (params?: { page?: number; size?: number; domain_app?: string }) =>
     apiClient.get<ApiResponse<PagedResponse<Tenant> | Tenant[]>>("/platform/tenants", { params }),
 
   getTenant: (id: string) =>
@@ -133,4 +133,17 @@ export const platformApi = {
 
   getGuide: (slug: string) =>
     apiClient.get<GuideDetail>(`/guides/${slug}`),
+
+  // API Keys (CR-025)
+  listApiKeys: (tenantId?: string) =>
+    apiClient.get<ApiResponse<ApiKey[]>>("/platform/api-keys", { params: tenantId ? { tenantId } : undefined }),
+
+  createApiKey: (data: CreateApiKeyRequest) =>
+    apiClient.post<ApiResponse<ApiKey & { apiKey: string }>>("/platform/api-keys", data),
+
+  revokeApiKey: (id: string) =>
+    apiClient.delete(`/platform/api-keys/${id}`),
+
+  regenerateApiKey: (id: string) =>
+    apiClient.post<ApiResponse<ApiKey & { apiKey: string }>>(`/platform/api-keys/${id}/regenerate`),
 };

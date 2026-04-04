@@ -1,4 +1,4 @@
-import { COLORS } from "../../theme";
+import { cn } from "@/lib/utils";
 
 interface LoadingSpinnerProps {
   size?: number;
@@ -8,28 +8,14 @@ interface LoadingSpinnerProps {
 export const LoadingSpinner = ({ size = 24, fullPage }: LoadingSpinnerProps) => {
   const spinner = (
     <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        border: `2px solid ${COLORS.border}`,
-        borderTopColor: COLORS.accent,
-        animation: "spin 0.8s linear infinite",
-      }}
+      className="rounded-full border-2 border-border border-t-primary animate-spin"
+      style={{ width: size, height: size }}
     />
   );
 
   if (fullPage) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100%",
-          minHeight: 200,
-        }}
-      >
+      <div className={cn("flex items-center justify-center h-full min-h-[200px]")}>
         {spinner}
       </div>
     );

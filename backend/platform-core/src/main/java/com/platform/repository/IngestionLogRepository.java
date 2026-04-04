@@ -11,4 +11,5 @@ import java.util.UUID;
 @Repository
 public interface IngestionLogRepository extends JpaRepository<IngestionLogEntity, UUID> {
     Page<IngestionLogEntity> findBySourceIdOrderByStartedAtDesc(String sourceId, Pageable pageable);
+    void deleteBySourceId(String sourceId);
 }

@@ -39,12 +39,16 @@ public class EmbeddingRepository {
         String metadataJson = toJson(entity.getMetadata());
         jdbc.update(
                 """
-                INSERT INTO embeddings (id, source_id, document_id, chunk_index, content, embedding, metadata, created_at)
-                VALUES (?::uuid, ?, ?, ?, ?, ?::vector, ?::jsonb, now())
+                INSERT INTO embeddings (id, source_id, document_id, chunk_index, content, embedding, metadata,
+                                        parent_id, context_prefix, content_hash, created_at)
+                VALUES (?::uuid, ?, ?, ?, ?, ?::vector, ?::jsonb, ?, ?, ?, now())
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     embedding = EXCLUDED.embedding,
-                    metadata = EXCLUDED.metadata
+                    metadata = EXCLUDED.metadata,
+                    parent_id = EXCLUDED.parent_id,
+                    context_prefix = EXCLUDED.context_prefix,
+                    content_hash = EXCLUDED.content_hash
                 """,
                 entity.getId() != null ? entity.getId().toString() : UUID.randomUUID().toString(),
                 entity.getSourceId(),
@@ -52,7 +56,10 @@ public class EmbeddingRepository {
                 entity.getChunkIndex(),
                 entity.getContent(),
                 entity.getEmbedding(),
-                metadataJson
+                metadataJson,
+                entity.getParentId(),
+                entity.getContextPrefix(),
+                entity.getContentHash()
         );
     }
 
@@ -98,6 +105,13 @@ public class EmbeddingRepository {
     }
 
     /**
+     * 특정 소스 내 특정 문서의 임베딩 삭제.
+     */
+    public int deleteBySourceIdAndDocumentId(String sourceId, String documentId) {
+        return jdbc.update("DELETE FROM embeddings WHERE source_id = ? AND document_id = ?", sourceId, documentId);
+    }
+
+    /**
      * 특정 소스의 임베딩 수 조회.
      */
     public int countBySourceId(String sourceId) {
@@ -105,6 +119,77 @@ public class EmbeddingRepository {
                 "SELECT COUNT(*) FROM embeddings WHERE source_id = ?",
                 Integer.class, sourceId);
         return count != null ? count : 0;
+    }
+
+    /**
+     * Parent-Child 검색: child 청크로 유사도 검색 후, 매칭된 child의 parent 전체 내용 반환.
+     * child(parent_id IS NOT NULL)에서 유사도 매칭 → parent(parent_id IS NULL) content를 JOIN.
+     */
+    public List<EmbeddingEntity> findSimilarWithParent(String sourceId, float[] queryVector, int topK) {
+        String vectorLiteral = toVectorLiteral(queryVector);
+        return jdbc.query(
+                """
+                WITH matched_children AS (
+                    SELECT c.parent_id, 1 - (c.embedding <=> ?::vector) AS score
+                    FROM embeddings c
+                    WHERE c.source_id = ? AND c.parent_id IS NOT NULL
+                    ORDER BY c.embedding <=> ?::vector
+                    LIMIT ?
+                ),
+                distinct_parents AS (
+                    SELECT parent_id, MAX(score) AS score
+                    FROM matched_children
+                    GROUP BY parent_id
+                )
+                SELECT p.id, p.source_id, p.document_id, p.chunk_index,
+                       CASE WHEN p.context_prefix IS NOT NULL
+                            THEN p.context_prefix || E'\\n' || p.content
+                            ELSE p.content END AS content,
+                       p.metadata, dp.score
+                FROM distinct_parents dp
+                JOIN embeddings p ON p.id::text = dp.parent_id
+                ORDER BY dp.score DESC
+                """,
+                new EmbeddingRowMapperWithScore(),
+                vectorLiteral, sourceId, vectorLiteral, topK * 3
+        );
+    }
+
+    /**
+     * content_hash로 기존 임베딩 존재 여부 확인 (incremental ingestion).
+     */
+    public boolean existsByContentHash(String sourceId, String contentHash) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM embeddings WHERE source_id = ? AND content_hash = ?",
+                Integer.class, sourceId, contentHash);
+        return count != null && count > 0;
+    }
+
+    /**
+     * 특정 소스의 모든 content_hash 목록 조회.
+     */
+    public List<String> findContentHashesBySourceId(String sourceId) {
+        return jdbc.queryForList(
+                "SELECT content_hash FROM embeddings WHERE source_id = ? AND content_hash IS NOT NULL",
+                String.class, sourceId);
+    }
+
+    /**
+     * content_hash에 해당하지 않는 이전 임베딩 삭제 (incremental ingestion 정리).
+     */
+    public int deleteBySourceIdAndHashNotIn(String sourceId, List<String> keepHashes) {
+        if (keepHashes.isEmpty()) {
+            return deleteBySourceId(sourceId);
+        }
+        String placeholders = String.join(",", keepHashes.stream().map(h -> "?").toList());
+        Object[] params = new Object[keepHashes.size() + 1];
+        params[0] = sourceId;
+        for (int i = 0; i < keepHashes.size(); i++) {
+            params[i + 1] = keepHashes.get(i);
+        }
+        return jdbc.update(
+                "DELETE FROM embeddings WHERE source_id = ? AND (content_hash IS NULL OR content_hash NOT IN (" + placeholders + "))",
+                params);
     }
 
     // ─── 내부 유틸 ──────────────────────────────────────────────────────────

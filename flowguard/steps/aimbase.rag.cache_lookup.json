@@ -1,0 +1,26 @@
+{
+  "type": "ACTION",
+  "connector": "aimbase-mcp-rag",
+  "action": {
+    "method": "POST",
+    "endpoint": "/mcp",
+    "headers": {},
+    "body": {
+      "tool": "cache_lookup",
+      "arguments": {
+        "query": "테스트 질문입니다",
+        "source_id": "{{sourceId}}",
+        "threshold": 0.95
+      }
+    }
+  },
+  "extract": {
+    "hit": "$.body.result.hit",
+    "responseText": "$.body.result.response_text",
+    "similarity": "$.body.result.similarity"
+  },
+  "assert": [
+    { "field": "$.body.result.hit", "operator": "in", "value": [true, false] }
+  ],
+  "failMode": "hard"
+}

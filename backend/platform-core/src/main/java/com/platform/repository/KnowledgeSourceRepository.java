@@ -10,4 +10,7 @@ import java.util.List;
 public interface KnowledgeSourceRepository extends JpaRepository<KnowledgeSourceEntity, String> {
     List<KnowledgeSourceEntity> findByType(String type);
     List<KnowledgeSourceEntity> findByStatus(String status);
+
+    // CR-022: 사용자별 리소스 소유
+    List<KnowledgeSourceEntity> findByCreatedBy(String createdBy);
 }

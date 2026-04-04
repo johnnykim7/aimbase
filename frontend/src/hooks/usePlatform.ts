@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { platformApi } from "../api/platform";
 import type { PagedResponse } from "../types/api";
-import type { App, AppCreateRequest, AppUpdateRequest, Tenant, TenantRequest, Subscription, AppTenantCreateRequest } from "../types/tenant";
+import type { App, AppCreateRequest, AppUpdateRequest, Tenant, TenantRequest, Subscription, AppTenantCreateRequest, ApiKey, CreateApiKeyRequest } from "../types/tenant";
 import type { AccountPoolStatus, AgentAccountCreateRequest, AssignmentCreateRequest, AgentAccountAssignment, GuideEntry, GuideDetail } from "../types/agentAccount";
 
 const extractList = <T>(d: unknown): T[] => {
@@ -11,10 +11,10 @@ const extractList = <T>(d: unknown): T[] => {
   return [];
 };
 
-export const useTenants = () =>
+export const useTenants = (domainApp?: string) =>
   useQuery({
-    queryKey: ["tenants"],
-    queryFn: () => platformApi.listTenants().then((r) => extractList<Tenant>(r.data.data)),
+    queryKey: ["tenants", { domainApp }],
+    queryFn: () => platformApi.listTenants(domainApp ? { domain_app: domainApp } : undefined).then((r) => extractList<Tenant>(r.data.data)),
     retry: false,
   });
 
@@ -248,3 +248,35 @@ export const useGuide = (slug: string) =>
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
+
+// CR-025: API Keys
+export const useApiKeys = (tenantId?: string) =>
+  useQuery({
+    queryKey: ["apiKeys", { tenantId }],
+    queryFn: () => platformApi.listApiKeys(tenantId).then((r) => (r.data.data ?? []) as ApiKey[]),
+    retry: false,
+  });
+
+export const useCreateApiKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateApiKeyRequest) => platformApi.createApiKey(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
+  });
+};
+
+export const useRevokeApiKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.revokeApiKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
+  });
+};
+
+export const useRegenerateApiKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformApi.regenerateApiKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
+  });
+};

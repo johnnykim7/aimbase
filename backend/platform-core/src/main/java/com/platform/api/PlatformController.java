@@ -69,7 +69,12 @@ public class PlatformController {
     @GetMapping("/tenants")
     @Operation(summary = "테넌트 목록 조회")
     public ApiResponse<List<TenantEntity>> listTenants(
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false, name = "domain_app") String domainApp) {
+        // CR-023: 소비앱별 필터링
+        if (domainApp != null) {
+            return ApiResponse.ok(tenantRepository.findByDomainApp(domainApp));
+        }
         if (status != null) {
             return ApiResponse.ok(tenantRepository.findByStatus(status));
         }
@@ -95,6 +100,15 @@ public class PlatformController {
         );
 
         TenantOnboardingResult result = onboardingService.provision(onboardingRequest);
+
+        // CR-023: 소비앱 메타데이터 설정
+        if (request.domainApp() != null && !request.domainApp().isBlank()) {
+            tenantRepository.findById(request.tenantId()).ifPresent(t -> {
+                t.setDomainApp(request.domainApp());
+                tenantRepository.save(t);
+            });
+        }
+
         return ApiResponse.ok(result);
     }
 
@@ -123,6 +137,7 @@ public class PlatformController {
 
         if (request.name() != null) tenant.setName(request.name());
         if (request.adminEmail() != null) tenant.setAdminEmail(request.adminEmail());
+        if (request.domainApp() != null) tenant.setDomainApp(request.domainApp()); // CR-023
         return ApiResponse.ok(tenantRepository.save(tenant));
     }
 
@@ -219,12 +234,14 @@ public class PlatformController {
         @NotBlank String name,
         @NotBlank String adminEmail,
         @NotBlank String initialAdminPassword,
-        String plan
+        String plan,
+        String domainApp // CR-023
     ) {}
 
     public record TenantUpdateRequest(
         String name,
-        String adminEmail
+        String adminEmail,
+        String domainApp // CR-023
     ) {}
 
     public record SubscriptionUpdateRequest(
