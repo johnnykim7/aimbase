@@ -15,11 +15,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.platform.tenant.ProjectContext;
-
-import com.platform.auth.UserPrincipal;
-import org.springframework.security.core.context.SecurityContextHolder;
-
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -46,19 +41,8 @@ public class WorkflowController {
     public ApiResponse<?> list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String domain,
-            @RequestParam(required = false, name = "my") Boolean my
+            @RequestParam(required = false) String domain
     ) {
-        // CR-022: 사용자별 리소스 필터링
-        if (Boolean.TRUE.equals(my)) {
-            String userId = currentUserId();
-            if (userId != null) return ApiResponse.ok(workflowRepository.findByCreatedByAndIsActiveTrue(userId));
-        }
-        // CR-021: 프로젝트 스코핑
-        String projectId = ProjectContext.getProjectId();
-        if (projectId != null) {
-            return ApiResponse.ok(workflowRepository.findByProjectIdOrSharedAndIsActiveTrue(projectId));
-        }
         var pageable = PageRequest.of(page, size);
         if (domain != null) {
             return ApiResponse.ok(workflowRepository.findByDomainAndIsActiveTrue(domain));
@@ -71,19 +55,15 @@ public class WorkflowController {
     @Operation(summary = "워크플로우 생성")
     public ApiResponse<WorkflowEntity> create(@Valid @RequestBody WorkflowRequest request) {
         WorkflowEntity entity = new WorkflowEntity();
-        entity.setId(request.id() != null && !request.id().isBlank() ? request.id() : java.util.UUID.randomUUID().toString());
+        entity.setId(request.id());
         entity.setName(request.name());
         entity.setDomain(request.domain());
         entity.setTriggerConfig(request.triggerConfig());
         entity.setSteps(request.steps());
         entity.setErrorHandling(request.errorHandling());
-        entity.setInputSchema(request.inputSchema());
         entity.setOutputSchema(request.outputSchema());
-        // CR-021: X-Project-Id 헤더 또는 요청 body의 projectId
-        String projectId = request.projectId() != null ? request.projectId() : ProjectContext.getProjectId();
-        entity.setProjectId(projectId);
+        entity.setInputSchema(request.inputSchema());
         entity.setActive(true);
-        entity.setCreatedBy(currentUserId()); // CR-022
         return ApiResponse.ok(workflowRepository.save(entity));
     }
 
@@ -107,17 +87,15 @@ public class WorkflowController {
         entity.setTriggerConfig(request.triggerConfig());
         entity.setSteps(request.steps());
         entity.setErrorHandling(request.errorHandling());
-        entity.setInputSchema(request.inputSchema());
         entity.setOutputSchema(request.outputSchema());
+        entity.setInputSchema(request.inputSchema());
         return ApiResponse.ok(workflowRepository.save(entity));
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "워크플로우 삭제")
-    @jakarta.transaction.Transactional
     public void delete(@PathVariable String id) {
-        workflowRunRepository.deleteByWorkflowId(id);
         workflowRepository.deleteById(id);
     }
 
@@ -172,27 +150,15 @@ public class WorkflowController {
     }
 
     public record WorkflowRequest(
-            String id,
+            @NotBlank String id,
             @NotBlank String name,
             String domain,
-            String projectId,
             @NotNull Map<String, Object> triggerConfig,
             @NotNull List<Map<String, Object>> steps,
             Map<String, Object> errorHandling,
-            Map<String, Object> inputSchema,
-            Map<String, Object> outputSchema
+            Map<String, Object> outputSchema,
+            Map<String, Object> inputSchema
     ) {}
 
     public record ApproveRequest(boolean approved, String reason) {}
-
-    /** CR-022: SecurityContext에서 현재 사용자 ID 추출. API Key 인증(system-*)은 users FK 없으므로 null 반환 */
-    private String currentUserId() {
-        var auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof UserPrincipal up) {
-            String id = up.getId();
-            if (id != null && id.startsWith("system-")) return null;
-            return id;
-        }
-        return null;
-    }
 }

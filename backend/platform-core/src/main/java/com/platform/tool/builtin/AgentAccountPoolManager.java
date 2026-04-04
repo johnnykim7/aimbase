@@ -12,21 +12,29 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import jakarta.annotation.PostConstruct;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 에이전트 계정 풀 매니저.
- * 다수의 사이드카 컨테이너(각각 독립 OAuth/API Key)를 관리하고,
- * 테넌트/앱 컨텍스트에 따라 적절한 계정을 해소한다.
+ * CLAUDE_CONFIG_DIR 환경변수로 계정별 설정 디렉토리를 격리하여
+ * 단일 프로세스 내에서 다중 OAuth/API Key 계정을 관리한다.
+ *
+ * 기존 HTTP 사이드카 방식을 제거하고 로컬 ProcessBuilder로 전환.
  */
 @Service
 @ConditionalOnProperty(name = "claude-code.enabled", havingValue = "true", matchIfMissing = false)
@@ -38,9 +46,12 @@ public class AgentAccountPoolManager {
     private static final int CB_FAILURE_THRESHOLD = 3;
     private static final long CB_OPEN_DURATION_MS = 5 * 60 * 1000L;
 
+    /** 계정별 Claude 설정 디렉토리 루트 */
+    private static final String CONFIG_BASE_DIR = System.getProperty("user.home") + "/.claude-accounts";
+
     private final AgentAccountRepository accountRepository;
     private final AgentAccountAssignmentRepository assignmentRepository;
-    private final HttpClient httpClient;
+    private final ClaudeCodeToolConfig config;
 
     /** 계정별 서킷 브레이커 */
     private final ConcurrentHashMap<String, GenericCircuitBreaker> circuitBreakers = new ConcurrentHashMap<>();
@@ -52,13 +63,36 @@ public class AgentAccountPoolManager {
     private final AtomicInteger roundRobinCounter = new AtomicInteger(0);
 
     public AgentAccountPoolManager(AgentAccountRepository accountRepository,
-                                   AgentAccountAssignmentRepository assignmentRepository) {
+                                   AgentAccountAssignmentRepository assignmentRepository,
+                                   ClaudeCodeToolConfig config) {
         this.accountRepository = accountRepository;
         this.assignmentRepository = assignmentRepository;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
-        log.info("AgentAccountPoolManager 초기화 완료");
+        this.config = config;
+        log.info("AgentAccountPoolManager 초기화: configBaseDir={}", CONFIG_BASE_DIR);
+    }
+
+    /**
+     * 앱 기동 시 DB에 저장된 토큰을 계정별 config 디렉토리에 배포.
+     */
+    @PostConstruct
+    public void initializeAccountConfigs() {
+        try {
+            Files.createDirectories(Path.of(CONFIG_BASE_DIR));
+            List<AgentAccountEntity> accounts = accountRepository.findByStatusOrderByPriorityDesc("active");
+            int deployed = 0;
+            for (AgentAccountEntity account : accounts) {
+                try {
+                    if (deployTokenToConfigDir(account)) {
+                        deployed++;
+                    }
+                } catch (Exception e) {
+                    log.warn("[{}] 토큰 배포 실패 (기동 계속): {}", account.getId(), e.getMessage());
+                }
+            }
+            log.info("계정 토큰 초기화 완료: {}/{}개 배포", deployed, accounts.size());
+        } catch (Exception e) {
+            log.error("계정 config 디렉토리 초기화 실패: {}", e.getMessage());
+        }
     }
 
     /**
@@ -110,51 +144,82 @@ public class AgentAccountPoolManager {
     }
 
     /**
-     * 사이드카 HTTP를 통해 커맨드 실행.
+     * 로컬 ProcessBuilder로 커맨드 실행 (CLAUDE_CONFIG_DIR로 계정 격리).
      */
-    public ExecutionResult executeViaHttp(AgentAccountEntity account,
-                                          List<String> command,
-                                          String workDir,
-                                          int timeoutSeconds,
-                                          String inputFile) {
+    public ExecutionResult executeLocal(AgentAccountEntity account,
+                                        List<String> command,
+                                        String workDir,
+                                        int timeoutSeconds,
+                                        String inputFile) {
         String accountId = account.getId();
         AtomicInteger counter = concurrencyCounters.computeIfAbsent(accountId, k -> new AtomicInteger(0));
         counter.incrementAndGet();
 
         try {
-            String url = account.getBaseUrl() + "/execute";
-            Map<String, Object> body = Map.of(
-                    "command", command,
-                    "workingDirectory", workDir != null ? workDir : "/data/workspace",
-                    "timeoutSeconds", timeoutSeconds,
-                    "inputFile", inputFile != null ? inputFile : ""
-            );
+            ProcessBuilder pb = new ProcessBuilder(command);
 
-            String jsonBody = objectMapper.writeValueAsString(body);
+            // 계정별 CLAUDE_CONFIG_DIR 설정 — 핵심 격리 메커니즘
+            String configDir = getConfigDir(accountId);
+            pb.environment().put("CLAUDE_CONFIG_DIR", configDir);
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(timeoutSeconds + 30)) // 사이드카 타임아웃 + 여유
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                    .build();
+            // 중첩 세션 방지
+            pb.environment().remove("CLAUDECODE");
 
-            log.info("[{}] 사이드카 실행 요청: host={}", accountId, account.getContainerHost());
+            // 인증 방식별 환경변수 설정
+            Map<String, Object> accountConfig = account.getConfig();
+            if (accountConfig != null) {
+                String authType = (String) accountConfig.get("auth_type");
+                String authToken = (String) accountConfig.get("auth_token");
+                if ("api_key".equals(authType) && authToken != null) {
+                    pb.environment().put("ANTHROPIC_API_KEY", authToken);
+                    if (!command.contains("--bare")) {
+                        command = new java.util.ArrayList<>(command);
+                        command.add(1, "--bare");
+                    }
+                } else if ("oauth_token".equals(authType) && authToken != null) {
+                    pb.environment().put("CLAUDE_CODE_OAUTH_TOKEN", authToken);
+                }
+            }
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (workDir != null && !workDir.isBlank()) {
+                File dir = new File(workDir);
+                if (dir.isDirectory()) {
+                    pb.directory(dir);
+                }
+            }
+            pb.redirectErrorStream(false);
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> result = objectMapper.readValue(response.body(), Map.class);
+            if (inputFile != null && !inputFile.isBlank()) {
+                File inFile = new File(inputFile);
+                if (inFile.exists()) {
+                    pb.redirectInput(inFile);
+                }
+            } else {
+                pb.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
+            }
 
-            int exitCode = result.get("exitCode") instanceof Number n ? n.intValue() : -1;
-            String stdout = (String) result.getOrDefault("stdout", "");
-            String stderr = (String) result.getOrDefault("stderr", "");
+            log.info("[{}] 로컬 실행: configDir={}", accountId, configDir);
 
-            return new ExecutionResult(exitCode, stdout, stderr);
+            Process process = pb.start();
+
+            CompletableFuture<String> stdoutFuture = CompletableFuture.supplyAsync(
+                    () -> readStream(process.getInputStream()));
+            CompletableFuture<String> stderrFuture = CompletableFuture.supplyAsync(
+                    () -> readStream(process.getErrorStream()));
+
+            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return new ExecutionResult(-1, "", "Process killed: timeout exceeded (" + timeoutSeconds + "s)");
+            }
+
+            String stdout = stdoutFuture.get(5, TimeUnit.SECONDS);
+            String stderr = stderrFuture.get(5, TimeUnit.SECONDS);
+            return new ExecutionResult(process.exitValue(), stdout, stderr);
 
         } catch (Exception e) {
-            log.error("[{}] 사이드카 통신 실패: {}", accountId, e.getMessage());
-            return new ExecutionResult(-1, "", "Sidecar communication failed: " + e.getMessage());
+            log.error("[{}] 로컬 실행 실패: {}", accountId, e.getMessage());
+            return new ExecutionResult(-1, "", "Local execution failed: " + e.getMessage());
         } finally {
             counter.decrementAndGet();
         }
@@ -182,8 +247,11 @@ public class AgentAccountPoolManager {
         if (cb != null) cb.reset();
     }
 
-    /** 30초 주기 헬스체크 */
-    @Scheduled(fixedDelay = 30_000, initialDelay = 10_000)
+    /**
+     * 60초 주기 헬스체크 — CLI 버전 확인 + 인증 상태 확인.
+     * CLAUDE_CONFIG_DIR별로 `claude --version`을 실행하여 CLI 정상 여부 판단.
+     */
+    @Scheduled(fixedDelay = 60_000, initialDelay = 15_000)
     public void healthCheckAll() {
         List<AgentAccountEntity> accounts = accountRepository.findByStatusOrderByPriorityDesc("active");
         for (AgentAccountEntity account : accounts) {
@@ -192,42 +260,36 @@ public class AgentAccountPoolManager {
     }
 
     private void checkHealth(AgentAccountEntity account) {
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(account.getBaseUrl() + "/health"))
-                    .timeout(Duration.ofSeconds(5))
-                    .GET()
-                    .build();
+        String configDir = getConfigDir(account.getId());
+        Path configPath = Path.of(configDir);
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        // config 디렉토리 존재 여부 확인
+        if (!Files.exists(configPath)) {
+            account.setHealthStatus("not_configured");
+            account.setLastHealthAt(OffsetDateTime.now());
+            accountRepository.save(account);
+            return;
+        }
 
-            if (response.statusCode() == 200) {
-                // 사이드카 응답에서 인증 상태 확인
-                try {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> healthResult = objectMapper.readValue(response.body(), Map.class);
-                    String status = (String) healthResult.getOrDefault("status", "ok");
-                    if ("auth_required".equals(status)) {
-                        if (!"auth_required".equals(account.getHealthStatus())) {
-                            log.warn("[{}] 인증 필요 — claude login을 실행하세요", account.getId());
-                        }
-                        account.setHealthStatus("auth_required");
-                    } else {
-                        if (!"healthy".equals(account.getHealthStatus())) {
-                            log.info("[{}] 헬스 → healthy", account.getId());
-                        }
-                        account.setHealthStatus("healthy");
-                    }
-                } catch (Exception parseEx) {
-                    account.setHealthStatus("healthy");
-                }
-            } else {
-                log.warn("[{}] 헬스체크 실패: status={}", account.getId(), response.statusCode());
-                account.setHealthStatus("unhealthy");
+        // 토큰 파일 존재 확인 (credentials.json 또는 .claude.json)
+        boolean hasCredentials = Files.exists(configPath.resolve("credentials.json"))
+                || Files.exists(configPath.resolve(".credentials.json"))
+                || Files.exists(configPath.resolve(".claude.json"));
+        Map<String, Object> accountConfig = account.getConfig();
+        boolean hasApiKey = accountConfig != null
+                && "api_key".equals(accountConfig.get("auth_type"))
+                && accountConfig.get("auth_token") != null;
+
+        if (!hasCredentials && !hasApiKey) {
+            if (!"auth_required".equals(account.getHealthStatus())) {
+                log.warn("[{}] 인증 필요 — 토큰을 등록하세요", account.getId());
             }
-        } catch (Exception e) {
-            log.warn("[{}] 헬스체크 오류: {}", account.getId(), e.getMessage());
-            account.setHealthStatus("unhealthy");
+            account.setHealthStatus("auth_required");
+        } else {
+            if (!"healthy".equals(account.getHealthStatus())) {
+                log.info("[{}] 헬스 → healthy", account.getId());
+            }
+            account.setHealthStatus("healthy");
         }
 
         account.setLastHealthAt(OffsetDateTime.now());
@@ -252,15 +314,13 @@ public class AgentAccountPoolManager {
     }
 
     private boolean isAvailable(AgentAccountEntity account) {
-        // 서킷 브레이커 체크
         if (!getCircuitBreaker(account.getId()).allowRequest()) {
             return false;
         }
-        // 헬스 체크
-        if ("unhealthy".equals(account.getHealthStatus())) {
+        String health = account.getHealthStatus();
+        if ("unhealthy".equals(health) || "not_configured".equals(health)) {
             return false;
         }
-        // 동시실행 제한
         if (getCurrentConcurrency(account.getId()) >= account.getMaxConcurrent()) {
             return false;
         }
@@ -272,11 +332,16 @@ public class AgentAccountPoolManager {
         return counter != null ? counter.get() : 0;
     }
 
-    // ── 토큰 관리 ──
+    // ── 토큰 관리 (로컬 파일시스템) ──
+
+    /** 계정별 config 디렉토리 경로 */
+    public String getConfigDir(String accountId) {
+        return CONFIG_BASE_DIR + "/" + accountId;
+    }
 
     /**
-     * 사이드카에서 OAuth 토큰을 추출하여 DB에 저장.
-     * 사이드카 재빌드 후 deployToken()으로 복원할 수 있다.
+     * 계정의 config 디렉토리에서 credentials를 읽어 DB에 저장.
+     * 컨테이너 재빌드 후 deployToken()으로 복원.
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> extractAndSaveToken(String accountId) {
@@ -284,30 +349,28 @@ public class AgentAccountPoolManager {
         if (account == null) throw new IllegalArgumentException("계정 없음: " + accountId);
 
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(account.getBaseUrl() + "/extract-token"))
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            Map<String, Object> result = objectMapper.readValue(response.body(), Map.class);
-
-            if (!"ok".equals(result.get("status"))) {
-                throw new RuntimeException("토큰 추출 실패: " + result.get("error"));
+            Path configDir = Path.of(getConfigDir(accountId));
+            Path credentialsFile = configDir.resolve("credentials.json");
+            if (!Files.exists(credentialsFile)) {
+                credentialsFile = configDir.resolve(".credentials.json");
+            }
+            if (!Files.exists(credentialsFile)) {
+                throw new IllegalStateException("credentials 파일 없음. claude login을 먼저 실행하세요.");
             }
 
+            String credentialsJson = Files.readString(credentialsFile, StandardCharsets.UTF_8);
+
             // config JSONB에 토큰 저장
-            Map<String, Object> config = account.getConfig() != null
+            Map<String, Object> acctConfig = account.getConfig() != null
                     ? new java.util.HashMap<>(account.getConfig()) : new java.util.HashMap<>();
-            config.put("oauth_token", result.get("token_json"));
-            config.put("oauth_credentials", result.get("credentials"));
-            config.put("token_saved_at", OffsetDateTime.now().toString());
-            account.setConfig(config);
+            acctConfig.put("oauth_credentials", credentialsJson);
+            acctConfig.put("token_saved_at", OffsetDateTime.now().toString());
+            account.setConfig(acctConfig);
             accountRepository.save(account);
 
-            log.info("[{}] OAuth 토큰 추출 및 DB 저장 완료", accountId);
-            return Map.of("status", "ok", "message", "토큰 저장 완료", "saved_at", config.get("token_saved_at"));
+            log.info("[{}] credentials 추출 및 DB 저장 완료", accountId);
+            return Map.of("status", "ok", "message", "토큰 저장 완료",
+                    "saved_at", acctConfig.get("token_saved_at"));
 
         } catch (Exception e) {
             log.error("[{}] 토큰 추출 실패: {}", accountId, e.getMessage());
@@ -316,42 +379,84 @@ public class AgentAccountPoolManager {
     }
 
     /**
-     * DB에 저장된 OAuth 토큰을 사이드카에 배포.
-     * 사이드카 재빌드/재기동 후 호출하면 인증이 복원된다.
+     * DB에 저장된 토큰을 계정별 config 디렉토리에 배포.
+     * 컨테이너 재빌드/재기동 후 호출하면 인증이 복원된다.
      */
-    @SuppressWarnings("unchecked")
     public Map<String, Object> deployToken(String accountId) {
         AgentAccountEntity account = accountRepository.findById(accountId).orElse(null);
         if (account == null) throw new IllegalArgumentException("계정 없음: " + accountId);
 
-        Map<String, Object> config = account.getConfig();
-        if (config == null || !config.containsKey("oauth_token")) {
-            throw new IllegalStateException("저장된 토큰 없음. 먼저 extractAndSaveToken을 실행하세요.");
+        if (!deployTokenToConfigDir(account)) {
+            throw new IllegalStateException("배포할 토큰 없음. save-token API로 토큰을 등록하세요.");
         }
 
+        log.info("[{}] 토큰 배포 완료", accountId);
+        return Map.of("status", "ok", "message", "토큰 배포 완료");
+    }
+
+    /**
+     * 계정의 DB 토큰을 config 디렉토리에 파일로 기록.
+     * @return 배포 성공 여부
+     */
+    private boolean deployTokenToConfigDir(AgentAccountEntity account) {
+        Map<String, Object> acctConfig = account.getConfig();
+        if (acctConfig == null) return false;
+
+        String accountId = account.getId();
+        Path configDir = Path.of(getConfigDir(accountId));
+
         try {
-            Map<String, Object> body = new java.util.HashMap<>();
-            body.put("token_json", config.get("oauth_token"));
-            body.put("credentials", config.get("oauth_credentials"));
+            Files.createDirectories(configDir);
 
-            String jsonBody = objectMapper.writeValueAsString(body);
+            // 1. extractAndSaveToken으로 저장된 credentials 파일 배포
+            Object credentials = acctConfig.get("oauth_credentials");
+            if (credentials != null) {
+                String credJson = credentials instanceof String s ? s
+                        : objectMapper.writeValueAsString(credentials);
+                Files.writeString(configDir.resolve("credentials.json"),
+                        credJson, StandardCharsets.UTF_8);
+                log.debug("[{}] credentials.json 배포 완료 (extracted)", accountId);
+                return true;
+            }
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(account.getBaseUrl() + "/upload-token"))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(10))
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                    .build();
+            // 2. save-token API로 저장된 auth_token 배포
+            String authType = (String) acctConfig.get("auth_type");
+            String authToken = (String) acctConfig.get("auth_token");
+            if (authToken != null && !authToken.isBlank()) {
+                if ("api_key".equals(authType)) {
+                    // API Key 방식은 파일 배포 불필요 (환경변수로 주입)
+                    log.debug("[{}] API Key 방식 — 파일 배포 불필요", accountId);
+                    return true;
+                }
+                // OAuth setup-token: .claude.json에 인증 정보 기록
+                Map<String, Object> claudeJson = new java.util.LinkedHashMap<>();
+                claudeJson.put("oauthToken", authToken);
+                Files.writeString(configDir.resolve(".claude.json"),
+                        objectMapper.writeValueAsString(claudeJson), StandardCharsets.UTF_8);
+                log.debug("[{}] .claude.json 배포 완료 (setup-token)", accountId);
+                return true;
+            }
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            Map<String, Object> result = objectMapper.readValue(response.body(), Map.class);
+            return false;
+        } catch (IOException e) {
+            log.error("[{}] config 디렉토리 배포 실패: {}", accountId, e.getMessage());
+            return false;
+        }
+    }
 
-            log.info("[{}] OAuth 토큰 배포 완료", accountId);
-            return Map.of("status", "ok", "message", "토큰 배포 완료");
-
-        } catch (Exception e) {
-            log.error("[{}] 토큰 배포 실패: {}", accountId, e.getMessage());
-            throw new RuntimeException("토큰 배포 실패: " + e.getMessage(), e);
+    private String readStream(InputStream inputStream) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!sb.isEmpty()) sb.append('\n');
+                sb.append(line);
+            }
+            return sb.toString();
+        } catch (IOException e) {
+            log.error("스트림 읽기 실패: {}", e.getMessage());
+            return "";
         }
     }
 

@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -14,28 +13,37 @@ import java.util.stream.Collectors;
 /**
  * Spring AI EmbeddingModel을 래핑하는 서비스.
  * 기본 모델: OpenAI text-embedding-3-small (1536 차원)
- *
- * spring.ai.openai.api-key가 설정되지 않으면 빈이 생성되지 않음.
+ * OPENAI_API_KEY 미설정 시 EmbeddingModel 빈이 없으므로 이 서비스도 생성되지 않는다.
  */
 @Component
-@ConditionalOnProperty(name = "spring.ai.openai.api-key", matchIfMissing = false)
 public class EmbeddingService {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
 
     private final EmbeddingModel embeddingModel;
 
-    public EmbeddingService(EmbeddingModel embeddingModel) {
+    public EmbeddingService(@org.springframework.beans.factory.annotation.Autowired(required = false)
+                             EmbeddingModel embeddingModel) {
         this.embeddingModel = embeddingModel;
+        if (embeddingModel == null) {
+            log.warn("EmbeddingModel not available (OPENAI_API_KEY not set). Embedding features disabled.");
+        }
+    }
+
+    public boolean isAvailable() {
+        return embeddingModel != null;
     }
 
     /**
      * 단일 텍스트 임베딩 생성.
      *
      * @param text 임베딩할 텍스트
-     * @return float[] 벡터 (차원은 모델에 따라 다름: OpenAI 1536d, BGE-M3 1024d 등)
+     * @return float[] 벡터 (1536 차원)
      */
     public float[] embed(String text) {
+        if (embeddingModel == null) {
+            throw new IllegalStateException("EmbeddingModel not available. Set OPENAI_API_KEY to enable embedding.");
+        }
         EmbeddingResponse response = embeddingModel.embedForResponse(List.of(text));
         float[] vector = response.getResult().getOutput();
         log.debug("Embedded text ({}chars) → {}d vector", text.length(), vector.length);
@@ -50,6 +58,9 @@ public class EmbeddingService {
      */
     public List<float[]> embed(List<String> texts) {
         if (texts.isEmpty()) return List.of();
+        if (embeddingModel == null) {
+            throw new IllegalStateException("EmbeddingModel not available. Set OPENAI_API_KEY to enable embedding.");
+        }
         EmbeddingResponse response = embeddingModel.embedForResponse(texts);
         List<float[]> vectors = response.getResults().stream()
                 .map(r -> r.getOutput())

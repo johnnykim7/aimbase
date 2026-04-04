@@ -29,7 +29,8 @@ public class ResponseCacheService {
     private final ResponseCacheRepository cacheRepository;
     private final EmbeddingService embeddingService;
 
-    public ResponseCacheService(ResponseCacheRepository cacheRepository, EmbeddingService embeddingService) {
+    public ResponseCacheService(ResponseCacheRepository cacheRepository,
+                                 EmbeddingService embeddingService) {
         this.cacheRepository = cacheRepository;
         this.embeddingService = embeddingService;
     }

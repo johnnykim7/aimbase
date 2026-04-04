@@ -4,6 +4,7 @@ import com.platform.action.ActionExecutor;
 import com.platform.action.model.*;
 import com.platform.domain.UsageLogEntity;
 import com.platform.llm.ConnectionAdapterFactory;
+import com.platform.llm.ConnectionGroupSelector;
 import com.platform.llm.LLMAdapterRegistry;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
@@ -58,6 +59,7 @@ public class OrchestratorEngine {
     private final ModelRouter modelRouter;
     private final FallbackChainExecutor fallbackChainExecutor;
     private final ConnectionAdapterFactory connectionAdapterFactory;
+    private final ConnectionGroupSelector connectionGroupSelector;
     private final SessionStore sessionStore;
     private final ContextWindowManager contextWindowManager;
     private final PolicyEngine policyEngine;
@@ -82,6 +84,7 @@ public class OrchestratorEngine {
             ModelRouter modelRouter,
             FallbackChainExecutor fallbackChainExecutor,
             ConnectionAdapterFactory connectionAdapterFactory,
+            ConnectionGroupSelector connectionGroupSelector,
             SessionStore sessionStore,
             ContextWindowManager contextWindowManager,
             PolicyEngine policyEngine,
@@ -103,6 +106,7 @@ public class OrchestratorEngine {
         this.modelRouter = modelRouter;
         this.fallbackChainExecutor = fallbackChainExecutor;
         this.connectionAdapterFactory = connectionAdapterFactory;
+        this.connectionGroupSelector = connectionGroupSelector;
         this.sessionStore = sessionStore;
         this.contextWindowManager = contextWindowManager;
         this.policyEngine = policyEngine;
@@ -163,15 +167,20 @@ public class OrchestratorEngine {
             }
         }
 
-        // 4. LLM 어댑터 선택 (connectionId 우선, 없으면 modelRouter 폴백)
-        LLMAdapter adapter;
-        String resolvedModel;
-        if (request.connectionId() != null && !request.connectionId().isBlank()) {
+        // 4. LLM 어댑터 선택 (connectionGroupId > connectionId > modelRouter)
+        //    CR-015: connectionGroupId 지정 시 그룹 전략에 따라 커넥션 선택 + 자동 폴백
+        LLMAdapter adapter = null;
+        String resolvedModel = null;
+        boolean useConnectionGroup = request.connectionGroupId() != null && !request.connectionGroupId().isBlank();
+        if (!useConnectionGroup && request.connectionId() != null && !request.connectionId().isBlank()) {
             adapter = connectionAdapterFactory.getAdapter(request.connectionId());
             resolvedModel = connectionAdapterFactory.resolveModel(request.connectionId(), request.model());
-        } else {
+        } else if (!useConnectionGroup) {
             adapter = modelRouter.route(new LLMRequest(request.model(), trimmedMessages));
             resolvedModel = modelRouter.resolveModelId(request.model());
+        } else {
+            // connectionGroupId 사용 시: resolvedModel은 그룹 내부에서 결정되므로 요청 모델 기준
+            resolvedModel = request.model() != null ? request.model() : "auto";
         }
 
         // 4-1. CR-007: 구조화 출력 — 스키마 해석
@@ -211,11 +220,16 @@ public class OrchestratorEngine {
                         resolvedModel, trimmedMessages, null,
                         ModelConfig.defaults(), false, sessionId, null, resolvedSchema);
                 try {
-                    // PRD-122: Fallback Chain — connectionId 직접 지정이 아닌 경우 fallback 적용
-                    if (request.connectionId() == null || request.connectionId().isBlank()) {
+                    if (useConnectionGroup) {
+                        // CR-015: 커넥션 그룹 기반 호출 — 그룹 전략 + 커넥션 레벨 폴백
+                        llmResponse = connectionGroupSelector.executeWithGroup(
+                                request.connectionGroupId(), llmRequest);
+                    } else if (request.connectionId() == null || request.connectionId().isBlank()) {
+                        // PRD-122: Fallback Chain — 모델 레벨 폴백
                         llmResponse = fallbackChainExecutor.execute(
                                 llmRequest, adapter, resolvedModel, modelRouter.getFallbackChain());
                     } else {
+                        // 단일 connectionId 직접 지정 — 폴백 없음
                         llmResponse = adapter.chat(llmRequest).get();
                     }
                 } catch (Exception e) {
@@ -269,8 +283,9 @@ public class OrchestratorEngine {
         sessionStore.appendMessage(sessionId,
                 UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, llmResponse.textContent()));
 
-        // 7.5 PRD-128: 응답 캐시 저장 (세션 없는 단발 요청만)
-        if (request.sessionId() == null && lastUserMsg != null && !lastUserMsg.isBlank()) {
+        // 7.5 PRD-128: 응답 캐시 저장 (세션 없는 단발 요청만, 유효한 응답만)
+        if (request.sessionId() == null && lastUserMsg != null && !lastUserMsg.isBlank()
+                && llmSuccess && llmResponse.textContent() != null && !llmResponse.textContent().isBlank()) {
             try {
                 int totalTokens = llmResponse.usage() != null
                         ? llmResponse.usage().inputTokens() + llmResponse.usage().outputTokens() : 0;
@@ -315,7 +330,13 @@ public class OrchestratorEngine {
 
         LLMAdapter adapter;
         String resolvedModel;
-        if (request.connectionId() != null && !request.connectionId().isBlank()) {
+        if (request.connectionGroupId() != null && !request.connectionGroupId().isBlank()) {
+            // CR-015: 스트리밍에서는 그룹의 첫 사용 가능 커넥션을 선택
+            // (스트리밍 중 폴백은 불가능하므로 시작 전 건강한 커넥션 선택)
+            var selectedConn = connectionGroupSelector.selectConnection(request.connectionGroupId());
+            adapter = connectionAdapterFactory.getAdapter(selectedConn);
+            resolvedModel = connectionAdapterFactory.resolveModel(selectedConn, request.model());
+        } else if (request.connectionId() != null && !request.connectionId().isBlank()) {
             adapter = connectionAdapterFactory.getAdapter(request.connectionId());
             resolvedModel = connectionAdapterFactory.resolveModel(request.connectionId(), request.model());
         } else {

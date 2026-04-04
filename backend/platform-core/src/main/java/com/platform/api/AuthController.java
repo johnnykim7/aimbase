@@ -66,9 +66,8 @@ public class AuthController {
             if (tenantId == null) {
                 throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
             }
-            // 동적으로 TenantContext 설정 + DataSource 보장
+            // 동적으로 TenantContext 설정
             TenantContext.setTenantId(tenantId);
-            dataSourceManager.ensureDataSource(tenantId);
         }
 
         UserEntity user = userRepository.findByEmail(request.email())

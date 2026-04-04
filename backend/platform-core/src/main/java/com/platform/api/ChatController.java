@@ -71,7 +71,8 @@ public class ChatController {
                 request.connectionId(),
                 toolFilter,
                 request.toolChoice(),
-                responseFormat
+                responseFormat,
+                request.connectionGroupId()
         );
 
         if (request.stream()) {
@@ -149,6 +150,7 @@ public class ChatController {
             boolean stream,
             @JsonProperty("actions_enabled") boolean actionsEnabled,
             @JsonProperty("connection_id") String connectionId,
+            @JsonProperty("connection_group_id") String connectionGroupId,
             @JsonProperty("tool_filter") ToolFilterDto toolFilter,
             @JsonProperty("tool_choice") String toolChoice,
             @JsonProperty("response_format") ResponseFormatDto responseFormat

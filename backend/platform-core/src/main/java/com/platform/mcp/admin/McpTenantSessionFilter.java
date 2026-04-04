@@ -53,7 +53,7 @@ public class McpTenantSessionFilter implements Filter {
             if (tenantId != null && !tenantId.isBlank()) {
                 currentMcpTenant = tenantId.trim();
                 // endpoint 이벤트 발행 전에 DataSource가 준비되어야 함
-                dataSourceManager.ensureDataSource(currentMcpTenant);
+                dataSourceManager.getTenantDataSource(currentMcpTenant);
                 log.info("MCP SSE connected: tenant '{}', DataSource ensured", currentMcpTenant);
             }
         } else if (path.startsWith("/admin-mcp/message")) {

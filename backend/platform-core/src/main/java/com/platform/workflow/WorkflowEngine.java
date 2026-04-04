@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.domain.PendingApprovalEntity;
 import com.platform.domain.WorkflowEntity;
 import com.platform.domain.WorkflowRunEntity;
+import com.platform.domain.master.PlatformWorkflowEntity;
 import com.platform.monitoring.PlatformMetrics;
 import com.platform.repository.PendingApprovalRepository;
 import com.platform.repository.WorkflowRepository;
@@ -93,6 +94,44 @@ public class WorkflowEngine {
                     if (tenantId != null) TenantContext.setTenantId(tenantId);
                     try {
                         doExecuteAsync(workflowEntity, saved);
+                    } finally {
+                        TenantContext.clear();
+                    }
+                });
+
+        return saved;
+    }
+
+    /**
+     * 플랫폼 공용 워크플로우 실행.
+     * Master DB의 PlatformWorkflowEntity를 사용하며, 실행 기록(WorkflowRunEntity)은 현재 테넌트 DB에 저장.
+     */
+    public WorkflowRunEntity executePlatform(PlatformWorkflowEntity platform,
+                                              Map<String, Object> input, String sessionId) {
+        // PlatformWorkflowEntity → WorkflowEntity로 변환 (기존 DAG 엔진 재사용)
+        WorkflowEntity proxy = new WorkflowEntity();
+        proxy.setId("platform:" + platform.getId());
+        proxy.setName(platform.getName());
+        proxy.setSteps(platform.getSteps());
+        proxy.setErrorHandling(platform.getErrorHandling());
+        proxy.setOutputSchema(platform.getOutputSchema());
+        proxy.setTriggerConfig(platform.getTriggerConfig() != null ? platform.getTriggerConfig() : Map.of());
+
+        WorkflowRunEntity run = new WorkflowRunEntity();
+        run.setWorkflowId(proxy.getId());
+        run.setSessionId(sessionId);
+        run.setStatus("running");
+        run.setInputData(input != null ? input : Map.of());
+        run.setStepResults(new LinkedHashMap<>());
+        WorkflowRunEntity saved = workflowRunRepository.save(run);
+
+        String tenantId = TenantContext.hasTenant() ? TenantContext.getTenantId() : null;
+        Thread.ofVirtual()
+                .name("platform-workflow-run-" + saved.getId())
+                .start(() -> {
+                    if (tenantId != null) TenantContext.setTenantId(tenantId);
+                    try {
+                        doExecuteAsync(proxy, saved);
                     } finally {
                         TenantContext.clear();
                     }

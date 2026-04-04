@@ -142,9 +142,13 @@ public class TenantOnboardingService {
             }
         }
 
-        // Master 레코드 삭제
+        // Master 레코드 삭제 (FK: subscriptions → tenants, 자식 먼저 삭제)
+        try {
+            subscriptionRepository.deleteById(tenantId);
+        } catch (Exception e) {
+            log.warn("Subscription not found or already deleted for tenant {}: {}", tenantId, e.getMessage());
+        }
         tenantRepository.deleteById(tenantId);
-        subscriptionRepository.deleteById(tenantId);
         log.info("Tenant deprovisioned: {}", tenantId);
     }
 
@@ -197,13 +201,18 @@ public class TenantOnboardingService {
         JdbcTemplate tenantJdbc = new JdbcTemplate(tenantDs);
 
         // 기본 역할은 V12 Flyway 마이그레이션에서 이미 시드됨 (admin, operator, viewer)
-        // 초기 Admin 계정 (users 테이블 스키마: id, email, name, role_id, api_key_hash, is_active)
+        // 초기 Admin 계정 — password_hash 포함
+        String passwordHash = (request.initialAdminPassword() != null && !request.initialAdminPassword().isBlank())
+            ? passwordEncoder.encode(request.initialAdminPassword())
+            : null;
+
         tenantJdbc.update(
-            "INSERT INTO users (id, email, name, role_id, is_active) " +
-            "VALUES (?, ?, ?, 'admin', true) ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO users (id, email, name, role_id, is_active, password_hash) " +
+            "VALUES (?, ?, ?, 'admin', true, ?) ON CONFLICT (id) DO NOTHING",
             "admin-" + request.tenantId(),
             request.adminEmail(),
-            "Admin"
+            "Admin",
+            passwordHash
         );
 
         // CR-027: Master DB user_tenant_map에 admin 매핑 등록

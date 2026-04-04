@@ -11,10 +11,13 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * Spring Boot 자동 설정 제외:
- * - DataSource/JPA/Flyway: Multi-Tenancy를 위해 TenantDataSourceConfig에서 수동 설정
- * - SqlInitialization: 순환 참조 방지 (FlywayMultiTenantConfig에서 직접 처리)
- * - OpenAI 전체: API key 없이도 기동 가능하도록 (CR-012). EmbeddingConfig에서 조건부 수동 등록
+ * Spring Boot 자동 DataSource/JPA/Flyway 설정 제외.
+ * Multi-Tenancy를 위해 TenantDataSourceConfig에서 수동으로 설정.
+ *
+ * SqlInitializationAutoConfiguration 제외 이유:
+ *   dataSourceScriptDatabaseInitializer → tenantDataSource(primary) → TenantDataSourceManager
+ *   → masterJdbcTemplate → dataSourceScriptDatabaseInitializer 순환 참조 방지.
+ *   데이터 초기화는 FlywayMultiTenantConfig에서 직접 처리한다.
  */
 @SpringBootApplication(
     exclude = {
@@ -22,15 +25,16 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         DataSourceTransactionManagerAutoConfiguration.class,
         HibernateJpaAutoConfiguration.class,
         FlywayAutoConfiguration.class,
-        SqlInitializationAutoConfiguration.class,
+        SqlInitializationAutoConfiguration.class
     },
     excludeName = {
-        "org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration",
         "org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration",
+        "org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration",
         "org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration",
         "org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration",
         "org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration",
-        "org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration"
+        "org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration",
+        "org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration"
     }
 )
 @EnableAsync

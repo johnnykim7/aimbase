@@ -35,9 +35,9 @@ public class ClaudeCodeToolConfig {
     private String executable = "claude";
 
     /**
-     * Anthropic API 키 (서버/클라우드 배포 시 사용).
-     * 설정하면 환경변수 ANTHROPIC_API_KEY로 프로세스에 전달.
-     * 미설정 시 기존 `claude login` OAuth 토큰 사용.
+     * Anthropic API 키 (종량제 배포 시 사용).
+     * 설정하면 --bare 모드 + ANTHROPIC_API_KEY 환경변수로 프로세스에 전달.
+     * 미설정 시 CLAUDE_CONFIG_DIR 내 OAuth 인증 사용 (setup-token 방식).
      */
     private String apiKey;
 

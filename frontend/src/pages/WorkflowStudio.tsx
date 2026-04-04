@@ -106,11 +106,20 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
 
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
 
+      // SUB_WORKFLOW 노드: 공용 워크플로우 ID를 config에 자동 설정
+      const config: Record<string, unknown> = {};
+      if (type === "sub_workflow") {
+        const subId = e.dataTransfer.getData("application/workflow-sub-id");
+        if (subId) {
+          config.workflow_id = subId;
+        }
+      }
+
       const newNode: Node = {
         id: nextId(),
         type: "workflowNode",
         position,
-        data: { label: label || type, type, config: {} },
+        data: { label: label || type, type, config },
       };
 
       setNodes((nds) => [...nds, newNode]);

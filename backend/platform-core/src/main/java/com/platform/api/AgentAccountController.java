@@ -94,72 +94,36 @@ public class AgentAccountController {
     }
 
     @PostMapping("/{id}/test")
-    @Operation(summary = "사이드카 연결 테스트")
+    @Operation(summary = "계정 상태 테스트 — config 디렉토리 및 인증 확인")
     public Map<String, Object> testAccount(@PathVariable String id) {
-        AgentAccountEntity account = accountRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "계정 없음: " + id));
-
-        try {
-            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofSeconds(5)).build();
-            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(account.getBaseUrl() + "/health"))
-                    .timeout(java.time.Duration.ofSeconds(5))
-                    .GET().build();
-            java.net.http.HttpResponse<String> response =
-                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-
-            return Map.of("status", "ok", "response", response.body());
-        } catch (Exception e) {
-            return Map.of("status", "error", "message", e.getMessage());
-        }
-    }
-
-    @PostMapping("/{id}/upload-token")
-    @Operation(summary = "OAuth 토큰 업로드 — 사이드카에 .claude.json 배포")
-    public Map<String, Object> uploadToken(@PathVariable String id, @RequestBody Map<String, Object> body) {
-        AgentAccountEntity account = accountRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "계정 없음: " + id));
-
-        Object tokenJson = body.get("token_json");
-        if (tokenJson == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "token_json은 필수입니다");
+        if (!accountRepository.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "계정 없음: " + id);
         }
 
-        try {
-            var objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            String jsonBody = objectMapper.writeValueAsString(body);
+        String configDir = poolManager.getConfigDir(id);
+        java.io.File dir = new java.io.File(configDir);
+        boolean dirExists = dir.exists();
+        boolean hasCredentials = new java.io.File(configDir + "/credentials.json").exists()
+                || new java.io.File(configDir + "/.credentials.json").exists()
+                || new java.io.File(configDir + "/.claude.json").exists();
 
-            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofSeconds(10)).build();
-            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(account.getBaseUrl() + "/upload-token"))
-                    .header("Content-Type", "application/json")
-                    .timeout(java.time.Duration.ofSeconds(10))
-                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
-                    .build();
-            java.net.http.HttpResponse<String> response =
-                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() == 200) {
-                return Map.of("status", "ok", "account_id", id, "message", "토큰 배포 완료");
-            } else {
-                return Map.of("status", "error", "account_id", id, "response", response.body());
-            }
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
-                    "사이드카 통신 실패: " + e.getMessage());
-        }
+        return Map.of(
+                "status", dirExists && hasCredentials ? "ok" : "needs_setup",
+                "account_id", id,
+                "config_dir", configDir,
+                "dir_exists", dirExists,
+                "has_credentials", hasCredentials
+        );
     }
 
     @PostMapping("/{id}/extract-token")
-    @Operation(summary = "OAuth 토큰 추출 — 사이드카에서 추출하여 DB에 저장 (재빌드 후 자동 복원)")
+    @Operation(summary = "OAuth 토큰 추출 — config 디렉토리에서 credentials를 DB에 저장 (재빌드 후 자동 복원)")
     public Map<String, Object> extractToken(@PathVariable String id) {
         return poolManager.extractAndSaveToken(id);
     }
 
     @PostMapping("/{id}/deploy-token")
-    @Operation(summary = "OAuth 토큰 배포 — DB에 저장된 토큰을 사이드카에 수동 배포")
+    @Operation(summary = "OAuth 토큰 배포 — DB에 저장된 토큰을 config 디렉토리에 수동 배포")
     public Map<String, Object> deployToken(@PathVariable String id) {
         return poolManager.deployToken(id);
     }

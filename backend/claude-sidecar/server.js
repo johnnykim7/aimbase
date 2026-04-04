@@ -162,6 +162,53 @@ function fetchTokenFromAimbase(callback) {
   });
 }
 
+/**
+ * MCP 서버 자동 등록.
+ * 환경변수 MCP_SERVERS에 설정된 서버를 claude mcp add로 등록.
+ * 형식: "name1=url1,name2=url2" (쉼표 구분)
+ * 예: MCP_SERVERS=flowguard=http://host.docker.internal:8180/sse
+ */
+function registerMcpServers(callback) {
+  const mcpServers = process.env.MCP_SERVERS;
+  if (!mcpServers) {
+    console.log('[mcp] MCP_SERVERS 미설정 — 건너뜀');
+    return callback();
+  }
+
+  const entries = mcpServers.split(',').map(s => s.trim()).filter(Boolean);
+  let remaining = entries.length;
+  if (remaining === 0) return callback();
+
+  entries.forEach(entry => {
+    const [name, url] = entry.split('=').map(s => s.trim());
+    if (!name || !url) {
+      console.error(`[mcp] 잘못된 형식: ${entry}`);
+      if (--remaining === 0) callback();
+      return;
+    }
+
+    const child = spawn('claude', ['mcp', 'add', '-t', 'sse', '-s', 'user', name, url], {
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.on('data', d => out += d);
+    child.stderr.on('data', d => out += d);
+    child.on('close', code => {
+      if (code === 0) {
+        console.log(`[mcp] ${name} 등록 완료: ${url}`);
+      } else {
+        console.error(`[mcp] ${name} 등록 실패 (exit ${code}): ${out.trim()}`);
+      }
+      if (--remaining === 0) callback();
+    });
+    child.on('error', err => {
+      console.error(`[mcp] ${name} 등록 오류: ${err.message}`);
+      if (--remaining === 0) callback();
+    });
+  });
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Claude sidecar listening on port ${PORT}`);
 
@@ -169,5 +216,9 @@ server.listen(PORT, '0.0.0.0', () => {
     const authType = process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'OAuth Token (구독)' :
                      process.env.ANTHROPIC_API_KEY ? 'API Key (종량제)' : '미설정';
     console.log(`[auth] 인증 방식: ${authType}`);
+
+    registerMcpServers(() => {
+      console.log('[ready] 사이드카 준비 완료');
+    });
   });
 });

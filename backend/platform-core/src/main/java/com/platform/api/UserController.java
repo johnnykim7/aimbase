@@ -109,6 +109,17 @@ public class UserController {
         );
     }
 
+    @PatchMapping("/{id}/activate")
+    @Operation(summary = "사용자 활성화/비활성화")
+    public ApiResponse<UserEntity> setActive(@PathVariable String id,
+                                              @RequestParam boolean active) {
+        UserEntity entity = userRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "User not found: " + id));
+        entity.setActive(active);
+        return ApiResponse.ok(userRepository.save(entity));
+    }
+
     @PostMapping("/{id}/api-key")
     @Operation(summary = "API 키 재발급")
     public ApiResponse<java.util.Map<String, String>> regenerateApiKey(@PathVariable String id) {

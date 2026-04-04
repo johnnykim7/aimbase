@@ -33,6 +33,9 @@ public class SubscriptionEntity {
     @Column(name = "max_users", nullable = false)
     private Integer maxUsers = 5;
 
+    @Column(name = "connection_management_mode", length = 30, nullable = false)
+    private String connectionManagementMode = "TENANT_MANAGED";
+
     @Column(name = "valid_from")
     private OffsetDateTime validFrom = OffsetDateTime.now();
 
@@ -66,6 +69,8 @@ public class SubscriptionEntity {
     public void setStorageGb(Integer storageGb) { this.storageGb = storageGb; }
     public Integer getMaxUsers() { return maxUsers; }
     public void setMaxUsers(Integer maxUsers) { this.maxUsers = maxUsers; }
+    public String getConnectionManagementMode() { return connectionManagementMode; }
+    public void setConnectionManagementMode(String connectionManagementMode) { this.connectionManagementMode = connectionManagementMode; }
     public OffsetDateTime getValidFrom() { return validFrom; }
     public void setValidFrom(OffsetDateTime validFrom) { this.validFrom = validFrom; }
     public OffsetDateTime getValidUntil() { return validUntil; }

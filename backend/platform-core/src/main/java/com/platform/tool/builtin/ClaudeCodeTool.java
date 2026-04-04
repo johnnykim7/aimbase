@@ -249,10 +249,14 @@ public class ClaudeCodeTool implements ToolExecutor {
             // 중첩 세션 방지: 부모 프로세스가 Claude Code 세션이면 CLAUDECODE 환경변수 제거
             pb.environment().remove("CLAUDECODE");
 
-            // API 키가 설정되어 있으면 프로세스 환경변수로 전달 (서버/AWS 배포용)
+            // API 키가 설정되어 있으면 --bare 모드로 전환 (CLI가 bare에서만 API Key 인증)
             String apiKey = config.getApiKey();
             if (apiKey != null && !apiKey.isBlank()) {
                 pb.environment().put("ANTHROPIC_API_KEY", apiKey);
+                if (!command.contains("--bare")) {
+                    command = new ArrayList<>(command);
+                    command.add(1, "--bare");
+                }
             }
 
             if (workDir != null && !workDir.isBlank()) {
@@ -484,8 +488,15 @@ public class ClaudeCodeTool implements ToolExecutor {
             // result 필드 fallback
             if (parsed.containsKey("result")) {
                 Object result = parsed.get("result");
-                if (result instanceof String) {
-                    return (String) result;
+                if (result instanceof String resultStr) {
+                    // 코드펜스 제거 후 JSON 파싱 시도
+                    String stripped = stripCodeFence(resultStr);
+                    try {
+                        Object jsonObj = objectMapper.readValue(stripped, Object.class);
+                        return objectMapper.writeValueAsString(jsonObj);
+                    } catch (Exception ignore) {
+                        return stripped;
+                    }
                 }
                 return objectMapper.writeValueAsString(result);
             }
@@ -513,8 +524,8 @@ public class ClaudeCodeTool implements ToolExecutor {
     }
 
     /**
-     * 풀 매니저를 통한 사이드카 실행 시도.
-     * 가용 계정이 있으면 실행 결과 반환, 없으면 null (로컬 폴백).
+     * 풀 매니저를 통한 로컬 실행 시도 (CLAUDE_CONFIG_DIR로 계정 격리).
+     * 가용 계정이 있으면 실행 결과 반환, 없으면 null (기본 로컬 경로 폴백).
      */
     private String tryExecuteViaPool(Map<String, Object> input, List<String> command,
                                       String workDir, int timeoutSeconds,
@@ -532,7 +543,7 @@ public class ClaudeCodeTool implements ToolExecutor {
         } else {
             account = poolManager.resolveAccount("claude_code", tenantId, null);
             if (account == null) {
-                return null; // 로컬 폴백
+                return null; // 기본 로컬 경로 폴백
             }
         }
 
@@ -542,10 +553,10 @@ public class ClaudeCodeTool implements ToolExecutor {
             return null;
         }
 
-        var result = poolManager.executeViaHttp(account, command, workDir, timeoutSeconds, inputFile);
+        var result = poolManager.executeLocal(account, command, workDir, timeoutSeconds, inputFile);
 
         if (result.exitCode() != 0) {
-            log.error("[{}] 사이드카 실패: exit={}, stderr={}", account.getId(), result.exitCode(), result.stderr());
+            log.error("[{}] 실행 실패: exit={}, stderr={}", account.getId(), result.exitCode(), result.stderr());
             poolManager.recordFailure(account.getId());
             handleFailure("EXIT_" + result.exitCode(), result.stderr().isBlank() ? result.stdout() : result.stderr());
             return toError("EXIT_" + result.exitCode(), result.stderr().isBlank() ? result.stdout() : result.stderr());
@@ -553,12 +564,28 @@ public class ClaudeCodeTool implements ToolExecutor {
 
         poolManager.recordSuccess(account.getId());
 
-        log.info("[{}] 사이드카 완료: output_length={}", account.getId(), result.stdout().length());
+        log.info("[{}] 실행 완료: output_length={}", account.getId(), result.stdout().length());
 
         if ("json".equals(outputFormat)) {
             return extractResultFromJson(result.stdout());
         }
         return result.stdout();
+    }
+
+    /** 마크다운 코드펜스(```json ... ```) 제거 */
+    private static String stripCodeFence(String text) {
+        if (text == null) return "";
+        String trimmed = text.strip();
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline > 0) {
+                trimmed = trimmed.substring(firstNewline + 1);
+            }
+            if (trimmed.endsWith("```")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 3).strip();
+            }
+        }
+        return trimmed;
     }
 
     private String toError(String code, String message) {

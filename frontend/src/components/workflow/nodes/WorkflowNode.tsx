@@ -1,28 +1,23 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { COLORS, FONTS } from "../../../theme";
 
 const TYPE_STYLES: Record<string, { color: string; icon: string }> = {
-  llm: { color: "#2563eb", icon: "🤖" },
-  tool: { color: "#7c3aed", icon: "🔧" },
-  condition: { color: "#d97706", icon: "⑂" },
-  parallel: { color: "#059669", icon: "⚡" },
-  approval: { color: "#dc2626", icon: "✋" },
+  llm: { color: COLORS.accent, icon: "🤖" },
+  tool: { color: COLORS.purple, icon: "🔧" },
+  condition: { color: COLORS.warning, icon: "⑂" },
+  parallel: { color: COLORS.success, icon: "⚡" },
+  approval: { color: COLORS.danger, icon: "✋" },
   action: { color: "#6366f1", icon: "▶" },
-  LLM_CALL: { color: "#2563eb", icon: "🤖" },
-  TOOL_CALL: { color: "#7c3aed", icon: "🔧" },
-  TOOL_USE: { color: "#7c3aed", icon: "🔧" },
-  tool_use: { color: "#7c3aed", icon: "🔧" },
-  CONDITION: { color: "#d97706", icon: "⑂" },
-  PARALLEL: { color: "#059669", icon: "⚡" },
-  HUMAN_INPUT: { color: "#dc2626", icon: "✋" },
-  ACTION: { color: "#6366f1", icon: "▶" },
+  sub_workflow: { color: "#0891b2", icon: "📦" },
+  SUB_WORKFLOW: { color: "#0891b2", icon: "📦" },
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  waiting: "#9ca3af",
-  running: "#2563eb",
-  completed: "#059669",
-  failed: "#dc2626",
+  waiting: COLORS.textDim,
+  running: COLORS.accent,
+  completed: COLORS.success,
+  failed: COLORS.danger,
 };
 
 function WorkflowNode({ data, selected }: NodeProps) {
@@ -33,36 +28,63 @@ function WorkflowNode({ data, selected }: NodeProps) {
 
   return (
     <div
-      className="bg-card rounded-xl cursor-grab transition-shadow"
       style={{
+        background: COLORS.surface,
         border: `2px solid ${borderColor}`,
-        padding: "8px 12px",
-        minWidth: 140,
+        borderRadius: 12,
+        padding: "10px 16px",
+        minWidth: 180,
         boxShadow: selected
           ? `0 0 0 2px ${style.color}40`
           : "0 1px 4px rgba(0,0,0,0.08)",
+        cursor: "grab",
+        transition: "box-shadow 0.15s, border-color 0.15s",
       }}
     >
       <Handle type="target" position={Position.Top} style={{ background: borderColor, width: 8, height: 8 }} />
 
-      <div className="flex items-center gap-2">
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span
-          className="w-6 h-6 rounded-md flex items-center justify-center text-xs shrink-0"
-          style={{ background: style.color + "18" }}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            background: style.color + "18",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 14,
+            flexShrink: 0,
+          }}
         >
           {style.icon}
         </span>
-        <div className="flex-1 min-w-0">
-          <div className="text-[11px] font-semibold text-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontFamily: FONTS.sans,
+              fontWeight: 600,
+              color: COLORS.text,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {(data.label as string) ?? "Untitled"}
           </div>
           <div
-            className="text-[9px] font-mono uppercase tracking-wider"
-            style={{ color: style.color }}
+            style={{
+              fontSize: 10,
+              fontFamily: FONTS.mono,
+              color: style.color,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+            }}
           >
             {stepType}
             {status && (
-              <span className="ml-1.5" style={{ color: STATUS_COLORS[status] ?? "#9ca3af" }}>
+              <span style={{ marginLeft: 6, color: STATUS_COLORS[status] ?? COLORS.textDim }}>
                 • {status}
               </span>
             )}

@@ -22,6 +22,9 @@ public class WorkflowEntity {
     @Column(length = 50)
     private String domain;
 
+    @Column(name = "project_id", length = 100)
+    private String projectId;
+
     @Type(JsonBinaryType.class)
     @Column(name = "trigger_config", columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> triggerConfig;
@@ -34,23 +37,14 @@ public class WorkflowEntity {
     @Column(name = "error_handling", columnDefinition = "jsonb")
     private Map<String, Object> errorHandling;
 
-    /** 워크플로우 입력 JSON Schema. 실행 시 입력 폼 자동 생성. */
-    @Type(JsonBinaryType.class)
-    @Column(name = "input_schema", columnDefinition = "jsonb")
-    private Map<String, Object> inputSchema;
-
     /** CR-007: 워크플로우 출력 JSON Schema. 마지막 LLM 스텝에 자동 주입. */
     @Type(JsonBinaryType.class)
     @Column(name = "output_schema", columnDefinition = "jsonb")
     private Map<String, Object> outputSchema;
 
-    /** CR-021: 프로젝트 스코핑. null이면 회사 공유. */
-    @Column(name = "project_id", length = 100)
-    private String projectId;
-
-    /** CR-022: 리소스 생성자 (users.id) */
-    @Column(name = "created_by", length = 100)
-    private String createdBy;
+    @Type(JsonBinaryType.class)
+    @Column(name = "input_schema", columnDefinition = "jsonb")
+    private Map<String, Object> inputSchema;
 
     @Column(name = "is_active")
     private boolean isActive = true;
@@ -72,22 +66,20 @@ public class WorkflowEntity {
     public void setName(String name) { this.name = name; }
     public String getDomain() { return domain; }
     public void setDomain(String domain) { this.domain = domain; }
+    public String getProjectId() { return projectId; }
+    public void setProjectId(String projectId) { this.projectId = projectId; }
     public Map<String, Object> getTriggerConfig() { return triggerConfig; }
     public void setTriggerConfig(Map<String, Object> triggerConfig) { this.triggerConfig = triggerConfig; }
     public List<Map<String, Object>> getSteps() { return steps; }
     public void setSteps(List<Map<String, Object>> steps) { this.steps = steps; }
     public Map<String, Object> getErrorHandling() { return errorHandling; }
     public void setErrorHandling(Map<String, Object> errorHandling) { this.errorHandling = errorHandling; }
-    public Map<String, Object> getInputSchema() { return inputSchema; }
-    public void setInputSchema(Map<String, Object> inputSchema) { this.inputSchema = inputSchema; }
     public Map<String, Object> getOutputSchema() { return outputSchema; }
     public void setOutputSchema(Map<String, Object> outputSchema) { this.outputSchema = outputSchema; }
+    public Map<String, Object> getInputSchema() { return inputSchema; }
+    public void setInputSchema(Map<String, Object> inputSchema) { this.inputSchema = inputSchema; }
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
-    public String getProjectId() { return projectId; }
-    public void setProjectId(String projectId) { this.projectId = projectId; }
-    public String getCreatedBy() { return createdBy; }
-    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }

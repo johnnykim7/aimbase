@@ -2,6 +2,7 @@ package com.platform.api;
 
 import com.platform.domain.RoleEntity;
 import com.platform.repository.RoleRepository;
+import com.platform.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -20,9 +21,11 @@ import java.util.Map;
 public class RoleController {
 
     private final RoleRepository roleRepository;
+    private final UserRepository userRepository;
 
-    public RoleController(RoleRepository roleRepository) {
+    public RoleController(RoleRepository roleRepository, UserRepository userRepository) {
         this.roleRepository = roleRepository;
+        this.userRepository = userRepository;
     }
 
     @GetMapping
@@ -74,6 +77,9 @@ public class RoleController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "역할 삭제")
     public void delete(@PathVariable String id) {
+        if (userRepository.existsByRoleId(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Role is in use: " + id);
+        }
         roleRepository.deleteById(id);
     }
 
