@@ -46,6 +46,9 @@ public class WorkflowEntity {
     @Column(name = "input_schema", columnDefinition = "jsonb")
     private Map<String, Object> inputSchema;
 
+    @Column(name = "created_by", length = 100)
+    private String createdBy;
+
     @Column(name = "is_active")
     private boolean isActive = true;
 
@@ -78,6 +81,8 @@ public class WorkflowEntity {
     public void setOutputSchema(Map<String, Object> outputSchema) { this.outputSchema = outputSchema; }
     public Map<String, Object> getInputSchema() { return inputSchema; }
     public void setInputSchema(Map<String, Object> inputSchema) { this.inputSchema = inputSchema; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
