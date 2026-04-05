@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v1.0.1** | 2026-03-28 | Aimbase v4.3.0 기준
+> **v1.1.0** | 2026-04-05 | Aimbase v4.3.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -402,6 +402,130 @@ RAG 품질을 RAGAS 메트릭으로 평가하고, LLM 출력을 검증합니다.
 | 할당 | `POST /projects/{id}/resources` | 리소스 연결 |
 | 해제 | `DELETE /projects/{id}/resources/{type}/{resourceId}` | 리소스 연결 해제 |
 
+### 3-13. Native Tool 관리 [CR-029]
+
+9종 네이티브 도구를 조회하고 직접 실행 테스트할 수 있습니다.
+
+**UI 경로**: Tools
+
+**네이티브 도구 목록**:
+
+| 도구명 | 역할 |
+|--------|------|
+| `rag_search` | RAG 벡터 검색 |
+| `web_search` | 웹 검색 |
+| `code_interpreter` | 코드 실행 |
+| `file_reader` | 파일 읽기 |
+| `file_writer` | 파일 쓰기 |
+| `calculator` | 수학 연산 |
+| `json_transformer` | JSON 변환 |
+| `http_client` | HTTP 요청 |
+| `claude_code` | Claude Code 실행 |
+
+**도구 API**:
+
+| 작업 | API | 설명 |
+|------|-----|------|
+| 목록 | `GET /tools` | contract 포함 조회 |
+| 계약 상세 | `GET /tools/{toolName}/contract` | 입출력 스키마 상세 |
+| 직접 실행 | `POST /tools/{toolName}/execute` | 도구 단독 실행 |
+| 입력 검증 | `POST /tools/{toolName}/validate` | contract 기반 검증 |
+
+**직접 실행 테스트 예시**:
+
+```bash
+# rag_search 도구 직접 실행
+curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
+  -H "X-API-Key: plat-xxxx" \
+  -H "Content-Type: application/json" \
+  -d '{ "input": { "query": "서버 장애 대응", "topK": 3 } }'
+```
+
+**Workspace Policy 설정**:
+
+도구 실행 시 보안 정책을 적용할 수 있습니다.
+
+| 설정 | 설명 | 예시 |
+|------|------|------|
+| `allowed_roots` | 파일 접근 허용 경로 | `["/data/workspace", "/tmp"]` |
+| `denied_paths` | 접근 차단 경로 | `["/etc", "/root", "**/.env"]` |
+| `secret_patterns` | 비밀 감지 패턴 (정규식) | `["sk-[a-zA-Z0-9]+", "password\\s*="]` |
+
+### 3-14. Context Recipe 설정 [CR-029]
+
+컨텍스트 조립 레시피를 생성하여 LLM에 전달할 컨텍스트를 체계적으로 구성합니다.
+
+**UI 경로**: Context Recipes
+
+| 작업 | API | 설명 |
+|------|-----|------|
+| 목록 | `GET /context-recipes` | 전체 레시피 |
+| 생성 | `POST /context-recipes` | 새 레시피 |
+| 상세 | `GET /context-recipes/{id}` | 레시피 상세 |
+| 수정 | `PUT /context-recipes/{id}` | 레시피 변경 |
+| 삭제 | `DELETE /context-recipes/{id}` | 레시피 제거 |
+| 미리보기 | `POST /context-recipes/{id}/preview` | 조립 결과 미리보기 |
+
+**레시피 생성 예시**:
+
+```json
+{
+  "name": "AXOPM 기본 레시피",
+  "layers": [
+    { "type": "system_prompt", "priority": 1 },
+    { "type": "rag", "sourceId": "src_xxx", "priority": 2, "topK": 5 },
+    { "type": "conversation_history", "priority": 3, "maxTurns": 10 }
+  ],
+  "budget": { "maxTokens": 8000 },
+  "freshness": "real_time"
+}
+```
+
+**주요 설정**:
+
+| 항목 | 설명 |
+|------|------|
+| `layers` | 컨텍스트 레이어 배열. `type`: system_prompt, rag, conversation_history, tool_result 등 |
+| `budget.maxTokens` | 전체 컨텍스트 토큰 상한 |
+| `priority` | 레이어 우선순위 (낮을수록 먼저 조립, 토큰 부족 시 높은 priority부터 제거) |
+| `freshness` | `real_time` (매 요청 재조립) 또는 `cached` (캐시 활용) |
+
+### 3-15. Domain Config 관리 [CR-029]
+
+도메인(소비앱) 단위로 기본 설정을 등록하여, 해당 도메인의 모든 요청에 일괄 적용합니다.
+
+**UI 경로**: Domain Configs
+
+| 작업 | API | 설명 |
+|------|-----|------|
+| 목록 | `GET /domain-configs` | 전체 도메인 설정 |
+| 생성 | `POST /domain-configs` | 도메인 설정 등록 |
+| 상세 | `GET /domain-configs/{domainApp}` | 도메인별 상세 |
+| 수정 | `PUT /domain-configs/{domainApp}` | 설정 변경 |
+| 삭제 | `DELETE /domain-configs/{domainApp}` | 설정 제거 |
+
+**등록 예시 (AXOPM)**:
+
+```json
+{
+  "domainApp": "axopm",
+  "defaultRecipeId": "recipe_xxx",
+  "toolAllowlist": ["rag_search", "web_search", "calculator"],
+  "runtime": {
+    "maxTokens": 4096,
+    "temperature": 0.7,
+    "defaultConnectionId": "conn_xxx"
+  }
+}
+```
+
+| 필드 | 설명 |
+|------|------|
+| `domainApp` | 도메인 식별자 (테넌트 생성 시 지정한 값) |
+| `defaultRecipeId` | 기본 Context Recipe. 요청에 recipe 미지정 시 자동 적용 |
+| `toolAllowlist` | 허용 도구 목록. 미지정 시 전체 허용 |
+| `runtime` | LLM 호출 기본값 (maxTokens, temperature, defaultConnectionId) |
+
 ---
 
 ## 4. 운영 시나리오
@@ -469,7 +593,42 @@ RAG 품질을 RAGAS 메트릭으로 평가하고, LLM 출력을 검증합니다.
    - 재인제스션: POST /knowledge-sources/{id}/sync
 ```
 
-### 시나리오 D: 테넌트 일시 정지 / 재활성화
+### 시나리오 D: 도메인 앱 설정 + Context Recipe 구성 [CR-029]
+
+```
+1. [테넌트 관리자] Context Recipe 생성
+   POST /context-recipes  {
+     name: "AXOPM 기본",
+     layers: [
+       { type: "system_prompt", priority: 1 },
+       { type: "rag", sourceId: "src_xxx", priority: 2, topK: 5 },
+       { type: "conversation_history", priority: 3 }
+     ],
+     budget: { maxTokens: 8000 }
+   }
+
+2. [테넌트 관리자] Recipe 미리보기로 검증
+   POST /context-recipes/{id}/preview  { query: "테스트 질문" }
+   → 조립 결과 확인 (토큰 사용량, 레이어별 내용)
+
+3. [테넌트 관리자] Domain Config 등록
+   POST /domain-configs  {
+     domainApp: "axopm",
+     defaultRecipeId: "{recipeId}",
+     toolAllowlist: ["rag_search", "calculator"],
+     runtime: { maxTokens: 4096, temperature: 0.7 }
+   }
+
+4. [테넌트 관리자] 도구 실행 테스트
+   POST /tools/rag_search/execute  { input: { query: "검색 테스트" } }
+   → 정상 응답 확인
+
+5. [테넌트 관리자] 도구 실행 이력 확인
+   GET /tool-executions?session_id={sessionId}
+   → 실행 기록, 소요 시간, 상태 확인
+```
+
+### 시나리오 E: 테넌트 일시 정지 / 재활성화
 
 ```
 1. [플랫폼 관리자] 정지
@@ -511,5 +670,6 @@ RAG 품질을 RAGAS 메트릭으로 평가하고, LLM 출력을 검증합니다.
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.1.0 | 2026-04-05 | Native Tool 관리(9종 도구, contract, 직접 실행, Workspace Policy), Context Recipe 설정, Domain Config 관리, 시나리오 D 추가 (CR-029) |
 | v1.0.1 | 2026-03-28 | 접속 정보(포트 매핑) 섹션 추가 |
 | v1.0.0 | 2026-03-28 | 초판 작성. 플랫폼 관리(테넌트/구독/API Key), 테넌트 관리(Connection~프로젝트), 운영 시나리오 4건 포함 |

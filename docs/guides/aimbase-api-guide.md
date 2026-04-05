@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v1.3.0** | 2026-03-28 | Aimbase v4.3.0 기준
+> **v1.5.0** | 2026-04-05 | Aimbase v4.3.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -456,7 +456,123 @@ DELETE /api/v1/workflows/{id}
 
 ---
 
-## 7. API 엔드포인트 요약
+## 7. 도구 관리 (확장) [CR-029]
+
+### 7-1. 도구 목록 조회
+
+등록된 도구의 contract(입출력 스키마)를 포함하여 조회합니다.
+
+```bash
+GET /api/v1/tools
+```
+
+### 7-2. 도구 계약 상세
+
+```bash
+GET /api/v1/tools/{toolName}/contract
+```
+
+### 7-3. 도구 직접 실행
+
+워크플로우 없이 개별 도구를 직접 호출합니다.
+
+```bash
+curl -X POST /api/v1/tools/{toolName}/execute \
+  -d '{ "input": { "query": "검색어" } }'
+```
+
+### 7-4. 입력 검증
+
+도구에 전달할 입력이 contract에 맞는지 사전 검증합니다.
+
+```bash
+curl -X POST /api/v1/tools/{toolName}/validate \
+  -d '{ "input": { "query": "검색어" } }'
+```
+
+---
+
+## 8. 세션 메타 [CR-029]
+
+세션에 커스텀 메타데이터를 부착하여 관리합니다.
+
+```bash
+# 세션 메타 조회
+GET /api/v1/conversations/{sessionId}/meta
+
+# 세션 메타 수정
+curl -X PUT /api/v1/conversations/{sessionId}/meta \
+  -d '{ "tags": ["important"], "summary": "요약 텍스트" }'
+```
+
+---
+
+## 9. 도구 실행 이력 [CR-029]
+
+도구 실행 기록을 세션 또는 워크플로우 실행 단위로 조회합니다.
+
+```bash
+# 세션 기준 조회
+GET /api/v1/tool-executions?session_id={sessionId}
+
+# 워크플로우 실행 기준 조회
+GET /api/v1/tool-executions?workflow_run_id={runId}
+
+# 상세 조회
+GET /api/v1/tool-executions/{id}
+```
+
+---
+
+## 10. Context Recipe [CR-029]
+
+컨텍스트 조립 레시피를 정의하고 미리보기합니다.
+
+```bash
+# 레시피 생성
+curl -X POST /api/v1/context-recipes \
+  -d '{
+    "name": "기본 레시피",
+    "layers": [
+      { "type": "system_prompt", "priority": 1 },
+      { "type": "rag", "sourceId": "src_xxx", "priority": 2 },
+      { "type": "conversation_history", "priority": 3 }
+    ],
+    "budget": { "maxTokens": 8000 },
+    "freshness": "real_time"
+  }'
+
+# 조립 미리보기
+curl -X POST /api/v1/context-recipes/{id}/preview \
+  -d '{ "query": "테스트 질문" }'
+```
+
+---
+
+## 11. Domain Config [CR-029]
+
+도메인(소비앱) 단위 기본 설정을 관리합니다.
+
+```bash
+# 도메인 설정 생성
+curl -X POST /api/v1/domain-configs \
+  -d '{
+    "domainApp": "axopm",
+    "defaultRecipeId": "recipe_xxx",
+    "toolAllowlist": ["rag_search", "web_search"],
+    "runtime": {
+      "maxTokens": 4096,
+      "temperature": 0.7
+    }
+  }'
+
+# 도메인별 조회
+GET /api/v1/domain-configs/{domainApp}
+```
+
+---
+
+## 12. API 엔드포인트 요약
 
 ### 인증
 
@@ -518,12 +634,57 @@ DELETE /api/v1/workflows/{id}
 | POST | `/chat` | LLM 대화 (정책 적용, 도구 호출 포함) |
 | POST | `/chat/stream` | 스트리밍 대화 |
 
+### 도구 관리 (확장) [v4.0, CR-029]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/tools` | 도구 목록 (contract 포함) |
+| GET | `/tools/{toolName}/contract` | 도구 계약 상세 |
+| POST | `/tools/{toolName}/execute` | 도구 직접 실행 |
+| POST | `/tools/{toolName}/validate` | 입력 검증 |
+
+### 세션 메타 [v4.0, CR-029]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/conversations/{sessionId}/meta` | 세션 메타 조회 |
+| PUT | `/conversations/{sessionId}/meta` | 세션 메타 수정 |
+
+### 도구 실행 이력 [v4.0, CR-029]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/tool-executions` | 목록 (session_id, workflow_run_id 필터) |
+| GET | `/tool-executions/{id}` | 상세 |
+
+### Context Recipe [v4.0, CR-029]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/context-recipes` | 목록 |
+| GET | `/context-recipes/{id}` | 상세 |
+| POST | `/context-recipes` | 생성 |
+| PUT | `/context-recipes/{id}` | 수정 |
+| DELETE | `/context-recipes/{id}` | 삭제 |
+| POST | `/context-recipes/{id}/preview` | 조립 미리보기 |
+
+### Domain Config [v4.0, CR-029]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/domain-configs` | 목록 |
+| GET | `/domain-configs/{domainApp}` | 상세 |
+| POST | `/domain-configs` | 생성 |
+| PUT | `/domain-configs/{domainApp}` | 수정 |
+| DELETE | `/domain-configs/{domainApp}` | 삭제 |
+
 ---
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.5.0 | 2026-04-05 | 도구 관리 확장(contract/execute/validate), 세션 메타, 도구 실행 이력, Context Recipe, Domain Config 엔드포인트 추가 (CR-029) |
 | v1.4.0 | 2026-03-28 | LLM_CALL 스텝 `max_tokens` config 키 추가. 토큰 초과 자동 처리(에스컬레이션+자동분할) 설명 (CR-028) |
 | v1.3.0 | 2026-03-28 | 워크플로우 생성/수정/삭제 REST API 예제 추가. 스텝 타입 레퍼런스(TOOL_CALL, LLM_CALL 등) 및 스텝 간 데이터 참조 문법 명세 |
 | v1.2.0 | 2026-03-28 | 시스템 API Key 인증 추가 (CR-025). `X-API-Key` 헤더로 JWT 없이 인증 가능. API Key 관리 엔드포인트 4개 추가 |
