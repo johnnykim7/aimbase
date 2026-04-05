@@ -7,25 +7,26 @@
 
 ## 전체 요약
 
-| CR 번호 | 변경 제목 | 변경 타입 | 영향도 | 적용 버전 |
-|---------|----------|----------|--------|----------|
-| CR-001 | 초기 시스템 구축 | 신규 | High | v1.0.0 |
-| CR-002 | Python 사이드카 아키텍처 도입 | 변경 | High | v2.0.0 |
-| CR-003 | MCP 클라이언트 통합 완성 | 변경 | High | v2.1.0 |
-| CR-004 | Sprint 18 고급 기능 구현 완성 | 변경 | Medium | v2.2.0 |
-| CR-005 | 워크플로우 비주얼 스튜디오 | 변경 | Medium | v2.3.0 |
-| CR-006 | 도구 선택 제어 (Tool Selection Control) | 변경 | Medium | v2.4.0 |
-| CR-007 | 구조화된 출력 (Structured Output) | 변경 | High | v2.5.0 |
-| CR-008 | LLM 연결 테스트 실제 검증 | 버그수정 | Medium | v2.5.1 |
-| CR-009 | Python 사이드카 알파 기능 | 변경 | High | v3.0.0 |
-| CR-010 | 플랫폼 핵심 강화 | 변경 | High | v3.0.0 |
-| CR-011 | ClaudeCodeTool 안정화 및 확장성 개선 | 변경 | High | v3.1.0 |
-| CR-012 | LLM 컨텍스트 설계 보강 | 변경 | High | v3.2.0 |
-| CR-013 | API Rate Limit 방어 (TokenBucket) | 변경 | Medium | v3.3.0 |
-| CR-014 | App-Tenant 3계층 멀티테넌시 | 변경 | High | v3.4.0 |
-| CR-015 | 커넥션 그룹 Resilience + 키 관리 권한 체계 | 변경 | High | v3.5.0 |
-| CR-016 | 공용 워크플로우 + 빌트인 도구 확장 | 변경 | High | v3.6.0 |
-| CR-017 | FlowGuard Agent 범용 도구 확장 | 변경 | High | v3.7.0 |
+| CR 번호 | 변경 제목 | 변경 타입 | 영향도 | 적용 버전 | 상태 |
+|---------|----------|----------|--------|----------|------|
+| CR-001 | 초기 시스템 구축 | 신규 | High | v1.0.0 | ✅ 완료 |
+| CR-002 | Python 사이드카 아키텍처 도입 | 변경 | High | v2.0.0 | ✅ 완료 |
+| CR-003 | MCP 클라이언트 통합 완성 | 변경 | High | v2.1.0 | ✅ 완료 |
+| CR-004 | Sprint 18 고급 기능 구현 완성 | 변경 | Medium | v2.2.0 | ✅ 완료 |
+| CR-005 | 워크플로우 비주얼 스튜디오 | 변경 | Medium | v2.3.0 | ✅ 완료 |
+| CR-006 | 도구 선택 제어 (Tool Selection Control) | 변경 | Medium | v2.4.0 | ✅ 완료 |
+| CR-007 | 구조화된 출력 (Structured Output) | 변경 | High | v2.5.0 | ✅ 완료 |
+| CR-008 | LLM 연결 테스트 실제 검증 | 버그수정 | Medium | v2.5.1 | ✅ 완료 |
+| CR-009 | Python 사이드카 알파 기능 | 변경 | High | v3.0.0 | ✅ 완료 |
+| CR-010 | 플랫폼 핵심 강화 | 변경 | High | v3.0.0 | ✅ 완료 |
+| CR-011 | ClaudeCodeTool 안정화 및 확장성 개선 | 변경 | High | v3.1.0 | ✅ 완료 |
+| CR-012 | LLM 컨텍스트 설계 보강 | 변경 | High | v3.2.0 | ✅ 완료 |
+| CR-013 | API Rate Limit 방어 (TokenBucket) | 변경 | Medium | v3.3.0 | ✅ 완료 |
+| CR-014 | App-Tenant 3계층 멀티테넌시 | 변경 | High | v3.4.0 | ✅ 완료 |
+| CR-015 | 커넥션 그룹 Resilience + 키 관리 권한 체계 | 변경 | High | v3.5.0 | ✅ 완료 |
+| CR-016 | 공용 워크플로우 + 빌트인 도구 확장 | 변경 | High | v3.6.0 | ✅ 완료 |
+| CR-017 | FlowGuard Agent 범용 도구 확장 | 변경 | High | v3.7.0 | ✅ 완료 |
+| CR-029 | Aimbase 1단계 고도화 — Native Tool + Session Meta + Context Assembly + Runtime 재배치 | 변경 | High | v4.0.0 | 🔲 진행중 |
 
 ---
 
@@ -255,6 +256,26 @@
 
 ---
 
+### CR-013 | API Rate Limit 방어 (TokenBucket)
+- **대상 기능 ID**: BIZ-007(Rate Limiting 강화)
+- **변경 타입**: 변경
+- **변경 내용**: Redis 기반 분산 TokenBucket Rate Limiter 도입 및 LLM 토큰 쿼터 적용
+  - **TokenBucketRateLimiter**: Redis Lua 스크립트로 원자적 INCR + EXPIRE. 키: `rl:{tenantId}:{minuteWindow}`. 분산 환경(멀티 인스턴스)에서 정확한 카운팅 보장. Redis 장애 시 fail-open(요청 허용).
+  - **RateLimitFilter**: Servlet Filter(@Order -100), TenantResolver 뒤에서 실행. 테넌트별 분당 요청 수 제한. 초과 시 429 + `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After` 헤더 반환.
+  - **플랜별 RPM 기본값**: free=60, starter=300, pro=1000, enterprise=무제한(0). `subscriptions.api_rpm_limit` 컬럼으로 테넌트별 커스텀 가능.
+  - **OrchestratorEngine 쿼터 적용**: chat()/chatStream() 진입 시 `QuotaService.checkLLMQuota()` 호출하여 월간 토큰 쿼터 초과 사전 거부.
+  - **GlobalExceptionHandler**: QuotaExceededException → 429 Too Many Requests 매핑.
+  - **DB 마이그레이션**: `V12__add_api_rpm_limit.sql` — subscriptions 테이블에 api_rpm_limit 컬럼 추가.
+- **변경 사유**: 기존 Rate Limit은 정책 엔진 내 인메모리 슬라이딩 윈도우로 세션/인텐트 단위만 제한. API 레벨 테넌트별 분당 요청 제한과 월간 토큰 쿼터 사전 적용이 부재하여, 악의적/과도한 API 호출에 대한 방어와 비용 통제 불가.
+- **영향 모듈**: policy(TokenBucketRateLimiter, RateLimitFilter 신규), orchestrator(OrchestratorEngine), api(GlobalExceptionHandler), domain/master(SubscriptionEntity), config(RedisConfig 활용)
+- **영향도**: Medium
+- **영향 범위**: BIZ-007, 전체 API 엔드포인트
+- **영향 설계서**: T1-3, T3-1, T3-2
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v3.3.0
+- **변경 일자**: 2026-04-05
+
+---
+
 ### CR-014 | App-Tenant 3계층 멀티테넌시
 - **대상 기능 ID**: PRD-신규 (App 관리, 소비앱 어드민 셀프서비스)
 - **변경 타입**: 변경
@@ -370,6 +391,28 @@
 - **영향 설계서**: T1-1, T2-1, T3-2, T3-6
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v3.7.0
 - **변경 일자**: 2026-04-01
+
+---
+
+### CR-029 | Aimbase 1단계 고도화 — Native Tool + Session Meta + Context Assembly + Runtime 재배치
+- **대상 기능 ID**: PRD-167 ~ PRD-185, FE-011 ~ FE-014
+- **변경 타입**: 변경
+- **변경 내용**: ClaudeTool 내부에 묻혀 있는 도구·세션·컨텍스트·실행 흐름의 통제권을 Aimbase 상위 레이어로 끌어올림
+  - Tool Contract 표준화: EnhancedToolExecutor, ToolContext, ToolResult, ToolContractMeta
+  - Workspace Guard: WorkspacePolicy, WorkspacePolicyEngine (3단계 정책 계층)
+  - Native Tool 9종: FileRead, Glob, Grep, WorkspaceSnapshot, PathInfo, StructuredSearch, DocumentSectionRead, SafeEdit, PatchApply
+  - Session Meta: scope_type, runtime_kind, workspace_ref, parent_session_id + tool_execution_log
+  - Context Assembly: ContextAssemblyEngine, Context Recipe, 10개 Source Provider, Budget/Priority/Freshness/Dedup, AssemblyTrace
+  - Runtime Adapter: RuntimeAdapter, RuntimeRegistry, ClaudeTool STATELESS/PERSISTENT mode, selectionReason 로그
+  - Domain Pack: DomainAppConfig (도메인별 기본 recipe/tool allowlist/runtime)
+  - FE: Sessions, ContextRecipes, DomainConfigs 페이지 + WorkflowStudio Tool 통합
+- **변경 사유**: Aimbase를 도메인 앱용 AI 운영 레이어로 재정렬. ClaudeTool 실행 래퍼 → 상위 통제 구조로 전환
+- **영향 모듈**: Tool, Session, Context, Orchestrator, Runtime, Workflow, FE 전체
+- **영향도**: High
+- **영향 범위**: PRD-167 ~ PRD-185, FE-011 ~ FE-014
+- **영향 설계서**: T1-1, T1-3, T2-1, T2-2, T3-1, T3-2, T3-3, T3-4
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v4.0.0
+- **변경 일자**: 2026-04-06
 
 ---
 

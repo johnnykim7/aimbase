@@ -96,6 +96,57 @@ public class ToolRegistry {
         }
     }
 
+    /**
+     * CR-029: 컨텍스트 기반 도구 실행.
+     * EnhancedToolExecutor이면 validateInput → execute(Map, ToolContext),
+     * 기존 ToolExecutor이면 execute(Map) → ToolResult로 래핑.
+     */
+    public ToolResult execute(ToolCall call, ToolContext ctx) {
+        ToolExecutor executor = executors.get(call.name());
+        if (executor == null) {
+            log.error("No executor found for tool: {}", call.name());
+            return ToolResult.error("알 수 없는 도구: " + call.name());
+        }
+
+        long start = System.currentTimeMillis();
+        try {
+            if (executor instanceof EnhancedToolExecutor enhanced) {
+                // 입력 검증
+                ValidationResult validation = enhanced.validateInput(call.input(), ctx);
+                if (!validation.valid()) {
+                    platformMetrics.recordToolExecution(call.name(), false);
+                    return ToolResult.error("입력 검증 실패: " + validation.message());
+                }
+                // 확장 실행
+                ToolResult result = enhanced.execute(call.input(), ctx);
+                platformMetrics.recordToolExecution(call.name(), result.success());
+                return result.withDuration(System.currentTimeMillis() - start);
+            } else {
+                // 기존 ToolExecutor bridge
+                String rawResult = executor.execute(call.input());
+                platformMetrics.recordToolExecution(call.name(), true);
+                return ToolResult.ok(rawResult, rawResult)
+                        .withDuration(System.currentTimeMillis() - start);
+            }
+        } catch (Exception e) {
+            log.error("Tool '{}' execution failed: {}", call.name(), e.getMessage());
+            platformMetrics.recordToolExecution(call.name(), false);
+            return ToolResult.error("도구 실행 오류: " + e.getMessage())
+                    .withDuration(System.currentTimeMillis() - start);
+        }
+    }
+
+    /**
+     * CR-029: EnhancedToolExecutor의 계약 메타 포함한 도구 정의 조회.
+     */
+    public ToolContractMeta getContractMeta(String toolName) {
+        ToolExecutor executor = executors.get(toolName);
+        if (executor instanceof EnhancedToolExecutor enhanced) {
+            return enhanced.getContractMeta();
+        }
+        return null;
+    }
+
     public boolean hasTools() {
         return !executors.isEmpty();
     }

@@ -17,8 +17,17 @@ import java.util.List;
 public record ToolFilterContext(
         List<String> allowedTools,
         List<String> excludeTools,
-        List<String> tags
+        List<String> tags,
+        // --- CR-029 신규 ---
+        List<String> requiredCapabilities,
+        PermissionLevel maxPermission,
+        Boolean readOnlyMode
 ) {
+    /** CR-006 하위호환: 3-arg constructor */
+    public ToolFilterContext(List<String> allowedTools, List<String> excludeTools, List<String> tags) {
+        this(allowedTools, excludeTools, tags, null, null, null);
+    }
+
     /** 필터 없음 (전체 도구 노출) */
     public static ToolFilterContext none() {
         return new ToolFilterContext(null, null, null);
