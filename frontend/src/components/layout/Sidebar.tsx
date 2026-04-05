@@ -19,6 +19,9 @@ import {
   KeyRound,
   Globe,
   LogOut,
+  MessageSquareText,
+  Layers,
+  Settings2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -44,6 +47,9 @@ const NAV_ITEMS: NavItemDef[] = [
   { path: "/rag-evaluation", icon: Target, label: "RAG 평가" },
   { path: "/documents", icon: FileText, label: "문서 생성" },
   { path: "/projects", icon: FolderOpen, label: "프로젝트" },
+  { path: "/sessions", icon: MessageSquareText, label: "세션" },
+  { path: "/context-recipes", icon: Layers, label: "Context Recipe" },
+  { path: "/domain-configs", icon: Settings2, label: "도메인 설정" },
   { path: "/auth", icon: Users, label: "사용자/권한" },
   { path: "/monitoring", icon: BarChart3, label: "모니터링" },
 ];

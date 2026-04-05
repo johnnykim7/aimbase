@@ -16,6 +16,10 @@ import Documents from "./pages/Documents";
 import Auth from "./pages/Auth";
 import Monitoring from "./pages/Monitoring";
 import Projects from "./pages/Projects";
+import Sessions from "./pages/Sessions";
+import SessionDetail from "./pages/SessionDetail";
+import ContextRecipes from "./pages/ContextRecipes";
+import DomainConfigs from "./pages/DomainConfigs";
 import Tenants from "./pages/platform/Tenants";
 import Subscriptions from "./pages/platform/Subscriptions";
 import PlatformMonitoring from "./pages/platform/PlatformMonitoring";
@@ -41,6 +45,10 @@ export default function App() {
         <Route path="documents" element={<Documents />} />
         <Route path="projects" element={<Projects />} />
         <Route path="auth" element={<Auth />} />
+        <Route path="sessions" element={<Sessions />} />
+        <Route path="sessions/:id" element={<SessionDetail />} />
+        <Route path="context-recipes" element={<ContextRecipes />} />
+        <Route path="domain-configs" element={<DomainConfigs />} />
         <Route path="monitoring" element={<Monitoring />} />
         <Route path="platform">
           <Route index element={<Navigate to="tenants" replace />} />

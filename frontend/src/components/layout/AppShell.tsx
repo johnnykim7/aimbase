@@ -4,6 +4,7 @@ import {
   LayoutDashboard, PlugZap, Wrench, FileJson, Shield, MessageSquare,
   Zap, BookOpen, Target, FileText, FolderOpen, Users, BarChart3,
   Building2, CreditCard, KeyRound, Globe,
+  MessageSquareText, Layers, Settings2,
 } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 
@@ -30,6 +31,9 @@ const ROUTE_HEADERS: Record<string, RouteHeader> = {
   "/documents":             { title: "Document Generation", subtitle: "AI 문서 생성 및 템플릿 관리", icon: <FileText className={ICON} /> },
   "/projects":              { title: "프로젝트 관리", subtitle: "회사 내 프로젝트를 생성하고 리소스를 할당합니다.", icon: <FolderOpen className={ICON} /> },
   "/auth":                  { title: "사용자/권한 관리", subtitle: "사용자 계정 및 역할 기반 접근 제어", icon: <Users className={ICON} /> },
+  "/sessions":              { title: "세션 관리", subtitle: "AI 세션 목록 및 Tool Lineage 추적", icon: <MessageSquareText className={ICON} /> },
+  "/context-recipes":       { title: "Context Recipe", subtitle: "컨텍스트 조립 전략 정의 및 소스 관리", icon: <Layers className={ICON} /> },
+  "/domain-configs":        { title: "도메인 설정", subtitle: "도메인 앱별 기본 런타임, Recipe, 스코프 설정", icon: <Settings2 className={ICON} /> },
   "/monitoring":            { title: "모니터링", subtitle: "비용 추적 및 모델 성능", icon: <BarChart3 className={ICON} /> },
   "/platform/tenants":      { title: "테넌트 관리", subtitle: "Super Admin — 플랫폼 테넌트 전체 관리", icon: <Building2 className={ICON} /> },
   "/platform/subscriptions":{ title: "구독/쿼터 관리", subtitle: "Super Admin — 테넌트별 사용 한도 설정", icon: <CreditCard className={ICON} /> },
@@ -43,6 +47,10 @@ function resolveHeader(pathname: string): RouteHeader | null {
   // /workflows/:id → 워크플로우 상세 (edit 제외)
   if (/^\/workflows\/[^/]+$/.test(pathname) && !pathname.endsWith("/new")) {
     return { title: "워크플로우 상세", icon: <Zap className={ICON} /> };
+  }
+  // /sessions/:id → 세션 상세 (동적 오버라이드 사용)
+  if (/^\/sessions\/[^/]+$/.test(pathname)) {
+    return { title: "세션 상세", icon: <MessageSquareText className={ICON} /> };
   }
   return null; // WorkflowStudio 등 헤더 없는 페이지
 }
