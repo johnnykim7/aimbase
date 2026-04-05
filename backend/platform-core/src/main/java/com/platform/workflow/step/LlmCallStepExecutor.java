@@ -57,6 +57,11 @@ public class LlmCallStepExecutor implements StepExecutor {
 
         String model = config.containsKey("model") ? (String) config.get("model") : "auto";
         String connectionId = (String) config.get("connection_id");
+
+        // CR-029: workflow step runtime 필드 (향후 RuntimeAdapter 분기 지점)
+        String runtime = (String) config.getOrDefault("runtime", "llm_api");
+        String runtimeMode = (String) config.getOrDefault("runtime_mode", "stateless");
+        log.debug("Step '{}': runtime={}, mode={}", step.id(), runtime, runtimeMode);
         String promptTemplate = (String) config.getOrDefault("prompt", "");
         String systemTemplate = (String) config.get("system");
         Integer configCeiling = config.containsKey("max_tokens")

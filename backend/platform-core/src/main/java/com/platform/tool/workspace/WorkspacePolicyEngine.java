@@ -35,14 +35,18 @@ public class WorkspacePolicyEngine {
      * @return 검증 결과
      */
     public ValidationResult validatePath(ToolContext ctx, WorkspacePolicy policy, String path) {
-        Path workspaceRoot = workspaceResolver.getWorkspaceRoot(ctx);
+        Path workspaceRoot;
+        try {
+            workspaceRoot = workspaceResolver.getWorkspaceRoot(ctx).toRealPath();
+        } catch (IOException e) {
+            workspaceRoot = workspaceResolver.getWorkspaceRoot(ctx).normalize();
+        }
         final Path target;
         {
             Path candidate = workspaceResolver.resolve(ctx, path);
             try {
                 candidate = candidate.toRealPath();
             } catch (IOException ignored) {
-                // 파일이 아직 없을 수 있음 — normalize된 경로로 진행
                 candidate = candidate.normalize();
             }
             target = candidate;

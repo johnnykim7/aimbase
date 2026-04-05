@@ -28,6 +28,7 @@ import com.platform.tenant.TenantContext;
 import com.platform.tenant.quota.QuotaService;
 import com.platform.context.AssemblyResult;
 import com.platform.context.ContextAssemblyEngine;
+import com.platform.runtime.RuntimeRegistry;
 import com.platform.tool.ApprovalState;
 import com.platform.tool.PermissionLevel;
 import com.platform.tool.ToolCallHandler;
@@ -86,6 +87,7 @@ public class OrchestratorEngine {
     private final MemoryService memoryService;
     private final QuotaService quotaService;
     private final ContextAssemblyEngine contextAssemblyEngine;
+    private final RuntimeRegistry runtimeRegistry;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -112,7 +114,8 @@ public class OrchestratorEngine {
             ResponseCacheService responseCacheService,
             MemoryService memoryService,
             QuotaService quotaService,
-            ContextAssemblyEngine contextAssemblyEngine
+            ContextAssemblyEngine contextAssemblyEngine,
+            RuntimeRegistry runtimeRegistry
     ) {
         this.modelRouter = modelRouter;
         this.fallbackChainExecutor = fallbackChainExecutor;
@@ -137,6 +140,7 @@ public class OrchestratorEngine {
         this.memoryService = memoryService;
         this.quotaService = quotaService;
         this.contextAssemblyEngine = contextAssemblyEngine;
+        this.runtimeRegistry = runtimeRegistry;
     }
 
     /**
@@ -189,6 +193,8 @@ public class OrchestratorEngine {
 
         // 4. LLM 어댑터 선택 (connectionGroupId > connectionId > modelRouter)
         //    CR-015: connectionGroupId 지정 시 그룹 전략에 따라 커넥션 선택 + 자동 폴백
+        //    CR-029: runtimeRegistry 로깅 (향후 selectBest 연결 지점)
+        log.debug("Available runtimes: {}", runtimeRegistry.listCapabilities().size());
         LLMAdapter adapter = null;
         String resolvedModel = null;
         boolean useConnectionGroup = request.connectionGroupId() != null && !request.connectionGroupId().isBlank();

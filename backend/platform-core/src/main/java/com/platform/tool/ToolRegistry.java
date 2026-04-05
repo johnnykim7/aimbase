@@ -68,9 +68,40 @@ public class ToolRegistry {
         if (filter == null) {
             return getToolDefs();
         }
-        return executors.values().stream()
-                .map(ToolExecutor::getDefinition)
-                .filter(def -> filter.isToolAllowed(def.name()))
+        return executors.entrySet().stream()
+                .filter(entry -> {
+                    String name = entry.getKey();
+                    ToolExecutor executor = entry.getValue();
+
+                    // 기존: 이름 기반 allow/exclude
+                    if (!filter.isToolAllowed(name)) return false;
+
+                    // CR-029: capability/permission/readOnly 필터링
+                    if (executor instanceof EnhancedToolExecutor enhanced) {
+                        ToolContractMeta meta = enhanced.getContractMeta();
+
+                        // readOnlyMode: readOnly 도구만 허용
+                        if (Boolean.TRUE.equals(filter.readOnlyMode()) && !meta.readOnly()) {
+                            return false;
+                        }
+
+                        // maxPermission: 도구의 permissionLevel이 최대 허용 수준 이내
+                        if (filter.maxPermission() != null) {
+                            if (meta.permissionLevel().ordinal() > filter.maxPermission().ordinal()) {
+                                return false;
+                            }
+                        }
+
+                        // requiredCapabilities: 도구가 요구 capability를 모두 지원
+                        if (filter.requiredCapabilities() != null && !filter.requiredCapabilities().isEmpty()) {
+                            if (meta.capabilities() == null || !meta.capabilities().containsAll(filter.requiredCapabilities())) {
+                                return false;
+                            }
+                        }
+                    }
+                    return true;
+                })
+                .map(entry -> entry.getValue().getDefinition())
                 .toList();
     }
 
