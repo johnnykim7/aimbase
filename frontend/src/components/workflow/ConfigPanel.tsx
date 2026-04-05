@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { useConnections } from "../../hooks/useConnections";
 import { usePrompts } from "../../hooks/usePrompts";
 import { useMCPServers } from "../../hooks/useMCPServers";
+import { useTools } from "../../hooks/useTools";
 import type { Connection } from "../../types/connection";
 import type { Prompt } from "../../types/prompt";
 import type { MCPServer, MCPToolDef } from "../../types/mcp";
@@ -64,19 +65,31 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
   const { data: connections, isError: connError } = useConnections();
   const { data: prompts, isError: promptError } = usePrompts();
   const { data: mcpServers, isError: mcpError } = useMCPServers();
+  const { data: nativeTools } = useTools();
 
   const toolOptions: SelectOption[] = (() => {
-    if (mcpError || !mcpServers) return [];
     const tools: SelectOption[] = [];
-    (mcpServers as MCPServer[]).forEach((server) => {
-      const serverTools: MCPToolDef[] = server.discoveredTools ?? server.toolsCache ?? [];
-      serverTools.forEach((t) => {
+    // CR-029: 네이티브 Tool 1급 노출 (상단에 배치)
+    if (nativeTools && Array.isArray(nativeTools)) {
+      nativeTools.forEach((t: { name: string; description?: string; contract?: { readOnly?: boolean } }) => {
         tools.push({
           value: t.name,
-          label: `${t.name}${t.description ? ` — ${t.description}` : ""} (${server.name})`,
+          label: `${t.name}${t.description ? ` — ${t.description}` : ""} (Native${t.contract?.readOnly ? ", ReadOnly" : ""})`,
         });
       });
-    });
+    }
+    // MCP 도구
+    if (!mcpError && mcpServers) {
+      (mcpServers as MCPServer[]).forEach((server) => {
+        const serverTools: MCPToolDef[] = server.discoveredTools ?? server.toolsCache ?? [];
+        serverTools.forEach((t) => {
+          tools.push({
+            value: t.name,
+            label: `${t.name}${t.description ? ` — ${t.description}` : ""} (${server.name})`,
+          });
+        });
+      });
+    }
     return tools;
   })();
 

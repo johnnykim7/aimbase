@@ -24,7 +24,14 @@ import com.platform.session.ContextWindowManager;
 import com.platform.session.MemoryService;
 import com.platform.session.ResponseCacheService;
 import com.platform.session.SessionStore;
+import com.platform.tenant.TenantContext;
+import com.platform.tenant.quota.QuotaService;
+import com.platform.context.AssemblyResult;
+import com.platform.context.ContextAssemblyEngine;
+import com.platform.tool.ApprovalState;
+import com.platform.tool.PermissionLevel;
 import com.platform.tool.ToolCallHandler;
+import com.platform.tool.ToolContext;
 import com.platform.tool.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -77,6 +84,8 @@ public class OrchestratorEngine {
     private final ObjectMapper objectMapper;
     private final ResponseCacheService responseCacheService;
     private final MemoryService memoryService;
+    private final QuotaService quotaService;
+    private final ContextAssemblyEngine contextAssemblyEngine;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -101,7 +110,9 @@ public class OrchestratorEngine {
             SchemaValidator schemaValidator,
             ObjectMapper objectMapper,
             ResponseCacheService responseCacheService,
-            MemoryService memoryService
+            MemoryService memoryService,
+            QuotaService quotaService,
+            ContextAssemblyEngine contextAssemblyEngine
     ) {
         this.modelRouter = modelRouter;
         this.fallbackChainExecutor = fallbackChainExecutor;
@@ -124,6 +135,8 @@ public class OrchestratorEngine {
         this.objectMapper = objectMapper;
         this.responseCacheService = responseCacheService;
         this.memoryService = memoryService;
+        this.quotaService = quotaService;
+        this.contextAssemblyEngine = contextAssemblyEngine;
     }
 
     /**
@@ -134,19 +147,26 @@ public class OrchestratorEngine {
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
 
-        // 1. 세션 히스토리 로드
-        List<UnifiedMessage> history = sessionStore.getMessages(sessionId);
+        // 0. CR-013: LLM 토큰 쿼터 체크 (월간 한도 초과 시 즉시 거부)
+        String tenantId = TenantContext.getTenantId();
+        if (tenantId != null) {
+            quotaService.checkLLMQuota(tenantId, 1000).throwIfExceeded();
+        }
 
-        // 1.5 PRD-130: 메모리 컨텍스트 주입 (SYSTEM_RULES + LONG_TERM + USER_PROFILE)
-        List<UnifiedMessage> memoryContext = memoryService.buildMemoryContext(sessionId, request.userId());
+        // CR-029: ContextAssemblyEngine으로 컨텍스트 조립 위임
+        // recipe가 없으면 기존과 동일한 default assembly (하위호환)
+        AssemblyResult assemblyResult = contextAssemblyEngine.assemble(sessionId, null, request);
+        List<UnifiedMessage> trimmedMessages = new ArrayList<>(assemblyResult.messages());
+        log.debug("Context assembled: recipe={}, tokens={}, layers={}",
+                assemblyResult.trace().recipeId(),
+                assemblyResult.trace().totalEstimatedTokens(),
+                assemblyResult.trace().includedLayers().size());
 
-        // 2. 현재 요청 메시지 추가
-        List<UnifiedMessage> allMessages = new ArrayList<>(memoryContext);
-        allMessages.addAll(history);
-        allMessages.addAll(request.messages());
-
-        // 3. 컨텍스트 윈도우 트리밍
-        List<UnifiedMessage> trimmedMessages = new ArrayList<>(contextWindowManager.trim(allMessages));
+        // CR-029: ToolContext 생성 (통합용)
+        ToolContext toolContext = new ToolContext(
+                tenantId, null, null, sessionId, null, null,
+                request.userId(), PermissionLevel.FULL,
+                ApprovalState.NOT_REQUIRED, null, false, 0);
 
         // 3-1. RAG 컨텍스트 주입 (Phase 3: ragSourceId 지정 시)
         if (request.ragSourceId() != null && !request.ragSourceId().isBlank()) {
@@ -210,11 +230,11 @@ public class OrchestratorEngine {
         boolean llmSuccess = false;
         try {
             if (request.actionsEnabled() && toolRegistry.hasTools()) {
-                // Tool use 루프 — 최대 5회 반복 (CR-006: 필터링 + 선택 전략 지원)
+                // Tool use 루프 — 최대 5회 반복 (CR-006 + CR-029: ToolContext + lineage)
                 llmResponse = toolCallHandler.executeLoop(
                         adapter, resolvedModel, trimmedMessages,
                         ModelConfig.defaults(), sessionId, toolRegistry,
-                        request.toolFilter(), request.toolChoice());
+                        request.toolFilter(), request.toolChoice(), toolContext);
             } else {
                 LLMRequest llmRequest = new LLMRequest(
                         resolvedModel, trimmedMessages, null,
@@ -322,6 +342,12 @@ public class OrchestratorEngine {
         String sessionId = request.sessionId() != null
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
+
+        // CR-013: LLM 토큰 쿼터 체크
+        String streamTenantId = TenantContext.getTenantId();
+        if (streamTenantId != null) {
+            quotaService.checkLLMQuota(streamTenantId, 1000).throwIfExceeded();
+        }
 
         List<UnifiedMessage> history = sessionStore.getMessages(sessionId);
         List<UnifiedMessage> allMessages = new ArrayList<>(history);

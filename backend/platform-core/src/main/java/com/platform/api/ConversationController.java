@@ -70,4 +70,48 @@ public class ConversationController {
         sessionRepository.deleteBySessionId(sessionId);
         sessionStore.clearSession(sessionId);
     }
+
+    /** CR-029: 세션 메타 조회 */
+    @GetMapping("/{sessionId}/meta")
+    @Operation(summary = "세션 메타 조회 (scope, runtime, recipe 등)")
+    public ApiResponse<Map<String, Object>> getMeta(@PathVariable String sessionId) {
+        ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Session not found: " + sessionId));
+        return ApiResponse.ok(Map.of(
+                "sessionId", session.getSessionId(),
+                "scopeType", session.getScopeType() != null ? session.getScopeType() : "chat",
+                "runtimeKind", session.getRuntimeKind() != null ? session.getRuntimeKind() : "",
+                "workspaceRef", session.getWorkspaceRef() != null ? session.getWorkspaceRef() : "",
+                "persistentSession", session.isPersistentSession(),
+                "summaryVersion", session.getSummaryVersion(),
+                "contextRecipeId", session.getContextRecipeId() != null ? session.getContextRecipeId() : "",
+                "appId", session.getAppId() != null ? session.getAppId() : "",
+                "projectId", session.getProjectId() != null ? session.getProjectId() : "",
+                "parentSessionId", session.getParentSessionId() != null ? session.getParentSessionId() : ""
+        ));
+    }
+
+    /** CR-029: 세션 메타 수정 */
+    @PutMapping("/{sessionId}/meta")
+    @Transactional
+    @Operation(summary = "세션 메타 수정")
+    public ApiResponse<Map<String, Object>> updateMeta(@PathVariable String sessionId,
+                                                        @RequestBody Map<String, Object> body) {
+        ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Session not found: " + sessionId));
+
+        if (body.containsKey("scopeType")) session.setScopeType((String) body.get("scopeType"));
+        if (body.containsKey("runtimeKind")) session.setRuntimeKind((String) body.get("runtimeKind"));
+        if (body.containsKey("workspaceRef")) session.setWorkspaceRef((String) body.get("workspaceRef"));
+        if (body.containsKey("persistentSession")) session.setPersistentSession((Boolean) body.get("persistentSession"));
+        if (body.containsKey("contextRecipeId")) session.setContextRecipeId((String) body.get("contextRecipeId"));
+        if (body.containsKey("appId")) session.setAppId((String) body.get("appId"));
+        if (body.containsKey("projectId")) session.setProjectId((String) body.get("projectId"));
+        if (body.containsKey("parentSessionId")) session.setParentSessionId((String) body.get("parentSessionId"));
+
+        sessionRepository.save(session);
+        return ApiResponse.ok(Map.of("updated", sessionId));
+    }
 }
