@@ -56,6 +56,13 @@ public class ClaudeCodeToolConfig {
     /** 기본 시스템 프롬프트 (CLI에 --append-system-prompt로 전달) */
     private String defaultSystemPrompt = "";
 
+    /**
+     * 세션 영속성 기본값 (기본: true).
+     * true면 Claude Code가 프로젝트 단위 메모리를 축적하고,
+     * --continue/--resume으로 이전 세션 재개 가능.
+     */
+    private boolean defaultSessionPersistence = true;
+
     // ── Getters & Setters ──
 
     public boolean isEnabled() { return enabled; }
@@ -81,4 +88,7 @@ public class ClaudeCodeToolConfig {
 
     public String getDefaultSystemPrompt() { return defaultSystemPrompt; }
     public void setDefaultSystemPrompt(String defaultSystemPrompt) { this.defaultSystemPrompt = defaultSystemPrompt; }
+
+    public boolean isDefaultSessionPersistence() { return defaultSessionPersistence; }
+    public void setDefaultSessionPersistence(boolean defaultSessionPersistence) { this.defaultSessionPersistence = defaultSessionPersistence; }
 }

@@ -35,7 +35,7 @@ class ClaudeCodeToolTest {
         config.setWorkingDirectory("");
 
         circuitBreaker = new ClaudeCodeCircuitBreaker();
-        tool = new ClaudeCodeTool(config, circuitBreaker, null, null);
+        tool = new ClaudeCodeTool(config, circuitBreaker, null, null, null);
     }
 
     @Test
@@ -171,7 +171,7 @@ class ClaudeCodeToolTest {
     void execute_withTimeout_shouldReturnTimeoutError() {
         config.setExecutable("bash");
         config.setTimeoutSeconds(1);
-        var timeoutTool = new ClaudeCodeTool(config, new ClaudeCodeCircuitBreaker(), null, null);
+        var timeoutTool = new ClaudeCodeTool(config, new ClaudeCodeCircuitBreaker(), null, null, null);
 
         Map<String, Object> input = new HashMap<>();
         input.put("prompt", "sleep 60");
@@ -212,13 +212,13 @@ class ClaudeCodeToolTest {
         Map<String, Object> input = new HashMap<>();
         input.put("prompt", "test");
         input.put("output_format", "text");
-        input.put("cli_options", Map.of("--verbose", "", "--continue", "sess_123"));
+        input.put("cli_options", Map.of("--verbose", "", "--color", "always"));
 
         String result = tool.execute(input);
 
         assertThat(result).contains("--verbose");
-        assertThat(result).contains("--continue");
-        assertThat(result).contains("sess_123");
+        assertThat(result).contains("--color");
+        assertThat(result).contains("always");
     }
 
     @Test
@@ -363,6 +363,89 @@ class ClaudeCodeToolTest {
 
         assertThat(circuitBreaker.getState())
                 .isEqualTo(ClaudeCodeCircuitBreaker.State.CLOSED);
+    }
+
+    // ── 세션 관리 테스트 ──
+
+    @Test
+    void execute_defaultSessionPersistence_shouldNotAddNoSessionFlag() {
+        // Config 기본값 true → --no-session-persistence 없어야 함
+        config.setDefaultSessionPersistence(true);
+        var sessionTool = new ClaudeCodeTool(config, new ClaudeCodeCircuitBreaker(), null, null, null);
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+
+        String result = sessionTool.execute(input);
+
+        assertThat(result).doesNotContain("--no-session-persistence");
+    }
+
+    @Test
+    void execute_sessionPersistenceDisabled_shouldAddNoSessionFlag() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("session_persistence", false);
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--no-session-persistence");
+    }
+
+    @Test
+    void execute_continueMode_shouldAddContinueFlag() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "이전 작업 이어서 진행");
+        input.put("output_format", "text");
+        input.put("continue_mode", "continue");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--continue");
+    }
+
+    @Test
+    void execute_resumeMode_shouldAddResumeWithSessionId() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "세션 재개");
+        input.put("output_format", "text");
+        input.put("continue_mode", "resume");
+        input.put("session_id", "sess_abc123");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--resume");
+        assertThat(result).contains("sess_abc123");
+    }
+
+    @Test
+    void execute_resumeModeWithoutSessionId_shouldReturnError() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "세션 재개");
+        input.put("continue_mode", "resume");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("INVALID_INPUT");
+        assertThat(result).contains("session_id");
+    }
+
+    @Test
+    void getDefinition_shouldContainContinueModeAndSessionId() {
+        var def = tool.getDefinition();
+
+        @SuppressWarnings("unchecked")
+        var properties = (Map<String, Object>) def.inputSchema().get("properties");
+        assertThat(properties).containsKey("continue_mode");
+        assertThat(properties).containsKey("session_id");
+
+        @SuppressWarnings("unchecked")
+        var continueProp = (Map<String, Object>) properties.get("continue_mode");
+        @SuppressWarnings("unchecked")
+        var enumValues = (List<String>) continueProp.get("enum");
+        assertThat(enumValues).containsExactly("new", "continue", "resume");
     }
 
     @Test

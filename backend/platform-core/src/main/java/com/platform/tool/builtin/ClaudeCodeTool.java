@@ -122,13 +122,26 @@ public class ClaudeCodeTool implements ToolExecutor {
                             )),
                             Map.entry("session_persistence", Map.of(
                                     "type", "boolean",
-                                    "description", "세션 영속 활성화 (기본: false). true면 --continue/--resume으로 이전 작업 재개 가능"
+                                    "description", "세션 영속 활성화 (기본: 설정값, 보통 true). "
+                                            + "true면 프로젝트 단위 메모리 축적 + --continue/--resume 재개 가능"
+                            )),
+                            Map.entry("continue_mode", Map.of(
+                                    "type", "string",
+                                    "enum", List.of("new", "continue", "resume"),
+                                    "description", "세션 모드. new=새 세션(기본), "
+                                            + "continue=해당 워킹 디렉토리의 마지막 세션 이어가기, "
+                                            + "resume=session_id로 특정 세션 재개"
+                            )),
+                            Map.entry("session_id", Map.of(
+                                    "type", "string",
+                                    "description", "재개할 세션 ID (continue_mode=resume 시 필수)"
                             )),
                             Map.entry("cli_options", Map.of(
                                     "type", "object",
                                     "additionalProperties", Map.of("type", "string"),
-                                    "description", "추가 CLI 옵션 맵 (예: {\"--verbose\": \"\", \"--continue\": \"session_id\"}). "
-                                            + "키는 옵션명(--포함), 값은 옵션 인수(플래그면 빈 문자열)"
+                                    "description", "추가 CLI 옵션 맵 (예: {\"--verbose\": \"\", \"--color\": \"always\"}). "
+                                            + "키는 옵션명(--포함), 값은 옵션 인수(플래그면 빈 문자열). "
+                                            + "주의: --continue/--resume은 continue_mode 파라미터 사용"
                             ))
                     )),
                     "required", List.of("prompt")
@@ -205,7 +218,15 @@ public class ClaudeCodeTool implements ToolExecutor {
         String permissionMode = (String) input.getOrDefault("permission_mode", null);
         boolean sessionPersistence = input.containsKey("session_persistence")
                 ? Boolean.TRUE.equals(input.get("session_persistence"))
-                : false;
+                : config.isDefaultSessionPersistence();
+        String continueMode = (String) input.getOrDefault("continue_mode", "new");
+        String sessionId = (String) input.getOrDefault("session_id", null);
+
+        // continue_mode=resume인데 session_id 없으면 에러
+        if ("resume".equals(continueMode) && (sessionId == null || sessionId.isBlank())) {
+            return toError("INVALID_INPUT", "continue_mode=resume 시 session_id는 필수입니다.");
+        }
+
         Map<String, String> cliOptions = input.containsKey("cli_options")
                 ? (Map<String, String>) input.get("cli_options")
                 : Map.of();
@@ -227,7 +248,8 @@ public class ClaudeCodeTool implements ToolExecutor {
         try {
             List<String> command = buildCommand(prompt, outputFormat, maxTurns,
                     allowedTools, jsonSchema, appendSystemPrompt, model,
-                    effort, permissionMode, sessionPersistence, cliOptions);
+                    effort, permissionMode, sessionPersistence,
+                    continueMode, sessionId, cliOptions);
 
             log.info("ClaudeCodeTool 실행: max_turns={}, allowed_tools={}, output_format={}, model={}",
                     maxTurns, allowedTools, outputFormat, model != null ? model : "default");
@@ -343,17 +365,27 @@ public class ClaudeCodeTool implements ToolExecutor {
                                        String appendSystemPrompt, String model,
                                        String effort, String permissionMode,
                                        boolean sessionPersistence,
+                                       String continueMode, String sessionId,
                                        Map<String, String> cliOptions) {
         // named params가 이미 처리하는 옵션 — cli_options에서 중복 방지
         Set<String> handledOptions = Set.of(
                 "-p", "--output-format", "--max-turns", "--allowedTools",
                 "--json-schema", "--append-system-prompt", "--model",
                 "--add-dir", "--no-session-persistence", "--permission-mode",
-                "--reasoning-effort"
+                "--reasoning-effort", "--continue", "--resume"
         );
 
         List<String> cmd = new ArrayList<>();
         cmd.add(config.getExecutable());
+
+        // continue_mode에 따른 세션 재개 옵션 (프롬프트 앞에 위치)
+        if ("continue".equals(continueMode)) {
+            cmd.add("--continue");
+        } else if ("resume".equals(continueMode) && sessionId != null && !sessionId.isBlank()) {
+            cmd.add("--resume");
+            cmd.add(sessionId);
+        }
+
         cmd.add("-p");
         cmd.add(prompt);
         cmd.add("--output-format");
@@ -361,7 +393,7 @@ public class ClaudeCodeTool implements ToolExecutor {
         cmd.add("--max-turns");
         cmd.add(String.valueOf(maxTurns));
 
-        // 세션 영속 비활성이 기본, 워크플로우에서 명시적으로 활성화 가능 (PRD-120)
+        // 세션 영속 제어: 기본 true (프로젝트 메모리 축적), 명시적으로 비활성화 가능
         if (!sessionPersistence) {
             cmd.add("--no-session-persistence");
         }

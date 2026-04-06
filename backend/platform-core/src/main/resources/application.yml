@@ -101,6 +101,7 @@ claude-code:
   max-turns: ${CLAUDE_CODE_MAX_TURNS:10}
   default-allowed-tools: ${CLAUDE_CODE_ALLOWED_TOOLS:}
   working-directory: ${CLAUDE_CODE_WORKING_DIR:}
+  default-session-persistence: ${CLAUDE_CODE_SESSION_PERSISTENCE:true}
   default-system-prompt: ${CLAUDE_CODE_SYSTEM_PROMPT:PDF 파일은 반드시 Read 도구로 읽어라. 문서 요약 시 모든 페이지와 첨부자료, 표, 수치 데이터를 빠짐없이 포함하라.}
 
 # ─── Platform 설정 (테넌트 프로비저닝 기본값) ────────────────────────
