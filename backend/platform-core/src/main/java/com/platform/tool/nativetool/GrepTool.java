@@ -8,10 +8,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.file.Path;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * CR-029 (PRD-172): ripgrep(rg) 우선 + Java regex fallback.
@@ -106,8 +109,96 @@ public class GrepTool implements EnhancedToolExecutor {
                     null, durationMs);
 
         } catch (Exception e) {
-            log.warn("ripgrep 실행 실패, fallback 불가: {}", e.getMessage());
-            return ToolResult.error("grep 실행 실패: " + e.getMessage())
+            log.info("ripgrep 미설치, Java regex fallback 사용: {}", e.getMessage());
+            return javaFallbackGrep(pattern, searchRoot, glob, outputMode, caseInsensitive, headLimit, start);
+        }
+    }
+
+    /**
+     * ripgrep 미설치 시 Java regex 기반 fallback.
+     */
+    private ToolResult javaFallbackGrep(String pattern, Path searchRoot, String glob,
+                                         String outputMode, boolean caseInsensitive,
+                                         int headLimit, long start) {
+        try {
+            int flags = caseInsensitive ? Pattern.CASE_INSENSITIVE : 0;
+            Pattern regex = Pattern.compile(pattern, flags);
+            PathMatcher fileMatcher = glob != null
+                    ? FileSystems.getDefault().getPathMatcher("glob:" + glob)
+                    : null;
+
+            List<String> matches = new ArrayList<>();
+            Set<String> matchedFiles = new HashSet<>();
+
+            Files.walkFileTree(searchRoot, EnumSet.noneOf(FileVisitOption.class), 20, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (matches.size() >= headLimit) return FileVisitResult.TERMINATE;
+
+                    Path relative = searchRoot.relativize(file);
+                    if (fileMatcher != null && !fileMatcher.matches(relative)) return FileVisitResult.CONTINUE;
+
+                    try {
+                        List<String> lines = Files.readAllLines(file);
+                        for (int i = 0; i < lines.size() && matches.size() < headLimit; i++) {
+                            if (regex.matcher(lines.get(i)).find()) {
+                                if ("files_with_matches".equals(outputMode)) {
+                                    if (matchedFiles.add(relative.toString())) {
+                                        matches.add(relative.toString());
+                                    }
+                                    break;
+                                } else if ("count".equals(outputMode)) {
+                                    matchedFiles.add(relative.toString());
+                                } else {
+                                    matches.add(relative + ":" + (i + 1) + ":" + lines.get(i));
+                                }
+                            }
+                        }
+                    } catch (IOException ignored) {}
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    String name = dir.getFileName() != null ? dir.getFileName().toString() : "";
+                    if (name.equals(".git") || name.equals("node_modules") || name.equals("build")
+                            || name.equals("target") || name.equals("__pycache__")) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+
+            if ("count".equals(outputMode)) {
+                matches.clear();
+                matches.add(String.valueOf(matchedFiles.size()));
+            }
+
+            boolean truncated = matches.size() >= headLimit;
+            long durationMs = System.currentTimeMillis() - start;
+
+            Map<String, Object> output = Map.of(
+                    "matches", matches,
+                    "matchCount", matches.size(),
+                    "durationMs", durationMs,
+                    "truncated", truncated
+            );
+
+            String summary = String.format("grep '%s': %d개 결과%s (java fallback)",
+                    pattern, matches.size(), truncated ? " (제한됨)" : "");
+
+            return new ToolResult(true, output, summary,
+                    List.of(), List.of(),
+                    Map.of("pattern", pattern, "matchCount", matches.size()),
+                    null, durationMs);
+
+        } catch (Exception e) {
+            return ToolResult.error("grep fallback 실패: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
     }

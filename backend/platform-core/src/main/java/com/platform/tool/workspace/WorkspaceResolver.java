@@ -29,12 +29,17 @@ public class WorkspaceResolver {
     }
 
     /**
-     * 주어진 상대 경로를 워크스페이스 루트 기준으로 절대 경로로 해석.
+     * 주어진 경로를 워크스페이스 기준으로 해석.
+     * - 절대 경로: 그대로 사용 (policy 검증에서 범위 체크)
+     * - 상대 경로: workspace root 기준으로 해석
      */
-    public Path resolve(ToolContext ctx, String relativePath) {
+    public Path resolve(ToolContext ctx, String path) {
+        Path inputPath = Path.of(path);
+        if (inputPath.isAbsolute()) {
+            return inputPath.normalize();
+        }
         Path root = getWorkspaceRoot(ctx);
-        Path resolved = root.resolve(relativePath).normalize();
-        return resolved;
+        return root.resolve(path).normalize();
     }
 
     /**
