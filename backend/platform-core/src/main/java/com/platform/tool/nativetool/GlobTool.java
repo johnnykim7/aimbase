@@ -52,6 +52,18 @@ public class GlobTool implements EnhancedToolExecutor {
         String pattern = (String) input.get("pattern");
         String basePath = (String) input.getOrDefault("path", null);
 
+        // 절대 경로 패턴 분리: "/abs/path/to/dir/*.md" → searchRoot=/abs/path/to/dir, pattern=*.md
+        if (pattern.startsWith("/") && pattern.contains("/")) {
+            int lastSlash = pattern.lastIndexOf('/');
+            String dirPart = pattern.substring(0, lastSlash);
+            String patternPart = pattern.substring(lastSlash + 1);
+            if (!patternPart.contains("/")) {
+                // 단순 파일명 패턴 (예: *.md, *.java) — dir 분리 적용
+                basePath = dirPart;
+                pattern = patternPart;
+            }
+        }
+
         Path searchRoot = basePath != null
                 ? workspaceResolver.resolve(ctx, basePath)
                 : workspaceResolver.getWorkspaceRoot(ctx);
@@ -63,6 +75,16 @@ public class GlobTool implements EnhancedToolExecutor {
 
         try {
             PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
+            // Java PathMatcher: "**/*.md" does not match root-level files (no subdirectory).
+            // Add a fallback matcher for the filename-only portion when pattern starts with "**/".
+            final PathMatcher filenameMatcher;
+            if (pattern.startsWith("**/")) {
+                String filePattern = pattern.substring(3); // e.g., "*.md"
+                filenameMatcher = FileSystems.getDefault().getPathMatcher("glob:" + filePattern);
+            } else {
+                filenameMatcher = null;
+            }
+
             List<Path> matches = new ArrayList<>();
             boolean[] truncated = {false};
 
@@ -74,7 +96,9 @@ public class GlobTool implements EnhancedToolExecutor {
                         return FileVisitResult.TERMINATE;
                     }
                     Path relative = searchRoot.relativize(file);
-                    if (matcher.matches(relative)) {
+                    boolean matched = matcher.matches(relative)
+                            || (filenameMatcher != null && filenameMatcher.matches(file.getFileName()));
+                    if (matched) {
                         matches.add(file);
                     }
                     return FileVisitResult.CONTINUE;
