@@ -23,7 +23,9 @@ public class ContextWindowManager {
 
     private static final int DEFAULT_MAX_TOKENS = 100_000;
     private static final int ESTIMATED_TOKENS_PER_CHAR = 4;
-    private static final double SUMMARY_TRIGGER_RATIO = 0.70;
+    // CR-029: OpenClaude 패턴 — 93% 임계값 (이전 70%에서 상향)
+    // 70%는 너무 빨리 요약 트리거하여 컨텍스트 낭비. 93%가 최적 (OpenClaude 기준)
+    private static final double SUMMARY_TRIGGER_RATIO = 0.93;
     private static final double SUMMARY_TARGET_RATIO = 0.50;
 
     private final ConversationSummarizer summarizer;

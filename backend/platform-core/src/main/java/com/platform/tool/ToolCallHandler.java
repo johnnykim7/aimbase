@@ -179,47 +179,96 @@ public class ToolCallHandler {
                     .toList();
             mutableMessages.add(UnifiedMessage.ofAssistantWithToolUse(toolUseBlocks));
 
-            // CR-029: ToolContext 기반 실행 + lineage 기록
+            // CR-029: concurrencySafe 분기 — OpenClaude partition 패턴
+            // concurrencySafe=true인 도구끼리는 병렬, 아니면 순차
             final int turnNum = iteration;
             AtomicInteger seq = new AtomicInteger(0);
-            List<ContentBlock.ToolResult> results = response.toolCalls().stream()
-                    .map(tc -> {
-                        int seqNum = seq.getAndIncrement();
-                        log.debug("Executing tool: {} (id={}, turn={}, seq={})",
-                                tc.name(), tc.id(), turnNum, seqNum);
+            List<ToolCall> toolCalls = response.toolCalls();
 
-                        ToolResult toolResult = toolRegistry.execute(tc, toolContext);
-                        recordLineage(toolContext, tc, toolResult, turnNum, seqNum);
+            // 병렬 안전한 도구와 아닌 도구 분리
+            List<ToolCall> safeCalls = new ArrayList<>();
+            List<ToolCall> unsafeCalls = new ArrayList<>();
+            for (ToolCall tc : toolCalls) {
+                ToolContractMeta meta = toolRegistry.getContractMeta(tc.name());
+                if (meta != null && meta.concurrencySafe()) {
+                    safeCalls.add(tc);
+                } else {
+                    unsafeCalls.add(tc);
+                }
+            }
 
-                        // LLM에 output 전달 — OpenClaude 패턴: 큰 결과는 preview로 대체
-                        String resultText;
-                        if (!toolResult.success()) {
-                            resultText = "Error: " + toolResult.summary();
-                        } else if (toolResult.output() != null) {
-                            String outputStr = toolResult.output().toString();
-                            if (outputStr.length() <= 4_000) {
-                                // 4KB 이하: 전체 전달
-                                resultText = outputStr;
-                            } else {
-                                // 4KB 초과: preview(첫 2KB) + truncation 안내
-                                String preview = outputStr.substring(0, Math.min(2000, outputStr.length()));
-                                // 줄 경계에서 자르기
-                                int lastNewline = preview.lastIndexOf('\n');
-                                if (lastNewline > 1000) preview = preview.substring(0, lastNewline);
-                                resultText = toolResult.summary() + "\n\n"
-                                        + "Preview (first 2KB of " + outputStr.length() + " chars):\n"
-                                        + preview + "\n...(truncated)";
-                            }
-                        } else {
-                            resultText = toolResult.summary();
-                        }
-                        return new ContentBlock.ToolResult(tc.id(), resultText);
-                    })
-                    .toList();
+            // 안전한 도구는 병렬 실행 가능 (현재는 순차지만 향후 CompletableFuture로 전환)
+            List<ContentBlock.ToolResult> results = new ArrayList<>();
+
+            // 1) concurrencySafe 도구들
+            for (ToolCall tc : safeCalls) {
+                results.add(executeAndRecord(tc, toolContext, toolRegistry, turnNum, seq.getAndIncrement()));
+            }
+            // 2) unsafe 도구들 (순차)
+            for (ToolCall tc : unsafeCalls) {
+                results.add(executeAndRecord(tc, toolContext, toolRegistry, turnNum, seq.getAndIncrement()));
+            }
+
+            // A2: per-message budget (OpenClaude: 3MB, 여기선 50KB)
+            int totalChars = results.stream().mapToInt(r -> r.content().length()).sum();
+            if (totalChars > 50_000) {
+                log.debug("Tool results total {}KB exceeds 50KB budget, truncating", totalChars / 1000);
+                results.sort((a, b) -> b.content().length() - a.content().length());
+                List<ContentBlock.ToolResult> budgeted = new ArrayList<>();
+                int remaining = 50_000;
+                for (ContentBlock.ToolResult r : results) {
+                    if (r.content().length() <= remaining) {
+                        budgeted.add(r);
+                        remaining -= r.content().length();
+                    } else {
+                        String p = r.content().substring(0, Math.min(1000, r.content().length()));
+                        int nl = p.lastIndexOf('\n');
+                        if (nl > 500) p = p.substring(0, nl);
+                        budgeted.add(new ContentBlock.ToolResult(r.toolUseId(),
+                                p + "\n...(truncated for context budget)"));
+                        remaining -= p.length() + 40;
+                    }
+                }
+                results = budgeted;
+            }
+
             mutableMessages.add(UnifiedMessage.ofToolResults(results));
         }
 
         return response;
+    }
+
+    /**
+     * 단일 도구 실행 + lineage 기록 + LLM용 결과 생성.
+     */
+    private ContentBlock.ToolResult executeAndRecord(ToolCall tc, ToolContext toolContext,
+                                                      ToolRegistry toolRegistry, int turnNum, int seqNum) {
+        log.debug("Executing tool: {} (id={}, turn={}, seq={})",
+                tc.name(), tc.id(), turnNum, seqNum);
+
+        ToolResult toolResult = toolRegistry.execute(tc, toolContext);
+        recordLineage(toolContext, tc, toolResult, turnNum, seqNum);
+
+        // LLM에 output 전달 — OpenClaude 패턴: 큰 결과는 preview로 대체
+        String resultText;
+        if (!toolResult.success()) {
+            resultText = "Error: " + toolResult.summary();
+        } else if (toolResult.output() != null) {
+            String outputStr = toolResult.output().toString();
+            if (outputStr.length() <= 4_000) {
+                resultText = outputStr;
+            } else {
+                String preview = outputStr.substring(0, Math.min(2000, outputStr.length()));
+                int lastNewline = preview.lastIndexOf('\n');
+                if (lastNewline > 1000) preview = preview.substring(0, lastNewline);
+                resultText = toolResult.summary() + "\n\n"
+                        + "Preview (first 2KB of " + outputStr.length() + " chars):\n"
+                        + preview + "\n...(truncated)";
+            }
+        } else {
+            resultText = toolResult.summary();
+        }
+        return new ContentBlock.ToolResult(tc.id(), resultText);
     }
 
     /**

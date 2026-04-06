@@ -158,12 +158,17 @@ public class OrchestratorEngine {
         }
 
         // CR-029: ContextAssemblyEngine으로 컨텍스트 조립 위임
-        // recipe가 없으면 기존과 동일한 default assembly (하위호환)
+        // B3: circuit breaker — 연속 압축 실패 시 skip
+        if (contextAssemblyEngine.shouldSkipCompact(sessionId)) {
+            log.warn("Session {} compact skipped (circuit breaker)", sessionId);
+        }
         AssemblyResult assemblyResult = contextAssemblyEngine.assemble(sessionId, null, request);
         List<UnifiedMessage> trimmedMessages = new ArrayList<>(assemblyResult.messages());
-        log.debug("Context assembled: recipe={}, tokens={}, layers={}",
+        // B5: effective window 로깅
+        log.debug("Context assembled: recipe={}, tokens={}/{}, layers={}",
                 assemblyResult.trace().recipeId(),
                 assemblyResult.trace().totalEstimatedTokens(),
+                assemblyResult.trace().effectiveWindow(),
                 assemblyResult.trace().includedLayers().size());
 
         // CR-029: ToolContext 생성 (통합용)
