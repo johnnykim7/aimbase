@@ -4,6 +4,7 @@ import com.anthropic.client.AnthropicClient;
 import com.anthropic.core.JsonValue;
 import com.anthropic.helpers.MessageAccumulator;
 import com.anthropic.models.messages.Base64ImageSource;
+import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.ContentBlockParam;
 import com.anthropic.models.messages.ImageBlockParam;
@@ -51,11 +52,16 @@ public class AnthropicAdapter implements LLMAdapter {
 
     private final AnthropicClient client;
 
+    // [input$/MTok, output$/MTok, cacheWrite$/MTok, cacheRead$/MTok]
     private static final Map<String, double[]> COSTS = Map.of(
-            "claude-opus-4-6",           new double[]{15.0, 75.0},
-            "claude-sonnet-4-5",         new double[]{3.0,  15.0},
-            "claude-haiku-4-5-20251001", new double[]{0.25,  1.25}
+            "claude-opus-4-6",           new double[]{15.0,  75.0, 18.75, 1.50},
+            "claude-sonnet-4-6",         new double[]{ 3.0,  15.0,  3.75, 0.30},
+            "claude-sonnet-4-5",         new double[]{ 3.0,  15.0,  3.75, 0.30},
+            "claude-haiku-4-5-20251001", new double[]{ 0.25,  1.25, 0.30, 0.03}
     );
+
+    private static final CacheControlEphemeral CACHE_EPHEMERAL =
+            CacheControlEphemeral.builder().build();
 
     public AnthropicAdapter(AnthropicClient client) {
         this.client = client;
@@ -103,8 +109,15 @@ public class AnthropicAdapter implements LLMAdapter {
                     log.warn("Failed to serialize schema for Anthropic prompt injection: {}", e.getMessage());
                 }
             }
+            // Prompt Cache: system prompt를 TextBlockParam 목록으로 전달하고 마지막 블록에 cache_control 적용
+            // 5분 ephemeral 캐시 → 반복 호출 시 cache_read 요금(0.1x)만 과금
             if (!systemText.isEmpty()) {
-                builder.system(systemText.toString());
+                builder.systemOfTextBlockParams(List.of(
+                        TextBlockParam.builder()
+                                .text(systemText.toString())
+                                .cacheControl(CACHE_EPHEMERAL)
+                                .build()
+                ));
             }
             builder.messages(userMessages);
 
@@ -129,7 +142,15 @@ public class AnthropicAdapter implements LLMAdapter {
             } else if (request.tools() != null && !request.tools().isEmpty()) {
                 @SuppressWarnings("unchecked")
                 List<Tool> anthropicTools = (List<Tool>) transformToolDefs(request.tools());
-                List<ToolUnion> toolUnions = anthropicTools.stream()
+                // Prompt Cache: 마지막 도구 정의에 cache_control 적용 (도구 목록 전체 캐시)
+                List<Tool> cachedTools = new ArrayList<>(anthropicTools);
+                if (!cachedTools.isEmpty()) {
+                    int last = cachedTools.size() - 1;
+                    cachedTools.set(last, cachedTools.get(last).toBuilder()
+                            .cacheControl(CACHE_EPHEMERAL)
+                            .build());
+                }
+                List<ToolUnion> toolUnions = cachedTools.stream()
                         .map(t -> ToolUnion.Companion.ofTool(t))
                         .toList();
                 builder.tools(toolUnions);
@@ -162,12 +183,21 @@ public class AnthropicAdapter implements LLMAdapter {
                             ? request.config().maxTokens() : 4096);
 
             List<MessageParam> userMessages = new ArrayList<>();
+            StringBuilder streamSystemText = new StringBuilder();
             for (UnifiedMessage msg : request.messages()) {
                 if (msg.role() == UnifiedMessage.Role.SYSTEM) {
-                    builder.system(extractText(msg));
+                    streamSystemText.append(extractText(msg));
                 } else {
                     userMessages.add(toAnthropicMessage(msg));
                 }
+            }
+            if (!streamSystemText.isEmpty()) {
+                builder.systemOfTextBlockParams(List.of(
+                        TextBlockParam.builder()
+                                .text(streamSystemText.toString())
+                                .cacheControl(CACHE_EPHEMERAL)
+                                .build()
+                ));
             }
             builder.messages(userMessages);
 
@@ -402,13 +432,21 @@ public class AnthropicAdapter implements LLMAdapter {
                 })
                 .toList();
 
+        int cacheCreate = msg.usage().cacheCreationInputTokens().orElse(0L).intValue();
+        int cacheRead   = msg.usage().cacheReadInputTokens().orElse(0L).intValue();
         TokenUsage usage = new TokenUsage(
                 (int) msg.usage().inputTokens(),
-                (int) msg.usage().outputTokens()
+                (int) msg.usage().outputTokens(),
+                cacheCreate,
+                cacheRead
         );
 
-        double[] costPerMillion = COSTS.getOrDefault(extractModelId(modelId), new double[]{3.0, 15.0});
-        double cost = (usage.inputTokens() * costPerMillion[0] + usage.outputTokens() * costPerMillion[1]) / 1_000_000;
+        // [input, output, cacheWrite, cacheRead] in $/MTok
+        double[] c = COSTS.getOrDefault(extractModelId(modelId), new double[]{3.0, 15.0, 3.75, 0.30});
+        double cost = (usage.inputTokens()              * c[0]
+                     + usage.outputTokens()             * c[1]
+                     + usage.cacheCreationInputTokens() * c[2]
+                     + usage.cacheReadInputTokens()     * c[3]) / 1_000_000;
 
         String stopReasonStr = msg.stopReason().map(StopReason::asString).orElse("end_turn");
         LLMResponse.FinishReason finishReason = switch (stopReasonStr) {

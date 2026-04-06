@@ -133,11 +133,17 @@ public class ChatController {
         result.put("session_id", response.sessionId());
         result.put("content", contentBlocks);
         result.put("actions_executed", response.actionsExecuted());
-        result.put("usage", Map.of(
-                "input_tokens", response.usage().inputTokens(),
-                "output_tokens", response.usage().outputTokens(),
-                "cost_usd", response.costUsd()
-        ));
+        Map<String, Object> usageMap = new java.util.LinkedHashMap<>();
+        usageMap.put("input_tokens", response.usage().inputTokens());
+        usageMap.put("output_tokens", response.usage().outputTokens());
+        usageMap.put("cost_usd", response.costUsd());
+        if (response.usage().cacheCreationInputTokens() > 0) {
+            usageMap.put("cache_creation_input_tokens", response.usage().cacheCreationInputTokens());
+        }
+        if (response.usage().cacheReadInputTokens() > 0) {
+            usageMap.put("cache_read_input_tokens", response.usage().cacheReadInputTokens());
+        }
+        result.put("usage", usageMap);
         return result;
     }
 

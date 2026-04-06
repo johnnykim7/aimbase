@@ -4,13 +4,13 @@ import com.platform.domain.ToolExecutionLogEntity;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
 import com.platform.repository.ToolExecutionLogRepository;
+import com.platform.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -263,30 +263,39 @@ public class ToolCallHandler {
     }
 
     /**
-     * CR-029: 도구 실행 lineage를 DB에 기록.
+     * CR-029: 도구 실행 lineage를 DB에 비동기 기록.
+     * Virtual Thread로 분리해 메인 요청 흐름의 지연을 제거.
+     * TenantContext(ThreadLocal)는 호출 시점에 캡처 후 새 스레드에 전달.
      */
     private void recordLineage(ToolContext ctx, ToolCall call, ToolResult result,
                                 int turnNumber, int sequenceInTurn) {
-        try {
-            ToolExecutionLogEntity logEntity = new ToolExecutionLogEntity();
-            logEntity.setSessionId(ctx.sessionId() != null ? ctx.sessionId() : "unknown");
-            logEntity.setWorkflowRunId(ctx.workflowRunId());
-            logEntity.setStepId(ctx.stepId());
-            logEntity.setTurnNumber(turnNumber);
-            logEntity.setSequenceInTurn(sequenceInTurn);
-            logEntity.setToolId(call.name());
-            logEntity.setToolName(call.name());
-            logEntity.setInputSummary(truncate(call.input() != null ? call.input().toString() : "", 500));
-            logEntity.setInputFull(call.input());
-            logEntity.setOutputSummary(truncate(result.summary() != null ? result.summary() : "", 500));
-            logEntity.setOutputFull(result.output() != null ? result.output().toString() : null);
-            logEntity.setSuccess(result.success());
-            logEntity.setDurationMs((int) result.durationMs());
-            logEntity.setRuntimeKind("native");
-            executionLogRepository.save(logEntity);
-        } catch (Exception e) {
-            log.warn("Failed to record tool execution lineage: {}", e.getMessage());
-        }
+        ToolExecutionLogEntity logEntity = new ToolExecutionLogEntity();
+        logEntity.setSessionId(ctx.sessionId() != null ? ctx.sessionId() : "unknown");
+        logEntity.setWorkflowRunId(ctx.workflowRunId());
+        logEntity.setStepId(ctx.stepId());
+        logEntity.setTurnNumber(turnNumber);
+        logEntity.setSequenceInTurn(sequenceInTurn);
+        logEntity.setToolId(call.name());
+        logEntity.setToolName(call.name());
+        logEntity.setInputSummary(truncate(call.input() != null ? call.input().toString() : "", 500));
+        logEntity.setInputFull(call.input());
+        logEntity.setOutputSummary(truncate(result.summary() != null ? result.summary() : "", 500));
+        logEntity.setOutputFull(result.output() != null ? result.output().toString() : null);
+        logEntity.setSuccess(result.success());
+        logEntity.setDurationMs((int) result.durationMs());
+        logEntity.setRuntimeKind("native");
+
+        String tenantId = TenantContext.getTenantId();
+        Thread.ofVirtual().start(() -> {
+            try {
+                if (tenantId != null) TenantContext.setTenantId(tenantId);
+                executionLogRepository.save(logEntity);
+            } catch (Exception e) {
+                log.warn("Failed to record tool execution lineage: {}", e.getMessage());
+            } finally {
+                TenantContext.clear();
+            }
+        });
     }
 
     private String truncate(String s, int maxLen) {
