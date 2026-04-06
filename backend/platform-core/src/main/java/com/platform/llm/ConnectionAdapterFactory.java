@@ -14,6 +14,7 @@ import com.platform.domain.ConnectionEntity;
 import com.platform.llm.adapter.AnthropicAdapter;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.adapter.OpenAIAdapter;
+import com.platform.llm.model.ModelConfig;
 import com.platform.repository.ConnectionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +66,31 @@ public class ConnectionAdapterFactory {
         ConnectionEntity conn = findConnection(connectionId);
         Object defaultModel = conn.getConfig().get("model");
         return defaultModel != null ? defaultModel.toString() : DEFAULT_MODEL;
+    }
+
+    /**
+     * CR-030: connection config에서 ModelConfig를 구성한다.
+     * config JSONB에 extended_thinking, thinking_budget_tokens 필드가 있으면 반영.
+     */
+    public ModelConfig resolveModelConfig(String connectionId) {
+        ConnectionEntity conn = findConnection(connectionId);
+        Map<String, Object> cfg = conn.getConfig();
+
+        Boolean extendedThinking = null;
+        Integer thinkingBudgetTokens = null;
+        Integer maxTokens = null;
+
+        if (cfg.containsKey("extended_thinking")) {
+            extendedThinking = Boolean.valueOf(cfg.get("extended_thinking").toString());
+        }
+        if (cfg.containsKey("thinking_budget_tokens")) {
+            thinkingBudgetTokens = ((Number) cfg.get("thinking_budget_tokens")).intValue();
+        }
+        if (cfg.containsKey("max_tokens")) {
+            maxTokens = ((Number) cfg.get("max_tokens")).intValue();
+        }
+
+        return new ModelConfig(null, maxTokens, null, null, extendedThinking, thinkingBudgetTokens);
     }
 
     /**

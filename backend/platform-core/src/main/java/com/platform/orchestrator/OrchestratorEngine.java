@@ -239,6 +239,11 @@ public class OrchestratorEngine {
         }
 
         // 5. LLM 호출 (Phase 2: actionsEnabled=true 시 tool use 루프)
+        // CR-030: connection config에서 ModelConfig 구성 (extended_thinking 등)
+        ModelConfig modelConfig = (request.connectionId() != null && !request.connectionId().isBlank())
+                ? connectionAdapterFactory.resolveModelConfig(request.connectionId())
+                : ModelConfig.defaults();
+
         LLMResponse llmResponse = null;
         long llmStart = System.currentTimeMillis();
         boolean llmSuccess = false;
@@ -247,12 +252,12 @@ public class OrchestratorEngine {
                 // Tool use 루프 — 최대 5회 반복 (CR-006 + CR-029: ToolContext + lineage)
                 llmResponse = toolCallHandler.executeLoop(
                         adapter, resolvedModel, trimmedMessages,
-                        ModelConfig.defaults(), sessionId, toolRegistry,
+                        modelConfig, sessionId, toolRegistry,
                         request.toolFilter(), request.toolChoice(), toolContext);
             } else {
                 LLMRequest llmRequest = new LLMRequest(
                         resolvedModel, trimmedMessages, null,
-                        ModelConfig.defaults(), false, sessionId, null, resolvedSchema);
+                        modelConfig, false, sessionId, null, resolvedSchema);
                 try {
                     if (useConnectionGroup) {
                         // CR-015: 커넥션 그룹 기반 호출 — 그룹 전략 + 커넥션 레벨 폴백
@@ -394,13 +399,17 @@ public class OrchestratorEngine {
             resolvedModel = modelRouter.resolveModelId(request.model());
         }
 
+        // CR-030: 스트리밍에도 connection config 기반 ModelConfig 적용
+        ModelConfig streamModelConfig = (request.connectionId() != null && !request.connectionId().isBlank())
+                ? connectionAdapterFactory.resolveModelConfig(request.connectionId())
+                : ModelConfig.defaults();
         LLMRequest llmRequest = new LLMRequest(
                 resolvedModel, trimmedMessages, null,
-                ModelConfig.defaults(), true, sessionId);
+                streamModelConfig, true, sessionId);
 
         StringBuilder fullResponse = new StringBuilder();
         adapter.chatStream(llmRequest, chunk -> {
-            if (chunk.delta() != null) {
+            if (chunk.delta() != null && !"thinking".equals(chunk.type())) {
                 fullResponse.append(chunk.delta());
             }
             if (chunk.done()) {

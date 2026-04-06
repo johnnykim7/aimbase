@@ -17,6 +17,8 @@ import com.anthropic.models.messages.Tool;
 import com.anthropic.models.messages.ToolResultBlockParam;
 import com.anthropic.models.messages.ToolUseBlock;
 import com.anthropic.models.messages.ToolUseBlockParam;
+import com.anthropic.models.messages.ThinkingBlock;
+import com.anthropic.models.messages.ThinkingConfigEnabled;
 import com.anthropic.models.messages.ToolChoice;
 import com.anthropic.models.messages.ToolChoiceAny;
 import com.anthropic.models.messages.ToolChoiceAuto;
@@ -121,7 +123,19 @@ public class AnthropicAdapter implements LLMAdapter {
             }
             builder.messages(userMessages);
 
-            if (request.config() != null && request.config().temperature() != null) {
+            // CR-030: Extended Thinking — thinking 파라미터 빌드
+            boolean thinkingEnabled = request.config() != null
+                    && Boolean.TRUE.equals(request.config().extendedThinking());
+            if (thinkingEnabled) {
+                int budget = request.config().thinkingBudgetTokens() != null
+                        ? request.config().thinkingBudgetTokens() : 10000;
+                int maxTok = request.config().maxTokens() != null
+                        ? request.config().maxTokens() : 16000;
+                // thinkingBudgetTokens must be >= 1024 and < maxTokens
+                budget = Math.max(1024, Math.min(budget, maxTok - 1));
+                builder.enabledThinking(budget);
+                // Extended Thinking 시 temperature 설정 불가 (Anthropic API 제약)
+            } else if (request.config() != null && request.config().temperature() != null) {
                 builder.temperature(request.config().temperature());
             }
 
@@ -201,6 +215,18 @@ public class AnthropicAdapter implements LLMAdapter {
             }
             builder.messages(userMessages);
 
+            // CR-030: 스트리밍에도 Extended Thinking 파라미터 적용
+            boolean streamThinking = request.config() != null
+                    && Boolean.TRUE.equals(request.config().extendedThinking());
+            if (streamThinking) {
+                int budget = request.config().thinkingBudgetTokens() != null
+                        ? request.config().thinkingBudgetTokens() : 10000;
+                int maxTok = request.config().maxTokens() != null
+                        ? request.config().maxTokens() : 16000;
+                budget = Math.max(1024, Math.min(budget, maxTok - 1));
+                builder.enabledThinking(budget);
+            }
+
             MessageAccumulator accumulator = MessageAccumulator.create();
             try (var stream = client.messages().createStreaming(builder.build())) {
                 stream.stream().forEach(event -> {
@@ -210,6 +236,10 @@ public class AnthropicAdapter implements LLMAdapter {
                         if (delta.isText()) {
                             String text = delta.asText().text();
                             chunkConsumer.accept(LLMStreamChunk.text(responseId, request.model(), text));
+                        } else if (delta.isThinking()) {
+                            // CR-030: thinking delta는 별도 타입으로 전달
+                            String thinking = delta.asThinking().thinking();
+                            chunkConsumer.accept(LLMStreamChunk.thinking(responseId, request.model(), thinking));
                         }
                     }
                 });
@@ -412,7 +442,13 @@ public class AnthropicAdapter implements LLMAdapter {
                                        String modelId, long latencyMs) {
         List<com.platform.llm.model.ContentBlock> content = msg.content().stream()
                 .map(block -> {
-                    if (block.isText()) {
+                    // CR-030: Extended Thinking 블록 처리
+                    if (block.isThinking()) {
+                        ThinkingBlock tb = block.asThinking();
+                        return (com.platform.llm.model.ContentBlock)
+                                new com.platform.llm.model.ContentBlock.Thinking(
+                                        tb.thinking(), tb.signature());
+                    } else if (block.isText()) {
                         return (com.platform.llm.model.ContentBlock)
                                 new com.platform.llm.model.ContentBlock.Text(block.asText().text());
                     } else if (block.isToolUse()) {

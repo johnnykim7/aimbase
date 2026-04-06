@@ -337,8 +337,8 @@ class LlmCallStepExecutorTest {
                     stepWithConfig(baseConfigWithSchema()), defaultContext());
 
             assertThat(result).containsEntry("_auto_split", true);
-            // Phase1+Phase2+plan+2parts+merge(2tries) = 8
-            verify(adapter, times(8)).chat(any());
+            // Phase1+Phase2+plan+2parts+merge(2tries) = 1+1+1+2+2 = 7
+            verify(adapter, times(7)).chat(any());
         }
 
         @Test

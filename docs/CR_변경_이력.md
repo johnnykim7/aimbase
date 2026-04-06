@@ -27,6 +27,7 @@
 | CR-016 | 공용 워크플로우 + 빌트인 도구 확장 | 변경 | High | v3.6.0 | ✅ 완료 |
 | CR-017 | FlowGuard Agent 범용 도구 확장 | 변경 | High | v3.7.0 | ✅ 완료 |
 | CR-029 | Aimbase 1단계 고도화 — Native Tool + Session Meta + Context Assembly + Runtime 재배치 | 변경 | High | v4.0.0 | 🔲 진행중 |
+| CR-030 | Aimbase 2단계 고도화 — Hook Architecture + Extended Thinking + Agent Isolation + 압축 전략 강화 | 변경 | High | v4.1.0 | 🔲 진행전 |
 
 ---
 
@@ -413,6 +414,24 @@
 - **영향 설계서**: T1-1, T1-3, T2-1, T2-2, T3-1, T3-2, T3-3, T3-4
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v4.0.0
 - **변경 일자**: 2026-04-06
+
+### CR-030 | Aimbase 2단계 고도화 — Hook Architecture + Extended Thinking + Agent Isolation + 압축 전략 강화
+- **대상 기능 ID**: PRD-186 ~ PRD-210 (신규 할당)
+- **변경 타입**: 변경
+- **변경 내용**: openclaude 벤치마킹 기반 플랫폼 기능 격차 해소 (6 Phase)
+  - **Phase 1 — Extended Thinking**: ContentBlock.Thinking sealed 서브타입 추가, TokenUsage에 thinking 토큰 필드, ModelConfig에 extendedThinking/thinkingBudgetTokens 필드, AnthropicAdapter thinking 파라미터 빌드 + ThinkingBlock 응답 파싱
+  - **Phase 2 — Hook Architecture**: HookEvent enum(9+ 이벤트: PreToolUse, PostToolUse, UserPromptSubmit, SessionStart/End, PreCompact/PostCompact, PermissionRequest/Denied), HookInput/HookOutput/HookDecision 모델, HookRegistry + HookExecutor + HookDispatcher, ToolCallHandler에 PreToolUse/PostToolUse 삽입, OrchestratorEngine에 UserPromptSubmit/SessionStart/End 삽입
+  - **Phase 3 — Permission AUTO Mode**: PermissionLevel.AUTO 추가, PermissionClassifier(요청 내용 기반 자동 권한 분류), PermissionRule(도구명 패턴 → 권한 매핑), EnhancedToolExecutor 도구별 최소 권한 검증
+  - **Phase 4 — Memory Scope**: MemoryScope enum(PRIVATE/TEAM/GLOBAL), ConversationMemoryEntity에 scope/teamId 필드, TeamMemoryService, 컨텍스트 주입 우선순위(PRIVATE > TEAM > GLOBAL), Flyway 마이그레이션
+  - **Phase 5 — 압축 보정 전략 강화**: CompactionStrategy enum(SNIP/MICRO/AUTO/SESSION_MEMORY/BLOCK), CompactionState/CompactionThresholds 모델, SessionMemoryCompactionService, ContextWindowManager 5전략 재구성, blocking limit + 환경변수 override
+  - **Phase 6 — Subagent + Worktree Isolation**: SubagentRequest/Result/Context 모델, SubagentRunner(포그라운드 CompletableFuture + 백그라운드 Virtual Thread), WorktreeManager(git worktree add/remove), WorkflowEngine AGENT_CALL 스텝 타입, AgentOrchestrator(병렬 에이전트 조율)
+- **변경 사유**: openclaude 전수 비교 결과 aimbase 플랫폼 레벨에서 누락된 핵심 메커니즘 식별. 훅 시스템(확장성), Extended Thinking(추론 품질), 에이전트 격리(안전성), 압축 전략(장시간 세션) 등 엔터프라이즈 플랫폼 필수 기능 확보
+- **영향 모듈**: Hook(신규), Agent(신규), LLM(ContentBlock/TokenUsage/AnthropicAdapter), Tool(PermissionLevel/PermissionClassifier), Session(MemoryScope/CompactionStrategy), Orchestrator, Workflow, Context
+- **영향도**: High
+- **영향 범위**: PRD-186 ~ PRD-210
+- **영향 설계서**: T1-1, T2-1, T2-2, T3-1, T3-2, T3-3
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v4.1.0
+- **변경 일자**: 2026-04-07
 
 ---
 

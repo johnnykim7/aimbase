@@ -87,9 +87,16 @@ public class LlmCallStepExecutor implements StepExecutor {
         Map<String, Object> responseSchema = config.containsKey("response_schema")
                 ? (Map<String, Object>) config.get("response_schema") : null;
 
+        // CR-030: step config에서 Extended Thinking 설정 추출
+        Boolean extThinking = config.containsKey("extended_thinking")
+                ? Boolean.valueOf(config.get("extended_thinking").toString()) : null;
+        Integer thinkingBudget = config.containsKey("thinking_budget_tokens")
+                ? ((Number) config.get("thinking_budget_tokens")).intValue() : null;
+
         // ── Phase 1: 일반 호출 ──
         int phase1Tokens = configCeiling != null ? Math.min(INITIAL_MAX_TOKENS, configCeiling) : INITIAL_MAX_TOKENS;
-        LLMResponse response = callLlm(adapter, resolvedModel, system, prompt, responseSchema, phase1Tokens, context);
+        LLMResponse response = callLlm(adapter, resolvedModel, system, prompt, responseSchema,
+                phase1Tokens, context, extThinking, thinkingBudget);
 
         if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
             return buildResult(response, resolvedModel);
@@ -368,17 +375,28 @@ public class LlmCallStepExecutor implements StepExecutor {
     /**
      * LLM 단일 호출 — 어댑터/모델/메시지/토큰을 받아 호출
      */
+    /** 하위 호환: thinking 설정 없는 호출 */
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,
                                  String system, String prompt,
                                  Map<String, Object> responseSchema,
                                  int maxTokens, StepContext context) {
+        return callLlm(adapter, resolvedModel, system, prompt, responseSchema,
+                maxTokens, context, null, null);
+    }
+
+    private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,
+                                 String system, String prompt,
+                                 Map<String, Object> responseSchema,
+                                 int maxTokens, StepContext context,
+                                 Boolean extendedThinking, Integer thinkingBudgetTokens) {
         List<UnifiedMessage> messages = new ArrayList<>();
         if (system != null && !system.isBlank()) {
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, system));
         }
         messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt));
 
-        ModelConfig modelConfig = new ModelConfig(null, maxTokens, null, null);
+        ModelConfig modelConfig = new ModelConfig(null, maxTokens, null, null,
+                extendedThinking, thinkingBudgetTokens);
         LLMRequest request = new LLMRequest(resolvedModel, messages, null,
                 modelConfig, false, context.workflowRunId(), null, responseSchema);
 
