@@ -254,17 +254,8 @@ public class ToolCallHandler {
         if (!toolResult.success()) {
             resultText = "Error: " + toolResult.summary();
         } else if (toolResult.output() != null) {
-            String outputStr = toolResult.output().toString();
-            if (outputStr.length() <= 8_000) {
-                resultText = outputStr;
-            } else {
-                String preview = outputStr.substring(0, Math.min(4000, outputStr.length()));
-                int lastNewline = preview.lastIndexOf('\n');
-                if (lastNewline > 2000) preview = preview.substring(0, lastNewline);
-                resultText = toolResult.summary() + "\n\n"
-                        + "Preview (first 4KB of " + outputStr.length() + " chars):\n"
-                        + preview + "\n...(truncated)";
-            }
+            // 전체 전달 — per-message budget이 총량 제어
+            resultText = toolResult.output().toString();
         } else {
             resultText = toolResult.summary();
         }
