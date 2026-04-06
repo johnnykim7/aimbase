@@ -142,15 +142,17 @@ public class GrepTool implements EnhancedToolExecutor {
                         List<String> lines = Files.readAllLines(file);
                         for (int i = 0; i < lines.size() && matches.size() < headLimit; i++) {
                             if (regex.matcher(lines.get(i)).find()) {
+                                // 절대 경로 반환 — LLM이 file_read에 그대로 전달 가능
+                                String absPath = file.toAbsolutePath().toString();
                                 if ("files_with_matches".equals(outputMode)) {
-                                    if (matchedFiles.add(relative.toString())) {
-                                        matches.add(relative.toString());
+                                    if (matchedFiles.add(absPath)) {
+                                        matches.add(absPath);
                                     }
                                     break;
                                 } else if ("count".equals(outputMode)) {
-                                    matchedFiles.add(relative.toString());
+                                    matchedFiles.add(absPath);
                                 } else {
-                                    matches.add(relative + ":" + (i + 1) + ":" + lines.get(i));
+                                    matches.add(absPath + ":" + (i + 1) + ":" + lines.get(i));
                                 }
                             }
                         }

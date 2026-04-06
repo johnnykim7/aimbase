@@ -105,8 +105,9 @@ public class GlobTool implements EnhancedToolExecutor {
                 }
             });
 
+            // 절대 경로 반환 — LLM이 file_read에 그대로 전달 가능
             List<String> filenames = matches.stream()
-                    .map(p -> searchRoot.relativize(p).toString())
+                    .map(p -> p.toAbsolutePath().toString())
                     .toList();
 
             long durationMs = System.currentTimeMillis() - start;

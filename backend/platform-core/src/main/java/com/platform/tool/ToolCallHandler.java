@@ -191,9 +191,19 @@ public class ToolCallHandler {
                         ToolResult toolResult = toolRegistry.execute(tc, toolContext);
                         recordLineage(toolContext, tc, toolResult, turnNum, seqNum);
 
-                        String resultText = toolResult.success()
-                                ? toolResult.summary()
-                                : "오류: " + toolResult.summary();
+                        // LLM에 전체 output 전달 (summary만으로는 파일명 등 세부 정보 누락)
+                        String resultText;
+                        if (!toolResult.success()) {
+                            resultText = "Error: " + toolResult.summary();
+                        } else if (toolResult.output() != null) {
+                            String outputStr = toolResult.output().toString();
+                            // 너무 크면 summary로 대체 (10KB 제한)
+                            resultText = outputStr.length() > 10_000
+                                    ? toolResult.summary()
+                                    : outputStr;
+                        } else {
+                            resultText = toolResult.summary();
+                        }
                         return new ContentBlock.ToolResult(tc.id(), resultText);
                     })
                     .toList();

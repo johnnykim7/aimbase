@@ -32,13 +32,13 @@ public class ContextAssemblyEngine {
     // CR-029: 네이티브 도구 사용 지침 (system prompt)
     private static final String TOOL_USAGE_PROMPT = """
             # Using your tools
-            - Do NOT guess file names or paths. Always use builtin_glob or builtin_grep first to find actual file paths, then pass those exact paths to builtin_file_read.
-            - When analyzing a directory, start with builtin_workspace_snapshot or builtin_glob to get the file list, then read specific files with builtin_file_read.
+            - CRITICAL: Do NOT guess or fabricate file names. NEVER invent file names like "overview.md" or "architecture.md". You MUST use the EXACT file names returned by builtin_glob or builtin_grep. File names may be in non-English languages (Korean, etc.) — copy them exactly as returned.
+            - When analyzing a directory, start with builtin_glob to get the actual file list, then pass those EXACT paths to builtin_file_read.
             - You can call multiple tools in a single response. If the calls are independent, make them in parallel.
-            - Results from previous tool calls are available in the conversation. Use the exact file paths returned by glob/grep when calling file_read.
-            - file_path parameters must be absolute paths.
+            - The file_path parameter MUST be an absolute path. Construct it by combining the directory path with the exact filename from glob results.
             - For code structure analysis, use builtin_structured_search instead of builtin_grep.
             - For document section reading, use builtin_document_section_read instead of reading the entire file.
+            - When builtin_glob returns relative paths, prepend the workspace root to make them absolute before passing to builtin_file_read.
             """;
     private static final int MAX_COMPACT_FAILURES = 3;
 
