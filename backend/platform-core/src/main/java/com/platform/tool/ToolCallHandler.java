@@ -191,16 +191,25 @@ public class ToolCallHandler {
                         ToolResult toolResult = toolRegistry.execute(tc, toolContext);
                         recordLineage(toolContext, tc, toolResult, turnNum, seqNum);
 
-                        // LLM에 전체 output 전달 (summary만으로는 파일명 등 세부 정보 누락)
+                        // LLM에 output 전달 — OpenClaude 패턴: 큰 결과는 preview로 대체
                         String resultText;
                         if (!toolResult.success()) {
                             resultText = "Error: " + toolResult.summary();
                         } else if (toolResult.output() != null) {
                             String outputStr = toolResult.output().toString();
-                            // 너무 크면 summary로 대체 (10KB 제한)
-                            resultText = outputStr.length() > 10_000
-                                    ? toolResult.summary()
-                                    : outputStr;
+                            if (outputStr.length() <= 4_000) {
+                                // 4KB 이하: 전체 전달
+                                resultText = outputStr;
+                            } else {
+                                // 4KB 초과: preview(첫 2KB) + truncation 안내
+                                String preview = outputStr.substring(0, Math.min(2000, outputStr.length()));
+                                // 줄 경계에서 자르기
+                                int lastNewline = preview.lastIndexOf('\n');
+                                if (lastNewline > 1000) preview = preview.substring(0, lastNewline);
+                                resultText = toolResult.summary() + "\n\n"
+                                        + "Preview (first 2KB of " + outputStr.length() + " chars):\n"
+                                        + preview + "\n...(truncated)";
+                            }
                         } else {
                             resultText = toolResult.summary();
                         }

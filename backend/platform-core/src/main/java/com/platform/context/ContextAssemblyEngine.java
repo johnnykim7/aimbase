@@ -32,13 +32,14 @@ public class ContextAssemblyEngine {
     // CR-029: 네이티브 도구 사용 지침 (system prompt)
     private static final String TOOL_USAGE_PROMPT = """
             # Using your tools
-            - CRITICAL: Do NOT guess or fabricate file names. NEVER invent file names like "overview.md" or "architecture.md". You MUST use the EXACT file names returned by builtin_glob or builtin_grep. File names may be in non-English languages (Korean, etc.) — copy them exactly as returned.
-            - When analyzing a directory, start with builtin_glob to get the actual file list, then pass those EXACT paths to builtin_file_read.
-            - You can call multiple tools in a single response. If the calls are independent, make them in parallel.
-            - The file_path parameter MUST be an absolute path. Construct it by combining the directory path with the exact filename from glob results.
+            - CRITICAL: Do NOT guess or fabricate file names. You MUST use the EXACT file names returned by builtin_glob or builtin_grep. File names may be in non-English languages (Korean, etc.) - copy them exactly as returned.
+            - When analyzing a directory: (1) builtin_glob to get file list, (2) builtin_file_read ALL files in ONE turn using parallel calls. Do NOT read files one by one across multiple turns.
+            - MAXIMIZE parallel tool calls. When you need to read multiple files, call builtin_file_read for ALL of them in a single response. This is critical for efficiency.
+            - The file_path parameter MUST be an absolute path. The glob results already contain absolute paths - pass them directly.
+            - Tool results may be truncated (preview only). This is normal - use the preview to understand the file content.
+            - After reading files, provide your analysis in the SAME response or the NEXT turn. Do not spend additional turns re-reading.
             - For code structure analysis, use builtin_structured_search instead of builtin_grep.
             - For document section reading, use builtin_document_section_read instead of reading the entire file.
-            - When builtin_glob returns relative paths, prepend the workspace root to make them absolute before passing to builtin_file_read.
             """;
     private static final int MAX_COMPACT_FAILURES = 3;
 
