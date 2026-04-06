@@ -29,7 +29,7 @@ public class PathInfoTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:path_info",
+                "builtin_path_info",
                 "파일 또는 디렉토리의 존재 여부, 타입, 크기, 수정 시간 등을 확인합니다.",
                 Map.of(
                         "type", "object",
@@ -43,7 +43,7 @@ public class PathInfoTool implements EnhancedToolExecutor {
 
     @Override
     public ToolContractMeta getContractMeta() {
-        return ToolContractMeta.readOnlyNative("builtin:path_info", List.of("filesystem", "metadata"));
+        return ToolContractMeta.readOnlyNative("builtin_path_info", List.of("filesystem", "metadata"));
     }
 
     @Override

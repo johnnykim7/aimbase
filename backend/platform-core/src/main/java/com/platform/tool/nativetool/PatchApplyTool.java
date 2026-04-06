@@ -26,7 +26,7 @@ public class PatchApplyTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:patch_apply",
+                "builtin_patch_apply",
                 "SafeEdit으로 생성한 패치를 적용합니다. confirm=false면 미리보기, true면 실제 적용.",
                 Map.of(
                         "type", "object",
@@ -42,7 +42,7 @@ public class PatchApplyTool implements EnhancedToolExecutor {
     @Override
     public ToolContractMeta getContractMeta() {
         return new ToolContractMeta(
-                "builtin:patch_apply", "1.0", ToolScope.NATIVE,
+                "builtin_patch_apply", "1.0", ToolScope.NATIVE,
                 PermissionLevel.FULL, true, false, false, false,
                 RetryPolicy.NONE, List.of("filesystem", "edit", "apply"), List.of("write", "apply")
         );

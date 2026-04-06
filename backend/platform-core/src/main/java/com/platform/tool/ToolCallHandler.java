@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ToolCallHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ToolCallHandler.class);
-    private static final int MAX_ITERATIONS = 5;
+    private static final int MAX_ITERATIONS = 15;
 
     private final ToolExecutionLogRepository executionLogRepository;
 

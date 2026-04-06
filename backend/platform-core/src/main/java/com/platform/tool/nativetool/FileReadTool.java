@@ -31,7 +31,7 @@ public class FileReadTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:file_read",
+                "builtin_file_read",
                 "파일 내용을 읽습니다. offset과 limit으로 범위를 제한할 수 있습니다.",
                 Map.of(
                         "type", "object",
@@ -48,7 +48,7 @@ public class FileReadTool implements EnhancedToolExecutor {
 
     @Override
     public ToolContractMeta getContractMeta() {
-        return ToolContractMeta.readOnlyNative("builtin:file_read", List.of("filesystem", "read"));
+        return ToolContractMeta.readOnlyNative("builtin_file_read", List.of("filesystem", "read"));
     }
 
     @Override

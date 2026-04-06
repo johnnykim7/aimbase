@@ -30,7 +30,7 @@ public class StructuredSearchTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:structured_search",
+                "builtin_structured_search",
                 "클래스, 함수, 설정 키, 엔티티 필드 등을 구조적으로 검색합니다.",
                 Map.of(
                         "type", "object",
@@ -50,7 +50,7 @@ public class StructuredSearchTool implements EnhancedToolExecutor {
 
     @Override
     public ToolContractMeta getContractMeta() {
-        return ToolContractMeta.readOnlyNative("builtin:structured_search", List.of("code", "search", "structure"));
+        return ToolContractMeta.readOnlyNative("builtin_structured_search", List.of("code", "search", "structure"));
     }
 
     @Override

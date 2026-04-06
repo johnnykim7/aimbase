@@ -27,7 +27,7 @@ public class WorkspaceSnapshotTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:workspace_snapshot",
+                "builtin_workspace_snapshot",
                 "워크스페이스의 디렉토리 구조, 언어/프레임워크 힌트, 최근 변경, git 상태를 요약합니다.",
                 Map.of(
                         "type", "object",
@@ -43,7 +43,7 @@ public class WorkspaceSnapshotTool implements EnhancedToolExecutor {
 
     @Override
     public ToolContractMeta getContractMeta() {
-        return ToolContractMeta.readOnlyNative("builtin:workspace_snapshot", List.of("workspace", "summary"));
+        return ToolContractMeta.readOnlyNative("builtin_workspace_snapshot", List.of("workspace", "summary"));
     }
 
     @Override

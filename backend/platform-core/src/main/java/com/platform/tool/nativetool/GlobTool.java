@@ -28,7 +28,7 @@ public class GlobTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:glob",
+                "builtin_glob",
                 "파일을 glob 패턴으로 검색합니다. 예: **/*.java, src/**/*.ts",
                 Map.of(
                         "type", "object",
@@ -43,7 +43,7 @@ public class GlobTool implements EnhancedToolExecutor {
 
     @Override
     public ToolContractMeta getContractMeta() {
-        return ToolContractMeta.readOnlyNative("builtin:glob", List.of("filesystem", "search"));
+        return ToolContractMeta.readOnlyNative("builtin_glob", List.of("filesystem", "search"));
     }
 
     @Override

@@ -34,7 +34,7 @@ public class SafeEditTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:safe_edit",
+                "builtin_safe_edit",
                 "파일의 텍스트를 찾아 변경하는 diff를 생성합니다. 실제 적용은 patch_apply 도구로 승인 후 진행합니다.",
                 Map.of(
                         "type", "object",
@@ -52,7 +52,7 @@ public class SafeEditTool implements EnhancedToolExecutor {
     @Override
     public ToolContractMeta getContractMeta() {
         return new ToolContractMeta(
-                "builtin:safe_edit", "1.0", ToolScope.NATIVE,
+                "builtin_safe_edit", "1.0", ToolScope.NATIVE,
                 PermissionLevel.RESTRICTED_WRITE, false, false, false, false,
                 RetryPolicy.NONE, List.of("filesystem", "edit"), List.of("write", "diff")
         );

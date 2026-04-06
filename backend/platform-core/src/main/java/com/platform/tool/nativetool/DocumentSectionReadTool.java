@@ -26,7 +26,7 @@ public class DocumentSectionReadTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:document_section_read",
+                "builtin_document_section_read",
                 "문서의 특정 섹션(heading 기준)이나 line range를 읽습니다.",
                 Map.of(
                         "type", "object",
@@ -43,7 +43,7 @@ public class DocumentSectionReadTool implements EnhancedToolExecutor {
 
     @Override
     public ToolContractMeta getContractMeta() {
-        return ToolContractMeta.readOnlyNative("builtin:document_section_read", List.of("document", "read", "section"));
+        return ToolContractMeta.readOnlyNative("builtin_document_section_read", List.of("document", "read", "section"));
     }
 
     @Override

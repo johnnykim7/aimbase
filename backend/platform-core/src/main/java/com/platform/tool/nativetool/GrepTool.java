@@ -35,7 +35,7 @@ public class GrepTool implements EnhancedToolExecutor {
     @Override
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
-                "builtin:grep",
+                "builtin_grep",
                 "텍스트 패턴을 검색합니다. ripgrep 기반으로 빠르게 동작합니다.",
                 Map.of(
                         "type", "object",
@@ -55,7 +55,7 @@ public class GrepTool implements EnhancedToolExecutor {
 
     @Override
     public ToolContractMeta getContractMeta() {
-        return ToolContractMeta.readOnlyNative("builtin:grep", List.of("filesystem", "search"));
+        return ToolContractMeta.readOnlyNative("builtin_grep", List.of("filesystem", "search"));
     }
 
     @Override

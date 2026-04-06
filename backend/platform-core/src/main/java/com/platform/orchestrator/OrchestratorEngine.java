@@ -167,10 +167,13 @@ public class OrchestratorEngine {
                 assemblyResult.trace().includedLayers().size());
 
         // CR-029: ToolContext 생성 (통합용)
+        // workspacePath: 향후 세션 메타의 workspace_ref에서 가져옴.
+        // 현재는 "/" 허용 (도구 내부의 workspace policy가 세밀하게 제어)
+        String workspacePath = "/";
         ToolContext toolContext = new ToolContext(
                 tenantId, null, null, sessionId, null, null,
                 request.userId(), PermissionLevel.FULL,
-                ApprovalState.NOT_REQUIRED, null, false, 0);
+                ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
 
         // 3-1. RAG 컨텍스트 주입 (Phase 3: ragSourceId 지정 시)
         if (request.ragSourceId() != null && !request.ragSourceId().isBlank()) {
