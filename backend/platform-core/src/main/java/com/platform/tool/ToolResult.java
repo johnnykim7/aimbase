@@ -27,6 +27,19 @@ public record ToolResult(
         return new ToolResult(false, null, message, List.of(), List.of(), Map.of(), null, 0);
     }
 
+    /**
+     * C1/C3: Permission 또는 Workspace Policy 거부.
+     * summary에 "[DENIED]" 프리픽스로 denial 여부를 표시.
+     */
+    public static ToolResult denied(String reason) {
+        return new ToolResult(false, null, "[DENIED] " + reason, List.of(), List.of(), Map.of(), null, 0);
+    }
+
+    /** C3: 이 결과가 실행 거부(denied)인지 판별 */
+    public boolean isDenied() {
+        return !success && summary != null && summary.startsWith("[DENIED]");
+    }
+
     /** durationMs를 설정한 복사본 반환 */
     public ToolResult withDuration(long durationMs) {
         return new ToolResult(success, output, summary, artifacts, sideEffects, auditPayload, nextContextHint, durationMs);

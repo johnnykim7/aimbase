@@ -283,7 +283,8 @@ public class ToolCallHandler {
         logEntity.setOutputFull(result.output() != null ? result.output().toString() : null);
         logEntity.setSuccess(result.success());
         logEntity.setDurationMs((int) result.durationMs());
-        logEntity.setRuntimeKind("native");
+        // C3: denied vs error vs native 구분 기록
+        logEntity.setRuntimeKind(result.isDenied() ? "denied" : "native");
 
         String tenantId = TenantContext.getTenantId();
         Thread.ofVirtual().start(() -> {

@@ -142,6 +142,17 @@ public class ToolRegistry {
         long start = System.currentTimeMillis();
         try {
             if (executor instanceof EnhancedToolExecutor enhanced) {
+                // C1: Permission 체크 — ctx.permissionLevel이 도구 요구 수준 미충족 시 거부
+                ToolContractMeta meta = enhanced.getContractMeta();
+                if (ctx != null && ctx.permissionLevel() != null && meta != null
+                        && meta.permissionLevel().ordinal() > ctx.permissionLevel().ordinal()) {
+                    String reason = String.format("tool '%s' requires %s but context allows %s",
+                            call.name(), meta.permissionLevel(), ctx.permissionLevel());
+                    log.warn("C1 permission denied: {}", reason);
+                    platformMetrics.recordToolExecution(call.name(), false);
+                    return ToolResult.denied(reason);
+                }
+
                 // 입력 검증
                 ValidationResult validation = enhanced.validateInput(call.input(), ctx);
                 if (!validation.valid()) {

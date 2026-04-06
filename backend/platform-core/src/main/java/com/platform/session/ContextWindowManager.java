@@ -8,6 +8,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 토큰 윈도우 관리 (PRD-127 확장).
@@ -32,8 +34,22 @@ public class ContextWindowManager {
 
     private final ConversationSummarizer summarizer;
 
+    // C2: 세션별 마지막 압축 요약 저장 (session_summary 소스에서 활용)
+    private final Map<String, String> sessionSummaries = new ConcurrentHashMap<>();
+
     public ContextWindowManager(ConversationSummarizer summarizer) {
         this.summarizer = summarizer;
+    }
+
+    /** C2: 세션 압축 요약 조회. 압축이 한 번도 안 됐으면 null. */
+    public String getSessionSummary(String sessionId) {
+        if (sessionId == null) return null;
+        return sessionSummaries.get(sessionId);
+    }
+
+    /** C2: 세션 요약 삭제 (세션 종료 시). */
+    public void clearSessionSummary(String sessionId) {
+        if (sessionId != null) sessionSummaries.remove(sessionId);
     }
 
     /**
@@ -84,6 +100,26 @@ public class ContextWindowManager {
 
     public List<UnifiedMessage> trim(List<UnifiedMessage> messages) {
         return trim(messages, DEFAULT_MAX_TOKENS);
+    }
+
+    /**
+     * C2: sessionId 포함 trim — 압축 요약 생성 시 sessionSummaries에 저장.
+     * ContextAssemblyEngine이 이 오버로드를 호출하면 session_summary 소스에서 활용 가능.
+     */
+    public List<UnifiedMessage> trim(List<UnifiedMessage> messages, int maxTokens, String sessionId) {
+        List<UnifiedMessage> result = trim(messages, maxTokens);
+        // 요약이 주입됐으면(SYSTEM 메시지에 "[이전 대화" 포함) sessionSummaries 갱신
+        if (sessionId != null) {
+            result.stream()
+                    .filter(m -> m.role() == com.platform.llm.model.UnifiedMessage.Role.SYSTEM)
+                    .flatMap(m -> m.content().stream())
+                    .filter(b -> b instanceof ContentBlock.Text t
+                            && (t.text().startsWith("[이전 대화 압축 요약]") || t.text().startsWith("[이전 대화 요약]")))
+                    .map(b -> ((ContentBlock.Text) b).text())
+                    .findFirst()
+                    .ifPresent(summary -> sessionSummaries.put(sessionId, summary));
+        }
+        return result;
     }
 
     /**

@@ -206,9 +206,9 @@ public class ContextAssemblyEngine {
             allMessages.addAll(request.messages());
         }
 
-        // 트리밍
+        // 트리밍 (C2: sessionId 전달 → 압축 요약 저장)
         List<UnifiedMessage> trimmed = contextWindowManager.trim(allMessages,
-                DEFAULT_TOKEN_BUDGET);
+                DEFAULT_TOKEN_BUDGET, sessionId);
 
         int estimatedTokens = contextWindowManager.estimateTokens(trimmed);
 
@@ -313,9 +313,12 @@ public class ContextAssemblyEngine {
                 yield policyMessages;
             }
             case "session_summary" -> {
-                // 세션 요약이 있으면 SYSTEM 메시지로 주입
-                var session = sessionStore.getMessages(sessionId);
-                yield List.of(); // 기본: 빈 목록 (요약은 memory에서 처리)
+                // C2: 압축 요약이 있으면 SYSTEM 메시지로 주입, 없으면 빈 목록
+                String summary = contextWindowManager.getSessionSummary(sessionId);
+                if (summary != null && !summary.isBlank()) {
+                    yield List.of(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, summary));
+                }
+                yield List.of();
             }
             case "recent_conversation" -> sessionStore.getMessages(sessionId);
             case "user_input" -> request.messages() != null ? request.messages() : List.of();
