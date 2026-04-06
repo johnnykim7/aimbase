@@ -30,11 +30,11 @@ public class PathInfoTool implements EnhancedToolExecutor {
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
                 "builtin_path_info",
-                "파일 또는 디렉토리의 존재 여부, 타입, 크기, 수정 시간 등을 확인합니다.",
+                "Checks file/directory existence, type, size, and modification time. Use before reading a file to verify it exists.",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
-                                "path", Map.of("type", "string", "description", "확인할 경로")
+                                "path", Map.of("type", "string", "description", "Path to check")
                         ),
                         "required", List.of("path")
                 )
@@ -59,7 +59,7 @@ public class PathInfoTool implements EnhancedToolExecutor {
         if (!Files.exists(resolved)) {
             output.put("isFile", false);
             output.put("isDirectory", false);
-            return new ToolResult(true, output, "경로 없음: " + pathStr,
+            return new ToolResult(true, output, "Path not found: " + pathStr,
                     List.of(), List.of(), Map.of(), null, System.currentTimeMillis() - start);
         }
 
@@ -80,8 +80,8 @@ public class PathInfoTool implements EnhancedToolExecutor {
             output.put("mimeType", mimeType != null ? mimeType : "unknown");
 
             String summary = attrs.isDirectory()
-                    ? String.format("디렉토리: %s", pathStr)
-                    : String.format("파일: %s (%d bytes)", pathStr, attrs.size());
+                    ? String.format("Directory: %s", pathStr)
+                    : String.format("File: %s (%d bytes)", pathStr, attrs.size());
 
             return new ToolResult(true, output, summary,
                     List.of(), List.of(), Map.of("path", pathStr),

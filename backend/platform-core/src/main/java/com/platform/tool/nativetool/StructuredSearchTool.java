@@ -31,16 +31,16 @@ public class StructuredSearchTool implements EnhancedToolExecutor {
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
                 "builtin_structured_search",
-                "클래스, 함수, 설정 키, 엔티티 필드 등을 구조적으로 검색합니다.",
+                "Searches for code structure elements like classes, functions, config keys, and entity fields.\n\n- search_type: class (class definitions), function (function definitions), config_key (config keys), entity_field (entity fields)\n- Use builtin_grep for general text search, use this tool for structural code element search",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
-                                "query", Map.of("type", "string", "description", "검색 대상 이름"),
+                                "query", Map.of("type", "string", "description", "Search query"),
                                 "search_type", Map.of("type", "string",
                                         "enum", List.of("class", "function", "config_key", "entity_field"),
-                                        "description", "검색 유형"),
-                                "path", Map.of("type", "string", "description", "검색 경로"),
-                                "glob", Map.of("type", "string", "description", "파일 필터 (예: *.java)"),
+                                        "description", "Search type"),
+                                "path", Map.of("type", "string", "description", "Search path"),
+                                "glob", Map.of("type", "string", "description", "File filter (e.g., *.java)"),
                                 "limit", Map.of("type", "integer", "default", DEFAULT_LIMIT)
                         ),
                         "required", List.of("query", "search_type")
@@ -127,7 +127,7 @@ public class StructuredSearchTool implements EnhancedToolExecutor {
                 }
             });
         } catch (IOException e) {
-            return ToolResult.error("구조 검색 실패: " + e.getMessage())
+            return ToolResult.error("Structured search failed: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
 
@@ -138,7 +138,7 @@ public class StructuredSearchTool implements EnhancedToolExecutor {
                 "durationMs", durationMs
         );
 
-        String summary = String.format("%s '%s': %d개 결과", searchType, query, results.size());
+        String summary = String.format("%s '%s': %d results", searchType, query, results.size());
         return new ToolResult(true, output, summary,
                 List.of(), List.of(),
                 Map.of("query", query, "searchType", searchType, "resultCount", results.size()),

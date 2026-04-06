@@ -29,12 +29,12 @@ public class GlobTool implements EnhancedToolExecutor {
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
                 "builtin_glob",
-                "파일을 glob 패턴으로 검색합니다. 예: **/*.java, src/**/*.ts",
+                "Fast file pattern matching. Returns matching file paths sorted by modification time.\n\n- Supports glob patterns like **/*.java or src/**/*.ts\n- Results are sorted by modification time (newest first)\n- Returns up to 100 matches\n- Use this tool when you need to find files by name pattern\n- Pass the returned file paths directly to builtin_file_read",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
-                                "pattern", Map.of("type", "string", "description", "glob 패턴"),
-                                "path", Map.of("type", "string", "description", "검색 시작 디렉토리 (기본: workspace root)")
+                                "pattern", Map.of("type", "string", "description", "Glob pattern (e.g., **/*.java)"),
+                                "path", Map.of("type", "string", "description", "Base directory (default: workspace root)")
                         ),
                         "required", List.of("pattern")
                 )
@@ -57,7 +57,7 @@ public class GlobTool implements EnhancedToolExecutor {
                 : workspaceResolver.getWorkspaceRoot(ctx);
 
         if (!Files.isDirectory(searchRoot)) {
-            return ToolResult.error("디렉토리가 존재하지 않습니다: " + searchRoot)
+            return ToolResult.error("Directory not found: " + searchRoot)
                     .withDuration(System.currentTimeMillis() - start);
         }
 
@@ -118,8 +118,8 @@ public class GlobTool implements EnhancedToolExecutor {
             );
 
             String summary = truncated[0]
-                    ? String.format("glob '%s': %d개 파일 (최대 %d개 제한)", pattern, filenames.size(), MAX_RESULTS)
-                    : String.format("glob '%s': %d개 파일", pattern, filenames.size());
+                    ? String.format("glob '%s': %d files (최대 %d개 제한)", pattern, filenames.size(), MAX_RESULTS)
+                    : String.format("glob '%s': %d files", pattern, filenames.size());
 
             return new ToolResult(true, output, summary,
                     List.of(), List.of(),
@@ -127,7 +127,7 @@ public class GlobTool implements EnhancedToolExecutor {
                     null, durationMs);
 
         } catch (IOException e) {
-            return ToolResult.error("glob 검색 실패: " + e.getMessage())
+            return ToolResult.error("Glob search failed: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
     }

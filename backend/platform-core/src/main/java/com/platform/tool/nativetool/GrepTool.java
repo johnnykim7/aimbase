@@ -36,15 +36,15 @@ public class GrepTool implements EnhancedToolExecutor {
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
                 "builtin_grep",
-                "텍스트 패턴을 검색합니다. ripgrep 기반으로 빠르게 동작합니다.",
+                "Searches file contents using regex patterns. ALWAYS use this tool for text search.\n\nUsage:\n- Supports full regex syntax (예: \"log.*Error\", \"function\\\\s+\\\\w+\")\n- Filter files with glob parameter (예: \"*.java\", \"**/*.tsx\")\n- output_mode: \"content\" shows matching lines, \"files_with_matches\" shows file paths only, \"count\" shows match counts\n- Pass returned file paths directly to builtin_file_read\n- Case insensitive search: case_insensitive=true",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
-                                "pattern", Map.of("type", "string", "description", "정규식 패턴"),
-                                "path", Map.of("type", "string", "description", "검색 경로 (기본: workspace root)"),
-                                "glob", Map.of("type", "string", "description", "파일 필터 glob (예: *.java)"),
+                                "pattern", Map.of("type", "string", "description", "Regex pattern"),
+                                "path", Map.of("type", "string", "description", "Search path (default: workspace root)"),
+                                "glob", Map.of("type", "string", "description", "File filter glob (e.g., *.java)"),
                                 "output_mode", Map.of("type", "string", "enum", List.of("content", "files_with_matches", "count"), "default", "files_with_matches"),
-                                "context", Map.of("type", "integer", "description", "전후 컨텍스트 라인 수"),
+                                "context", Map.of("type", "integer", "description", "Context lines before and after match"),
                                 "case_insensitive", Map.of("type", "boolean", "default", false),
                                 "head_limit", Map.of("type", "integer", "default", DEFAULT_HEAD_LIMIT)
                         ),
@@ -100,8 +100,8 @@ public class GrepTool implements EnhancedToolExecutor {
                     "truncated", truncated
             );
 
-            String summary = String.format("grep '%s': %d개 결과%s",
-                    pattern, lines.size(), truncated ? " (제한됨)" : "");
+            String summary = String.format("grep '%s': %d results%s",
+                    pattern, lines.size(), truncated ? " (limited)" : "");
 
             return new ToolResult(true, output, summary,
                     List.of(), List.of(),
@@ -109,7 +109,7 @@ public class GrepTool implements EnhancedToolExecutor {
                     null, durationMs);
 
         } catch (Exception e) {
-            log.info("ripgrep 미설치, Java regex fallback 사용: {}", e.getMessage());
+            log.info("ripgrep not found, using Java regex fallback: {}", e.getMessage());
             return javaFallbackGrep(pattern, searchRoot, glob, outputMode, caseInsensitive, headLimit, start);
         }
     }
@@ -189,8 +189,8 @@ public class GrepTool implements EnhancedToolExecutor {
                     "truncated", truncated
             );
 
-            String summary = String.format("grep '%s': %d개 결과%s (java fallback)",
-                    pattern, matches.size(), truncated ? " (제한됨)" : "");
+            String summary = String.format("grep '%s': %d results%s (java fallback)",
+                    pattern, matches.size(), truncated ? " (limited)" : "");
 
             return new ToolResult(true, output, summary,
                     List.of(), List.of(),
@@ -198,7 +198,7 @@ public class GrepTool implements EnhancedToolExecutor {
                     null, durationMs);
 
         } catch (Exception e) {
-            return ToolResult.error("grep fallback 실패: " + e.getMessage())
+            return ToolResult.error("Grep fallback failed: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
     }

@@ -35,14 +35,14 @@ public class SafeEditTool implements EnhancedToolExecutor {
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
                 "builtin_safe_edit",
-                "파일의 텍스트를 찾아 변경하는 diff를 생성합니다. 실제 적용은 patch_apply 도구로 승인 후 진행합니다.",
+                "Generates a diff/patch for file changes. Does NOT modify the actual file.\n\n- old_string must appear exactly once in the file (uniqueness validation)\n- Use replace_all=true to replace all occurrences\n- Returns a patchId. Use builtin_patch_apply to actually apply the change",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
-                                "file_path", Map.of("type", "string", "description", "편집할 파일 경로"),
-                                "old_string", Map.of("type", "string", "description", "찾을 문자열"),
-                                "new_string", Map.of("type", "string", "description", "대체할 문자열"),
-                                "replace_all", Map.of("type", "boolean", "default", false, "description", "모든 매칭 대체 여부")
+                                "file_path", Map.of("type", "string", "description", "File path to edit (absolute)"),
+                                "old_string", Map.of("type", "string", "description", "String to find"),
+                                "new_string", Map.of("type", "string", "description", "Replacement string"),
+                                "replace_all", Map.of("type", "boolean", "default", false, "description", "Replace all occurrences")
                         ),
                         "required", List.of("file_path", "old_string", "new_string")
                 )
@@ -62,11 +62,11 @@ public class SafeEditTool implements EnhancedToolExecutor {
     public ValidationResult validateInput(Map<String, Object> input, ToolContext ctx) {
         String filePath = (String) input.get("file_path");
         if (filePath == null || filePath.isBlank()) {
-            return ValidationResult.fail("file_path는 필수입니다.");
+            return ValidationResult.fail("file_path is required.");
         }
         String oldString = (String) input.get("old_string");
         if (oldString == null || oldString.isEmpty()) {
-            return ValidationResult.fail("old_string은 필수입니다.");
+            return ValidationResult.fail("old_string is required.");
         }
         return policyEngine.validatePath(ctx, WorkspacePolicy.defaultPolicy(), filePath);
     }
@@ -81,7 +81,7 @@ public class SafeEditTool implements EnhancedToolExecutor {
 
         Path resolved = workspaceResolver.resolve(ctx, filePath);
         if (!Files.exists(resolved)) {
-            return ToolResult.error("파일이 존재하지 않습니다: " + filePath)
+            return ToolResult.error("File not found: " + filePath)
                     .withDuration(System.currentTimeMillis() - start);
         }
 
@@ -92,12 +92,12 @@ public class SafeEditTool implements EnhancedToolExecutor {
             if (!replaceAll) {
                 int count = countOccurrences(content, oldString);
                 if (count == 0) {
-                    return ToolResult.error("old_string을 찾을 수 없습니다: " + truncate(oldString, 100))
+                    return ToolResult.error("old_string not found: " + truncate(oldString, 100))
                             .withDuration(System.currentTimeMillis() - start);
                 }
                 if (count > 1) {
                     return ToolResult.error(
-                            "old_string이 " + count + "곳에서 발견됨. replace_all=true를 사용하거나 더 구체적인 문자열을 지정하세요.")
+                            "old_string이 " + count + "occurrences found. Use replace_all=true or specify a more unique string.")
                             .withDuration(System.currentTimeMillis() - start);
                 }
             }
@@ -109,7 +109,7 @@ public class SafeEditTool implements EnhancedToolExecutor {
 
             boolean didChange = !content.equals(newContent);
             if (!didChange) {
-                return ToolResult.ok(Map.of("didChange", false), "변경 사항 없음")
+                return ToolResult.ok(Map.of("didChange", false), "No changes")
                         .withDuration(System.currentTimeMillis() - start);
             }
 
@@ -129,14 +129,14 @@ public class SafeEditTool implements EnhancedToolExecutor {
             );
 
             return new ToolResult(true, output,
-                    String.format("diff 생성: %s (patchId=%s)", filePath, patchId),
+                    String.format("Diff generated: %s (patchId=%s)", filePath, patchId),
                     List.of(new ToolArtifact("diff", filePath, diff)),
                     List.of(),
                     Map.of("file_path", filePath, "patchId", patchId),
                     null, System.currentTimeMillis() - start);
 
         } catch (IOException e) {
-            return ToolResult.error("파일 읽기 실패: " + e.getMessage())
+            return ToolResult.error("File read failed: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
     }

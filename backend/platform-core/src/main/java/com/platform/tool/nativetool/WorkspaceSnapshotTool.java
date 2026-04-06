@@ -28,11 +28,11 @@ public class WorkspaceSnapshotTool implements EnhancedToolExecutor {
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
                 "builtin_workspace_snapshot",
-                "워크스페이스의 디렉토리 구조, 언어/프레임워크 힌트, 최근 변경, git 상태를 요약합니다.",
+                "Summarizes workspace structure. Call this FIRST when analyzing a new project.\n\n- Provides directory tree, file count, language/framework hints, and git status in one call\n- Use depth parameter to control traversal depth (default: 3)\n- Use results to decide which files to read in detail with builtin_file_read",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
-                                "depth", Map.of("type", "integer", "default", 3, "description", "디렉토리 탐색 깊이"),
+                                "depth", Map.of("type", "integer", "default", 3, "description", "Directory traversal depth"),
                                 "include_git_status", Map.of("type", "boolean", "default", true),
                                 "include_recent_changes", Map.of("type", "boolean", "default", true),
                                 "recent_limit", Map.of("type", "integer", "default", 10)
@@ -56,7 +56,7 @@ public class WorkspaceSnapshotTool implements EnhancedToolExecutor {
 
         Path root = workspaceResolver.getWorkspaceRoot(ctx);
         if (!Files.isDirectory(root)) {
-            return ToolResult.error("워크스페이스 경로가 존재하지 않습니다: " + root)
+            return ToolResult.error("Workspace path not found: " + root)
                     .withDuration(System.currentTimeMillis() - start);
         }
 
@@ -69,7 +69,7 @@ public class WorkspaceSnapshotTool implements EnhancedToolExecutor {
         try {
             buildTree(root, root, depth, 0, tree, extCount, fileCount);
         } catch (IOException e) {
-            tree.append("트리 생성 실패: ").append(e.getMessage());
+            tree.append("Tree build failed: ").append(e.getMessage());
         }
         output.put("tree", tree.toString());
         output.put("fileCount", fileCount[0]);
@@ -91,7 +91,7 @@ public class WorkspaceSnapshotTool implements EnhancedToolExecutor {
         }
 
         long durationMs = System.currentTimeMillis() - start;
-        String summary = String.format("워크스페이스: %d개 파일, %s, %s",
+        String summary = String.format("Workspace: %d files, %s, %s",
                 fileCount[0], output.get("languageHint"), output.get("frameworkHint"));
 
         return new ToolResult(true, output, summary,

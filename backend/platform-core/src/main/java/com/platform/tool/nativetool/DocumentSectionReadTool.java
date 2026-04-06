@@ -27,14 +27,14 @@ public class DocumentSectionReadTool implements EnhancedToolExecutor {
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
                 "builtin_document_section_read",
-                "문서의 특정 섹션(heading 기준)이나 line range를 읽습니다.",
+                "Reads specific sections of a document by heading. Call without section param to list all sections first.\n\n- Call without section param to get a list of all sections\n- Specify section param to read only that heading's content\n- Use line_range to read specific line ranges (e.g., '10-30')\n- Best suited for Markdown documents with # headings",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
-                                "file_path", Map.of("type", "string", "description", "문서 파일 경로"),
-                                "section", Map.of("type", "string", "description", "찾을 heading 텍스트 (부분 매칭)"),
-                                "section_level", Map.of("type", "integer", "description", "heading 레벨 (1-6)"),
-                                "line_range", Map.of("type", "string", "description", "줄 범위 (예: 10-30)")
+                                "file_path", Map.of("type", "string", "description", "Document file path (absolute)"),
+                                "section", Map.of("type", "string", "description", "Heading text to find (partial match)"),
+                                "section_level", Map.of("type", "integer", "description", "Heading level (1-6)"),
+                                "line_range", Map.of("type", "string", "description", "Line range (e.g., 10-30)")
                         ),
                         "required", List.of("file_path")
                 )
@@ -56,7 +56,7 @@ public class DocumentSectionReadTool implements EnhancedToolExecutor {
 
         Path resolved = workspaceResolver.resolve(ctx, filePath);
         if (!Files.exists(resolved)) {
-            return ToolResult.error("파일이 존재하지 않습니다: " + filePath)
+            return ToolResult.error("File not found: " + filePath)
                     .withDuration(System.currentTimeMillis() - start);
         }
 
@@ -77,7 +77,7 @@ public class DocumentSectionReadTool implements EnhancedToolExecutor {
             return listSections(filePath, allLines, start);
 
         } catch (IOException e) {
-            return ToolResult.error("파일 읽기 실패: " + e.getMessage())
+            return ToolResult.error("File read failed: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
     }
@@ -131,7 +131,7 @@ public class DocumentSectionReadTool implements EnhancedToolExecutor {
         }
 
         if (sectionStart < 0) {
-            return ToolResult.error("섹션을 찾을 수 없습니다: " + query)
+            return ToolResult.error("Section not found: " + query)
                     .withDuration(System.currentTimeMillis() - start);
         }
 
@@ -180,7 +180,7 @@ public class DocumentSectionReadTool implements EnhancedToolExecutor {
         );
 
         return new ToolResult(true, output,
-                String.format("%s: %d개 섹션", filePath, sections.size()),
+                String.format("%s: %d sections", filePath, sections.size()),
                 List.of(), List.of(), Map.of(), null, System.currentTimeMillis() - start);
     }
 

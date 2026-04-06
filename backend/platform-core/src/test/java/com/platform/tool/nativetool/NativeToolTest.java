@@ -65,7 +65,7 @@ class NativeToolTest {
         ToolResult result = tool.execute(Map.of("file_path", "nonexistent.txt"), ctx);
 
         assertFalse(result.success());
-        assertTrue(result.summary().contains("존재하지 않"));
+        assertTrue(result.summary().contains("not found"));
     }
 
     @Test

@@ -32,14 +32,14 @@ public class FileReadTool implements EnhancedToolExecutor {
     public UnifiedToolDef getDefinition() {
         return new UnifiedToolDef(
                 "builtin_file_read",
-                "파일 내용을 읽습니다. offset과 limit으로 범위를 제한할 수 있습니다.",
+                "Reads a file from the filesystem.\n\nUsage:\n- The file_path parameter MUST be an absolute path, not a relative path\n- By default, reads up to 2000 lines from the beginning\n- Use offset and limit to read specific ranges\n- Results are returned in cat -n format with line numbers\n- Binary files return metadata only\n- Cannot read directories. Use builtin_glob to list directory contents\n- Pass exact file paths returned by builtin_glob or builtin_grep to this tool",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
-                                "file_path", Map.of("type", "string", "description", "읽을 파일 경로"),
-                                "offset", Map.of("type", "integer", "description", "시작 줄 번호 (0-based)", "default", 0),
-                                "limit", Map.of("type", "integer", "description", "최대 줄 수", "default", 2000),
-                                "encoding", Map.of("type", "string", "description", "인코딩", "default", "UTF-8")
+                                "file_path", Map.of("type", "string", "description", "File path to read (absolute path)"),
+                                "offset", Map.of("type", "integer", "description", "Line offset (0-based)", "default", 0),
+                                "limit", Map.of("type", "integer", "description", "Maximum number of lines to read", "default", 2000),
+                                "encoding", Map.of("type", "string", "description", "File encoding", "default", "UTF-8")
                         ),
                         "required", List.of("file_path")
                 )
@@ -55,7 +55,7 @@ public class FileReadTool implements EnhancedToolExecutor {
     public ValidationResult validateInput(Map<String, Object> input, ToolContext ctx) {
         String filePath = (String) input.get("file_path");
         if (filePath == null || filePath.isBlank()) {
-            return ValidationResult.fail("file_path는 필수입니다.");
+            return ValidationResult.fail("file_path is required.");
         }
         return policyEngine.validatePath(ctx, WorkspacePolicy.defaultPolicy(), filePath);
     }
@@ -70,7 +70,7 @@ public class FileReadTool implements EnhancedToolExecutor {
         try {
             Path resolved = workspaceResolver.resolve(ctx, filePath);
             if (!Files.exists(resolved)) {
-                return ToolResult.error("파일이 존재하지 않습니다: " + filePath)
+                return ToolResult.error("File not found: " + filePath)
                         .withDuration(System.currentTimeMillis() - start);
             }
 
@@ -84,10 +84,10 @@ public class FileReadTool implements EnhancedToolExecutor {
                     Map<String, Object> meta = Map.of(
                             "path", filePath, "extension", ext,
                             "size", size, "binary", true,
-                            "message", "바이너리 파일 — 메타 정보만 반환"
+                            "message", "Binary file - metadata only"
                     );
                     return new ToolResult(true, meta,
-                            "바이너리 파일: " + filePath + " (" + size + " bytes)",
+                            "Binary file: " + filePath + " (" + size + " bytes)",
                             List.of(new ToolArtifact("file_meta", filePath, meta)),
                             List.of(), Map.of(), null,
                             System.currentTimeMillis() - start);
@@ -130,7 +130,7 @@ public class FileReadTool implements EnhancedToolExecutor {
                     null, System.currentTimeMillis() - start);
 
         } catch (IOException e) {
-            return ToolResult.error("파일 읽기 실패: " + e.getMessage())
+            return ToolResult.error("File read failed: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
     }

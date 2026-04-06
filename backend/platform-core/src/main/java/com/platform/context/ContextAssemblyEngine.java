@@ -28,6 +28,18 @@ public class ContextAssemblyEngine {
     private static final Logger log = LoggerFactory.getLogger(ContextAssemblyEngine.class);
     private static final int DEFAULT_TOKEN_BUDGET = 100_000;
     private static final int OUTPUT_TOKEN_RESERVE = 20_000;
+
+    // CR-029: 네이티브 도구 사용 지침 (system prompt)
+    private static final String TOOL_USAGE_PROMPT = """
+            # Using your tools
+            - Do NOT guess file names or paths. Always use builtin_glob or builtin_grep first to find actual file paths, then pass those exact paths to builtin_file_read.
+            - When analyzing a directory, start with builtin_workspace_snapshot or builtin_glob to get the file list, then read specific files with builtin_file_read.
+            - You can call multiple tools in a single response. If the calls are independent, make them in parallel.
+            - Results from previous tool calls are available in the conversation. Use the exact file paths returned by glob/grep when calling file_read.
+            - file_path parameters must be absolute paths.
+            - For code structure analysis, use builtin_structured_search instead of builtin_grep.
+            - For document section reading, use builtin_document_section_read instead of reading the entire file.
+            """;
     private static final int MAX_COMPACT_FAILURES = 3;
 
     private final SessionStore sessionStore;
@@ -86,7 +98,10 @@ public class ContextAssemblyEngine {
                 sessionId, request.userId());
         List<UnifiedMessage> history = sessionStore.getMessages(sessionId);
 
-        List<UnifiedMessage> allMessages = new ArrayList<>(memoryContext);
+        List<UnifiedMessage> allMessages = new ArrayList<>();
+        // CR-029: 도구 사용 지침을 최상위 SYSTEM 메시지로 주입
+        allMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, TOOL_USAGE_PROMPT));
+        allMessages.addAll(memoryContext);
         allMessages.addAll(history);
         if (request.messages() != null) {
             allMessages.addAll(request.messages());
@@ -191,7 +206,13 @@ public class ContextAssemblyEngine {
      */
     private List<UnifiedMessage> provideSource(String source, String sessionId, ChatRequest request) {
         return switch (source) {
-            case "system_policy" -> memoryService.buildMemoryContext(sessionId, request.userId());
+            case "system_policy" -> {
+                List<UnifiedMessage> policyMessages = new ArrayList<>();
+                // CR-029: 도구 사용 지침을 system_policy 소스 최상위에 주입
+                policyMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, TOOL_USAGE_PROMPT));
+                policyMessages.addAll(memoryService.buildMemoryContext(sessionId, request.userId()));
+                yield policyMessages;
+            }
             case "session_summary" -> {
                 // 세션 요약이 있으면 SYSTEM 메시지로 주입
                 var session = sessionStore.getMessages(sessionId);
