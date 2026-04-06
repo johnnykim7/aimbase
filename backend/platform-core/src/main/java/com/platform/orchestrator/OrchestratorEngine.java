@@ -301,6 +301,16 @@ public class OrchestratorEngine {
             } catch (Exception e) {
                 log.warn("Tracing record failed: {}", e.getMessage());
             }
+
+            // B4: 실측 토큰으로 보정 비율 갱신 (다음 assemble에서 사용)
+            // total = input + cacheCreation + cacheRead (캐시 포함해야 추정 비교가 정확)
+            if (llmResponse != null && llmResponse.usage() != null && inputTokens > 0) {
+                int totalActual = (int) inputTokens
+                        + llmResponse.usage().cacheCreationInputTokens()
+                        + llmResponse.usage().cacheReadInputTokens();
+                int estimated = assemblyResult.trace().totalEstimatedTokens();
+                contextAssemblyEngine.updateCalibration(sessionId, totalActual, estimated);
+            }
         }
 
         // 5-1. CR-007: 구조화 출력 — 응답 검증 + 재시도 + ContentBlock 변환

@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * CR-029 (PRD-182): 컨텍스트 조립 엔진.
@@ -144,6 +145,10 @@ public class ContextAssemblyEngine {
     // 세션별 연속 압축 실패 카운터 (circuit breaker)
     private final Map<String, Integer> compactFailures = new HashMap<>();
 
+    // B4: 세션별 토큰 추정 보정 비율 (실측 / char*4 추정)
+    // 1.0 = 보정 없음, >1.0 = char*4가 과소 추정, <1.0 = 과대 추정
+    private final Map<String, Double> calibrationRatios = new ConcurrentHashMap<>();
+
     public ContextAssemblyEngine(
             SessionStore sessionStore,
             MemoryService memoryService,
@@ -210,9 +215,9 @@ public class ContextAssemblyEngine {
         AssemblyTrace trace = new AssemblyTrace(
                 null, resolveReason,
                 List.of(
-                        new AssembledLayer("memory", memoryContext, estimateTokens(memoryContext), 100, false),
-                        new AssembledLayer("history", history, estimateTokens(history), 80, true),
-                        new AssembledLayer("user_input", request.messages() != null ? request.messages() : List.of(), estimateTokens(request.messages()), 100, false)
+                        new AssembledLayer("memory", memoryContext, estimateTokens(memoryContext, sessionId), 100, false),
+                        new AssembledLayer("history", history, estimateTokens(history, sessionId), 80, true),
+                        new AssembledLayer("user_input", request.messages() != null ? request.messages() : List.of(), estimateTokens(request.messages(), sessionId), 100, false)
                 ),
                 List.of(), List.of(),
                 estimatedTokens, DEFAULT_TOKEN_BUDGET,
@@ -334,10 +339,14 @@ public class ContextAssemblyEngine {
     }
 
     /**
-     * 하이브리드 토큰 추정: char / 4.
-     * 향후 API 실측 값과 결합.
+     * B4: 하이브리드 토큰 추정 — char/4 기반에 세션 보정 비율 적용.
+     * updateCalibration()이 호출된 세션은 실측 기반 비율로 보정.
      */
     private int estimateTokens(List<UnifiedMessage> messages) {
+        return estimateTokens(messages, null);
+    }
+
+    private int estimateTokens(List<UnifiedMessage> messages, String sessionId) {
         if (messages == null || messages.isEmpty()) return 0;
         int chars = 0;
         for (UnifiedMessage msg : messages) {
@@ -349,7 +358,27 @@ public class ContextAssemblyEngine {
                 }
             }
         }
-        return chars / 4;
+        int rawEstimate = chars / 4;
+        if (sessionId == null) return rawEstimate;
+        double ratio = calibrationRatios.getOrDefault(sessionId, 1.0);
+        return (int) (rawEstimate * ratio);
+    }
+
+    /**
+     * B4: LLM 실측 토큰 수로 보정 비율 갱신.
+     * 지수 이동 평균(EMA α=0.3)으로 점진 수렴.
+     *
+     * @param sessionId      세션 ID
+     * @param actualTokens   API 응답의 실제 input_tokens
+     * @param estimatedTokens assemble 시 추정한 토큰 수
+     */
+    public void updateCalibration(String sessionId, int actualTokens, int estimatedTokens) {
+        if (sessionId == null || estimatedTokens <= 0 || actualTokens <= 0) return;
+        double newRatio = (double) actualTokens / estimatedTokens;
+        calibrationRatios.merge(sessionId, newRatio,
+                (old, next) -> old * 0.7 + next * 0.3);  // EMA α=0.3
+        log.debug("Token calibration updated: session={}, ratio={} (actual={}, est={})",
+                sessionId, String.format("%.2f", calibrationRatios.get(sessionId)), actualTokens, estimatedTokens);
     }
 
     /**
