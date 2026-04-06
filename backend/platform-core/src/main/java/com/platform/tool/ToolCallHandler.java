@@ -211,8 +211,8 @@ public class ToolCallHandler {
 
             // A2: per-message budget (OpenClaude: 3MB, 여기선 50KB)
             int totalChars = results.stream().mapToInt(r -> r.content().length()).sum();
-            if (totalChars > 50_000) {
-                log.debug("Tool results total {}KB exceeds 50KB budget, truncating", totalChars / 1000);
+            if (totalChars > 80_000) {
+                log.debug("Tool results total {}KB exceeds 80KB budget, truncating", totalChars / 1000);
                 results.sort((a, b) -> b.content().length() - a.content().length());
                 List<ContentBlock.ToolResult> budgeted = new ArrayList<>();
                 int remaining = 50_000;
@@ -221,9 +221,9 @@ public class ToolCallHandler {
                         budgeted.add(r);
                         remaining -= r.content().length();
                     } else {
-                        String p = r.content().substring(0, Math.min(1000, r.content().length()));
+                        String p = r.content().substring(0, Math.min(2000, r.content().length()));
                         int nl = p.lastIndexOf('\n');
-                        if (nl > 500) p = p.substring(0, nl);
+                        if (nl > 1000) p = p.substring(0, nl);
                         budgeted.add(new ContentBlock.ToolResult(r.toolUseId(),
                                 p + "\n...(truncated for context budget)"));
                         remaining -= p.length() + 40;
@@ -255,14 +255,14 @@ public class ToolCallHandler {
             resultText = "Error: " + toolResult.summary();
         } else if (toolResult.output() != null) {
             String outputStr = toolResult.output().toString();
-            if (outputStr.length() <= 4_000) {
+            if (outputStr.length() <= 8_000) {
                 resultText = outputStr;
             } else {
-                String preview = outputStr.substring(0, Math.min(2000, outputStr.length()));
+                String preview = outputStr.substring(0, Math.min(4000, outputStr.length()));
                 int lastNewline = preview.lastIndexOf('\n');
-                if (lastNewline > 1000) preview = preview.substring(0, lastNewline);
+                if (lastNewline > 2000) preview = preview.substring(0, lastNewline);
                 resultText = toolResult.summary() + "\n\n"
-                        + "Preview (first 2KB of " + outputStr.length() + " chars):\n"
+                        + "Preview (first 4KB of " + outputStr.length() + " chars):\n"
                         + preview + "\n...(truncated)";
             }
         } else {
