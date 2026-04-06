@@ -7,6 +7,7 @@ import com.platform.action.model.ActionPolicy;
 import com.platform.action.model.ActionRequest;
 import com.platform.action.model.ActionTarget;
 import com.platform.domain.PolicyEntity;
+import com.platform.hook.HookDispatcher;
 import com.platform.monitoring.PlatformMetrics;
 import com.platform.policy.model.PolicyResult;
 import com.platform.repository.PolicyRepository;
@@ -38,6 +39,7 @@ class PolicyEngineTransformTest {
     @Mock private MCPSafetyClient mcpSafetyClient;
     @Mock private RateLimiter rateLimiter;
     @Mock private PlatformMetrics platformMetrics;
+    @Mock private HookDispatcher hookDispatcher;
 
     private PolicyEngine engine;
 
@@ -45,7 +47,7 @@ class PolicyEngineTransformTest {
     void setUp() {
         engine = new PolicyEngine(
                 policyRepository, auditLogger, new ObjectMapper(),
-                piiMasker, mcpSafetyClient, rateLimiter, platformMetrics);
+                piiMasker, mcpSafetyClient, rateLimiter, platformMetrics, hookDispatcher);
     }
 
     private ActionRequest buildRequest(Map<String, Object> data) {

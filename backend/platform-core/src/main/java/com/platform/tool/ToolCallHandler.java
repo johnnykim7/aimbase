@@ -1,6 +1,11 @@
 package com.platform.tool;
 
 import com.platform.domain.ToolExecutionLogEntity;
+import com.platform.hook.HookDecision;
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
+import com.platform.hook.HookOutput;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
 import com.platform.repository.ToolExecutionLogRepository;
@@ -11,6 +16,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -32,9 +38,12 @@ public class ToolCallHandler {
     private static final int MAX_ITERATIONS = 15;
 
     private final ToolExecutionLogRepository executionLogRepository;
+    private final HookDispatcher hookDispatcher;
 
-    public ToolCallHandler(ToolExecutionLogRepository executionLogRepository) {
+    public ToolCallHandler(ToolExecutionLogRepository executionLogRepository,
+                           HookDispatcher hookDispatcher) {
         this.executionLogRepository = executionLogRepository;
+        this.hookDispatcher = hookDispatcher;
     }
 
     /**
@@ -112,14 +121,43 @@ public class ToolCallHandler {
                     .toList();
             mutableMessages.add(UnifiedMessage.ofAssistantWithToolUse(toolUseBlocks));
 
-            // 2. 각 도구 실행 → tool_result 메시지 기록
-            List<ContentBlock.ToolResult> results = response.toolCalls().stream()
-                    .map(tc -> {
-                        log.debug("Executing tool: {} (id={})", tc.name(), tc.id());
-                        String result = toolRegistry.execute(tc);
-                        return new ContentBlock.ToolResult(tc.id(), result);
-                    })
-                    .toList();
+            // 2. 각 도구 실행 → tool_result 메시지 기록 (CR-030: 훅 삽입)
+            List<ContentBlock.ToolResult> results = new ArrayList<>();
+            for (ToolCall tc : response.toolCalls()) {
+                log.debug("Executing tool: {} (id={})", tc.name(), tc.id());
+
+                // PRD-193: PreToolUse 훅
+                HookOutput preHook = hookDispatcher.dispatch(
+                        HookEvent.PRE_TOOL_USE,
+                        HookInput.of(HookEvent.PRE_TOOL_USE, sessionId, tc.name(), tc.input()),
+                        tc.name());
+                if (preHook.decision() == HookDecision.BLOCK) {
+                    log.info("Tool execution blocked by hook: tool={}", tc.name());
+                    results.add(new ContentBlock.ToolResult(tc.id(),
+                            "Tool execution blocked by policy hook"));
+                    continue;
+                }
+
+                try {
+                    String result = toolRegistry.execute(tc);
+                    results.add(new ContentBlock.ToolResult(tc.id(), result));
+
+                    // PRD-193: PostToolUse 훅
+                    hookDispatcher.dispatch(
+                            HookEvent.POST_TOOL_USE,
+                            HookInput.of(HookEvent.POST_TOOL_USE, sessionId, tc.name(),
+                                    Map.of("result", result != null ? result : "")),
+                            tc.name());
+                } catch (Exception e) {
+                    // PRD-193: PostToolUseFailure 훅
+                    hookDispatcher.dispatch(
+                            HookEvent.POST_TOOL_USE_FAILURE,
+                            HookInput.of(HookEvent.POST_TOOL_USE_FAILURE, sessionId, tc.name(),
+                                    Map.of("error", e.getMessage() != null ? e.getMessage() : "unknown")),
+                            tc.name());
+                    results.add(new ContentBlock.ToolResult(tc.id(), "Error: " + e.getMessage()));
+                }
+            }
             mutableMessages.add(UnifiedMessage.ofToolResults(results));
         }
 
@@ -240,14 +278,52 @@ public class ToolCallHandler {
 
     /**
      * 단일 도구 실행 + lineage 기록 + LLM용 결과 생성.
+     * CR-030: PreToolUse / PostToolUse / PostToolUseFailure 훅 삽입.
      */
     private ContentBlock.ToolResult executeAndRecord(ToolCall tc, ToolContext toolContext,
                                                       ToolRegistry toolRegistry, int turnNum, int seqNum) {
         log.debug("Executing tool: {} (id={}, turn={}, seq={})",
                 tc.name(), tc.id(), turnNum, seqNum);
 
-        ToolResult toolResult = toolRegistry.execute(tc, toolContext);
+        // PRD-193: PreToolUse 훅
+        HookOutput preHook = hookDispatcher.dispatch(
+                HookEvent.PRE_TOOL_USE,
+                HookInput.of(HookEvent.PRE_TOOL_USE, toolContext.sessionId(), tc.name(), tc.input()),
+                tc.name());
+        if (preHook.decision() == HookDecision.BLOCK) {
+            log.info("Tool execution blocked by hook: tool={}, turn={}", tc.name(), turnNum);
+            return new ContentBlock.ToolResult(tc.id(), "Tool execution blocked by policy hook");
+        }
+
+        ToolResult toolResult;
+        try {
+            toolResult = toolRegistry.execute(tc, toolContext);
+        } catch (Exception e) {
+            // PRD-193: PostToolUseFailure 훅
+            hookDispatcher.dispatch(
+                    HookEvent.POST_TOOL_USE_FAILURE,
+                    HookInput.of(HookEvent.POST_TOOL_USE_FAILURE, toolContext.sessionId(), tc.name(),
+                            Map.of("error", e.getMessage() != null ? e.getMessage() : "unknown")),
+                    tc.name());
+            throw e;
+        }
+
         recordLineage(toolContext, tc, toolResult, turnNum, seqNum);
+
+        // PRD-193: PostToolUse / PostToolUseFailure 훅
+        if (toolResult.success()) {
+            hookDispatcher.dispatch(
+                    HookEvent.POST_TOOL_USE,
+                    HookInput.of(HookEvent.POST_TOOL_USE, toolContext.sessionId(), tc.name(),
+                            Map.of("result", toolResult.summary() != null ? toolResult.summary() : "")),
+                    tc.name());
+        } else {
+            hookDispatcher.dispatch(
+                    HookEvent.POST_TOOL_USE_FAILURE,
+                    HookInput.of(HookEvent.POST_TOOL_USE_FAILURE, toolContext.sessionId(), tc.name(),
+                            Map.of("error", toolResult.summary() != null ? toolResult.summary() : "unknown")),
+                    tc.name());
+        }
 
         // LLM에 output 전달 — OpenClaude 패턴: 큰 결과는 preview로 대체
         String resultText;

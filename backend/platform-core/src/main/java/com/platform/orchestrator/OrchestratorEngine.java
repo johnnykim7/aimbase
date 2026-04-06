@@ -2,6 +2,11 @@ package com.platform.orchestrator;
 
 import com.platform.action.ActionExecutor;
 import com.platform.action.model.*;
+import com.platform.hook.HookDecision;
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
+import com.platform.hook.HookOutput;
 import com.platform.domain.UsageLogEntity;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.ConnectionGroupSelector;
@@ -88,6 +93,7 @@ public class OrchestratorEngine {
     private final QuotaService quotaService;
     private final ContextAssemblyEngine contextAssemblyEngine;
     private final RuntimeRegistry runtimeRegistry;
+    private final HookDispatcher hookDispatcher;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -115,7 +121,8 @@ public class OrchestratorEngine {
             MemoryService memoryService,
             QuotaService quotaService,
             ContextAssemblyEngine contextAssemblyEngine,
-            RuntimeRegistry runtimeRegistry
+            RuntimeRegistry runtimeRegistry,
+            HookDispatcher hookDispatcher
     ) {
         this.modelRouter = modelRouter;
         this.fallbackChainExecutor = fallbackChainExecutor;
@@ -141,6 +148,7 @@ public class OrchestratorEngine {
         this.quotaService = quotaService;
         this.contextAssemblyEngine = contextAssemblyEngine;
         this.runtimeRegistry = runtimeRegistry;
+        this.hookDispatcher = hookDispatcher;
     }
 
     /**
@@ -155,6 +163,27 @@ public class OrchestratorEngine {
         String tenantId = TenantContext.getTenantId();
         if (tenantId != null) {
             quotaService.checkLLMQuota(tenantId, 1000).throwIfExceeded();
+        }
+
+        // CR-030 PRD-194: SessionStart 훅 (세션이 새로 생성된 경우)
+        if (request.sessionId() == null) {
+            hookDispatcher.dispatch(HookEvent.SESSION_START,
+                    HookInput.of(HookEvent.SESSION_START, sessionId,
+                            Map.of("userId", request.userId() != null ? request.userId() : ""),
+                            Map.of()));
+        }
+
+        // CR-030 PRD-194: UserPromptSubmit 훅 (프롬프트 수정 가능)
+        HookOutput promptHook = hookDispatcher.dispatch(HookEvent.USER_PROMPT_SUBMIT,
+                HookInput.of(HookEvent.USER_PROMPT_SUBMIT, sessionId,
+                        Map.of("prompt", extractLastUserMessage(request) != null ? extractLastUserMessage(request) : ""),
+                        Map.of("userId", request.userId() != null ? request.userId() : "")));
+        if (promptHook.decision() == HookDecision.BLOCK) {
+            log.info("User prompt blocked by hook: sessionId={}", sessionId);
+            return new ChatResponse(
+                    "hook-blocked", "none", sessionId,
+                    List.of(new ContentBlock.Text("Request blocked by policy hook")),
+                    List.of(), new TokenUsage(0, 0), 0.0, null);
         }
 
         // CR-029: ContextAssemblyEngine으로 컨텍스트 조립 위임
@@ -351,6 +380,14 @@ public class OrchestratorEngine {
         // 9. 감사 로그
         auditLogger.logLLMCall(resolvedModel, sessionId,
                 llmResponse.usage().inputTokens(), llmResponse.usage().outputTokens());
+
+        // CR-030 PRD-194: SessionEnd 훅
+        hookDispatcher.dispatch(HookEvent.SESSION_END,
+                HookInput.of(HookEvent.SESSION_END, sessionId,
+                        Map.of("model", resolvedModel,
+                                "inputTokens", llmResponse.usage().inputTokens(),
+                                "outputTokens", llmResponse.usage().outputTokens()),
+                        Map.of()));
 
         return new ChatResponse(
                 llmResponse.id(),

@@ -1,5 +1,9 @@
 package com.platform.session;
 
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
+import com.platform.hook.HookOutput;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.UnifiedMessage;
 import org.slf4j.Logger;
@@ -33,12 +37,14 @@ public class ContextWindowManager {
     private static final double SUMMARY_TARGET_RATIO     = 0.50;
 
     private final ConversationSummarizer summarizer;
+    private final HookDispatcher hookDispatcher;
 
     // C2: 세션별 마지막 압축 요약 저장 (session_summary 소스에서 활용)
     private final Map<String, String> sessionSummaries = new ConcurrentHashMap<>();
 
-    public ContextWindowManager(ConversationSummarizer summarizer) {
+    public ContextWindowManager(ConversationSummarizer summarizer, HookDispatcher hookDispatcher) {
         this.summarizer = summarizer;
+        this.hookDispatcher = hookDispatcher;
     }
 
     /** C2: 세션 압축 요약 조회. 압축이 한 번도 안 됐으면 null. */
@@ -75,27 +81,46 @@ public class ContextWindowManager {
             return messages;  // 여유 있음
         }
 
+        // CR-030 PRD-195: PreCompact 훅 (압축 대상 메시지 변경 가능)
+        HookOutput preHook = hookDispatcher.dispatch(HookEvent.PRE_COMPACT,
+                HookInput.of(HookEvent.PRE_COMPACT, null,
+                        Map.of("messageCount", messages.size(),
+                                "estimatedTokens", total,
+                                "maxTokens", maxTokens),
+                        Map.of()));
+        // PreCompact 훅이 BLOCK이면 압축 스킵 (원본 반환)
+        if (preHook.decision() == com.platform.hook.HookDecision.BLOCK) {
+            log.info("Compact blocked by hook, returning original messages");
+            return messages;
+        }
+
+        List<UnifiedMessage> result;
         if (total <= microThreshold) {
             // Level 1: snip — 빠르고 비용 없음
             log.debug("B6 snip 적용: {}토큰 > {}% 임계값", total, (int)(SNIP_TRIGGER_RATIO*100));
-            return snip(messages, 3);
-        }
-
-        if (total <= autoThreshold) {
+            result = snip(messages, 3);
+        } else if (total <= autoThreshold) {
             // Level 2: microcompact — Haiku로 짧은 요약
             log.debug("B6 microcompact 적용: {}토큰 > {}% 임계값", total, (int)(MICRO_TRIGGER_RATIO*100));
             List<UnifiedMessage> micro = tryMicroCompact(messages, targetTokens);
-            if (micro != null) return micro;
-            // 실패 시 snip으로 폴백
-            return snip(messages, 5);
+            result = micro != null ? micro : snip(messages, 5);
+        } else {
+            // Level 3: autocompact — full 요약
+            log.debug("B6 autocompact 적용: {}토큰 > {}% 임계값", total, (int)(AUTO_TRIGGER_RATIO*100));
+            List<UnifiedMessage> summarized = trySummarizeAndTrim(messages, targetTokens);
+            result = summarized != null ? summarized : simpleTrim(messages, maxTokens);
         }
 
-        // Level 3: autocompact — full 요약
-        log.debug("B6 autocompact 적용: {}토큰 > {}% 임계값", total, (int)(AUTO_TRIGGER_RATIO*100));
-        List<UnifiedMessage> summarized = trySummarizeAndTrim(messages, targetTokens);
-        if (summarized != null) return summarized;
+        // CR-030 PRD-195: PostCompact 훅 (압축 결과 알림)
+        hookDispatcher.dispatch(HookEvent.POST_COMPACT,
+                HookInput.of(HookEvent.POST_COMPACT, null,
+                        Map.of("originalCount", messages.size(),
+                                "resultCount", result.size(),
+                                "originalTokens", total,
+                                "resultTokens", estimateTokens(result)),
+                        Map.of()));
 
-        return simpleTrim(messages, maxTokens);  // 최종 폴백
+        return result;
     }
 
     public List<UnifiedMessage> trim(List<UnifiedMessage> messages) {

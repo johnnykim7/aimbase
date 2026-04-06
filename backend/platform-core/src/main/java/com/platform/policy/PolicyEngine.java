@@ -1,6 +1,9 @@
 package com.platform.policy;
 
 import com.platform.action.model.ActionRequest;
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
 import com.platform.monitoring.PlatformMetrics;
 import com.platform.policy.model.PolicyResult;
 import com.platform.policy.model.TriggeredPolicy;
@@ -49,6 +52,7 @@ public class PolicyEngine {
     private final MCPSafetyClient mcpSafetyClient;
     private final RateLimiter rateLimiter;
     private final PlatformMetrics platformMetrics;
+    private final HookDispatcher hookDispatcher;
 
     public PolicyEngine(PolicyRepository policyRepository,
                         AuditLogger auditLogger,
@@ -56,7 +60,8 @@ public class PolicyEngine {
                         PIIMasker piiMasker,
                         MCPSafetyClient mcpSafetyClient,
                         RateLimiter rateLimiter,
-                        PlatformMetrics platformMetrics) {
+                        PlatformMetrics platformMetrics,
+                        HookDispatcher hookDispatcher) {
         this.policyRepository = policyRepository;
         this.auditLogger = auditLogger;
         this.objectMapper = objectMapper;
@@ -64,6 +69,7 @@ public class PolicyEngine {
         this.mcpSafetyClient = mcpSafetyClient;
         this.rateLimiter = rateLimiter;
         this.platformMetrics = platformMetrics;
+        this.hookDispatcher = hookDispatcher;
     }
 
     /**
@@ -99,11 +105,26 @@ public class PolicyEngine {
                     // RATE_LIMIT DENY vs 일반 DENY 구분
                     String violationType = "RATE_LIMIT".equalsIgnoreCase(type) ? "rate_limit" : "deny";
                     platformMetrics.recordPolicyViolation(violationType);
+                    // CR-030 PRD-194: PermissionDenied 훅
+                    String sessionId = request.metadata() != null ? request.metadata().sessionId() : null;
+                    hookDispatcher.dispatch(HookEvent.PERMISSION_DENIED,
+                            HookInput.of(HookEvent.PERMISSION_DENIED, sessionId,
+                                    Map.of("policyId", policyEntity.getId(),
+                                            "intent", request.intent(),
+                                            "reason", reason),
+                                    Map.of()));
                     return new PolicyResult(false, PolicyResult.PolicyAction.DENY, triggered, transforms, reason);
                 }
                 if (action == PolicyResult.PolicyAction.REQUIRE_APPROVAL) {
                     log.info("Policy REQUIRE_APPROVAL: {} rule[{}] for intent '{}'",
                             policyEntity.getId(), i, request.intent());
+                    // CR-030 PRD-194: PermissionRequest 훅
+                    String sessionId = request.metadata() != null ? request.metadata().sessionId() : null;
+                    hookDispatcher.dispatch(HookEvent.PERMISSION_REQUEST,
+                            HookInput.of(HookEvent.PERMISSION_REQUEST, sessionId,
+                                    Map.of("policyId", policyEntity.getId(),
+                                            "intent", request.intent()),
+                                    Map.of()));
                     return new PolicyResult(true, PolicyResult.PolicyAction.REQUIRE_APPROVAL,
                             triggered, transforms, null);
                 }
