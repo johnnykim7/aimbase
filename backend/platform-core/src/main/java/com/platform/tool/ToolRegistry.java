@@ -5,6 +5,9 @@ import com.platform.llm.model.UnifiedToolDef;
 import com.platform.monitoring.PlatformMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -14,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 모든 도구(built-in + MCP)를 관리하는 중앙 레지스트리.
  *
- * - built-in 도구: @Component로 자동 감지 후 생성자 주입으로 등록
+ * - built-in 도구: @PostConstruct에서 지연 등록 (순환 참조 방지)
  * - MCP 도구: MCPServerManager가 discover() 시 동적으로 register()
  */
 @Component
@@ -24,13 +27,15 @@ public class ToolRegistry {
 
     private final Map<String, ToolExecutor> executors = new ConcurrentHashMap<>();
     private final PlatformMetrics platformMetrics;
+    private final List<ToolExecutor> builtins;
 
-    /**
-     * 생성자 주입으로 built-in 도구 등록.
-     * Spring이 ToolExecutor 구현체를 모두 수집하여 주입.
-     */
-    public ToolRegistry(List<ToolExecutor> builtins, PlatformMetrics platformMetrics) {
+    public ToolRegistry(@Lazy List<ToolExecutor> builtins, PlatformMetrics platformMetrics) {
         this.platformMetrics = platformMetrics;
+        this.builtins = builtins;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    void registerBuiltins() {
         builtins.forEach(this::register);
         log.info("ToolRegistry initialized with {} built-in tool(s): {}",
                 builtins.size(),

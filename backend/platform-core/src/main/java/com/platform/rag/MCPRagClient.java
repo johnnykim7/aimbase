@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import com.platform.llm.model.UnifiedToolDef;
 import com.platform.tool.ToolRegistry;
 
+import org.springframework.context.annotation.Lazy;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.List;
@@ -44,7 +45,7 @@ public class MCPRagClient {
     private MCPServerClient mcpClient;
     private boolean connected = false;
 
-    public MCPRagClient(ObjectMapper objectMapper, ToolRegistry toolRegistry) {
+    public MCPRagClient(ObjectMapper objectMapper, @Lazy ToolRegistry toolRegistry) {
         this.objectMapper = objectMapper;
         this.toolRegistry = toolRegistry;
     }
