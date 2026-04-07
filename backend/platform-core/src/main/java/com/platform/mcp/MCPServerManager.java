@@ -144,6 +144,11 @@ public class MCPServerManager {
         return List.copyOf(connections.keySet());
     }
 
+    /** 특정 서버의 클라이언트 반환 (연결 안 되어 있으면 null) */
+    public MCPServerClient getClient(String serverId) {
+        return connections.get(serverId);
+    }
+
     private MCPServerClient connect(MCPServerEntity entity) {
         MCPServerClient client = createClient(entity);
         client.connect();
