@@ -30,7 +30,12 @@
 | CR-030 | Aimbase 2단계 고도화 — Hook Architecture + Extended Thinking + Agent Isolation + 압축 전략 강화 | 변경 | High | v4.1.0 | ✅ 완료 |
 | CR-031 | 성능/퀄리티 메커니즘 — Post-Compact Recovery + MICRO_COMPACT + Extract Memories + Adaptive Thinking | 변경 | High | v5.0.0 | ✅ 완료 |
 | CR-032 | 프로바이더 확장 — OpenAI Compatible shim + Bedrock + Vertex AI + 에이전트 라우팅 | 변경 | High | v5.0.0 | ✅ 완료 |
-| CR-033 | 에이전트 구조적 사고 체계 — Plan Mode + Todo + Task 관리 (10개 Tool + FE 대시보드) | 변경 | High | v6.1.0 | 🔲 진행전 |
+| CR-033 | 에이전트 구조적 사고 체계 — Plan Mode + Todo + Task 관리 (10개 Tool + FE 대시보드) | 변경 | High | v6.1.0 | ✅ 완료 |
+| CR-034 | 멀티에이전트 협업 완성 — SendMessage + Built-in Agent 5타입 + Hook 14개 | 신규 | High | v6.0.0+ | ✅ 완료 |
+| CR-035 | Tool/Policy 확장성·자동화 — ScheduleCron + SkillTool + Firecrawl + 도메인 필터링 (PRD-234~240) | 변경 | High | v6.2.0 | ✅ 완료 |
+| CR-036 | 프롬프트 외부화 + 영문 전환 + OpenClaude 프롬프트 전수 포팅 (PRD-249~264, FE-020~021) | 변경 | High | v6.5.0 | 🔧 진행중 |
+| CR-037 | 핵심 도구 네이티브화 — BashTool + FileWriteTool + WebSearchTool + SuggestBackgroundPR (PRD-241~244) | 변경 | High | v6.3.0 | ✅ 완료 |
+| CR-038 | 에이전트 자율성 강화 — MCP 리소스 탐색·읽기 + 이벤트 트리거 + 세션 브리핑 (PRD-245~248, FE-019) | 변경 | High | v6.4.0 | ✅ 완료 |
 
 ---
 
@@ -496,6 +501,120 @@
 - **영향 범위**: PRD-222 ~ PRD-227, FE-015, BIZ-052 ~ BIZ-056
 - **영향 설계서**: T1-1, T1-3, T1-7, T3-2, T3-6
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v6.1.0
+- **변경 일자**: 2026-04-08
+
+---
+
+### CR-034 | 멀티에이전트 협업 완성 — SendMessage + Built-in Agent 5타입 + Hook 14개
+- **대상 기능 ID**: PRD-228 ~ PRD-233 (신규), FE-016 (신규)
+- **변경 타입**: 신규
+- **변경 내용**: 멀티에이전트 협업을 위한 메시지 통신 + 에이전트 타입 체계 + Hook 확장
+  - **SendMessageTool**: 에이전트간 1:1/브로드캐스트 메시지
+  - **AgentMessageBus**: 메시지 큐 + 라우팅
+  - **Built-in Agent 5타입**: GENERAL/PLAN/EXPLORE/GUIDE/VERIFICATION
+  - **AgentTypeRegistry**: 에이전트 타입 중앙 관리
+  - **HookEvent 14개 추가**: Notification, Stop, StopFailure, Setup, TeammateIdle, TaskCreated, TaskCompleted, Elicitation, ElicitationResult, ConfigChange, WorktreeCreate, WorktreeRemove, InstructionsLoaded, CwdChanged
+  - **FE MessagePanel 컴포넌트**
+- **변경 사유**: 멀티에이전트 시나리오에서 에이전트간 협업 통신 및 역할 기반 실행 체계 필요
+- **영향 모듈**: Agent, Hook, Tool, Workflow, FE
+- **영향도**: High
+- **영향 범위**: PRD-228 ~ PRD-233, FE-016
+- **영향 설계서**: T1-1, T1-3, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v6.0.0+
+- **변경 일자**: 2026-04-08
+
+---
+
+### CR-035 | Tool/Policy 확장성·자동화 — ScheduleCron + SkillTool + Firecrawl + 도메인 필터링
+- **대상 기능 ID**: PRD-234 ~ PRD-240 (신규), FE-017 (신규)
+- **변경 타입**: 변경
+- **변경 내용**: 갭 분석 기반 tool/ + policy/ 패키지 미구현 기능 추가 (6 Phase)
+  - **PRD-234 Cron 스케줄 엔진**: CronScheduleManager (Spring TaskScheduler 래핑), scheduled_jobs 테이블, 서버 기동 시 active job 로드, TenantContext 내 워크플로우/도구 실행
+  - **PRD-235 ScheduleCronTool + CronListTool + CronDeleteTool**: LLM이 자율적으로 Cron 작업 CRUD. 테넌트당 50개 제한, 최소 1분 간격, 3회 실패 시 비활성화
+  - **PRD-236 ToolSearchTool**: ToolContractMeta의 tags/capabilities/description 키워드 검색. ToolRegistry.searchTools() 메서드 추가
+  - **PRD-237 SkillTool**: 재사용 가능한 프롬프트+도구 조합 경량 실행. skills 테이블, 단일 LLM 호출 (워크플로우와 차별점)
+  - **PRD-238 Python 사이드카 Firecrawl 어댑터**: scraper.py에 firecrawl 모드 추가, firecrawl-py 의존성, Self-hosted 지원, API Key 미설정 시 js_render 폴백
+  - **PRD-239 BE 지식소스 Firecrawl 모드**: KnowledgeSource.crawl_mode 필드, IngestionPipeline 분기, FE 크롤링 모드 선택
+  - **PRD-240 PolicyEngine 도메인 필터링**: DOMAIN_FILTER 규칙 타입 신규, allowed_domains/blocked_domains, ALLOWLIST/BLOCKLIST 모드, 와일드카드 서브도메인
+  - **FE-017 관리 UI**: 스케줄 모니터링 탭, 도구 탐색 패널, 스킬 관리 페이지, 정책 도메인 필터 UI
+  - **DB**: V20__cr035_scheduled_jobs.sql (Master), V44__cr035_skills.sql (Tenant)
+  - **BIZ 규칙**: BIZ-057~065 (스케줄 제한, 스킬 규칙, Firecrawl 폴백, 도메인 필터링)
+- **변경 사유**: openclaude 갭 분석에서 식별된 중간 우선순위 Tool 누락 + 정책 엔진 확장. 자동화(Cron), 확장성(Skill/ToolSearch), 웹 소스 품질(Firecrawl), 보안(도메인 필터) 4개 축 강화
+- **영향 모듈**: Tool(도구 5종 신규), Policy(DOMAIN_FILTER), RAG(Firecrawl), Python 사이드카(scraper), Workflow(CronScheduleManager), FE(4개 페이지/패널)
+- **영향도**: High
+- **영향 범위**: PRD-234 ~ PRD-240, FE-017, BIZ-057 ~ BIZ-065
+- **영향 설계서**: T1-1, T1-3, T3-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v6.2.0
+- **변경 일자**: 2026-04-08
+
+---
+
+### CR-036 | 프롬프트 외부화 + 영문 전환 + OpenClaude 프롬프트 전수 포팅
+- **대상 기능 ID**: PRD-249 ~ PRD-264 (신규), FE-020 ~ FE-021 (신규)
+- **변경 타입**: 변경
+- **변경 내용**: Java/Python 소스에 하드코딩된 시스템 프롬프트 25개를 DB 외부화하고, OpenClaude 원본 70+개 프롬프트를 전수 포팅 (10 Phase)
+  - **PRD-249 prompt_templates 테이블**: Tenant DB V46 마이그레이션. key+version 복합키, category/name/template/variables/language/is_system 컬럼. Caffeine 캐시 → DB → resources/prompts/*.txt 3단계 폴백
+  - **PRD-250 PromptTemplateService**: getTemplate/render/getTemplateOrFallback/bulkLoad 핵심 메서드. Caffeine 로컬 캐시 (5분 TTL, 200개). {{variable}} 치환 렌더링
+  - **PRD-251 PromptTemplateController**: `/api/v1/prompt-templates` CRUD + render + bulk API
+  - **PRD-252 기존 Java 프롬프트 외부화**: AgentType(5), ContextAssemblyEngine(1), RAGService(1), LlmCallStepExecutor(5), ImageAnalysisTool(1), TranslationTool(1), ConversationSummarizer(2), MemoryAutoExtractService(1), Adapter(2) — 한글→영문 전환 포함
+  - **PRD-253 시드 마이그레이션**: V47 시드 데이터 INSERT (25개 영문 프롬프트 기본값)
+  - **PRD-254 Python PromptTemplateClient**: httpx 기반 BE API 벌크 로드 + 메모리 캐시. 실패 시 로컬 파일 폴백
+  - **PRD-255 Python 프롬프트 외부화**: query_transformer(3), contextual_chunker(1), evaluator(3) — 한글→영문 전환
+  - **PRD-256 OpenClaude Core 시스템 프롬프트**: prompts.ts(914줄) 기반 core.* 카테고리 10+개. ContextAssemblyEngine 모듈별 조립으로 리팩토링
+  - **PRD-257 OpenClaude Tool 프롬프트 Part 1**: BashTool(369줄), AgentTool(287줄), TodoWriteTool(184줄) 등 주요 도구 8개
+  - **PRD-258 OpenClaude Tool 프롬프트 Part 2**: FileRead/Edit/Write, Grep, Glob, WebFetch/Search 등 나머지 28개
+  - **PRD-259 OpenClaude 서비스 프롬프트**: extractMemories, SessionMemory, compact, MagicDocs 등 6개
+  - **PRD-260 동적 프롬프트 조립 엔진**: systemPromptSections.ts 기반 동적 조립. 언어/MCP/Git/출력스타일 등 런타임 섹션
+  - **FE-020 프롬프트 템플릿 관리 화면**: 목록/편집/카테고리 필터. is_system=true 삭제 불가
+  - **FE-021 프롬프트 테스트 패널**: 변수 입력 → 렌더링 프리뷰 + 토큰 추정
+  - **DB**: V46__cr036_prompt_templates.sql, V47__cr036_seed_prompts.sql (Tenant)
+  - **BIZ 규칙**: BIZ-070(프롬프트 3단계 폴백), BIZ-071(시스템 프롬프트 삭제 불가), BIZ-072(프롬프트 캐시 TTL 5분)
+- **변경 사유**: 프롬프트 하드코딩으로 수정 시 재배포 필수, 한글 프롬프트 토큰 비용 2~3배, 런타임 A/B 테스트 불가. OpenClaude 대비 Tool별 프롬프트 세분화 부족 (103줄 통합 vs 36개 개별)
+- **영향 모듈**: Context(ContextAssemblyEngine 리팩토링), Agent(AgentType), RAG(RAGService), Workflow(LlmCallStepExecutor), Tool(ImageAnalysis/Translation), Session(Summarizer/MemoryExtract), LLM(Adapter), Python(query_transformer/chunker/evaluator), FE(신규 2개 페이지)
+- **영향도**: High
+- **영향 범위**: PRD-249 ~ PRD-260, FE-020 ~ FE-021, BIZ-070 ~ BIZ-072
+- **영향 설계서**: T1-1, T3-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v6.5.0
+- **변경 일자**: 2026-04-08
+
+---
+
+### CR-037 | 핵심 도구 네이티브화 — BashTool + FileWriteTool + WebSearchTool + SuggestBackgroundPR
+- **대상 기능 ID**: PRD-241 ~ PRD-244 (신규), FE-018 (신규)
+- **변경 타입**: 변경
+- **변경 내용**: ClaudeCodeTool 경유 없이 직접 실행 가능한 핵심 도구 4종 네이티브 구현
+  - **PRD-241 BashTool**: ProcessBuilder 기반 셸 명령 실행, 위험 명령 차단 목록, 타임아웃 120초, stdout/stderr 분리 캡처, WorkspaceResolver 작업 디렉토리 제한
+  - **PRD-242 FileWriteTool**: 신규 파일 생성 (SafeEditTool 보완), 부모 디렉토리 자동 생성, 기존 파일 덮어쓰기 경고, WorkspacePolicyEngine 경로 검증
+  - **PRD-243 WebSearchTool**: Tavily API 우선 + DuckDuckGo HTML 폴백, Connection 테이블에서 API Key 조회, title/url/snippet 구조화 반환
+  - **PRD-244 SuggestBackgroundPR**: Git 커밋 + GitHub PR 자동 생성, ProcessBuilder git 명령, GitHub REST API, Connection에서 토큰 조회
+  - **FE-018**: 기존 도구 목록에 자동 노출 (ToolRegistry 기반, 별도 페이지 불필요)
+- **변경 사유**: ClaudeCodeTool 경유 시 프로세스 오버헤드(subprocess + CLI), 인증 의존성(Anthropic API Key), lineage 추적 불가, 정책 엔진 우회 등 4가지 문제 해소. openclaude 갭 분석 핵심 4개 항목
+- **영향 모듈**: Tool(도구 4종 신규), FE(도구 목록 자동 노출)
+- **영향도**: High
+- **영향 범위**: PRD-241 ~ PRD-244, FE-018
+- **영향 설계서**: T1-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v6.3.0
+- **변경 일자**: 2026-04-08
+
+---
+
+### CR-038 | 에이전트 자율성 강화 — MCP 리소스 탐색·읽기 + 이벤트 트리거 + 세션 브리핑
+- **대상 기능 ID**: PRD-245 ~ PRD-248 (신규), FE-019 (신규)
+- **변경 타입**: 변경
+- **변경 내용**: 에이전트가 사람 개입 없이 자율적으로 MCP 리소스 탐색·읽기, 이벤트 기반 즉시 트리거, 세션 이전 작업 브리핑을 수행하는 도구 4종 + FE 확장
+  - **PRD-245 ListMcpResourcesTool**: 연결된 MCP 서버의 리소스 목록 탐색. MCPServerClient.listResources() 호출. server_id 선택적 필터. 리소스 URI/name/description/mimeType 반환
+  - **PRD-246 ReadMcpResourceTool**: MCP 리소스 URI로 직접 읽기. MCPServerClient.readResource() 호출. text/blob 콘텐츠 반환. 대용량 텍스트 32KB 트렁케이션
+  - **PRD-247 RemoteTriggerTool**: 이벤트 기반 워크플로우/도구 즉시 실행. CronScheduleManager의 executeJob 로직 재사용. Cron(주기적)과 보완. trigger_reason 감사 기록
+  - **PRD-248 BriefTool**: 세션 이전 작업 요약 생성. SessionStore에서 최근 메시지 로드 → LLM 호출로 요약. session_briefs 테이블 캐시. 메모리 시스템과 용도 차별화 (Brief=세션 즉시 요약, Memory=장기 저장)
+  - **FE-019 세션 브리핑 패널**: 세션 상세 화면에 Brief 탭 추가. 이전 세션 요약 표시 + 수동 생성 버튼
+  - **DB**: V45__cr038_session_briefs.sql (Tenant) — session_briefs 테이블
+  - **BIZ 규칙**: BIZ-066(MCP 리소스 읽기 32KB 트렁케이션), BIZ-067(RemoteTrigger 분당 10회 제한), BIZ-068(Brief 캐시 TTL 1시간), BIZ-069(Brief 생성 시 최근 50개 메시지 사용)
+- **변경 사유**: openclaude 갭 분석에서 식별된 에이전트 자율성 관련 4개 도구. MCP 리소스 탐색은 UI(사람용)와 Tool(에이전트용) 용도 분리 필요. Brief는 Memory와 다른 용도(세션 즉시 복원 vs 장기 저장). RemoteTrigger는 Cron(주기적)과 보완적(이벤트 기반 즉시)
+- **영향 모듈**: Tool(도구 4종 신규), MCP(MCPServerClient 리소스 메서드 추가), Session(BriefService), FE(세션 상세 확장)
+- **영향도**: High
+- **영향 범위**: PRD-245 ~ PRD-248, FE-019, BIZ-066 ~ BIZ-069
+- **영향 설계서**: T1-1, T1-3, T1-7, T3-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v6.4.0
 - **변경 일자**: 2026-04-08
 
 ---

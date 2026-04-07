@@ -185,7 +185,10 @@ frontend/src/
 - [x] Sprint 43: CR-032 프로바이더 확장 6 Phase (PRD-217~221) — OpenAI Compatible shim, AWS Bedrock, Vertex AI, 에이전트별 라우팅, FE Connection 폼
 - [x] Sprint 44: CR-033 에이전트 구조적 사고 체계 6 Phase (PRD-222~227, FE-015) — Plan Mode(Enter/Exit/Verify), TodoWrite, Task(Create/Get/List/Update/Output/Stop), FE 대시보드
 - [x] Sprint 45: CR-034 멀티에이전트 협업 완성 6 Phase (PRD-228~233, FE-016) — SendMessageTool, Built-in Agent 5타입, Hook 이벤트 14개 추가, FE 메시지 패널
-- [ ] Sprint 46: CR-035 Tool/Policy 확장성·자동화 6 Phase (PRD-234~240, FE-017) — ScheduleCron(3 Tool), SkillTool, ToolSearchTool, Firecrawl 연동, DOMAIN_FILTER 정책, FE 관리 UI
+- [x] Sprint 46: CR-035 Tool/Policy 확장성·자동화 6 Phase (PRD-234~240, FE-017) — ScheduleCron(3 Tool), SkillTool, ToolSearchTool, Firecrawl 연동, DOMAIN_FILTER 정책, FE 관리 UI
+- [x] Sprint 47: CR-037 핵심 도구 네이티브화 4 Phase (PRD-241~244, FE-018) — BashTool, FileWriteTool, WebSearchTool, SuggestBackgroundPR (ClaudeCodeTool 의존 해소)
+- [x] Sprint 48: CR-038 에이전트 자율성 강화 4 Phase (PRD-245~248, FE-019) — ListMcpResources, ReadMcpResource, RemoteTriggerTool, BriefTool, FE 세션 브리핑
+- [x] Sprint 49: CR-036 프롬프트 외부화 + 영문 전환 + OpenClaude 포팅 10 Phase (PRD-249~260, FE-020~021) — prompt_templates 테이블, PromptTemplateService(캐시+폴백), 기존 25개 외부화, OpenClaude 48개 포팅, Python 연동, FE 관리화면
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)

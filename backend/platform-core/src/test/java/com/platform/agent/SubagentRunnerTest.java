@@ -36,13 +36,14 @@ class SubagentRunnerTest {
     @Mock private WorktreeManager worktreeManager;
     @Mock private HookDispatcher hookDispatcher;
     @Mock private SubagentLifecycleManager lifecycleManager;
+    @Mock private AgentTypeRegistry agentTypeRegistry;
 
     private SubagentRunner runner;
 
     @BeforeEach
     void setUp() {
         runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry);
 
         lenient().when(hookDispatcher.dispatch(any(), any()))
                 .thenReturn(HookOutput.PASSTHROUGH);

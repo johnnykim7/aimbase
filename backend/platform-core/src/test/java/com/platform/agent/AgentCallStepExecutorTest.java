@@ -35,6 +35,7 @@ class AgentCallStepExecutorTest {
     @Mock private WorktreeManager worktreeManager;
     @Mock private HookDispatcher hookDispatcher;
     @Mock private SubagentLifecycleManager lifecycleManager;
+    @Mock private AgentTypeRegistry agentTypeRegistry;
 
     private AgentCallStepExecutor executor;
 
@@ -44,7 +45,7 @@ class AgentCallStepExecutorTest {
         lenient().when(subagentRunRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         SubagentRunner runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry);
         AgentOrchestrator orchestrator = new AgentOrchestrator(runner);
         executor = new AgentCallStepExecutor(orchestrator);
     }

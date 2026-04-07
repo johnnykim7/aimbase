@@ -22,6 +22,8 @@ import {
   MessageSquareText,
   Layers,
   Settings2,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -50,6 +52,9 @@ const NAV_ITEMS: NavItemDef[] = [
   { path: "/sessions", icon: MessageSquareText, label: "세션" },
   { path: "/context-recipes", icon: Layers, label: "Context Recipe" },
   { path: "/domain-configs", icon: Settings2, label: "도메인 설정" },
+  { path: "/scheduled-jobs", icon: Clock, label: "스케줄" },
+  { path: "/skills", icon: Sparkles, label: "스킬" },
+  { path: "/prompt-templates", icon: FileText, label: "프롬프트 템플릿" },
   { path: "/auth", icon: Users, label: "사용자/권한" },
   { path: "/monitoring", icon: BarChart3, label: "모니터링" },
 ];

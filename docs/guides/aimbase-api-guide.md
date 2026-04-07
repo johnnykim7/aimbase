@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v1.6.0** | 2026-04-07 | Aimbase v4.1.0 기준
+> **v1.8.0** | 2026-04-08 | Aimbase v6.3.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -824,6 +824,9 @@ GET /api/v1/agents/active
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.9.0 | 2026-04-08 | 에이전트 자율성 도구 4종 추가: list_mcp_resources, read_mcp_resource, remote_trigger, brief. 세션 브리핑 REST API 2개 추가 (CR-038) |
+| v1.8.0 | 2026-04-08 | 네이티브 도구 4종 추가: bash(셸 실행), file_write(파일 생성), web_search(웹 검색), suggest_background_pr(PR 자동 생성). ClaudeCodeTool 의존 해소 (CR-037) |
+| v1.7.0 | 2026-04-08 | 스케줄 작업 CRUD API, 스킬 CRUD API, 지식소스 crawl_mode(firecrawl) 지원, DOMAIN_FILTER 정책 규칙 추가 (CR-035) |
 | v1.6.0 | 2026-04-07 | 서브에이전트 API 6개 엔드포인트 추가, 워크플로우 AGENT_CALL 스텝 타입, Worktree 격리 실행 (CR-030) |
 | v1.5.0 | 2026-04-05 | 도구 관리 확장(contract/execute/validate), 세션 메타, 도구 실행 이력, Context Recipe, Domain Config 엔드포인트 추가 (CR-029) |
 | v1.4.0 | 2026-03-28 | LLM_CALL 스텝 `max_tokens` config 키 추가. 토큰 초과 자동 처리(에스컬레이션+자동분할) 설명 (CR-028) |

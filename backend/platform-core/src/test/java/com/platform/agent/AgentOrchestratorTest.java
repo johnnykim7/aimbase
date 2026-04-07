@@ -31,6 +31,7 @@ class AgentOrchestratorTest {
     @Mock private WorktreeManager worktreeManager;
     @Mock private HookDispatcher hookDispatcher;
     @Mock private SubagentLifecycleManager lifecycleManager;
+    @Mock private AgentTypeRegistry agentTypeRegistry;
 
     private AgentOrchestrator orchestrator;
 
@@ -40,7 +41,7 @@ class AgentOrchestratorTest {
         lenient().when(subagentRunRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         SubagentRunner runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry);
         orchestrator = new AgentOrchestrator(runner);
     }
 

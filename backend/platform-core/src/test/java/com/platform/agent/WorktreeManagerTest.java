@@ -39,20 +39,20 @@ class WorktreeManagerTest {
     @Test
     void worktreeManager_initializesWithDefaults() {
         // repo-root와 worktree-base가 null이면 자동 감지
-        WorktreeManager manager = new WorktreeManager(null, null);
+        WorktreeManager manager = new WorktreeManager(null, null, null);
         assertThat(manager).isNotNull();
     }
 
     @Test
     void worktreeManager_customPaths() {
-        WorktreeManager manager = new WorktreeManager("/tmp/test-repo", "/tmp/test-wt");
+        WorktreeManager manager = new WorktreeManager("/tmp/test-repo", "/tmp/test-wt", null);
         assertThat(manager).isNotNull();
     }
 
     @Test
     void worktreeManager_listWorktrees_doesNotThrow() {
         // 현재 디렉토리가 git repo가 아닐 수 있으므로 예외 무시
-        WorktreeManager manager = new WorktreeManager(System.getProperty("user.dir"), null);
+        WorktreeManager manager = new WorktreeManager(System.getProperty("user.dir"), null, null);
         try {
             String list = manager.listWorktrees();
             assertThat(list).isNotNull();

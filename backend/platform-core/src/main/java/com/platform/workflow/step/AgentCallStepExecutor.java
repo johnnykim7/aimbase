@@ -49,7 +49,7 @@ public class AgentCallStepExecutor implements StepExecutor {
 
     private final AgentOrchestrator agentOrchestrator;
 
-    public AgentCallStepExecutor(AgentOrchestrator agentOrchestrator) {
+    public AgentCallStepExecutor(@org.springframework.context.annotation.Lazy AgentOrchestrator agentOrchestrator) {
         this.agentOrchestrator = agentOrchestrator;
     }
 

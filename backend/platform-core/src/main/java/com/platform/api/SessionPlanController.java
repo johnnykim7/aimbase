@@ -5,6 +5,7 @@ import com.platform.agent.TodoService;
 import com.platform.domain.SubagentRunEntity;
 import com.platform.domain.TodoEntity;
 import com.platform.repository.SubagentRunRepository;
+import com.platform.session.SessionBriefService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -22,13 +23,16 @@ public class SessionPlanController {
     private final PlanService planService;
     private final TodoService todoService;
     private final SubagentRunRepository subagentRunRepository;
+    private final SessionBriefService briefService;
 
     public SessionPlanController(PlanService planService,
                                  TodoService todoService,
-                                 SubagentRunRepository subagentRunRepository) {
+                                 SubagentRunRepository subagentRunRepository,
+                                 SessionBriefService briefService) {
         this.planService = planService;
         this.todoService = todoService;
         this.subagentRunRepository = subagentRunRepository;
+        this.briefService = briefService;
     }
 
     @GetMapping("/plan")
@@ -80,6 +84,20 @@ public class SessionPlanController {
                     return ApiResponse.ok(data);
                 })
                 .orElse(ApiResponse.error("Task not found"));
+    }
+
+    /** CR-038 FE-019: 세션 브리핑 조회 (캐시 우선) */
+    @GetMapping("/brief")
+    public ApiResponse<Map<String, Object>> getBrief(@PathVariable String sessionId) {
+        Map<String, Object> brief = briefService.getBrief(sessionId, false);
+        return ApiResponse.ok(brief);
+    }
+
+    /** CR-038 FE-019: 세션 브리핑 수동 생성/갱신 */
+    @PostMapping("/brief")
+    public ApiResponse<Map<String, Object>> createBrief(@PathVariable String sessionId) {
+        Map<String, Object> brief = briefService.getBrief(sessionId, true);
+        return ApiResponse.ok(brief);
     }
 
     private Map<String, Object> toTaskMap(SubagentRunEntity e) {

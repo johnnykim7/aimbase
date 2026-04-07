@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v1.1.0** | 2026-04-05 | Aimbase v4.3.0 기준
+> **v1.4.0** | 2026-04-08 | Aimbase v6.3.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -724,6 +724,9 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.5.0 | 2026-04-08 | 에이전트 자율성 도구 4종 추가: ListMcpResourcesTool, ReadMcpResourceTool, RemoteTriggerTool, BriefTool. 세션 브리핑 패널 추가 (CR-038) |
+| v1.4.0 | 2026-04-08 | 네이티브 도구 4종 추가: BashTool, FileWriteTool, WebSearchTool, SuggestBackgroundPRTool. ToolRegistry 자동 등록으로 도구 목록 자동 노출 (CR-037) |
+| v1.3.0 | 2026-04-08 | 스케줄 관리(Cron 작업), 스킬 관리, Firecrawl 크롤링 모드, 도메인 필터링 정책 추가 (CR-035) |
 | v1.2.0 | 2026-04-07 | 서브에이전트 관리(§ 3-16), 시나리오 F(멀티에이전트 워크플로우) 추가 (CR-030) |
 | v1.1.0 | 2026-04-05 | Native Tool 관리(9종 도구, contract, 직접 실행, Workspace Policy), Context Recipe 설정, Domain Config 관리, 시나리오 D 추가 (CR-029) |
 | v1.0.1 | 2026-03-28 | 접속 정보(포트 매핑) 섹션 추가 |

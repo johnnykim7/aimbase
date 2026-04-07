@@ -20,6 +20,9 @@ import Sessions from "./pages/Sessions";
 import SessionDetail from "./pages/SessionDetail";
 import ContextRecipes from "./pages/ContextRecipes";
 import DomainConfigs from "./pages/DomainConfigs";
+import ScheduledJobs from "./pages/ScheduledJobs";
+import Skills from "./pages/Skills";
+import PromptTemplates from "./pages/PromptTemplates";
 import Tenants from "./pages/platform/Tenants";
 import Subscriptions from "./pages/platform/Subscriptions";
 import PlatformMonitoring from "./pages/platform/PlatformMonitoring";
@@ -49,6 +52,9 @@ export default function App() {
         <Route path="sessions/:id" element={<SessionDetail />} />
         <Route path="context-recipes" element={<ContextRecipes />} />
         <Route path="domain-configs" element={<DomainConfigs />} />
+        <Route path="scheduled-jobs" element={<ScheduledJobs />} />
+        <Route path="skills" element={<Skills />} />
+        <Route path="prompt-templates" element={<PromptTemplates />} />
         <Route path="monitoring" element={<Monitoring />} />
         <Route path="platform">
           <Route index element={<Navigate to="tenants" replace />} />

@@ -23,6 +23,17 @@ export interface TaskData {
   output?: string; large_output?: Record<string, unknown>; error?: string;
 }
 
+/* CR-038: Brief 타입 */
+export interface BriefData {
+  session_id: string;
+  summary: string;
+  key_decisions: string[];
+  pending_items: string[];
+  message_count: number;
+  model_used: string;
+  created_at: string;
+}
+
 export const sessionsApi = {
   list: (params?: { page?: number; size?: number; scope_type?: string; runtime_kind?: string }) =>
     apiClient.get<ApiResponse<PagedResponse<SessionMeta> | SessionMeta[]>>("/conversations", { params }),
@@ -43,4 +54,10 @@ export const sessionsApi = {
     apiClient.get<ApiResponse<TodoItem[]>>(`/sessions/${sessionId}/todos`),
   getTasks: (sessionId: string) =>
     apiClient.get<ApiResponse<TaskData[]>>(`/sessions/${sessionId}/tasks`),
+
+  // CR-038: Brief
+  getBrief: (sessionId: string) =>
+    apiClient.get<ApiResponse<BriefData | null>>(`/sessions/${sessionId}/brief`),
+  createBrief: (sessionId: string) =>
+    apiClient.post<ApiResponse<BriefData>>(`/sessions/${sessionId}/brief`),
 };

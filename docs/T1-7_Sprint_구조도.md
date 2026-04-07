@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 3.0 | 최종 수정: 2026-04-07 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032
+> 설계 버전: 3.2 | 최종 수정: 2026-04-07 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -57,6 +57,11 @@ flowchart LR
     S39 --> S42
     S2 --> S43[Sprint 43: 프로바이더 확장 CR-032]
     S39 --> S43
+    S3 --> S46[Sprint 46: Tool/Policy 확장 CR-035]
+    S4 --> S46
+    S6 --> S46
+    S3 --> S47[Sprint 47: 핵심 도구 네이티브화 CR-037]
+    S2 --> S47
 ```
 
 ---
@@ -493,12 +498,12 @@ flowchart LR
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| PRD-211 | PostCompactRecoveryService 구현 | Sprint 1(ContextWindowManager) | 압축 후 최근 파일 5개 + 메모리 재주입 확인 | BE | 미구현 |
-| PRD-212 | MICRO_COMPACT 0비용 최적화 | Sprint 1(ConversationSummarizer) | Haiku 호출 없이 마커 대체 동작 확인 | BE | 미구현 |
-| PRD-213 | MemoryAutoExtractService 구현 | Sprint 1(OrchestratorEngine) | 5턴 이상 대화 종료 시 LONG_TERM 메모리 자동 생성 확인 | BE | 미구현 |
-| PRD-214 | ModelConfig ThinkingMode + AnthropicAdapter 분기 | Sprint 1(AnthropicAdapter) | ADAPTIVE 모드 → `{"type":"adaptive"}` API 파라미터 전송 확인 | BE | 미구현 |
-| PRD-215 | ToolResultCompactor 구현 | Sprint 3(ToolCallHandler) | 도구별 축약 전략 적용 + compact_output 생성 확인 | BE | 미구현 |
-| PRD-216 | SubagentProgressReporter 구현 | Sprint 41(SubagentRunner) | 30초 주기 progressSummary SSE 푸시 확인 | BE | 미구현 |
+| PRD-211 | PostCompactRecoveryService 구현 | Sprint 1(ContextWindowManager) | 압축 후 최근 파일 5개 + 메모리 재주입 확인 | BE | ✅ 구현완료 |
+| PRD-212 | MICRO_COMPACT 0비용 최적화 | Sprint 1(ConversationSummarizer) | Haiku 호출 없이 마커 대체 동작 확인 | BE | ✅ 구현완료 |
+| PRD-213 | MemoryAutoExtractService 구현 | Sprint 1(OrchestratorEngine) | 5턴 이상 대화 종료 시 LONG_TERM 메모리 자동 생성 확인 | BE | ✅ 구현완료 |
+| PRD-214 | ModelConfig ThinkingMode + AnthropicAdapter 분기 | Sprint 1(AnthropicAdapter) | ADAPTIVE 모드 → `{"type":"adaptive"}` API 파라미터 전송 확인 | BE | ✅ 구현완료 |
+| PRD-215 | ToolResultCompactor 구현 | Sprint 3(ToolCallHandler) | 도구별 축약 전략 적용 + compact_output 생성 확인 | BE | ✅ 구현완료 |
+| PRD-216 | SubagentProgressReporter 구현 | Sprint 41(SubagentRunner) | 30초 주기 progressSummary SSE 푸시 확인 | BE | ✅ 구현완료 |
 
 ---
 
@@ -506,13 +511,13 @@ flowchart LR
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| PRD-217 | OpenAICompatibleAdapter 구현 | Sprint 2(ConnectionAdapterFactory) | base_url + api_key로 DeepSeek/Groq 채팅 성공 | BE | 미구현 |
-| PRD-218 | BedrockAdapter 구현 + Gradle 의존성 | Sprint 2(ConnectionAdapterFactory) | AWS Bedrock Claude/Llama 채팅 성공 | BE | 미구현 |
-| PRD-219 | VertexAIAdapter 구현 + Gradle 의존성 | Sprint 2(ConnectionAdapterFactory) | Vertex AI Gemini/Claude 채팅 성공 | BE | 미구현 |
+| PRD-217 | OpenAICompatibleAdapter 구현 | Sprint 2(ConnectionAdapterFactory) | base_url + api_key로 DeepSeek/Groq 채팅 성공 | BE | ✅ 구현완료 |
+| PRD-218 | BedrockAdapter 구현 + Gradle 의존성 | Sprint 2(ConnectionAdapterFactory) | AWS Bedrock Claude/Llama 채팅 성공 | BE | ✅ 구현완료 |
+| PRD-219 | VertexAIAdapter 구현 + Gradle 의존성 | Sprint 2(ConnectionAdapterFactory) | Vertex AI Gemini/Claude 채팅 성공 | BE | ✅ 구현완료 |
 | PRD-220 | SubagentRequest 라우팅 확장 | Sprint 41(SubagentRunner) | preferredConnectionId 지정 시 해당 커넥션 사용 확인 | BE | 미구현 |
-| PRD-221 | Connection 생성 폼 동적 필드 | Sprint 11(FE Connection) | adapter별 동적 입력 필드 렌더링 확인 | FE | 미구현 |
-| - | ConnectionAdapterFactory switch 확장 | PRD-217~219 | 4개 신규 adapter 분기 동작 확인 | BE | 미구현 |
-| - | ConnectionAdapter enum + normalizeAdapterType 확장 | PRD-217~219 | openai_compatible/bedrock/vertex_ai 정규화 확인 | BE | 미구현 |
+| PRD-221 | Connection 생성 폼 동적 필드 | Sprint 11(FE Connection) | adapter별 동적 입력 필드 렌더링 확인 | FE | 부분 구현 |
+| - | ConnectionAdapterFactory switch 확장 | PRD-217~219 | 4개 신규 adapter 분기 동작 확인 | BE | ✅ 구현완료 |
+| - | ConnectionAdapter enum + normalizeAdapterType 확장 | PRD-217~219 | openai_compatible/bedrock/vertex_ai 정규화 확인 | BE | ✅ 구현완료 |
 
 ---
 
@@ -520,15 +525,58 @@ flowchart LR
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| PRD-222 | EnterPlanModeTool — Plan 도메인 + 계획모드 진입 | Sprint 3(ToolRegistry), CR-006(ToolFilterContext), CR-029(EnhancedToolExecutor) | 계획 모드 진입 시 readOnlyMode 활성화 + 쓰기 도구 차단 확인 | BE | 미구현 |
-| PRD-223 | ExitPlanModeTool — 계획모드 종료 + 실행 전환 | PRD-222 | 계획 확정 + planModeActive=false 복원 + 쓰기 도구 재활성화 확인 | BE | 미구현 |
-| PRD-224 | VerifyPlanExecutionTool — 계획 대비 실행 검증 | PRD-223 | 완료율 산출 + 미완료 gap 식별 + 100% 시 COMPLETED 전환 확인 | BE | 미구현 |
-| PRD-225 | TodoWriteTool — 세션 체크리스트 | Sprint 1(SessionStore), CR-029(EnhancedToolExecutor) | todos 전체 교체 + Redis 캐시 + DB 영속 확인 | BE | 미구현 |
-| PRD-226 | TaskCreate/Get/List — 태스크 생성/조회/목록 | CR-030(SubagentRunner) | SubagentRunner 백그라운드 실행 + 상태 조회 + 목록 필터링 확인 | BE | 미구현 |
-| PRD-227 | TaskUpdate/Output/Stop — 태스크 수정/출력/중지 | PRD-226 | large_output 저장 + 실행 중 태스크 취소 + COMPLETED 수정 거부 확인 | BE | 미구현 |
-| FE-015 | Plan/Todo/Task 대시보드 — 세션 상세 확장 | PRD-222~227, Sprint 11(FE Sessions) | 3개 탭 패널 렌더링 + SSE 실시간 업데이트 확인 | FE | 미구현 |
-| - | Flyway V42 마이그레이션 (plans + todos + subagent_runs 확장) | V41 이후 | 마이그레이션 성공 + 테이블 생성 확인 | BE | 미구현 |
-| - | BIZ-052~056 비즈니스 규칙 구현 검증 | PRD-222~227 | Plan 읽기전용 모드, 세션당 Plan 1개, FSM 전이, Task 5개 제한 검증 | BE | 미구현 |
+| PRD-222 | EnterPlanModeTool — Plan 도메인 + 계획모드 진입 | Sprint 3(ToolRegistry), CR-006(ToolFilterContext), CR-029(EnhancedToolExecutor) | 계획 모드 진입 시 readOnlyMode 활성화 + 쓰기 도구 차단 확인 | BE | ✅ 구현완료 |
+| PRD-223 | ExitPlanModeTool — 계획모드 종료 + 실행 전환 | PRD-222 | 계획 확정 + planModeActive=false 복원 + 쓰기 도구 재활성화 확인 | BE | ✅ 구현완료 |
+| PRD-224 | VerifyPlanExecutionTool — 계획 대비 실행 검증 | PRD-223 | 완료율 산출 + 미완료 gap 식별 + 100% 시 COMPLETED 전환 확인 | BE | ✅ 구현완료 |
+| PRD-225 | TodoWriteTool — 세션 체크리스트 | Sprint 1(SessionStore), CR-029(EnhancedToolExecutor) | todos 전체 교체 + Redis 캐시 + DB 영속 확인 | BE | ✅ 구현완료 |
+| PRD-226 | TaskCreate/Get/List — 태스크 생성/조회/목록 | CR-030(SubagentRunner) | SubagentRunner 백그라운드 실행 + 상태 조회 + 목록 필터링 확인 | BE | ✅ 구현완료 |
+| PRD-227 | TaskUpdate/Output/Stop — 태스크 수정/출력/중지 | PRD-226 | large_output 저장 + 실행 중 태스크 취소 + COMPLETED 수정 거부 확인 | BE | ✅ 구현완료 |
+| FE-015 | Plan/Todo/Task 대시보드 — 세션 상세 확장 | PRD-222~227, Sprint 11(FE Sessions) | 3개 탭 패널 렌더링 + SSE 실시간 업데이트 확인 | FE | ✅ 구현완료 |
+| - | Flyway V42 마이그레이션 (plans + todos + subagent_runs 확장) | V41 이후 | 마이그레이션 성공 + 테이블 생성 확인 | BE | ✅ 구현완료 |
+| - | BIZ-052~056 비즈니스 규칙 구현 검증 | PRD-222~227 | Plan 읽기전용 모드, 세션당 Plan 1개, FSM 전이, Task 5개 제한 검증 | BE | ✅ 구현완료 |
+
+---
+
+### Sprint 46: Tool/Policy 확장성·자동화 (BE + FE) [v6.2, CR-035]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-234 | CronScheduleManager — Spring TaskScheduler 래핑, scheduled_jobs 테이블, 서버 기동 시 active job 로드 | Sprint 6(WorkflowEngine), Sprint 9(TenantContext) | Cron 표현식 등록 + 지정 시각 워크플로우/도구 자동 실행 확인 | BE | 완료 |
+| PRD-235 | ScheduleCronTool + CronListTool + CronDeleteTool — LLM 자율 Cron CRUD | PRD-234 | 테넌트당 50개 제한 + 최소 1분 간격 + 3회 실패 시 비활성화 확인 | BE | 완료 |
+| PRD-236 | SkillInvokeTool — 재사용 프롬프트+도구 조합 경량 실행 | Sprint 3(ToolRegistry), CR-029(EnhancedToolExecutor) | skills 테이블 기반 단일 LLM 호출 + 결과 반환 확인 | BE | 완료 |
+| PRD-237 | ToolSearchTool — ToolContractMeta tags/capabilities/description 키워드 검색 | Sprint 3(ToolRegistry) | ToolRegistry.searchTools() 키워드 매칭 + 결과 반환 확인 | BE | 완료 |
+| PRD-238 | Python 사이드카 Firecrawl 어댑터 — scraper.py firecrawl 모드, Self-hosted 지원 | Sprint 15(Python 사이드카) | firecrawl-py 의존성 + API Key 미설정 시 js_render 폴백 확인 | Python | 완료 |
+| PRD-239 | BE 지식소스 Firecrawl 모드 — KnowledgeSource.crawl_mode + IngestionPipeline 분기 | PRD-238, Sprint 5(RAG) | crawl_mode 선택 시 Firecrawl 경유 인제스션 + FE 크롤링 모드 선택 확인 | BE | 완료 |
+| PRD-240 | DOMAIN_FILTER 규칙 타입 — PolicyEngine 도메인 필터링 | Sprint 4(PolicyEngine) | ALLOWLIST/BLOCKLIST 모드 + 와일드카드 서브도메인 + 차단 시 DENY 반환 확인 | BE | 완료 |
+| FE-017 | 스케줄/스킬/도구탐색/도메인필터 관리 UI | PRD-234~240, Sprint 11(FE 기본) | 스케줄 모니터링 탭 + 스킬 관리 페이지 + 도구 탐색 패널 + 정책 도메인 필터 UI 렌더링 확인 | FE | 완료 |
+| - | Flyway V20 (Master: scheduled_jobs) + V44 (Tenant: skills) 마이그레이션 | V19/V43 이후 | 마이그레이션 성공 + 테이블 생성 확인 | BE | 완료 |
+| - | BIZ-057~065 비즈니스 규칙 구현 검증 | PRD-234~240 | 스케줄 제한, 스킬 규칙, Firecrawl 폴백, 도메인 필터링 검증 | BE | 완료 |
+
+---
+
+### Sprint 47: 핵심 도구 네이티브화 (BE) [v6.3, CR-037]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-241 | BashTool — ProcessBuilder 셸 명령 실행, 위험 명령 차단 목록 | Sprint 3(ToolRegistry), CR-029(EnhancedToolExecutor) | 타임아웃 120초 + stdout/stderr 분리 캡처 + WorkspaceResolver 작업 디렉토리 제한 확인 | BE | ✅ 구현완료 |
+| PRD-242 | FileWriteTool — 신규 파일 생성 (SafeEditTool 보완) | Sprint 3(ToolRegistry), CR-029(EnhancedToolExecutor) | 부모 디렉토리 자동 생성 + 기존 파일 덮어쓰기 경고 + WorkspacePolicyEngine 경로 검증 확인 | BE | ✅ 구현완료 |
+| PRD-243 | WebSearchTool — Tavily API 우선 + DuckDuckGo HTML 폴백 | Sprint 2(Connection), Sprint 3(ToolRegistry) | Connection에서 API Key 조회 + title/url/snippet 구조화 반환 + 폴백 동작 확인 | BE | ✅ 구현완료 |
+| PRD-244 | SuggestBackgroundPR — Git 커밋 + GitHub PR 자동 생성 | Sprint 3(ToolRegistry), CR-029(EnhancedToolExecutor) | ProcessBuilder git 명령 + GitHub REST API + Connection 토큰 조회 확인 | BE | ✅ 구현완료 |
+| FE-018 | 도구 목록 자동 노출 (ToolRegistry 기반) | PRD-241~244, Sprint 12(FE 확장) | 기존 도구 목록 페이지에 4종 자동 노출 확인 | FE | ✅ 구현완료 |
+
+---
+
+### Sprint 48: 에이전트 자율성 강화 (BE + FE) [v6.4, CR-038]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-245 | ListMcpResourcesTool — MCP 리소스 목록 탐색 | Sprint 3(MCP), CR-029(EnhancedToolExecutor) | 연결된 서버의 리소스 URI/name/mimeType 반환 확인 | BE | ✅ 구현완료 |
+| PRD-246 | ReadMcpResourceTool — MCP 리소스 읽기 | PRD-245 | text/blob 콘텐츠 반환 + 32KB 트렁케이션 확인 | BE | ✅ 구현완료 |
+| PRD-247 | RemoteTriggerTool — 이벤트 기반 즉시 트리거 | CR-035(CronScheduleManager) | 워크플로우/도구 즉시 실행 + 분당 10회 제한 확인 | BE | ✅ 구현완료 |
+| PRD-248 | BriefTool — 세션 브리핑 | Sprint 1(SessionStore), CR-029(EnhancedToolExecutor) | 최근 50개 메시지 기반 요약 생성 + 캐시 확인 | BE | ✅ 구현완료 |
+| FE-019 | 세션 브리핑 패널 — 세션 상세 확장 | PRD-248, Sprint 11(FE Sessions) | Brief 탭 렌더링 + 수동 생성 버튼 확인 | FE | ✅ 구현완료 |
+| - | Flyway V45 마이그레이션 (session_briefs) | V44 이후 | 마이그레이션 성공 + 테이블 생성 확인 | BE | ✅ 구현완료 |
+| - | BIZ-066~069 비즈니스 규칙 구현 검증 | PRD-245~248 | 32KB 트렁케이션, 분당 10회 제한, 캐시 TTL, 50개 메시지 제한 검증 | BE | ✅ 구현완료 |
 
 ---
 

@@ -51,8 +51,8 @@ public class CronScheduleManager {
 
     public CronScheduleManager(ScheduledJobRepository jobRepository,
                                TaskScheduler taskScheduler,
-                               WorkflowEngine workflowEngine,
-                               ToolRegistry toolRegistry,
+                               @org.springframework.context.annotation.Lazy WorkflowEngine workflowEngine,
+                               @org.springframework.context.annotation.Lazy ToolRegistry toolRegistry,
                                AuditLogger auditLogger,
                                PlatformMetrics platformMetrics) {
         this.jobRepository = jobRepository;

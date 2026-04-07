@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { sessionsApi } from "../api/sessions";
-import type { PlanData, TodoItem, TaskData } from "../api/sessions";
+import type { PlanData, TodoItem, TaskData, BriefData } from "../api/sessions";
 import type { PagedResponse } from "../types/api";
 import type { SessionMeta } from "../types/session";
 import type { ToolExecution } from "../types/tool";
@@ -65,3 +65,20 @@ export const useSessionTasks = (sessionId: string) =>
     enabled: !!sessionId,
     retry: false,
   });
+
+// CR-038: Brief hooks
+export const useSessionBrief = (sessionId: string) =>
+  useQuery({
+    queryKey: ["sessions", sessionId, "brief"],
+    queryFn: () => sessionsApi.getBrief(sessionId).then((r) => r.data.data as BriefData | null),
+    enabled: !!sessionId,
+    retry: false,
+  });
+
+export const useCreateBrief = (sessionId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => sessionsApi.createBrief(sessionId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions", sessionId, "brief"] }),
+  });
+};
