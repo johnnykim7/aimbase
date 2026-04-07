@@ -15,6 +15,6 @@ public record WorkflowStep(
         Long timeoutMs
 ) {
     public enum StepType {
-        LLM_CALL, TOOL_CALL, ACTION, CONDITION, PARALLEL, HUMAN_INPUT, SUB_WORKFLOW
+        LLM_CALL, TOOL_CALL, ACTION, CONDITION, PARALLEL, HUMAN_INPUT, SUB_WORKFLOW, AGENT_CALL
     }
 }

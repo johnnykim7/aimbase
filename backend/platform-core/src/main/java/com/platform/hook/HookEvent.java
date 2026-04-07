@@ -22,5 +22,9 @@ public enum HookEvent {
 
     // ── 컨텍스트 압축 (PRD-195) ──
     PRE_COMPACT,            // 압축 전 (대상 메시지 변경 가능)
-    POST_COMPACT            // 압축 완료 후 알림
+    POST_COMPACT,           // 압축 완료 후 알림
+
+    // ── 서브에이전트 (PRD-207) ──
+    SUBAGENT_START,         // 서브에이전트 실행 시작
+    SUBAGENT_STOP           // 서브에이전트 실행 완료/실패/타임아웃
 }
