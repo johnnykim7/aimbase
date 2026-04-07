@@ -16,6 +16,8 @@ const TYPE_STYLES: Record<string, { color: string; icon: string }> = {
   PARALLEL: { color: "#059669", icon: "⚡" },
   HUMAN_INPUT: { color: "#dc2626", icon: "✋" },
   ACTION: { color: "#6366f1", icon: "▶" },
+  agent: { color: "#0891b2", icon: "🧬" },
+  AGENT_CALL: { color: "#0891b2", icon: "🧬" },
 };
 
 const STATUS_COLORS: Record<string, string> = {

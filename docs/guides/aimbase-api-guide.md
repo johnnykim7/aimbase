@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v1.5.0** | 2026-04-05 | Aimbase v4.3.0 기준
+> **v1.6.0** | 2026-04-07 | Aimbase v4.1.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -572,7 +572,136 @@ GET /api/v1/domain-configs/{domainApp}
 
 ---
 
-## 12. API 엔드포인트 요약
+## 12. 서브에이전트 [CR-030]
+
+서브에이전트는 메인 세션에서 독립적인 LLM 에이전트를 생성하여 작업을 위임하는 기능입니다.
+
+### 12-1. 단일 에이전트 실행
+
+```bash
+POST /api/v1/agents/run
+Content-Type: application/json
+
+{
+  "description": "코드 리뷰 에이전트",
+  "prompt": "다음 코드를 리뷰해주세요: ...",
+  "model": "claude-sonnet",
+  "connectionId": "conn-1",
+  "isolation": "NONE",
+  "runInBackground": false,
+  "timeoutMs": 120000,
+  "parentSessionId": "sess-abc-123"
+}
+```
+
+**주요 파라미터:**
+
+| 파라미터 | 필수 | 설명 |
+|---------|------|------|
+| `description` | O | 에이전트 목적 (3-5 단어) |
+| `prompt` | O | 에이전트에게 전달할 작업 프롬프트 |
+| `model` | X | LLM 모델 (null이면 기본값) |
+| `connectionId` | X | LLM 커넥션 ID |
+| `isolation` | X | `NONE` (기본) 또는 `WORKTREE` (git worktree 격리) |
+| `runInBackground` | X | `true`면 비동기 실행, 즉시 RUNNING 상태 반환 |
+| `timeoutMs` | X | 타임아웃 (기본 120,000ms) |
+| `parentSessionId` | X | 부모 세션 ID (결과 병합용) |
+
+**응답:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "subagentRunId": "uuid",
+    "sessionId": "subagent-uuid",
+    "status": "COMPLETED",
+    "output": "리뷰 결과...",
+    "exitCode": 0,
+    "usage": { "inputTokens": 500, "outputTokens": 1200 },
+    "durationMs": 3500
+  }
+}
+```
+
+### 12-2. 멀티에이전트 조율 실행
+
+```bash
+POST /api/v1/agents/orchestrate
+Content-Type: application/json
+
+{
+  "agents": [
+    { "description": "분석 에이전트", "prompt": "코드 분석..." },
+    { "description": "테스트 에이전트", "prompt": "테스트 작성..." }
+  ],
+  "execution": "parallel",
+  "parentSessionId": "sess-abc-123"
+}
+```
+
+- `execution`: `"parallel"` (병렬, 기본) 또는 `"sequential"` (순차)
+- 응답에 `mergedOutput`, `successCount`, `failCount`, 개별 `agents` 결과 포함
+
+### 12-3. 상태 조회 및 관리
+
+```bash
+# 실행 상태 조회
+GET /api/v1/agents/{runId}
+
+# 부모 세션의 서브에이전트 목록
+GET /api/v1/agents/session/{parentSessionId}
+
+# 강제 취소
+POST /api/v1/agents/{runId}/cancel
+
+# 활성 에이전트 현황
+GET /api/v1/agents/active
+```
+
+### 12-4. Worktree 격리
+
+`isolation: "WORKTREE"` 설정 시 git worktree 기반 격리 환경에서 실행됩니다.
+- 에이전트 완료 후 변경사항이 없으면 worktree 자동 정리
+- 변경사항이 있으면 `worktreePath`와 `branchName`이 결과에 포함
+- 주기적 스캔(30초)으로 타임아웃된 에이전트 자동 감지
+
+### 12-5. 워크플로우 AGENT_CALL 스텝
+
+워크플로우 DAG에서 `AGENT_CALL` 스텝 타입으로 서브에이전트를 실행할 수 있습니다.
+
+```json
+{
+  "id": "s3",
+  "name": "코드 리뷰",
+  "type": "AGENT_CALL",
+  "config": {
+    "description": "리뷰 에이전트",
+    "prompt": "{{s2.output}} 를 리뷰해줘",
+    "isolation": "WORKTREE",
+    "timeout_ms": 60000
+  },
+  "dependsOn": ["s2"]
+}
+```
+
+멀티에이전트 config:
+
+```json
+{
+  "config": {
+    "agents": [
+      { "description": "agent-1", "prompt": "..." },
+      { "description": "agent-2", "prompt": "..." }
+    ],
+    "execution": "parallel"
+  }
+}
+```
+
+---
+
+## 13. API 엔드포인트 요약
 
 ### 인증
 
@@ -678,12 +807,24 @@ GET /api/v1/domain-configs/{domainApp}
 | PUT | `/domain-configs/{domainApp}` | 수정 |
 | DELETE | `/domain-configs/{domainApp}` | 삭제 |
 
+### 서브에이전트 [v4.1, CR-030]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| POST | `/agents/run` | 단일 에이전트 실행 (fg/bg) |
+| POST | `/agents/orchestrate` | 멀티에이전트 병렬/순차 실행 |
+| GET | `/agents/{runId}` | 실행 상태 조회 |
+| GET | `/agents/session/{parentSessionId}` | 부모 세션별 목록 |
+| POST | `/agents/{runId}/cancel` | 강제 취소 |
+| GET | `/agents/active` | 활성 에이전트 현황 |
+
 ---
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.6.0 | 2026-04-07 | 서브에이전트 API 6개 엔드포인트 추가, 워크플로우 AGENT_CALL 스텝 타입, Worktree 격리 실행 (CR-030) |
 | v1.5.0 | 2026-04-05 | 도구 관리 확장(contract/execute/validate), 세션 메타, 도구 실행 이력, Context Recipe, Domain Config 엔드포인트 추가 (CR-029) |
 | v1.4.0 | 2026-03-28 | LLM_CALL 스텝 `max_tokens` config 키 추가. 토큰 초과 자동 처리(에스컬레이션+자동분할) 설명 (CR-028) |
 | v1.3.0 | 2026-03-28 | 워크플로우 생성/수정/삭제 REST API 예제 추가. 스텝 타입 레퍼런스(TOOL_CALL, LLM_CALL 등) 및 스텝 간 데이터 참조 문법 명세 |

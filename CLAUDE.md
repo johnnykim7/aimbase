@@ -39,6 +39,7 @@ backend/platform-core/src/main/java/com/platform/
 ├── orchestrator/  # 핵심 요청 오케스트레이션
 ├── llm/           # LLM 어댑터 (adapter/, router/)
 ├── tool/          # 도구 레지스트리 & 실행
+├── agent/         # 서브에이전트 (SubagentRunner, WorktreeManager, AgentOrchestrator)
 ├── action/        # 액션 실행 (write/notify)
 ├── workflow/      # 워크플로우 엔진
 ├── rag/           # RAG (파싱, 청킹, 임베딩, 검색)
@@ -176,6 +177,7 @@ frontend/src/
 - [x] Sprint 38: WorkflowStudio + 플랫폼 4개 교체 [CR-026]
 - [x] Sprint 39: 정리 + 최종 검증 [CR-026]
 - [x] Sprint 40: LLM_CALL 토큰 초과 자동 처리 — 에스컬레이션 + 자동분할 [CR-028]
+- [x] Sprint 41: CR-030 2단계 고도화 6 Phase (PRD-186~210) — Extended Thinking, Hook Architecture, Permission AUTO, Memory Scope, 압축 5전략, Subagent+Worktree Isolation
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)

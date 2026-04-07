@@ -485,6 +485,42 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
         { key: "destination", label: "대상 (테이블/채널)", placeholder: "results" },
         { key: "payload", label: "페이로드 (JSON)", placeholder: '{"data": {"key": "{{step1.output}}"}}', multiline: true },
       ];
+    case "AGENT_CALL":
+    case "agent":
+      return [
+        { key: "description", label: "에이전트 설명", placeholder: "코드 리뷰 에이전트 (3-5 단어)" },
+        { key: "prompt", label: "프롬프트", placeholder: "{{input.code}}를 리뷰해줘", multiline: true },
+        { key: "model", label: "모델", placeholder: "예: claude-sonnet (비우면 기본값)" },
+        {
+          key: "connection_id",
+          label: "LLM 연결",
+          placeholder: ctx.connError ? "연결 ID 직접 입력" : "연결 선택 (비우면 기본)",
+          type: ctx.connError ? "text" : "select",
+          options: ctx.connectionOptions,
+        },
+        {
+          key: "isolation",
+          label: "격리 모드",
+          placeholder: "NONE",
+          type: "select",
+          options: [
+            { value: "NONE", label: "NONE — 격리 없음" },
+            { value: "WORKTREE", label: "WORKTREE — Git worktree 격리" },
+          ],
+        },
+        { key: "timeout_ms", label: "타임아웃 (ms)", placeholder: "120000" },
+        { key: "agents", label: "멀티에이전트 (JSON)", placeholder: '[{"description":"agent-1","prompt":"..."}]', multiline: true },
+        {
+          key: "execution",
+          label: "실행 방식 (멀티)",
+          placeholder: "parallel",
+          type: "select",
+          options: [
+            { value: "parallel", label: "parallel — 병렬 실행" },
+            { value: "sequential", label: "sequential — 순차 실행" },
+          ],
+        },
+      ];
     default:
       return [];
   }

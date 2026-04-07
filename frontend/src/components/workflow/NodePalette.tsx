@@ -5,6 +5,7 @@ const PALETTE_ITEMS = [
   { type: "parallel", label: "병렬 실행", icon: "⚡", color: "#059669" },
   { type: "approval", label: "승인 게이트", icon: "✋", color: "#dc2626" },
   { type: "action", label: "액션", icon: "▶", color: "#6366f1" },
+  { type: "agent", label: "에이전트", icon: "🧬", color: "#0891b2" },
 ] as const;
 
 export function NodePalette() {

@@ -1,6 +1,17 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { WorkflowStep, WorkflowRequest } from "../../../types/workflow";
 
+/** FE 팔레트 타입 → BE StepType 매핑 */
+const TYPE_MAP: Record<string, string> = {
+  llm: "LLM_CALL",
+  tool: "TOOL_CALL",
+  condition: "CONDITION",
+  parallel: "PARALLEL",
+  approval: "HUMAN_INPUT",
+  action: "ACTION",
+  agent: "AGENT_CALL",
+};
+
 /**
  * React Flow 노드/엣지 → WorkflowRequest JSON 변환
  */
@@ -27,7 +38,7 @@ export function flowToWorkflow(
     return {
       id: node.id,
       name: (node.data.label as string) ?? node.id,
-      type: node.data.type as WorkflowStep["type"],
+      type: (TYPE_MAP[node.data.type as string] ?? node.data.type) as WorkflowStep["type"],
       config: (node.data.config as Record<string, unknown>) ?? {},
       dependsOn,
       nextSteps: nextSteps.length > 0 ? nextSteps : undefined,

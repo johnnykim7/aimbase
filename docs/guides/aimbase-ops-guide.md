@@ -526,6 +526,31 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 | `toolAllowlist` | 허용 도구 목록. 미지정 시 전체 허용 |
 | `runtime` | LLM 호출 기본값 (maxTokens, temperature, defaultConnectionId) |
 
+### 3-16. 서브에이전트 관리 [CR-030]
+
+서브에이전트는 메인 세션에서 독립적인 LLM 에이전트를 생성하여 병렬/순차로 작업을 위임하는 기능입니다.
+
+**관리 엔드포인트:**
+
+| 작업 | 경로 | 설명 |
+|------|------|------|
+| 단일 실행 | `POST /agents/run` | 포그라운드/백그라운드 실행 |
+| 멀티 조율 | `POST /agents/orchestrate` | 병렬 또는 순차 실행 |
+| 상태 조회 | `GET /agents/{runId}` | 실행 결과 확인 |
+| 목록 조회 | `GET /agents/session/{parentSessionId}` | 부모 세션별 목록 |
+| 강제 취소 | `POST /agents/{runId}/cancel` | 실행 중인 에이전트 중단 |
+| 활성 현황 | `GET /agents/active` | 현재 실행 중인 에이전트 수 |
+
+**Worktree 격리:**
+- `isolation: "WORKTREE"` 설정 시 git worktree 기반 격리 환경에서 실행
+- 변경사항 없으면 자동 정리, 있으면 `worktreePath`/`branchName` 반환
+- 타임아웃 스캔(30초 간격), 고아 worktree 정리(5분 간격) 자동 수행
+
+**워크플로우 통합:**
+- `AGENT_CALL` 스텝 타입으로 DAG에서 서브에이전트 실행 가능
+- 단일 에이전트 또는 멀티에이전트(parallel/sequential) 지원
+- `{{input.key}}`, `{{stepId.field}}` 변수 치환 지원
+
 ---
 
 ## 4. 운영 시나리오
@@ -640,6 +665,35 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
    → 즉시 서비스 재개
 ```
 
+### 시나리오 F: 멀티에이전트 워크플로우 구성 [CR-030]
+
+```
+1. [테넌트 관리자] 워크플로우에 AGENT_CALL 스텝 추가
+   POST /workflows
+   body.steps = [
+     { "id": "s1", "type": "LLM_CALL", ... },
+     { "id": "s2", "type": "AGENT_CALL",
+       "config": {
+         "agents": [
+           { "description": "코드 분석", "prompt": "{{s1.output}} 분석" },
+           { "description": "테스트 생성", "prompt": "{{s1.output}} 테스트" }
+         ],
+         "execution": "parallel"
+       },
+       "dependsOn": ["s1"]
+     }
+   ]
+
+2. [소비앱] 워크플로우 실행
+   POST /workflows/{id}/execute
+   → s1 완료 → s2에서 2개 에이전트 병렬 실행 → 결과 병합
+
+3. [운영자] 에이전트 모니터링
+   GET /agents/active → 활성 에이전트 현황
+   GET /agents/session/{sessionId} → 세션별 실행 이력
+   POST /agents/{runId}/cancel → 필요 시 강제 종료
+```
+
 ---
 
 ## 5. 운영 주의사항
@@ -670,6 +724,7 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.2.0 | 2026-04-07 | 서브에이전트 관리(§ 3-16), 시나리오 F(멀티에이전트 워크플로우) 추가 (CR-030) |
 | v1.1.0 | 2026-04-05 | Native Tool 관리(9종 도구, contract, 직접 실행, Workspace Policy), Context Recipe 설정, Domain Config 관리, 시나리오 D 추가 (CR-029) |
 | v1.0.1 | 2026-03-28 | 접속 정보(포트 매핑) 섹션 추가 |
 | v1.0.0 | 2026-03-28 | 초판 작성. 플랫폼 관리(테넌트/구독/API Key), 테넌트 관리(Connection~프로젝트), 운영 시나리오 4건 포함 |

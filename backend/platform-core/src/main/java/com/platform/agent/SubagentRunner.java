@@ -116,7 +116,7 @@ public class SubagentRunner {
 
     private SubagentResult runForeground(SubagentContext context, SubagentRunEntity entity) {
         CompletableFuture<SubagentResult> future = CompletableFuture.supplyAsync(
-                () -> executeAgent(context), Thread.ofVirtual().factory()::newThread);
+                () -> executeAgent(context), java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
 
         try {
             SubagentResult result = future.get(context.getRequest().timeoutMs(), TimeUnit.MILLISECONDS);
