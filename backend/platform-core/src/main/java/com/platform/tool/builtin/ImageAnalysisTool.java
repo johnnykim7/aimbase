@@ -24,6 +24,7 @@ public class ImageAnalysisTool implements ToolExecutor {
 
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final ConnectionRepository connectionRepository;
+    private final com.platform.service.PromptTemplateService promptTemplateService;
 
     private static final UnifiedToolDef DEFINITION = new UnifiedToolDef(
             "analyze_image",
@@ -49,9 +50,11 @@ public class ImageAnalysisTool implements ToolExecutor {
     );
 
     public ImageAnalysisTool(ConnectionAdapterFactory connectionAdapterFactory,
-                             ConnectionRepository connectionRepository) {
+                             ConnectionRepository connectionRepository,
+                             com.platform.service.PromptTemplateService promptTemplateService) {
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.connectionRepository = connectionRepository;
+        this.promptTemplateService = promptTemplateService;
     }
 
     @Override
@@ -86,7 +89,8 @@ public class ImageAnalysisTool implements ToolExecutor {
                     model,
                     List.of(
                             UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
-                                    "You are an image analysis expert. Analyze the image and respond to the user's request precisely."),
+                                    promptTemplateService.getTemplateOrFallback("tool.image_analysis.system",
+                                            "You are an image analysis expert. Analyze the image and respond to the user's request precisely.")),
                             new UnifiedMessage(UnifiedMessage.Role.USER, List.of(
                                     ContentBlock.Image.ofBase64(mediaType, imageBase64),
                                     new ContentBlock.Text(prompt)

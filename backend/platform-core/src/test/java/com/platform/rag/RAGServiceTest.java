@@ -3,6 +3,7 @@ package com.platform.rag;
 import com.platform.domain.RetrievalConfigEntity;
 import com.platform.rag.model.RetrievedChunk;
 import com.platform.repository.RetrievalConfigRepository;
+import com.platform.service.PromptTemplateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,12 +30,13 @@ class RAGServiceTest {
     @Mock private VectorSearcher vectorSearcher;
     @Mock private RetrievalConfigRepository retrievalConfigRepository;
     @Mock private MCPRagClient mcpRagClient;
+    @Mock private PromptTemplateService promptTemplateService;
 
     private RAGService ragService;
 
     @BeforeEach
     void setUp() {
-        ragService = new RAGService(vectorSearcher, retrievalConfigRepository, mcpRagClient);
+        ragService = new RAGService(vectorSearcher, retrievalConfigRepository, mcpRagClient, promptTemplateService);
     }
 
     // ─── buildContext 기본 ────────────────────────────────────────

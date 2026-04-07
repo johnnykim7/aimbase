@@ -35,9 +35,12 @@ public class ConversationSummarizer {
             "아래 대화를 불릿 포인트 3~5개로 초간단 요약. 핵심 사실만. 한국어, 200자 이내.";
 
     private final LLMAdapterRegistry adapterRegistry;
+    private final com.platform.service.PromptTemplateService promptTemplateService;
 
-    public ConversationSummarizer(LLMAdapterRegistry adapterRegistry) {
+    public ConversationSummarizer(LLMAdapterRegistry adapterRegistry,
+                                   com.platform.service.PromptTemplateService promptTemplateService) {
         this.adapterRegistry = adapterRegistry;
+        this.promptTemplateService = promptTemplateService;
     }
 
     /**
@@ -65,7 +68,8 @@ public class ConversationSummarizer {
             LLMAdapter adapter = adapterRegistry.getAdapter(SUMMARY_MODEL);
 
             List<UnifiedMessage> messages = new ArrayList<>();
-            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, SUMMARY_PROMPT));
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
+                    promptTemplateService.getTemplateOrFallback("session.summarize.standard", SUMMARY_PROMPT)));
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, conversationText));
 
             LLMRequest request = new LLMRequest(SUMMARY_MODEL, messages);
@@ -98,7 +102,8 @@ public class ConversationSummarizer {
         try {
             LLMAdapter adapter = adapterRegistry.getAdapter(SUMMARY_MODEL);
             List<UnifiedMessage> messages = new ArrayList<>();
-            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, MICRO_SUMMARY_PROMPT));
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
+                    promptTemplateService.getTemplateOrFallback("session.summarize.micro", MICRO_SUMMARY_PROMPT)));
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, conversationText));
             LLMResponse response = adapter.chat(new LLMRequest(SUMMARY_MODEL, messages)).get();
             String summary = extractText(response);

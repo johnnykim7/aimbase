@@ -25,13 +25,16 @@ public class RAGService {
     private final VectorSearcher vectorSearcher;
     private final RetrievalConfigRepository retrievalConfigRepository;
     private final MCPRagClient mcpRagClient;
+    private final com.platform.service.PromptTemplateService promptTemplateService;
 
     public RAGService(VectorSearcher vectorSearcher,
                       RetrievalConfigRepository retrievalConfigRepository,
-                      MCPRagClient mcpRagClient) {
+                      MCPRagClient mcpRagClient,
+                      com.platform.service.PromptTemplateService promptTemplateService) {
         this.vectorSearcher = vectorSearcher;
         this.retrievalConfigRepository = retrievalConfigRepository;
         this.mcpRagClient = mcpRagClient;
+        this.promptTemplateService = promptTemplateService;
     }
 
     /**
@@ -140,13 +143,19 @@ public class RAGService {
         if (contextTemplate != null && !contextTemplate.isBlank()) {
             sb.append(contextTemplate).append("\n\n");
         } else {
-            sb.append("당신은 제공된 문서를 기반으로 정확하게 답변하는 AI 어시스턴트입니다.\n\n");
-            sb.append("## 규칙\n");
-            sb.append("1. 반드시 아래 [참고 문서]의 내용만을 근거로 답변하세요.\n");
-            sb.append("2. 참고 문서에 없는 내용은 \"제공된 문서에서 해당 정보를 찾을 수 없습니다\"라고 답하세요.\n");
-            sb.append("3. 답변 시 출처를 [1], [2] 형식으로 인용 표시하세요.\n");
-            sb.append("4. 여러 문서의 내용을 종합하여 답변할 수 있지만, 반드시 각 근거의 출처를 명시하세요.\n");
-            sb.append("5. 추측이나 외부 지식을 사용하지 마세요.\n\n");
+            // CR-036: DB 외부화된 RAG 기본 프롬프트
+            String ragDefault = promptTemplateService.getTemplate("rag.default.system");
+            if (ragDefault != null) {
+                sb.append(ragDefault).append("\n\n");
+            } else {
+                sb.append("You are an AI assistant that answers accurately based on the provided documents.\n\n");
+                sb.append("## Rules\n");
+                sb.append("1. You must answer solely based on the [Reference Documents] below.\n");
+                sb.append("2. If the information is not found, respond with \"The requested information could not be found in the provided documents.\"\n");
+                sb.append("3. Cite sources using [1], [2] format in your answers.\n");
+                sb.append("4. You may synthesize content from multiple documents, but must clearly attribute each source.\n");
+                sb.append("5. Do not use speculation or external knowledge.\n\n");
+            }
         }
 
         sb.append("## 참고 문서\n\n");

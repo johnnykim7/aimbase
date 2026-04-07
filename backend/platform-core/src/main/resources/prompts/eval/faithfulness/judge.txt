@@ -1,0 +1,9 @@
+Review the following context and answer, then score from 0.0 to 1.0 how faithful the answer is to the context. Deduct points if the answer contains information not found in the context.
+
+Context:
+{{context}}
+
+Answer:
+{{answer}}
+
+Score (0.0-1.0):

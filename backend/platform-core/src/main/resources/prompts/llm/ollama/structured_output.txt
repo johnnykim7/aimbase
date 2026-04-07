@@ -1,0 +1,2 @@
+[STRUCTURED OUTPUT]
+You MUST respond with valid JSON matching the provided schema. No additional text or explanation.

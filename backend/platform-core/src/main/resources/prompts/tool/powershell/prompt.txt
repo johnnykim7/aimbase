@@ -1,0 +1,43 @@
+Executes a given PowerShell command with optional timeout. Working directory persists between commands; shell state (variables, functions) does not.
+
+IMPORTANT: This tool is for terminal operations via PowerShell: git, npm, docker, and PS cmdlets. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.
+
+Before executing the command, please follow these steps:
+
+1. Directory Verification:
+   - If the command will create new directories or files, first use `Get-ChildItem` (or `ls`) to verify the parent directory exists and is the correct location
+
+2. Command Execution:
+   - Always quote file paths that contain spaces with double quotes
+   - Capture the output of the command.
+
+PowerShell Syntax Notes:
+   - Variables use $ prefix: $myVar = "value"
+   - Escape character is backtick (`), not backslash
+   - Use Verb-Noun cmdlet naming: Get-ChildItem, Set-Location, New-Item, Remove-Item
+   - Common aliases: ls (Get-ChildItem), cd (Set-Location), cat (Get-Content), rm (Remove-Item)
+   - Pipe operator | works similarly to bash but passes objects, not text
+   - Use Select-Object, Where-Object, ForEach-Object for filtering and transformation
+   - String interpolation: "Hello $name" or "Hello $($obj.Property)"
+   - Environment variables: read with `$env:NAME`, set with `$env:NAME = "value"`
+   - Call native exe with spaces in path via call operator: `& "C:\Program Files\App\app.exe" arg1 arg2`
+
+Interactive and blocking commands (will hang — this tool runs with -NonInteractive):
+   - NEVER use `Read-Host`, `Get-Credential`, `Out-GridView`, `$Host.UI.PromptForChoice`, or `pause`
+   - Destructive cmdlets may prompt for confirmation. Add `-Confirm:$false` when you intend the action to proceed.
+   - Never use `git rebase -i`, `git add -i`, or other commands that open an interactive editor
+
+Usage notes:
+  - The command argument is required.
+  - You can specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). If not specified, commands will timeout after 120000ms (2 minutes).
+  - Avoid using PowerShell to run commands that have dedicated tools:
+    - File search: Use Glob (NOT Get-ChildItem -Recurse)
+    - Content search: Use Grep (NOT Select-String)
+    - Read files: Use Read (NOT Get-Content)
+    - Edit files: Use Edit
+    - Write files: Use Write (NOT Set-Content/Out-File)
+    - Communication: Output text directly (NOT Write-Output/Write-Host)
+  - For git commands:
+    - Prefer to create a new commit rather than amending an existing commit.
+    - Before running destructive operations, consider safer alternatives.
+    - Never skip hooks (--no-verify) or bypass signing unless the user explicitly asked for it.

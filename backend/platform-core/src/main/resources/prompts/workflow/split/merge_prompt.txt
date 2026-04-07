@@ -1,0 +1,12 @@
+Merge the following fragments into one complete JSON according to the schema below.
+
+=== Target Schema ===
+{{schema}}
+
+=== Fragments ===
+{{fragments}}
+
+Rules:
+- Include all content from every fragment without omission
+- Rearrange into the structure matching the schema
+- Remove duplicates but do not omit any content

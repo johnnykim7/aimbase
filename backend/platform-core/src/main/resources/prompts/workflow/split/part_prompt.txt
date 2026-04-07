@@ -1,0 +1,9 @@
+Generate only the following scope from the overall task.
+
+=== Scope ===
+{{scope}}
+
+=== Original Request ===
+{{prompt}}
+
+Respond in JSON format only.

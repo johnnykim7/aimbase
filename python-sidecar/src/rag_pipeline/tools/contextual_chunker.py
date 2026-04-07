@@ -14,18 +14,30 @@ from rag_pipeline.tools.embedder import embed_texts
 
 logger = logging.getLogger(__name__)
 
-CONTEXT_PROMPT_TEMPLATE = """<document>
+_DEFAULT_CONTEXT_TEMPLATE = """<document>
 {document}
 </document>
 
-위 문서에서 아래 청크가 위치합니다. 이 청크를 검색에서 정확히 찾을 수 있도록,
-문서 전체 맥락에서 이 청크의 역할과 위치를 간결하게 설명하는 접두 문장(50~100자)을 생성해주세요.
+The following chunk is located within the document above. Generate a concise prefix sentence (50-100 characters) describing the role and position of this chunk within the overall document context.
 
 <chunk>
 {chunk}
 </chunk>
 
-접두 문장:"""
+Prefix sentence:"""
+
+
+def _get_context_template() -> str:
+    """CR-036: DB 외부화된 프롬프트 로드 (폴백: 로컬 기본값)."""
+    from rag_pipeline import prompt_client
+    tmpl = prompt_client.get("chunking.contextual.prefix")
+    if tmpl:
+        # DB 템플릿은 {{variable}} 형식이므로 Python {variable}로 변환
+        return tmpl.replace("{{document}}", "{document}").replace("{{chunk}}", "{chunk}")
+    return _DEFAULT_CONTEXT_TEMPLATE
+
+
+CONTEXT_PROMPT_TEMPLATE = _DEFAULT_CONTEXT_TEMPLATE  # 초기값 (startup 후 갱신)
 
 
 def contextual_chunk(

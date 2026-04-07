@@ -57,12 +57,16 @@ public class MemoryAutoExtractService {
     private final Map<String, Long> lastExtractionTime = new ConcurrentHashMap<>();
     private static final long THROTTLE_MS = 60_000; // 1분 이내 재추출 방지
 
+    private final com.platform.service.PromptTemplateService promptTemplateService;
+
     public MemoryAutoExtractService(LLMAdapterRegistry adapterRegistry,
                                      ConversationMemoryRepository memoryRepository,
-                                     MemoryService memoryService) {
+                                     MemoryService memoryService,
+                                     com.platform.service.PromptTemplateService promptTemplateService) {
         this.adapterRegistry = adapterRegistry;
         this.memoryRepository = memoryRepository;
         this.memoryService = memoryService;
+        this.promptTemplateService = promptTemplateService;
     }
 
     /**
@@ -148,7 +152,8 @@ public class MemoryAutoExtractService {
         try {
             LLMAdapter adapter = adapterRegistry.getAdapter(EXTRACT_MODEL);
             List<UnifiedMessage> promptMessages = List.of(
-                    UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, EXTRACT_PROMPT),
+                    UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
+                            promptTemplateService.getTemplateOrFallback("session.memory_extract.system", EXTRACT_PROMPT)),
                     UnifiedMessage.ofText(UnifiedMessage.Role.USER, conversationText));
 
             LLMResponse response = adapter.chat(new LLMRequest(EXTRACT_MODEL, promptMessages)).get();

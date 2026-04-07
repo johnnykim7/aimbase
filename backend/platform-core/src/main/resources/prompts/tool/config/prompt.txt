@@ -1,0 +1,28 @@
+Get or set configuration settings.
+
+View or change settings. Use when the user requests configuration changes, asks about current settings, or when adjusting a setting would benefit them.
+
+## Usage
+- **Get current value:** Omit the "value" parameter
+- **Set new value:** Include the "value" parameter
+
+## Configurable settings list
+The following settings are available for you to change:
+
+### Global Settings
+- theme: "light", "dark", "light-daltonized", "dark-daltonized" - Color theme for the terminal UI
+- editorMode: "normal", "vim", "emacs" - Text input mode
+- verbose: true/false - Show detailed tool call information
+
+### Project Settings
+- permissions.defaultMode: "default", "plan", "bypassPermissions" - Default permission mode
+
+## Model
+- model - Override the default model (sonnet, opus, haiku, best, or full model ID)
+
+## Examples
+- Get theme: { "setting": "theme" }
+- Set dark theme: { "setting": "theme", "value": "dark" }
+- Enable vim mode: { "setting": "editorMode", "value": "vim" }
+- Enable verbose: { "setting": "verbose", "value": true }
+- Change model: { "setting": "model", "value": "opus" }

@@ -344,18 +344,20 @@ def scrape_url(
     max_pages: int = 10,
     timeout_ms: int = 30000,
 ) -> str:
-    """Scrape web page content with robots.txt compliance (PY-017).
+    """Scrape web page content with robots.txt compliance (PY-017, CR-035).
 
     Modes:
     - basic: urllib + unstructured HTML text extraction
     - js_render: Playwright for JavaScript-rendered pages (optional dependency)
+    - firecrawl: Firecrawl API for JS rendering + structured markdown (CR-035 PRD-238)
     - sitemap: Parse sitemap.xml and crawl pages up to max_pages
 
     Respects robots.txt and applies 1-second rate limiting between requests.
+    Firecrawl mode auto-fallbacks to js_render if API key missing or call fails.
 
     Args:
         url: URL to scrape
-        mode: Scraping mode - "basic", "js_render", or "sitemap"
+        mode: Scraping mode - "basic", "js_render", "firecrawl", or "sitemap"
         max_pages: Maximum pages to crawl in sitemap mode
         timeout_ms: Request timeout in milliseconds
     """
@@ -950,6 +952,10 @@ def web_fetch(
 
 def main():
     """Start the MCP server with SSE transport."""
+    # CR-036: 프롬프트 템플릿 벌크 로드 (실패 시 로컬 폴백 사용)
+    from rag_pipeline import prompt_client
+    prompt_client.load_all()
+
     logger.info(
         "Starting Aimbase RAG Pipeline MCP Server on %s:%d",
         settings.MCP_HOST,

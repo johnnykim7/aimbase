@@ -40,9 +40,12 @@ public class LlmCallStepExecutor implements StepExecutor {
 
     private final ModelRouter modelRouter;
     private final ConnectionAdapterFactory connectionAdapterFactory;
+    private final com.platform.service.PromptTemplateService promptTemplateService;
 
-    public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory) {
+    public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
+                                com.platform.service.PromptTemplateService promptTemplateService) {
         this.modelRouter = modelRouter;
+        this.promptTemplateService = promptTemplateService;
         this.connectionAdapterFactory = connectionAdapterFactory;
     }
 
@@ -199,10 +202,10 @@ public class LlmCallStepExecutor implements StepExecutor {
             String system, String prompt, String scope,
             int partIndex, int totalParts, StepContext context) {
 
-        String partPrompt = "전체 작업 중 아래 범위만 생성하세요.\n\n" +
-                "=== 범위 ===\n" + scope + "\n\n" +
-                "=== 원본 요청 ===\n" + prompt + "\n\n" +
-                "JSON 형식으로만 응답하세요.";
+        // CR-036: DB 외부화
+        String partTemplate = promptTemplateService.getTemplateOrFallback("workflow.split.part_prompt",
+                "Generate only the following scope from the overall task.\n\n=== Scope ===\n{{scope}}\n\n=== Original Request ===\n{{prompt}}\n\nRespond in JSON format only.");
+        String partPrompt = promptTemplateService.renderTemplate(partTemplate, Map.of("scope", scope, "prompt", prompt));
 
         for (int attempt = 1; attempt <= 2; attempt++) {
             LLMResponse partResponse = callLlm(adapter, resolvedModel, system, partPrompt,
@@ -240,19 +243,17 @@ public class LlmCallStepExecutor implements StepExecutor {
             schemaStr = responseSchema.toString();
         }
 
-        String planSystem = "당신은 대규모 JSON 생성 작업을 분할하는 전문가입니다. " +
-                "작업을 독립적으로 생성 가능한 파트로 나누세요.";
+        // CR-036: DB 외부화
+        String planSystem = promptTemplateService.getTemplateOrFallback("workflow.split.plan_system",
+                "You are an expert at splitting large JSON generation tasks. Divide the task into independently generable parts.");
 
-        String planPrompt = "다음 작업의 출력이 너무 커서 한 번에 생성할 수 없습니다.\n" +
-                "독립적으로 생성 가능한 파트로 분할 계획을 세우세요.\n\n" +
-                "=== 원본 시스템 프롬프트 ===\n" + (system != null ? system : "(없음)") + "\n\n" +
-                "=== 원본 요청 ===\n" + prompt + "\n\n" +
-                "=== 출력 스키마 ===\n" + schemaStr + "\n\n" +
-                "규칙:\n" +
-                "- 각 파트는 최대 3000 토큰 이내로 생성 가능해야 합니다\n" +
-                "- 파트 수는 2~" + SPLIT_MAX_PARTS + "개\n" +
-                "- 각 파트의 scope는 구체적이고 명확해야 합니다\n" +
-                "- 나중에 파트별 결과를 합쳐서 최종 스키마를 완성할 수 있어야 합니다";
+        String planTemplate = promptTemplateService.getTemplateOrFallback("workflow.split.plan_prompt",
+                "The output of the following task is too large to generate at once.\nCreate a split plan into independently generable parts.\n\n=== Original System Prompt ===\n{{system}}\n\n=== Original Request ===\n{{prompt}}\n\n=== Output Schema ===\n{{schema}}\n\nRules:\n- Each part must be generable within 3000 tokens\n- Number of parts: 2 to {{max_parts}}\n- Each part's scope must be specific and clear\n- Part results must be mergeable into the final schema");
+        String planPrompt = promptTemplateService.renderTemplate(planTemplate, Map.of(
+                "system", system != null ? system : "(none)",
+                "prompt", prompt,
+                "schema", schemaStr,
+                "max_parts", String.valueOf(SPLIT_MAX_PARTS)));
 
         Map<String, Object> planSchema = Map.of(
                 "type", "object",
@@ -322,16 +323,14 @@ public class LlmCallStepExecutor implements StepExecutor {
             fragments.append(partResults.get(i)).append("\n\n");
         }
 
-        String mergeSystem = "당신은 JSON 조각을 하나의 완전한 구조로 병합하는 전문가입니다. " +
-                "주어진 스키마에 정확히 맞는 하나의 JSON을 생성하세요.";
+        String mergeSystem = promptTemplateService.getTemplateOrFallback("workflow.split.merge_system",
+                "You are an expert at merging JSON fragments into a single complete structure. Generate one JSON that exactly matches the given schema.");
 
-        String mergePrompt = "다음 조각들을 아래 스키마에 맞게 하나의 완전한 JSON으로 합치세요.\n\n" +
-                "=== 목표 스키마 ===\n" + schemaStr + "\n\n" +
-                "=== 조각들 ===\n" + fragments +
-                "규칙:\n" +
-                "- 모든 조각의 내용을 빠짐없이 포함하세요\n" +
-                "- 스키마에 맞는 구조로 재배치하세요\n" +
-                "- 중복은 제거하되 내용은 누락하지 마세요";
+        String mergeTemplate = promptTemplateService.getTemplateOrFallback("workflow.split.merge_prompt",
+                "Merge the following fragments into one complete JSON according to the schema below.\n\n=== Target Schema ===\n{{schema}}\n\n=== Fragments ===\n{{fragments}}\n\nRules:\n- Include all content from every fragment without omission\n- Rearrange into the structure matching the schema\n- Remove duplicates but do not omit any content");
+        String mergePrompt = promptTemplateService.renderTemplate(mergeTemplate, Map.of(
+                "schema", schemaStr,
+                "fragments", fragments.toString()));
 
         // 취합: 4096 시도 → 잘리면 8192 에스컬레이션
         LLMResponse mergeResponse = callLlm(adapter, resolvedModel, mergeSystem, mergePrompt,

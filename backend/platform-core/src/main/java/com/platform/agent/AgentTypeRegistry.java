@@ -1,5 +1,6 @@
 package com.platform.agent;
 
+import com.platform.service.PromptTemplateService;
 import com.platform.tool.ToolRegistry;
 import org.springframework.stereotype.Component;
 
@@ -15,9 +16,11 @@ import java.util.*;
 public class AgentTypeRegistry {
 
     private final ToolRegistry toolRegistry;
+    private final PromptTemplateService promptTemplateService;
 
-    public AgentTypeRegistry(ToolRegistry toolRegistry) {
+    public AgentTypeRegistry(ToolRegistry toolRegistry, PromptTemplateService promptTemplateService) {
         this.toolRegistry = toolRegistry;
+        this.promptTemplateService = promptTemplateService;
     }
 
     /**
@@ -27,7 +30,9 @@ public class AgentTypeRegistry {
      * @return 시스템 프롬프트 + 도구 필터가 적용된 설정
      */
     public AgentTypeConfig getConfig(AgentType agentType) {
-        String systemPrompt = agentType.getSystemPrompt();
+        // CR-036: DB 외부화된 프롬프트 우선, 없으면 enum 하드코딩 폴백
+        String promptKey = "agent." + agentType.name().toLowerCase() + ".system";
+        String systemPrompt = promptTemplateService.getTemplateOrFallback(promptKey, agentType.getSystemPrompt());
         String[] allowedTools = agentType.getAllowedTools();
         boolean readOnly = agentType.isReadOnly();
 

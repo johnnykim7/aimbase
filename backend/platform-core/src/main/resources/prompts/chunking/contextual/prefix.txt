@@ -1,0 +1,5 @@
+<document>
+{{document}}
+</document>
+
+The following chunk is located within the document above. To ensure accurate retrieval of this chunk in search, generate a concise prefix sentence (50-100 characters) describing the role and position of this chunk within the overall document context.

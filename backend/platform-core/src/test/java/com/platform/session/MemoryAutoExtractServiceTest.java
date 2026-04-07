@@ -5,6 +5,7 @@ import com.platform.llm.LLMAdapterRegistry;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
 import com.platform.repository.ConversationMemoryRepository;
+import com.platform.service.PromptTemplateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,13 +30,14 @@ class MemoryAutoExtractServiceTest {
     @Mock private LLMAdapterRegistry adapterRegistry;
     @Mock private ConversationMemoryRepository memoryRepository;
     @Mock private MemoryService memoryService;
+    @Mock private PromptTemplateService promptTemplateService;
     @Mock private LLMAdapter haiku;
 
     private MemoryAutoExtractService service;
 
     @BeforeEach
     void setUp() {
-        service = new MemoryAutoExtractService(adapterRegistry, memoryRepository, memoryService);
+        service = new MemoryAutoExtractService(adapterRegistry, memoryRepository, memoryService, promptTemplateService);
     }
 
     @Test

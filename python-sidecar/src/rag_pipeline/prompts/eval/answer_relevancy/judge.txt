@@ -1,0 +1,9 @@
+Score from 0.0 to 1.0 how appropriate the answer is to the following question.
+
+Question:
+{{question}}
+
+Answer:
+{{answer}}
+
+Score (0.0-1.0):

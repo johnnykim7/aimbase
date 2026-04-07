@@ -24,6 +24,7 @@ public class TranslationTool implements ToolExecutor {
 
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final ConnectionRepository connectionRepository;
+    private final com.platform.service.PromptTemplateService promptTemplateService;
 
     private static final UnifiedToolDef DEFINITION = new UnifiedToolDef(
             "translate_text",
@@ -49,9 +50,11 @@ public class TranslationTool implements ToolExecutor {
     );
 
     public TranslationTool(ConnectionAdapterFactory connectionAdapterFactory,
-                           ConnectionRepository connectionRepository) {
+                           ConnectionRepository connectionRepository,
+                           com.platform.service.PromptTemplateService promptTemplateService) {
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.connectionRepository = connectionRepository;
+        this.promptTemplateService = promptTemplateService;
     }
 
     @Override
@@ -72,9 +75,10 @@ public class TranslationTool implements ToolExecutor {
         log.info("translate_text: {} → {}, text_length={}", sourceLang, targetLang, text.length());
 
         try {
-            String systemPrompt = "You are a professional translator. "
-                    + "Translate the given text to " + langName(targetLang) + ". "
-                    + "Output ONLY the translated text, nothing else. No explanations, no quotes.";
+            // CR-036: DB 외부화
+            String template = promptTemplateService.getTemplateOrFallback("tool.translation.system",
+                    "You are a professional translator. Translate the given text to {{target_language}}. Output ONLY the translated text, nothing else. No explanations, no quotes.");
+            String systemPrompt = promptTemplateService.renderTemplate(template, Map.of("target_language", langName(targetLang)));
 
             String userPrompt = text;
             if (!"auto".equals(sourceLang)) {

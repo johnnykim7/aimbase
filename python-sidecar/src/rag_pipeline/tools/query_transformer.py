@@ -54,10 +54,9 @@ def transform_query(
 def _hyde_transform(query: str, llm: Any = None) -> dict[str, Any]:
     """HyDE: Hypothetical Document Embedding."""
     if llm:
-        prompt = (
-            f"다음 질문에 대한 답변이 포함된 가상의 문서 단락(150~300자)을 작성해주세요. "
-            f"실제 정보가 아니어도 됩니다. 검색용 가상 문서입니다.\n\n"
-            f"질문: {query}\n\n가상 문서:"
+        from rag_pipeline import prompt_client
+        prompt = prompt_client.render("query.hyde.transform", {"query": query},
+            fallback=f"Write a hypothetical document paragraph (150-300 characters) containing the answer to: {query}\n\nHypothetical document:"
         )
         hypothesis = _call_llm(llm, prompt)
     else:
@@ -80,11 +79,9 @@ def _hyde_transform(query: str, llm: Any = None) -> dict[str, Any]:
 def _multi_query_transform(query: str, llm: Any = None) -> dict[str, Any]:
     """Multi-Query: Generate multiple diverse query variations."""
     if llm:
-        prompt = (
-            f"다음 질문을 검색 품질을 높이기 위해 3~5개의 다른 표현으로 변환해주세요. "
-            f"각 변형은 의미는 같지만 다른 어휘와 관점을 사용해야 합니다.\n\n"
-            f"원본 질문: {query}\n\n"
-            f"변형 질문들 (한 줄에 하나씩, 번호 없이):"
+        from rag_pipeline import prompt_client
+        prompt = prompt_client.render("query.multi_query.transform", {"query": query},
+            fallback=f"Transform the following question into 3-5 different phrasings:\n\nOriginal: {query}\n\nVariations (one per line):"
         )
         raw = _call_llm(llm, prompt)
         variations = [line.strip().lstrip("- ").lstrip("•").strip()
@@ -108,11 +105,9 @@ def _multi_query_transform(query: str, llm: Any = None) -> dict[str, Any]:
 def _step_back_transform(query: str, llm: Any = None) -> dict[str, Any]:
     """Step-Back: Generate a more general/abstract version of the query."""
     if llm:
-        prompt = (
-            f"다음 질문을 더 일반적이고 추상적인 상위 개념 질문으로 변환해주세요. "
-            f"구체적인 세부사항을 제거하고 핵심 개념에 초점을 맞추세요.\n\n"
-            f"구체적 질문: {query}\n\n"
-            f"추상화된 질문:"
+        from rag_pipeline import prompt_client
+        prompt = prompt_client.render("query.step_back.transform", {"query": query},
+            fallback=f"Transform into a more general, abstract question:\n\nSpecific: {query}\n\nAbstract:"
         )
         step_back_query = _call_llm(llm, prompt).strip()
     else:

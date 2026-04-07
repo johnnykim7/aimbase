@@ -141,6 +141,7 @@ public class ContextAssemblyEngine {
     private final MemoryService memoryService;
     private final ContextWindowManager contextWindowManager;
     private final ContextRecipeRepository recipeRepository;
+    private final com.platform.service.PromptTemplateService promptTemplateService;
 
     // 세션별 연속 압축 실패 카운터 (circuit breaker)
     private final Map<String, Integer> compactFailures = new HashMap<>();
@@ -153,11 +154,13 @@ public class ContextAssemblyEngine {
             SessionStore sessionStore,
             MemoryService memoryService,
             ContextWindowManager contextWindowManager,
-            ContextRecipeRepository recipeRepository) {
+            ContextRecipeRepository recipeRepository,
+            com.platform.service.PromptTemplateService promptTemplateService) {
         this.sessionStore = sessionStore;
         this.memoryService = memoryService;
         this.contextWindowManager = contextWindowManager;
         this.recipeRepository = recipeRepository;
+        this.promptTemplateService = promptTemplateService;
     }
 
     /**
@@ -198,8 +201,9 @@ public class ContextAssemblyEngine {
         List<UnifiedMessage> history = sessionStore.getMessages(sessionId);
 
         List<UnifiedMessage> allMessages = new ArrayList<>();
-        // CR-029: 도구 사용 지침을 최상위 SYSTEM 메시지로 주입
-        allMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, TOOL_USAGE_PROMPT));
+        // CR-029/CR-036: 도구 사용 지침을 최상위 SYSTEM 메시지로 주입 (DB 외부화)
+        allMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
+                promptTemplateService.getTemplateOrFallback("context.tool_usage.system", TOOL_USAGE_PROMPT)));
         allMessages.addAll(memoryContext);
         allMessages.addAll(history);
         if (request.messages() != null) {
@@ -307,8 +311,9 @@ public class ContextAssemblyEngine {
         return switch (source) {
             case "system_policy" -> {
                 List<UnifiedMessage> policyMessages = new ArrayList<>();
-                // CR-029: 도구 사용 지침을 system_policy 소스 최상위에 주입
-                policyMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, TOOL_USAGE_PROMPT));
+                // CR-029/CR-036: 도구 사용 지침 (DB 외부화)
+                policyMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
+                        promptTemplateService.getTemplateOrFallback("context.tool_usage.system", TOOL_USAGE_PROMPT)));
                 policyMessages.addAll(memoryService.buildMemoryContext(sessionId, request.userId()));
                 yield policyMessages;
             }

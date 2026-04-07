@@ -4,6 +4,7 @@ import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
 import com.platform.llm.router.ModelRouter;
+import com.platform.service.PromptTemplateService;
 import com.platform.workflow.StepContext;
 import com.platform.workflow.model.WorkflowStep;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +31,7 @@ class LlmCallStepExecutorTest {
 
     @Mock private ModelRouter modelRouter;
     @Mock private ConnectionAdapterFactory connectionAdapterFactory;
+    @Mock private PromptTemplateService promptTemplateService;
     @Mock private LLMAdapter adapter;
 
     private LlmCallStepExecutor executor;
@@ -39,7 +41,7 @@ class LlmCallStepExecutorTest {
 
     @BeforeEach
     void setUp() {
-        executor = new LlmCallStepExecutor(modelRouter, connectionAdapterFactory);
+        executor = new LlmCallStepExecutor(modelRouter, connectionAdapterFactory, promptTemplateService);
         lenient().when(connectionAdapterFactory.getAdapter(CONNECTION_ID)).thenReturn(adapter);
         lenient().when(connectionAdapterFactory.resolveModel(CONNECTION_ID, "auto")).thenReturn(MODEL_ID);
     }

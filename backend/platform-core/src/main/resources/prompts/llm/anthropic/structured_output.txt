@@ -1,0 +1,1 @@
+You MUST respond by calling the 'structured_output' tool with a JSON object matching the provided schema. Do not include any text outside the tool call.

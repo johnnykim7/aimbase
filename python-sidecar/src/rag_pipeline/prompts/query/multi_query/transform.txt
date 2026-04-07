@@ -1,0 +1,5 @@
+Transform the following question into 3-5 different phrasings to improve search quality. Each variation should use different vocabulary and perspectives while maintaining the same meaning.
+
+Original question: {{query}}
+
+Variations (one per line, no numbering):

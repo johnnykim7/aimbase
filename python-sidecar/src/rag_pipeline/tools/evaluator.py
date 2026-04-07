@@ -223,16 +223,12 @@ def _llm_judge_faithfulness(question: str, contexts: list[str], answer: str = ""
     combined_context = "\n---\n".join(contexts[:3])
     answer_text = answer or combined_context[:500]
 
-    prompt = f"""다음 컨텍스트와 답변을 보고, 답변이 컨텍스트에 얼마나 충실한지 0.0~1.0 사이 점수를 매기세요.
-컨텍스트에 없는 내용이 답변에 포함되면 감점합니다.
-
-[컨텍스트]
-{combined_context[:2000]}
-
-[답변]
-{answer_text[:1000]}
-
-점수만 숫자로 답하세요 (예: 0.75):"""
+    # CR-036: DB 외부화
+    from rag_pipeline import prompt_client
+    prompt = prompt_client.render("eval.faithfulness.judge",
+        {"context": combined_context[:2000], "answer": answer_text[:1000]},
+        fallback=f"Score 0.0-1.0 how faithful the answer is to the context.\n\nContext:\n{combined_context[:2000]}\n\nAnswer:\n{answer_text[:1000]}\n\nScore:"
+    )
 
     try:
         score = _call_llm_for_score(prompt)
@@ -247,15 +243,12 @@ def _llm_judge_context_relevancy(question: str, contexts: list[str]) -> float:
         return 0.0
     combined = "\n---\n".join(contexts[:3])
 
-    prompt = f"""다음 질문에 대해 검색된 컨텍스트가 얼마나 관련있는지 0.0~1.0 사이 점수를 매기세요.
-
-[질문]
-{question}
-
-[검색된 컨텍스트]
-{combined[:2000]}
-
-점수만 숫자로 답하세요 (예: 0.85):"""
+    # CR-036: DB 외부화
+    from rag_pipeline import prompt_client
+    prompt = prompt_client.render("eval.context_relevancy.judge",
+        {"question": question, "context": combined[:2000]},
+        fallback=f"Score 0.0-1.0 how relevant the context is.\n\nQuestion:\n{question}\n\nContext:\n{combined[:2000]}\n\nScore:"
+    )
 
     try:
         return _call_llm_for_score(prompt)
@@ -269,15 +262,12 @@ def _llm_judge_answer_relevancy(question: str, contexts: list[str]) -> float:
         return 0.0
     answer = " ".join(contexts[:3])[:2000]
 
-    prompt = f"""다음 질문에 대한 답변이 얼마나 적절한지 0.0~1.0 사이 점수를 매기세요.
-
-[질문]
-{question}
-
-[답변]
-{answer}
-
-점수만 숫자로 답하세요 (예: 0.70):"""
+    # CR-036: DB 외부화
+    from rag_pipeline import prompt_client
+    prompt = prompt_client.render("eval.answer_relevancy.judge",
+        {"question": question, "answer": answer},
+        fallback=f"Score 0.0-1.0 how appropriate the answer is.\n\nQuestion:\n{question}\n\nAnswer:\n{answer}\n\nScore:"
+    )
 
     try:
         return _call_llm_for_score(prompt)

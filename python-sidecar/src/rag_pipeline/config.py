@@ -28,6 +28,9 @@ class Settings:
     MCP_HOST: str = os.getenv("MCP_HOST", "0.0.0.0")
     MCP_PORT: int = int(os.getenv("MCP_PORT", "8002"))
 
+    # CR-036: Aimbase BE API (프롬프트 템플릿 벌크 로드)
+    AIMBASE_API_URL: str = os.getenv("AIMBASE_API_URL", "http://localhost:8181")
+
     @property
     def db_url(self) -> str:
         return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
