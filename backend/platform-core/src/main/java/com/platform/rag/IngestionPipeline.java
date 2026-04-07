@@ -513,14 +513,24 @@ public class IngestionPipeline {
                 if (urls.isEmpty() && config.get("url") instanceof String singleUrl) {
                     urls = List.of(singleUrl);
                 }
+                // CR-035 PRD-239: crawl_mode 지원 (basic/js_render/firecrawl)
+                String crawlMode = config.get("crawl_mode") instanceof String cm ? cm : "basic";
+
                 for (String url : urls) {
                     try {
-                        String content = fetchUrl(url);
+                        String content;
+                        if ("firecrawl".equals(crawlMode) || "js_render".equals(crawlMode)) {
+                            // MCP scrape_url 호출 (JS 렌더링 / Firecrawl)
+                            var scrapeResult = mcpRagClient.scrapeUrl(url, crawlMode, 1, 30000);
+                            content = extractScrapedContent(scrapeResult);
+                        } else {
+                            content = fetchUrl(url);
+                        }
                         String parsed = documentParser.parse(
                                 new ByteArrayInputStream(content.getBytes()), "text/html");
                         docs.add(new RawDocument(url, parsed));
                     } catch (Exception e) {
-                        log.warn("Failed to fetch URL '{}': {}", url, e.getMessage());
+                        log.warn("Failed to fetch URL '{}' (mode={}): {}", url, crawlMode, e.getMessage());
                         errors.add(Map.of("url", url, "error", e.getMessage()));
                     }
                 }
@@ -641,6 +651,30 @@ public class IngestionPipeline {
             throw new RuntimeException("HTTP " + response.statusCode() + " for URL: " + urlStr);
         }
         return response.body();
+    }
+
+    /**
+     * CR-035: MCP scrape_url 결과에서 콘텐츠 추출.
+     * 결과 형식: {pages: [{content: "..."}, ...]}
+     */
+    @SuppressWarnings("unchecked")
+    private String extractScrapedContent(Map<String, Object> scrapeResult) {
+        if (scrapeResult == null) return "";
+        Object pages = scrapeResult.get("pages");
+        if (pages instanceof List<?> pageList && !pageList.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (Object page : pageList) {
+                if (page instanceof Map<?, ?> pageMap) {
+                    Object content = pageMap.get("content");
+                    if (content != null) {
+                        if (!sb.isEmpty()) sb.append("\n\n");
+                        sb.append(content);
+                    }
+                }
+            }
+            return sb.toString();
+        }
+        return "";
     }
 
     /** 내부 문서 전송 타입 */

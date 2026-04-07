@@ -249,6 +249,57 @@ def _scrape_sitemap(url: str, max_pages: int, timeout_s: float) -> dict[str, Any
     }
 
 
+def _scrape_firecrawl(url: str, timeout_s: float) -> dict[str, Any]:
+    """CR-035 PRD-238: Firecrawl 모드 — JS 렌더링 + 구조화된 마크다운 출력.
+
+    BIZ-062: API Key 미설정 시 js_render로 폴백.
+    BIZ-063: Firecrawl 호출 실패 시 playwright로 폴백 (2단 폴백).
+    """
+    import os
+
+    api_key = os.environ.get("FIRECRAWL_API_KEY", "")
+    if not api_key:
+        logger.info("FIRECRAWL_API_KEY 미설정 — js_render로 폴백")
+        result = _scrape_js_render(url, timeout_s)
+        result["fallback"] = "js_render (API key missing)"
+        return result
+
+    try:
+        from firecrawl import FirecrawlApp
+    except ImportError:
+        logger.warning("firecrawl-py 미설치 — js_render로 폴백")
+        result = _scrape_js_render(url, timeout_s)
+        result["fallback"] = "js_render (firecrawl-py not installed)"
+        return result
+
+    base_url = os.environ.get("FIRECRAWL_BASE_URL")  # Self-hosted 지원
+    try:
+        app = FirecrawlApp(api_key=api_key, api_url=base_url) if base_url else FirecrawlApp(api_key=api_key)
+
+        scrape_result = app.scrape_url(
+            url,
+            params={
+                "formats": ["markdown", "html"],
+                "timeout": int(timeout_s * 1000),
+            },
+        )
+
+        content = scrape_result.get("markdown", "") or scrape_result.get("content", "")
+        title = scrape_result.get("metadata", {}).get("title", "")
+        page_result = _make_page_result(url, title, content)
+
+        return {
+            "pages": [page_result],
+            "total_pages": 1,
+            "mode": "firecrawl",
+        }
+    except Exception as e:
+        logger.warning("Firecrawl 호출 실패 (%s) — js_render로 폴백: %s", url, e)
+        result = _scrape_js_render(url, timeout_s)
+        result["fallback"] = f"js_render (firecrawl error: {e})"
+        return result
+
+
 def scrape_url(
     url: str,
     mode: str = "basic",
@@ -259,7 +310,7 @@ def scrape_url(
 
     Args:
         url: 스크래핑할 URL
-        mode: "basic" (urllib), "js_render" (playwright), "sitemap" (sitemap.xml 크롤링)
+        mode: "basic" (urllib), "js_render" (playwright), "firecrawl", "sitemap"
         max_pages: sitemap 모드에서 최대 크롤링 페이지 수
         timeout_ms: 요청 타임아웃 (밀리초)
 
@@ -273,6 +324,8 @@ def scrape_url(
             return _scrape_basic(url, timeout_s)
         elif mode == "js_render":
             return _scrape_js_render(url, timeout_s)
+        elif mode == "firecrawl":
+            return _scrape_firecrawl(url, timeout_s)
         elif mode == "sitemap":
             return _scrape_sitemap(url, max_pages, timeout_s)
         else:
@@ -280,7 +333,7 @@ def scrape_url(
                 "pages": [],
                 "total_pages": 0,
                 "mode": mode,
-                "error": f"지원하지 않는 모드: {mode}. 'basic', 'js_render', 'sitemap' 중 선택하세요.",
+                "error": f"지원하지 않는 모드: {mode}. 'basic', 'js_render', 'firecrawl', 'sitemap' 중 선택하세요.",
             }
     except urllib.error.URLError as e:
         return {
