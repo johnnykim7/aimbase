@@ -13,6 +13,31 @@ export interface SubagentRunRequest {
   timeoutMs?: number;
   config?: Record<string, unknown>;
   parentSessionId?: string;
+  agentType?: AgentTypeName;
+}
+
+/** CR-034: Built-in 에이전트 타입 */
+export type AgentTypeName = "GENERAL" | "PLAN" | "EXPLORE" | "GUIDE" | "VERIFICATION";
+
+export interface AgentTypeSummary {
+  name: AgentTypeName;
+  displayName: string;
+  description: string;
+  readOnly: boolean;
+  allowedTools: string | null;
+}
+
+/** CR-034: 에이전트 간 메시지 */
+export interface AgentMessage {
+  id: string;
+  sessionId: string;
+  fromAgentId: string;
+  toAgentId: string;
+  messageType: "TEXT" | "COMMAND" | "RESULT" | "ERROR";
+  content: string;
+  metadata?: Record<string, unknown>;
+  read: boolean;
+  createdAt: string;
 }
 
 export interface SubagentResult {
@@ -66,4 +91,21 @@ export const agentsApi = {
 
   getActive: () =>
     apiClient.get<ApiResponse<{ activeCount: number; agents: string[] }>>("/agents/active"),
+
+  // CR-034: 에이전트 타입
+  listTypes: () =>
+    apiClient.get<ApiResponse<AgentTypeSummary[]>>("/agents/types"),
+
+  // CR-034: 에이전트 메시지
+  getSessionMessages: (sessionId: string) =>
+    apiClient.get<ApiResponse<AgentMessage[]>>(`/agents/messages/${sessionId}`),
+
+  getAgentMessages: (sessionId: string, agentId: string) =>
+    apiClient.get<ApiResponse<AgentMessage[]>>(`/agents/messages/${sessionId}/agent/${agentId}`),
+
+  getUnreadMessages: (agentId: string) =>
+    apiClient.get<ApiResponse<AgentMessage[]>>(`/agents/messages/unread/${agentId}`),
+
+  markAsRead: (agentId: string) =>
+    apiClient.post<ApiResponse<{ agentId: string; markedAsRead: number }>>(`/agents/messages/read/${agentId}`),
 };

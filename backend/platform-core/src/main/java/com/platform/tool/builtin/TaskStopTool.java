@@ -1,5 +1,8 @@
 package com.platform.tool.builtin;
 
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
 import com.platform.llm.model.UnifiedToolDef;
 import com.platform.repository.SubagentRunRepository;
 import com.platform.tool.*;
@@ -17,9 +20,11 @@ import java.util.UUID;
 public class TaskStopTool implements EnhancedToolExecutor {
 
     private final SubagentRunRepository subagentRunRepository;
+    private final HookDispatcher hookDispatcher;
 
-    public TaskStopTool(SubagentRunRepository subagentRunRepository) {
+    public TaskStopTool(SubagentRunRepository subagentRunRepository, HookDispatcher hookDispatcher) {
         this.subagentRunRepository = subagentRunRepository;
+        this.hookDispatcher = hookDispatcher;
     }
 
     @Override
@@ -66,6 +71,14 @@ public class TaskStopTool implements EnhancedToolExecutor {
                     entity.setError("Stopped: " + reason);
                     entity.setCompletedAt(OffsetDateTime.now());
                     subagentRunRepository.save(entity);
+
+                    // CR-034: TASK_COMPLETED 훅 발행
+                    try {
+                        hookDispatcher.dispatch(HookEvent.TASK_COMPLETED,
+                                HookInput.of(HookEvent.TASK_COMPLETED, ctx.sessionId(),
+                                        Map.of("taskId", taskId, "status", "CANCELLED", "reason", reason),
+                                        Map.of()));
+                    } catch (Exception ignored) {}
 
                     return ToolResult.ok(
                             Map.of(

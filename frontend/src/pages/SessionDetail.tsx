@@ -8,9 +8,11 @@ import { Page } from "../components/layout/Page";
 import { useSetHeaderOverride } from "../components/layout/AppShell";
 import { MessageSquareText, Wrench } from "lucide-react";
 import { useSessionMeta, useToolLineage, useSessionPlan, useSessionTodos, useSessionTasks } from "../hooks/useSessions";
+import { useSessionMessages } from "../hooks/useAgents";
 import { PlanPanel } from "../components/session/PlanPanel";
 import { TodoPanel } from "../components/session/TodoPanel";
 import { TaskPanel } from "../components/session/TaskPanel";
+import { MessagePanel } from "../components/session/MessagePanel";
 import type { ToolExecution } from "../types/tool";
 
 export default function SessionDetail() {
@@ -21,7 +23,8 @@ export default function SessionDetail() {
   const { data: plan } = useSessionPlan(id!);
   const { data: todos = [] } = useSessionTodos(id!);
   const { data: tasks = [] } = useSessionTasks(id!);
-  const [tab, setTab] = useState<"conversation" | "lineage" | "plan" | "todos" | "tasks">("lineage");
+  const { data: messages = [] } = useSessionMessages(id!);
+  const [tab, setTab] = useState<"conversation" | "lineage" | "plan" | "todos" | "tasks" | "messages">("lineage");
 
   useLayoutEffect(() => {
     if (meta) {
@@ -67,6 +70,9 @@ export default function SessionDetail() {
         <TabButton active={tab === "tasks"} onClick={() => setTab("tasks")}>
           Tasks {tasks.length > 0 && `(${tasks.length})`}
         </TabButton>
+        <TabButton active={tab === "messages"} onClick={() => setTab("messages")}>
+          Messages {messages.length > 0 && `(${messages.length})`}
+        </TabButton>
       </div>
 
       {/* Tab content */}
@@ -81,6 +87,7 @@ export default function SessionDetail() {
       {tab === "plan" && <PlanPanel plan={plan} />}
       {tab === "todos" && <TodoPanel todos={todos} />}
       {tab === "tasks" && <TaskPanel tasks={tasks} />}
+      {tab === "messages" && <MessagePanel messages={messages} />}
 
       {tab === "lineage" && (
         lineageLoading ? (

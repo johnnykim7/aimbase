@@ -1,10 +1,14 @@
 package com.platform.api;
 
+import com.platform.agent.AgentMessageBus;
 import com.platform.agent.AgentOrchestrator;
+import com.platform.agent.AgentType;
+import com.platform.agent.AgentTypeRegistry;
 import com.platform.agent.SubagentLifecycleManager;
 import com.platform.agent.SubagentRequest;
 import com.platform.agent.SubagentResult;
 import com.platform.agent.SubagentRunner;
+import com.platform.domain.AgentMessageEntity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,13 +31,19 @@ public class SubagentController {
     private final SubagentRunner subagentRunner;
     private final AgentOrchestrator agentOrchestrator;
     private final SubagentLifecycleManager lifecycleManager;
+    private final AgentMessageBus messageBus;
+    private final AgentTypeRegistry agentTypeRegistry;
 
     public SubagentController(SubagentRunner subagentRunner,
                               AgentOrchestrator agentOrchestrator,
-                              SubagentLifecycleManager lifecycleManager) {
+                              SubagentLifecycleManager lifecycleManager,
+                              AgentMessageBus messageBus,
+                              AgentTypeRegistry agentTypeRegistry) {
         this.subagentRunner = subagentRunner;
         this.agentOrchestrator = agentOrchestrator;
         this.lifecycleManager = lifecycleManager;
+        this.messageBus = messageBus;
+        this.agentTypeRegistry = agentTypeRegistry;
     }
 
     // ── 단일 에이전트 실행 ──
@@ -53,7 +63,8 @@ public class SubagentController {
                 request.runInBackground(),
                 request.timeoutMs() > 0 ? request.timeoutMs() : 120_000L,
                 request.config(),
-                request.parentSessionId()
+                request.parentSessionId(),
+                AgentType.fromString(request.agentType())
         );
         SubagentResult result = subagentRunner.run(agentRequest);
         return ApiResponse.ok(result);
@@ -121,6 +132,42 @@ public class SubagentController {
         ));
     }
 
+    // ── 에이전트 타입 (CR-034 PRD-229) ──
+
+    @GetMapping("/types")
+    @Operation(summary = "Built-in 에이전트 타입 목록 조회")
+    public ApiResponse<List<AgentTypeRegistry.AgentTypeSummary>> listAgentTypes() {
+        return ApiResponse.ok(agentTypeRegistry.listTypes());
+    }
+
+    // ── 에이전트 메시지 (CR-034 PRD-228) ──
+
+    @GetMapping("/messages/{sessionId}")
+    @Operation(summary = "세션 내 에이전트 메시지 전체 조회")
+    public ApiResponse<List<AgentMessageEntity>> getSessionMessages(@PathVariable String sessionId) {
+        return ApiResponse.ok(messageBus.getSessionMessages(sessionId));
+    }
+
+    @GetMapping("/messages/{sessionId}/agent/{agentId}")
+    @Operation(summary = "특정 에이전트의 수신 메시지 조회 (브로드캐스트 포함)")
+    public ApiResponse<List<AgentMessageEntity>> getAgentMessages(
+            @PathVariable String sessionId, @PathVariable String agentId) {
+        return ApiResponse.ok(messageBus.getMessagesForAgent(sessionId, agentId));
+    }
+
+    @GetMapping("/messages/unread/{agentId}")
+    @Operation(summary = "에이전트의 읽지 않은 메시지 조회")
+    public ApiResponse<List<AgentMessageEntity>> getUnreadMessages(@PathVariable String agentId) {
+        return ApiResponse.ok(messageBus.getUnreadMessages(agentId));
+    }
+
+    @PostMapping("/messages/read/{agentId}")
+    @Operation(summary = "에이전트의 모든 메시지 읽음 처리")
+    public ApiResponse<Map<String, Object>> markAsRead(@PathVariable String agentId) {
+        int count = messageBus.markAllAsRead(agentId);
+        return ApiResponse.ok(Map.of("agentId", agentId, "markedAsRead", count));
+    }
+
     // ── Request DTOs ──
 
     public record RunRequest(
@@ -132,7 +179,8 @@ public class SubagentController {
             boolean runInBackground,
             long timeoutMs,
             Map<String, Object> config,
-            String parentSessionId
+            String parentSessionId,
+            String agentType
     ) {}
 
     public record OrchestrateRequest(

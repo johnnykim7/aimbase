@@ -1,8 +1,12 @@
 package com.platform.agent;
 
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -27,13 +31,16 @@ public class WorktreeManager {
 
     private final String repoRoot;
     private final String worktreeBase;
+    private final HookDispatcher hookDispatcher;
 
     public WorktreeManager(
             @Value("${platform.agent.repo-root:#{null}}") String repoRoot,
-            @Value("${platform.agent.worktree-base:#{null}}") String worktreeBase) {
+            @Value("${platform.agent.worktree-base:#{null}}") String worktreeBase,
+            @Lazy HookDispatcher hookDispatcher) {
         this.repoRoot = repoRoot != null ? repoRoot : detectRepoRoot();
         this.worktreeBase = worktreeBase != null ? worktreeBase
                 : Path.of(this.repoRoot, ".worktrees").toString();
+        this.hookDispatcher = hookDispatcher;
     }
 
     /**
@@ -65,7 +72,9 @@ public class WorktreeManager {
             }
 
             log.info("Worktree created: path={}, branch={}, base={}", worktreePath, branchName, baseCommit);
-            return new WorktreeContext(worktreePath.toString(), branchName, baseCommit);
+            WorktreeContext ctx = new WorktreeContext(worktreePath.toString(), branchName, baseCommit);
+            dispatchWorktreeHook(HookEvent.WORKTREE_CREATE, ctx);
+            return ctx;
         } catch (IOException | InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Failed to create worktree for runId=" + runId, e);
@@ -113,6 +122,7 @@ public class WorktreeManager {
             deleteBranch(ctx.branchName());
 
             log.info("Worktree removed: path={}, branch={}", ctx.worktreePath(), ctx.branchName());
+            dispatchWorktreeHook(HookEvent.WORKTREE_REMOVE, ctx);
         } catch (IOException | InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Failed to remove worktree: {}", ctx.worktreePath(), e);
@@ -134,6 +144,21 @@ public class WorktreeManager {
         } catch (IOException | InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Failed to list worktrees", e);
+        }
+    }
+
+    // ── Hook 디스패치 ──
+
+    private void dispatchWorktreeHook(HookEvent event, WorktreeContext ctx) {
+        try {
+            hookDispatcher.dispatch(event,
+                    HookInput.of(event, null,
+                            java.util.Map.of("worktreePath", ctx.worktreePath(),
+                                    "branchName", ctx.branchName(),
+                                    "baseCommit", ctx.baseCommit()),
+                            java.util.Map.of()));
+        } catch (Exception e) {
+            log.warn("Worktree hook dispatch failed: event={}, path={}", event, ctx.worktreePath(), e);
         }
     }
 

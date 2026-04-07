@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { agentsApi, type SubagentRunRequest, type OrchestrateRequest } from "../api/agents";
+export type { AgentTypeSummary, AgentMessage } from "../api/agents";
 
 /**
  * CR-030: 서브에이전트 React Query 훅
@@ -62,3 +63,22 @@ export const useCancelAgent = () => {
     },
   });
 };
+
+// ── CR-034: 에이전트 타입 ──
+
+export const useAgentTypes = () =>
+  useQuery({
+    queryKey: ["agents", "types"],
+    queryFn: () => agentsApi.listTypes().then((r) => r.data.data),
+    staleTime: 60_000,
+  });
+
+// ── CR-034: 에이전트 메시지 ──
+
+export const useSessionMessages = (sessionId: string | null) =>
+  useQuery({
+    queryKey: ["agents", "messages", sessionId],
+    queryFn: () => agentsApi.getSessionMessages(sessionId!).then((r) => r.data.data),
+    enabled: !!sessionId,
+    refetchInterval: 5_000,
+  });

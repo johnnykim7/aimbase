@@ -190,6 +190,16 @@ public class OrchestratorEngine {
                     List.of(), new TokenUsage(0, 0), 0.0, null);
         }
 
+        // CR-034 PRD-231: INSTRUCTIONS_LOADED 훅 (시스템 프롬프트 로드 완료)
+        if (request.sessionId() == null) {
+            try {
+                hookDispatcher.dispatch(HookEvent.INSTRUCTIONS_LOADED,
+                        HookInput.of(HookEvent.INSTRUCTIONS_LOADED, sessionId,
+                                Map.of("sessionId", sessionId),
+                                Map.of()));
+            } catch (Exception ignored) {}
+        }
+
         // CR-029: ContextAssemblyEngine으로 컨텍스트 조립 위임
         // B3: circuit breaker — 연속 압축 실패 시 skip
         if (contextAssemblyEngine.shouldSkipCompact(sessionId)) {

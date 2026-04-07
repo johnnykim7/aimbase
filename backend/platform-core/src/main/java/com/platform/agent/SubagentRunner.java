@@ -39,17 +39,20 @@ public class SubagentRunner {
     private final WorktreeManager worktreeManager;
     private final HookDispatcher hookDispatcher;
     private final SubagentLifecycleManager lifecycleManager;
+    private final AgentTypeRegistry agentTypeRegistry;
 
     public SubagentRunner(OrchestratorEngine orchestratorEngine,
                           SubagentRunRepository subagentRunRepository,
                           WorktreeManager worktreeManager,
                           HookDispatcher hookDispatcher,
-                          SubagentLifecycleManager lifecycleManager) {
+                          SubagentLifecycleManager lifecycleManager,
+                          AgentTypeRegistry agentTypeRegistry) {
         this.orchestratorEngine = orchestratorEngine;
         this.subagentRunRepository = subagentRunRepository;
         this.worktreeManager = worktreeManager;
         this.hookDispatcher = hookDispatcher;
         this.lifecycleManager = lifecycleManager;
+        this.agentTypeRegistry = agentTypeRegistry;
     }
 
     /**
@@ -176,11 +179,19 @@ public class SubagentRunner {
         OffsetDateTime startedAt = OffsetDateTime.now();
         long startMs = System.currentTimeMillis();
 
+        // CR-034: 에이전트 타입별 시스템 프롬프트 주입
+        AgentTypeRegistry.AgentTypeConfig typeConfig = agentTypeRegistry.getConfig(req.agentType());
+        List<UnifiedMessage> messages = new java.util.ArrayList<>();
+        if (typeConfig.systemPrompt() != null && !typeConfig.systemPrompt().isBlank()) {
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, typeConfig.systemPrompt()));
+        }
+        messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, req.prompt()));
+
         // OrchestratorEngine에 ChatRequest 위임
         ChatRequest chatRequest = new ChatRequest(
                 req.model(),
                 context.getChildSessionId(),
-                List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, req.prompt())),
+                messages,
                 false, true,
                 null, null,
                 req.connectionId()
@@ -244,6 +255,15 @@ public class SubagentRunner {
                 Map.of("status", result.status().name(),
                         "exitCode", result.exitCode(),
                         "durationMs", result.durationMs()));
+
+        // CR-034: TASK_COMPLETED 훅 (태스크로 실행된 경우)
+        if (context.getRequest().runInBackground()) {
+            dispatchHook(HookEvent.TASK_COMPLETED,
+                    context.getSubagentRunId(), context.getChildSessionId(),
+                    context.getParentSessionId(),
+                    Map.of("taskId", context.getSubagentRunId(),
+                            "status", result.status().name()));
+        }
     }
 
     // ── DB 엔티티 관리 ──
@@ -262,6 +282,7 @@ public class SubagentRunner {
         entity.setRunInBackground(request.runInBackground());
         entity.setTimeoutMs(request.timeoutMs());
         entity.setConfig(request.config());
+        entity.setAgentType(request.agentType().name());
         if (wCtx != null) {
             entity.setWorktreePath(wCtx.worktreePath());
             entity.setBranchName(wCtx.branchName());

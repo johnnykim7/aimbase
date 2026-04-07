@@ -1,6 +1,9 @@
 package com.platform.tool.builtin;
 
 import com.platform.domain.SubagentRunEntity;
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
 import com.platform.llm.model.UnifiedToolDef;
 import com.platform.repository.SubagentRunRepository;
 import com.platform.tool.*;
@@ -20,9 +23,11 @@ public class TaskCreateTool implements EnhancedToolExecutor {
     private static final int MAX_CONCURRENT_TASKS = 5;
 
     private final SubagentRunRepository subagentRunRepository;
+    private final HookDispatcher hookDispatcher;
 
-    public TaskCreateTool(SubagentRunRepository subagentRunRepository) {
+    public TaskCreateTool(SubagentRunRepository subagentRunRepository, HookDispatcher hookDispatcher) {
         this.subagentRunRepository = subagentRunRepository;
+        this.hookDispatcher = hookDispatcher;
     }
 
     @Override
@@ -85,6 +90,17 @@ public class TaskCreateTool implements EnhancedToolExecutor {
         entity.setPriority((String) input.getOrDefault("priority", "medium"));
 
         SubagentRunEntity saved = subagentRunRepository.save(entity);
+
+        // CR-034: TASK_CREATED 훅 발행
+        try {
+            hookDispatcher.dispatch(HookEvent.TASK_CREATED,
+                    HookInput.of(HookEvent.TASK_CREATED, sessionId,
+                            Map.of("taskId", saved.getId().toString(),
+                                    "description", description),
+                            Map.of()));
+        } catch (Exception e) {
+            // 훅 실패가 태스크 생성을 막지 않음
+        }
 
         return ToolResult.ok(
                 Map.of(

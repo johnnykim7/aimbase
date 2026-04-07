@@ -92,6 +92,10 @@ public class SubagentRunEntity {
     @Column(name = "progress_summary", length = 500)
     private String progressSummary;
 
+    /** CR-034 PRD-229: 에이전트 타입 (GENERAL, PLAN, EXPLORE, GUIDE, VERIFICATION) */
+    @Column(name = "agent_type", length = 30)
+    private String agentType = "GENERAL";
+
     /** CR-033 PRD-226: Task 설명 (Task 도구용) */
     @Column(name = "task_description", columnDefinition = "text")
     private String taskDescription;
@@ -184,4 +188,7 @@ public class SubagentRunEntity {
 
     public Map<String, Object> getLargeOutput() { return largeOutput; }
     public void setLargeOutput(Map<String, Object> largeOutput) { this.largeOutput = largeOutput; }
+
+    public String getAgentType() { return agentType; }
+    public void setAgentType(String agentType) { this.agentType = agentType; }
 }

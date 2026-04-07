@@ -133,6 +133,9 @@ frontend/src/
 - 워크플로우 DAG 실행: Kahn 알고리즘 위상 정렬, SUB_WORKFLOW로 공용 워크플로우 참조 실행 (BIZ-009)
 - 임베딩: BGE-M3, 1024차원 기본. OpenAI text-embedding-3-small 선택 가능 (BIZ-012)
 - 모든 주요 이벤트 감사 로깅 필수 (BIZ-020)
+- 에이전트 메시지 본문 최대 32KB, 세션당 500개 제한 (BIZ-057)
+- Built-in Agent 5타입: GENERAL/PLAN/EXPLORE/GUIDE/VERIFICATION (BIZ-058)
+- Hook 이벤트 26종: Tool(3) + Orchestration(4) + Compact(2) + Subagent(2) + CR-034(14+1) (BIZ-059)
 
 ## 테스트 전략
 
@@ -180,7 +183,9 @@ frontend/src/
 - [x] Sprint 41: CR-030 2단계 고도화 6 Phase (PRD-186~210) — Extended Thinking, Hook Architecture, Permission AUTO, Memory Scope, 압축 5전략, Subagent+Worktree Isolation
 - [x] Sprint 42: CR-031 성능/퀄리티 메커니즘 6 Phase (PRD-211~216) — Post-Compact Recovery, MICRO_COMPACT 0비용, Extract Memories 자동화, Adaptive Thinking, Tool Result 축약, Agent 진행 요약
 - [x] Sprint 43: CR-032 프로바이더 확장 6 Phase (PRD-217~221) — OpenAI Compatible shim, AWS Bedrock, Vertex AI, 에이전트별 라우팅, FE Connection 폼
-- [ ] Sprint 44: CR-033 에이전트 구조적 사고 체계 6 Phase (PRD-222~227, FE-015) — Plan Mode(Enter/Exit/Verify), TodoWrite, Task(Create/Get/List/Update/Output/Stop), FE 대시보드
+- [x] Sprint 44: CR-033 에이전트 구조적 사고 체계 6 Phase (PRD-222~227, FE-015) — Plan Mode(Enter/Exit/Verify), TodoWrite, Task(Create/Get/List/Update/Output/Stop), FE 대시보드
+- [x] Sprint 45: CR-034 멀티에이전트 협업 완성 6 Phase (PRD-228~233, FE-016) — SendMessageTool, Built-in Agent 5타입, Hook 이벤트 14개 추가, FE 메시지 패널
+- [ ] Sprint 46: CR-035 Tool/Policy 확장성·자동화 6 Phase (PRD-234~240, FE-017) — ScheduleCron(3 Tool), SkillTool, ToolSearchTool, Firecrawl 연동, DOMAIN_FILTER 정책, FE 관리 UI
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)

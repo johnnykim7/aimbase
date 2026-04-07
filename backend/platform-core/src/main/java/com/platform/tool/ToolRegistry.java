@@ -50,6 +50,11 @@ public class ToolRegistry {
         log.debug("Unregistered tool: {}", toolName);
     }
 
+    /** CR-034: 등록된 도구 이름 집합 반환 */
+    public java.util.Set<String> getRegisteredToolNames() {
+        return java.util.Collections.unmodifiableSet(executors.keySet());
+    }
+
     /** LLMRequest.tools에 전달할 모든 도구 정의 */
     public List<UnifiedToolDef> getToolDefs() {
         return executors.values().stream()
@@ -194,6 +199,72 @@ public class ToolRegistry {
             return enhanced.getContractMeta();
         }
         return null;
+    }
+
+    /**
+     * CR-035 PRD-236: 키워드/태그/스코프 기반 도구 검색.
+     * name + description 키워드 매칭 + tags 교집합 필터링.
+     */
+    public List<Map<String, Object>> searchTools(String query, List<String> tags,
+                                                  String scope, int maxResults) {
+        String lowerQuery = query != null ? query.toLowerCase() : "";
+
+        return executors.entrySet().stream()
+                .filter(entry -> {
+                    ToolExecutor executor = entry.getValue();
+                    UnifiedToolDef def = executor.getDefinition();
+
+                    // 키워드 매칭 (name + description)
+                    if (!lowerQuery.isEmpty()) {
+                        boolean nameMatch = def.name().toLowerCase().contains(lowerQuery);
+                        boolean descMatch = def.description() != null
+                                && def.description().toLowerCase().contains(lowerQuery);
+                        if (!nameMatch && !descMatch) return false;
+                    }
+
+                    if (executor instanceof EnhancedToolExecutor enhanced) {
+                        ToolContractMeta meta = enhanced.getContractMeta();
+
+                        // 태그 필터 (교집합)
+                        if (tags != null && !tags.isEmpty() && meta.tags() != null) {
+                            boolean anyTagMatch = tags.stream()
+                                    .anyMatch(t -> meta.tags().contains(t));
+                            if (!anyTagMatch) return false;
+                        }
+
+                        // 스코프 필터
+                        if (scope != null && !scope.isEmpty()) {
+                            try {
+                                ToolScope scopeFilter = ToolScope.valueOf(scope.toUpperCase());
+                                if (meta.scope() != scopeFilter) return false;
+                            } catch (IllegalArgumentException ignored) {}
+                        }
+                    }
+                    return true;
+                })
+                .limit(maxResults > 0 ? maxResults : 20)
+                .map(entry -> {
+                    ToolExecutor executor = entry.getValue();
+                    UnifiedToolDef def = executor.getDefinition();
+                    Map<String, Object> result = new java.util.HashMap<>();
+                    result.put("name", def.name());
+                    result.put("description", def.description());
+
+                    if (executor instanceof EnhancedToolExecutor enhanced) {
+                        ToolContractMeta meta = enhanced.getContractMeta();
+                        result.put("scope", meta.scope().name());
+                        result.put("permission_level", meta.permissionLevel().name());
+                        result.put("tags", meta.tags());
+                        result.put("read_only", meta.readOnly());
+                    } else {
+                        result.put("scope", "BUILTIN");
+                        result.put("permission_level", "FULL");
+                        result.put("tags", List.of());
+                        result.put("read_only", false);
+                    }
+                    return result;
+                })
+                .toList();
     }
 
     public boolean hasTools() {

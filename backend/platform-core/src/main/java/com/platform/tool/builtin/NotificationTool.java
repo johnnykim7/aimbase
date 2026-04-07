@@ -1,5 +1,8 @@
 package com.platform.tool.builtin;
 
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
 import com.platform.llm.model.UnifiedToolDef;
 import com.platform.tool.ToolExecutor;
 import org.slf4j.Logger;
@@ -30,7 +33,12 @@ public class NotificationTool implements ToolExecutor {
     @Value("${notification.api-key:}")
     private String notificationApiKey;
 
+    private final HookDispatcher hookDispatcher;
     private final RestTemplate restTemplate = new RestTemplate();
+
+    public NotificationTool(HookDispatcher hookDispatcher) {
+        this.hookDispatcher = hookDispatcher;
+    }
 
     private static final UnifiedToolDef DEFINITION = new UnifiedToolDef(
             "send_notification",
@@ -95,6 +103,14 @@ public class NotificationTool implements ToolExecutor {
         }
 
         log.info("send_notification: channel={}, target={}, template={}", channel, target, templateCode);
+
+        // CR-034: NOTIFICATION 훅 발행
+        try {
+            hookDispatcher.dispatch(HookEvent.NOTIFICATION,
+                    HookInput.of(HookEvent.NOTIFICATION, null,
+                            Map.of("channel", channel, "target", target, "templateCode", templateCode),
+                            Map.of()));
+        } catch (Exception ignored) {}
 
         if (notificationApiKey.isBlank()) {
             log.warn("notification.api-key not configured, returning simulated success");
