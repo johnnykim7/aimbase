@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 2.5 | 최종 수정: 2026-03-28 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026
+> 설계 버전: 3.0 | 최종 수정: 2026-04-07 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -53,6 +53,10 @@ flowchart LR
     S36 --> S39[Sprint 39: 정리+검증]
     S37 --> S39
     S38 --> S39
+    S1 --> S42[Sprint 42: 성능/퀄리티 CR-031]
+    S39 --> S42
+    S2 --> S43[Sprint 43: 프로바이더 확장 CR-032]
+    S39 --> S43
 ```
 
 ---
@@ -482,6 +486,33 @@ flowchart LR
 | - | 전체 페이지 시각 + 반응형 검증 | Sprint 36~38 | 20+ 페이지 정상 | FE | 완료 |
 | - | npm run build 정상 + tsc --noEmit 통과 | Sprint 36~38 | 빌드 에러 없음 | FE | 완료 |
 | - | 설계 문서 최종 갱신 (T2-1, CLAUDE.md, T1-7) | Sprint 38 | 문서 현행화 완료 | FE | 완료 |
+
+---
+
+### Sprint 42: 성능/퀄리티 메커니즘 (BE) [v6.0, CR-031]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-211 | PostCompactRecoveryService 구현 | Sprint 1(ContextWindowManager) | 압축 후 최근 파일 5개 + 메모리 재주입 확인 | BE | 미구현 |
+| PRD-212 | MICRO_COMPACT 0비용 최적화 | Sprint 1(ConversationSummarizer) | Haiku 호출 없이 마커 대체 동작 확인 | BE | 미구현 |
+| PRD-213 | MemoryAutoExtractService 구현 | Sprint 1(OrchestratorEngine) | 5턴 이상 대화 종료 시 LONG_TERM 메모리 자동 생성 확인 | BE | 미구현 |
+| PRD-214 | ModelConfig ThinkingMode + AnthropicAdapter 분기 | Sprint 1(AnthropicAdapter) | ADAPTIVE 모드 → `{"type":"adaptive"}` API 파라미터 전송 확인 | BE | 미구현 |
+| PRD-215 | ToolResultCompactor 구현 | Sprint 3(ToolCallHandler) | 도구별 축약 전략 적용 + compact_output 생성 확인 | BE | 미구현 |
+| PRD-216 | SubagentProgressReporter 구현 | Sprint 41(SubagentRunner) | 30초 주기 progressSummary SSE 푸시 확인 | BE | 미구현 |
+
+---
+
+### Sprint 43: 프로바이더 확장 (BE + FE) [v6.0, CR-032]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-217 | OpenAICompatibleAdapter 구현 | Sprint 2(ConnectionAdapterFactory) | base_url + api_key로 DeepSeek/Groq 채팅 성공 | BE | 미구현 |
+| PRD-218 | BedrockAdapter 구현 + Gradle 의존성 | Sprint 2(ConnectionAdapterFactory) | AWS Bedrock Claude/Llama 채팅 성공 | BE | 미구현 |
+| PRD-219 | VertexAIAdapter 구현 + Gradle 의존성 | Sprint 2(ConnectionAdapterFactory) | Vertex AI Gemini/Claude 채팅 성공 | BE | 미구현 |
+| PRD-220 | SubagentRequest 라우팅 확장 | Sprint 41(SubagentRunner) | preferredConnectionId 지정 시 해당 커넥션 사용 확인 | BE | 미구현 |
+| PRD-221 | Connection 생성 폼 동적 필드 | Sprint 11(FE Connection) | adapter별 동적 입력 필드 렌더링 확인 | FE | 미구현 |
+| - | ConnectionAdapterFactory switch 확장 | PRD-217~219 | 4개 신규 adapter 분기 동작 확인 | BE | 미구현 |
+| - | ConnectionAdapter enum + normalizeAdapterType 확장 | PRD-217~219 | openai_compatible/bedrock/vertex_ai 정규화 확인 | BE | 미구현 |
 
 ---
 

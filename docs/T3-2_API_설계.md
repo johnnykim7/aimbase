@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 4.1 | 최종 수정: 2026-04-06 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029
+> 설계 버전: 5.0 | 최종 수정: 2026-04-07 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -119,20 +119,66 @@
 |------|------|------|------|
 | id | String | ✅ | 연결 ID (고유 식별자) |
 | name | String | ✅ | 연결 이름 |
-| adapter | String | ✅ | 어댑터 유형 (openai, anthropic, ollama, postgresql, slack 등) |
+| adapter | String | ✅ | 어댑터 유형 (openai, anthropic, ollama, openai_compatible, bedrock, vertex_ai, postgresql, slack 등) |
 | type | String | ✅ | 연결 분류 (llm, write, notify, realtime) |
-| config | Map | 선택 | 어댑터별 설정 (JSONB) |
+| config | Map | 선택 | 어댑터별 설정 (JSONB) — 아래 예시 참조 |
+
+**adapter별 config 스키마 [v5.0, CR-031/CR-032]:**
 
 ```json
+// anthropic (기존 + CR-031 Adaptive Thinking)
 {
   "id": "conn-anthropic-main",
   "name": "Claude Main",
   "adapter": "anthropic",
   "type": "llm",
   "config": {
-    "api_key": "sk-ant-...",
-    "model": "claude-sonnet-4-5",
-    "max_tokens": 4096
+    "apiKey": "sk-ant-...",
+    "model": "anthropic/claude-sonnet-4-5",
+    "max_tokens": 4096,
+    "thinking_mode": "ADAPTIVE",
+    "thinking_budget_tokens": 10000
+  }
+}
+
+// openai_compatible (CR-032) — DeepSeek, Groq, Mistral, LM Studio 등
+{
+  "id": "conn-deepseek",
+  "name": "DeepSeek Chat",
+  "adapter": "openai_compatible",
+  "type": "llm",
+  "config": {
+    "base_url": "https://api.deepseek.com/v1",
+    "apiKey": "sk-...",
+    "model": "deepseek-chat"
+  }
+}
+
+// bedrock (CR-032)
+{
+  "id": "conn-bedrock-claude",
+  "name": "Bedrock Claude",
+  "adapter": "bedrock",
+  "type": "llm",
+  "config": {
+    "aws_region": "us-east-1",
+    "aws_access_key_id": "AKIA...",
+    "aws_secret_access_key": "...",
+    "model_id": "anthropic.claude-sonnet-4-5-20250514-v1:0"
+  }
+}
+
+// vertex_ai (CR-032)
+{
+  "id": "conn-vertex-gemini",
+  "name": "Vertex Gemini",
+  "adapter": "vertex_ai",
+  "type": "llm",
+  "config": {
+    "project_id": "my-gcp-project",
+    "location": "us-central1",
+    "service_account_key": "{...JSON...}",
+    "model_id": "gemini-2.0-flash"
   }
 }
 ```
