@@ -7,7 +7,10 @@ import { EmptyState } from "../components/common/EmptyState";
 import { Page } from "../components/layout/Page";
 import { useSetHeaderOverride } from "../components/layout/AppShell";
 import { MessageSquareText, Wrench } from "lucide-react";
-import { useSessionMeta, useToolLineage } from "../hooks/useSessions";
+import { useSessionMeta, useToolLineage, useSessionPlan, useSessionTodos, useSessionTasks } from "../hooks/useSessions";
+import { PlanPanel } from "../components/session/PlanPanel";
+import { TodoPanel } from "../components/session/TodoPanel";
+import { TaskPanel } from "../components/session/TaskPanel";
 import type { ToolExecution } from "../types/tool";
 
 export default function SessionDetail() {
@@ -15,7 +18,10 @@ export default function SessionDetail() {
   const setHeaderOverride = useSetHeaderOverride();
   const { data: meta, isLoading: metaLoading } = useSessionMeta(id!);
   const { data: lineage = [], isLoading: lineageLoading } = useToolLineage(id!);
-  const [tab, setTab] = useState<"conversation" | "lineage">("lineage");
+  const { data: plan } = useSessionPlan(id!);
+  const { data: todos = [] } = useSessionTodos(id!);
+  const { data: tasks = [] } = useSessionTasks(id!);
+  const [tab, setTab] = useState<"conversation" | "lineage" | "plan" | "todos" | "tasks">("lineage");
 
   useLayoutEffect(() => {
     if (meta) {
@@ -52,6 +58,15 @@ export default function SessionDetail() {
         <TabButton active={tab === "lineage"} onClick={() => setTab("lineage")}>
           Tool Lineage
         </TabButton>
+        <TabButton active={tab === "plan"} onClick={() => setTab("plan")}>
+          Plan
+        </TabButton>
+        <TabButton active={tab === "todos"} onClick={() => setTab("todos")}>
+          Todo {todos.length > 0 && `(${todos.filter(t => t.status === "completed").length}/${todos.length})`}
+        </TabButton>
+        <TabButton active={tab === "tasks"} onClick={() => setTab("tasks")}>
+          Tasks {tasks.length > 0 && `(${tasks.length})`}
+        </TabButton>
       </div>
 
       {/* Tab content */}
@@ -62,6 +77,10 @@ export default function SessionDetail() {
           description="향후 구현 예정입니다"
         />
       )}
+
+      {tab === "plan" && <PlanPanel plan={plan} />}
+      {tab === "todos" && <TodoPanel todos={todos} />}
+      {tab === "tasks" && <TaskPanel tasks={tasks} />}
 
       {tab === "lineage" && (
         lineageLoading ? (

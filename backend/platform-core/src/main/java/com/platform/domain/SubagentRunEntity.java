@@ -92,6 +92,19 @@ public class SubagentRunEntity {
     @Column(name = "progress_summary", length = 500)
     private String progressSummary;
 
+    /** CR-033 PRD-226: Task 설명 (Task 도구용) */
+    @Column(name = "task_description", columnDefinition = "text")
+    private String taskDescription;
+
+    /** CR-033 PRD-226: Task 우선순위 */
+    @Column(name = "priority", length = 20)
+    private String priority = "medium";
+
+    /** CR-033 PRD-227: 대용량 출력 (컨텍스트 윈도우 외부 저장) */
+    @Type(JsonBinaryType.class)
+    @Column(name = "large_output", columnDefinition = "jsonb")
+    private Map<String, Object> largeOutput;
+
     // --- Getters & Setters ---
 
     public UUID getId() { return id; }
@@ -162,4 +175,13 @@ public class SubagentRunEntity {
 
     public String getProgressSummary() { return progressSummary; }
     public void setProgressSummary(String progressSummary) { this.progressSummary = progressSummary; }
+
+    public String getTaskDescription() { return taskDescription; }
+    public void setTaskDescription(String taskDescription) { this.taskDescription = taskDescription; }
+
+    public String getPriority() { return priority; }
+    public void setPriority(String priority) { this.priority = priority; }
+
+    public Map<String, Object> getLargeOutput() { return largeOutput; }
+    public void setLargeOutput(Map<String, Object> largeOutput) { this.largeOutput = largeOutput; }
 }

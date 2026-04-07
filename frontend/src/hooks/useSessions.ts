@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { sessionsApi } from "../api/sessions";
+import type { PlanData, TodoItem, TaskData } from "../api/sessions";
 import type { PagedResponse } from "../types/api";
 import type { SessionMeta } from "../types/session";
 import type { ToolExecution } from "../types/tool";
@@ -36,6 +37,31 @@ export const useToolLineage = (sessionId: string) =>
         if (Array.isArray(d)) return d as ToolExecution[];
         return [];
       }),
+    enabled: !!sessionId,
+    retry: false,
+  });
+
+// CR-033: Plan/Todo/Task hooks
+export const useSessionPlan = (sessionId: string) =>
+  useQuery({
+    queryKey: ["sessions", sessionId, "plan"],
+    queryFn: () => sessionsApi.getPlan(sessionId).then((r) => r.data.data as PlanData | null),
+    enabled: !!sessionId,
+    retry: false,
+  });
+
+export const useSessionTodos = (sessionId: string) =>
+  useQuery({
+    queryKey: ["sessions", sessionId, "todos"],
+    queryFn: () => sessionsApi.getTodos(sessionId).then((r) => (r.data.data ?? []) as TodoItem[]),
+    enabled: !!sessionId,
+    retry: false,
+  });
+
+export const useSessionTasks = (sessionId: string) =>
+  useQuery({
+    queryKey: ["sessions", sessionId, "tasks"],
+    queryFn: () => sessionsApi.getTasks(sessionId).then((r) => (r.data.data ?? []) as TaskData[]),
     enabled: !!sessionId,
     retry: false,
   });

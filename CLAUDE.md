@@ -180,6 +180,7 @@ frontend/src/
 - [x] Sprint 41: CR-030 2단계 고도화 6 Phase (PRD-186~210) — Extended Thinking, Hook Architecture, Permission AUTO, Memory Scope, 압축 5전략, Subagent+Worktree Isolation
 - [x] Sprint 42: CR-031 성능/퀄리티 메커니즘 6 Phase (PRD-211~216) — Post-Compact Recovery, MICRO_COMPACT 0비용, Extract Memories 자동화, Adaptive Thinking, Tool Result 축약, Agent 진행 요약
 - [x] Sprint 43: CR-032 프로바이더 확장 6 Phase (PRD-217~221) — OpenAI Compatible shim, AWS Bedrock, Vertex AI, 에이전트별 라우팅, FE Connection 폼
+- [ ] Sprint 44: CR-033 에이전트 구조적 사고 체계 6 Phase (PRD-222~227, FE-015) — Plan Mode(Enter/Exit/Verify), TodoWrite, Task(Create/Get/List/Update/Output/Stop), FE 대시보드
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)

@@ -516,6 +516,22 @@ flowchart LR
 
 ---
 
+### Sprint 44: 에이전트 구조적 사고 체계 (BE + FE) [v6.1, CR-033]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-222 | EnterPlanModeTool — Plan 도메인 + 계획모드 진입 | Sprint 3(ToolRegistry), CR-006(ToolFilterContext), CR-029(EnhancedToolExecutor) | 계획 모드 진입 시 readOnlyMode 활성화 + 쓰기 도구 차단 확인 | BE | 미구현 |
+| PRD-223 | ExitPlanModeTool — 계획모드 종료 + 실행 전환 | PRD-222 | 계획 확정 + planModeActive=false 복원 + 쓰기 도구 재활성화 확인 | BE | 미구현 |
+| PRD-224 | VerifyPlanExecutionTool — 계획 대비 실행 검증 | PRD-223 | 완료율 산출 + 미완료 gap 식별 + 100% 시 COMPLETED 전환 확인 | BE | 미구현 |
+| PRD-225 | TodoWriteTool — 세션 체크리스트 | Sprint 1(SessionStore), CR-029(EnhancedToolExecutor) | todos 전체 교체 + Redis 캐시 + DB 영속 확인 | BE | 미구현 |
+| PRD-226 | TaskCreate/Get/List — 태스크 생성/조회/목록 | CR-030(SubagentRunner) | SubagentRunner 백그라운드 실행 + 상태 조회 + 목록 필터링 확인 | BE | 미구현 |
+| PRD-227 | TaskUpdate/Output/Stop — 태스크 수정/출력/중지 | PRD-226 | large_output 저장 + 실행 중 태스크 취소 + COMPLETED 수정 거부 확인 | BE | 미구현 |
+| FE-015 | Plan/Todo/Task 대시보드 — 세션 상세 확장 | PRD-222~227, Sprint 11(FE Sessions) | 3개 탭 패널 렌더링 + SSE 실시간 업데이트 확인 | FE | 미구현 |
+| - | Flyway V42 마이그레이션 (plans + todos + subagent_runs 확장) | V41 이후 | 마이그레이션 성공 + 테이블 생성 확인 | BE | 미구현 |
+| - | BIZ-052~056 비즈니스 규칙 구현 검증 | PRD-222~227 | Plan 읽기전용 모드, 세션당 Plan 1개, FSM 전이, Task 5개 제한 검증 | BE | 미구현 |
+
+---
+
 ## Sprint 분리 원칙
 
 1. **인프라 선행**: Sprint 0에서 DB, 설정, 공통 모듈을 먼저 구축

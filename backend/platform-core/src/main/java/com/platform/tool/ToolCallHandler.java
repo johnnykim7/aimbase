@@ -11,6 +11,7 @@ import com.platform.llm.model.*;
 import com.platform.policy.PermissionClassifier;
 import com.platform.repository.ToolExecutionLogRepository;
 import com.platform.tenant.TenantContext;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -42,15 +43,22 @@ public class ToolCallHandler {
     private final HookDispatcher hookDispatcher;
     private final PermissionClassifier permissionClassifier;
     private final com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry;
+    private final RedisTemplate<String, String> redisTemplate;
+
+    /** CR-033: Plan Mode 읽기전용 검사에서 허용하는 도구 (Plan Mode 자체 제어용) */
+    private static final java.util.Set<String> PLAN_MODE_ALLOWED_WRITES =
+            java.util.Set.of("exit_plan_mode", "todo_write");
 
     public ToolCallHandler(ToolExecutionLogRepository executionLogRepository,
                            HookDispatcher hookDispatcher,
                            PermissionClassifier permissionClassifier,
-                           com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry) {
+                           com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry,
+                           RedisTemplate<String, String> redisTemplate) {
         this.executionLogRepository = executionLogRepository;
         this.hookDispatcher = hookDispatcher;
         this.permissionClassifier = permissionClassifier;
         this.compactorRegistry = compactorRegistry;
+        this.redisTemplate = redisTemplate;
     }
 
     /**
@@ -305,6 +313,21 @@ public class ToolCallHandler {
                                                       ToolRegistry toolRegistry, int turnNum, int seqNum) {
         log.debug("Executing tool: {} (id={}, turn={}, seq={})",
                 tc.name(), tc.id(), turnNum, seqNum);
+
+        // CR-033 BIZ-052: Plan Mode 읽기전용 검사
+        if (toolContext != null && toolContext.sessionId() != null) {
+            String planModeKey = "session:planMode:" + toolContext.sessionId();
+            if ("true".equals(redisTemplate.opsForValue().get(planModeKey))
+                    && !PLAN_MODE_ALLOWED_WRITES.contains(tc.name())) {
+                ToolContractMeta meta = toolRegistry.getContractMeta(tc.name());
+                if (meta != null && !meta.readOnly()) {
+                    log.info("Plan mode: blocked write tool={}, session={}", tc.name(), toolContext.sessionId());
+                    return new ContentBlock.ToolResult(tc.id(),
+                            "[DENIED] Plan mode active: only read-only tools allowed. " +
+                                    "Use exit_plan_mode to enable writes.");
+                }
+            }
+        }
 
         // PRD-193: PreToolUse 훅
         HookOutput preHook = hookDispatcher.dispatch(

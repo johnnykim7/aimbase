@@ -26,8 +26,11 @@
 | CR-015 | 커넥션 그룹 Resilience + 키 관리 권한 체계 | 변경 | High | v3.5.0 | ✅ 완료 |
 | CR-016 | 공용 워크플로우 + 빌트인 도구 확장 | 변경 | High | v3.6.0 | ✅ 완료 |
 | CR-017 | FlowGuard Agent 범용 도구 확장 | 변경 | High | v3.7.0 | ✅ 완료 |
-| CR-029 | Aimbase 1단계 고도화 — Native Tool + Session Meta + Context Assembly + Runtime 재배치 | 변경 | High | v4.0.0 | 🔲 진행중 |
-| CR-030 | Aimbase 2단계 고도화 — Hook Architecture + Extended Thinking + Agent Isolation + 압축 전략 강화 | 변경 | High | v4.1.0 | 🔲 진행전 |
+| CR-029 | Aimbase 1단계 고도화 — Native Tool + Session Meta + Context Assembly + Runtime 재배치 | 변경 | High | v4.0.0 | ✅ 완료 |
+| CR-030 | Aimbase 2단계 고도화 — Hook Architecture + Extended Thinking + Agent Isolation + 압축 전략 강화 | 변경 | High | v4.1.0 | ✅ 완료 |
+| CR-031 | 성능/퀄리티 메커니즘 — Post-Compact Recovery + MICRO_COMPACT + Extract Memories + Adaptive Thinking | 변경 | High | v5.0.0 | ✅ 완료 |
+| CR-032 | 프로바이더 확장 — OpenAI Compatible shim + Bedrock + Vertex AI + 에이전트 라우팅 | 변경 | High | v5.0.0 | ✅ 완료 |
+| CR-033 | 에이전트 구조적 사고 체계 — Plan Mode + Todo + Task 관리 (10개 Tool + FE 대시보드) | 변경 | High | v6.1.0 | 🔲 진행전 |
 
 ---
 
@@ -432,6 +435,68 @@
 - **영향 설계서**: T1-1, T2-1, T2-2, T3-1, T3-2, T3-3
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v4.1.0
 - **변경 일자**: 2026-04-07
+
+---
+
+### CR-031 | 성능/퀄리티 메커니즘 6 Phase
+- **대상 기능 ID**: PRD-211 ~ PRD-216 (신규)
+- **변경 타입**: 변경
+- **변경 내용**: openclaude 벤치마킹 기반 LLM 출력 품질 및 비용 최적화 메커니즘 6종
+  - **PRD-211 Post-Compact Recovery**: 압축 후 최근 참조 파일 5개 + 장기 메모리 자동 재주입 (50K 토큰 예산)
+  - **PRD-212 MICRO_COMPACT 0비용**: Haiku 호출 없이 마커 대체로 MICRO_COMPACT 수행
+  - **PRD-213 Extract Memories 자동화**: 대화 5턴 이상 시 Haiku로 메모리 자동 추출 + 중복 판정
+  - **PRD-214 Adaptive Thinking**: ThinkingMode(DISABLED/ENABLED/ADAPTIVE) + Claude 4.6+ 분기
+  - **PRD-215 Tool Result 축약**: 도구별 축약 전략 레지스트리
+  - **PRD-216 Agent 진행 요약**: 30초 주기 서브에이전트 progressSummary SSE 푸시
+- **변경 사유**: 장시간 대화 품질 급락 방지 + 불필요한 LLM 비용 절감
+- **영향 모듈**: Session(압축), Memory(자동추출), LLM(Adaptive Thinking), Tool(축약), Agent(진행요약)
+- **영향도**: High
+- **영향 범위**: PRD-211 ~ PRD-216, BIZ-046 ~ BIZ-049
+- **영향 설계서**: T1-1, T1-3, T3-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v5.0.0
+- **변경 일자**: 2026-04-08
+
+---
+
+### CR-032 | 프로바이더 확장 6 Phase
+- **대상 기능 ID**: PRD-217 ~ PRD-221 (신규)
+- **변경 타입**: 변경
+- **변경 내용**: LLM 프로바이더 3개 추가 + 에이전트별 라우팅 + FE 동적 폼
+  - **PRD-217 OpenAI Compatible shim**: Chat Completions API 호환 범용 어댑터 (DeepSeek/Groq/Mistral 등)
+  - **PRD-218 AWS Bedrock**: Bedrock Runtime SDK 프록시 모드
+  - **PRD-219 Google Vertex AI**: Vertex AI Prediction API 프록시 모드
+  - **PRD-220 에이전트별 라우팅**: SubagentRequest.preferredConnectionId로 ModelRouter 우회
+  - **PRD-221 FE Connection 폼 확장**: adapter별 동적 config 필드 렌더링
+- **변경 사유**: 엔터프라이즈 환경에서 Bedrock/Vertex 필수. OpenAI 호환 서비스 통합 필요
+- **영향 모듈**: LLM(어댑터 3개), Agent(라우팅), FE(Connection 폼)
+- **영향도**: High
+- **영향 범위**: PRD-217 ~ PRD-221, BIZ-050 ~ BIZ-051
+- **영향 설계서**: T1-1, T1-3, T3-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v5.0.0
+- **변경 일자**: 2026-04-08
+
+---
+
+### CR-033 | 에이전트 구조적 사고 체계 — Plan Mode + Todo + Task 관리
+- **대상 기능 ID**: PRD-222 ~ PRD-227 (신규), FE-015 (신규)
+- **변경 타입**: 변경
+- **변경 내용**: LLM 에이전트의 구조적 사고를 지원하는 도구 10종 + FE 대시보드
+  - **PRD-222 EnterPlanModeTool**: 계획 모드 진입 — PlanEntity 생성, ToolFilterContext readOnlyMode 활성화, 쓰기 도구 자동 차단
+  - **PRD-223 ExitPlanModeTool**: 계획 모드 종료 — steps 확정, planModeActive 해제, 실행 단계 전환
+  - **PRD-224 VerifyPlanExecutionTool**: 계획 대비 실행 검증 — step별 결과 매칭, 완료율 산출, 미완료 gap 식별
+  - **PRD-225 TodoWriteTool**: 세션 체크리스트 — 전체 교체 방식 CRUD, Redis 캐시 + DB 영속
+  - **PRD-226 Task Create/Get/List**: SubagentRunner 래핑 태스크 생성·조회·목록 3종
+  - **PRD-227 Task Update/Output/Stop**: 태스크 수정, 대용량 출력 별도 저장, 실행 중 태스크 중지 3종
+  - **FE-015 Plan/Todo/Task 대시보드**: 세션 상세 화면에 3개 탭 패널 추가
+  - **DB 추가**: plans, todos 2개 테이블 신규. subagent_runs에 task_description/priority/large_output 3개 컬럼 추가
+  - **BIZ 규칙 추가**: BIZ-052(Plan 읽기전용), BIZ-053(세션당 Plan 1개), BIZ-054(Plan FSM), BIZ-055(Todo 전체교체), BIZ-056(Task 5개 제한)
+- **변경 사유**: openclaude 전수 비교에서 식별된 높은 우선순위 Tool 누락. 복잡한 요청에서 "바로 코드 쓰기" 대신 "탐색→계획→실행→검증" 구조적 사고 가능. 멀티스텝 워크플로우와 서브에이전트 시나리오에서 에이전트 출력 품질 구조적 향상
+- **영향 모듈**: Tool(도구 10종), Agent(PlanService, TodoService), Session(planModeActive), Domain(PlanEntity, TodoEntity), FE(SessionDetail 확장)
+- **영향도**: High
+- **영향 범위**: PRD-222 ~ PRD-227, FE-015, BIZ-052 ~ BIZ-056
+- **영향 설계서**: T1-1, T1-3, T1-7, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v6.1.0
+- **변경 일자**: 2026-04-08
 
 ---
 
