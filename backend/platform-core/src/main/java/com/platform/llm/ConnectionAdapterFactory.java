@@ -79,6 +79,7 @@ public class ConnectionAdapterFactory {
         Boolean extendedThinking = null;
         Integer thinkingBudgetTokens = null;
         Integer maxTokens = null;
+        com.platform.llm.model.ThinkingMode thinkingMode = null;
 
         if (cfg.containsKey("extended_thinking")) {
             extendedThinking = Boolean.valueOf(cfg.get("extended_thinking").toString());
@@ -89,8 +90,18 @@ public class ConnectionAdapterFactory {
         if (cfg.containsKey("max_tokens")) {
             maxTokens = ((Number) cfg.get("max_tokens")).intValue();
         }
+        // CR-031 PRD-214: thinking_mode 파싱 (DISABLED/ENABLED/ADAPTIVE)
+        if (cfg.containsKey("thinking_mode")) {
+            try {
+                thinkingMode = com.platform.llm.model.ThinkingMode.valueOf(
+                        cfg.get("thinking_mode").toString().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("Connection '{}' 잘못된 thinking_mode '{}' — 무시",
+                        connectionId, cfg.get("thinking_mode"));
+            }
+        }
 
-        return new ModelConfig(null, maxTokens, null, null, extendedThinking, thinkingBudgetTokens);
+        return new ModelConfig(null, maxTokens, null, null, extendedThinking, thinkingBudgetTokens, thinkingMode);
     }
 
     /**

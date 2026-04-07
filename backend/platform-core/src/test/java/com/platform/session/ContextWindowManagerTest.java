@@ -27,6 +27,7 @@ class ContextWindowManagerTest {
     @Mock private ConversationSummarizer summarizer;
     @Mock private HookDispatcher hookDispatcher;
     @Mock private SessionMemoryCompactionService sessionMemoryCompaction;
+    @Mock private PostCompactRecoveryService postCompactRecovery;
 
     private ContextWindowManager manager;
 
@@ -37,7 +38,7 @@ class ContextWindowManagerTest {
 
     @BeforeEach
     void setUp() {
-        manager = new ContextWindowManager(summarizer, hookDispatcher, sessionMemoryCompaction, THRESHOLDS);
+        manager = new ContextWindowManager(summarizer, hookDispatcher, sessionMemoryCompaction, postCompactRecovery, THRESHOLDS);
 
         // 기본: 훅 PASSTHROUGH
         lenient().when(hookDispatcher.dispatch(any(), any()))

@@ -26,6 +26,7 @@ import com.platform.repository.UsageLogRepository;
 import com.platform.schema.SchemaRegistry;
 import com.platform.schema.SchemaValidator;
 import com.platform.session.ContextWindowManager;
+import com.platform.session.MemoryAutoExtractService;
 import com.platform.session.MemoryService;
 import com.platform.session.ResponseCacheService;
 import com.platform.session.SessionStore;
@@ -94,6 +95,7 @@ public class OrchestratorEngine {
     private final ContextAssemblyEngine contextAssemblyEngine;
     private final RuntimeRegistry runtimeRegistry;
     private final HookDispatcher hookDispatcher;
+    private final MemoryAutoExtractService memoryAutoExtractService;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -122,7 +124,8 @@ public class OrchestratorEngine {
             QuotaService quotaService,
             ContextAssemblyEngine contextAssemblyEngine,
             RuntimeRegistry runtimeRegistry,
-            HookDispatcher hookDispatcher
+            HookDispatcher hookDispatcher,
+            MemoryAutoExtractService memoryAutoExtractService
     ) {
         this.modelRouter = modelRouter;
         this.fallbackChainExecutor = fallbackChainExecutor;
@@ -149,6 +152,7 @@ public class OrchestratorEngine {
         this.contextAssemblyEngine = contextAssemblyEngine;
         this.runtimeRegistry = runtimeRegistry;
         this.hookDispatcher = hookDispatcher;
+        this.memoryAutoExtractService = memoryAutoExtractService;
     }
 
     /**
@@ -388,6 +392,14 @@ public class OrchestratorEngine {
                                 "inputTokens", llmResponse.usage().inputTokens(),
                                 "outputTokens", llmResponse.usage().outputTokens()),
                         Map.of()));
+
+        // CR-031 PRD-213: 메모리 자동 추출 (fire-and-forget 비동기)
+        try {
+            List<UnifiedMessage> sessionMessages = sessionStore.getMessages(sessionId);
+            memoryAutoExtractService.extractIfEligible(sessionId, request.userId(), sessionMessages);
+        } catch (Exception e) {
+            log.debug("메모리 자동 추출 트리거 실패 (무시): {}", e.getMessage());
+        }
 
         return new ChatResponse(
                 llmResponse.id(),

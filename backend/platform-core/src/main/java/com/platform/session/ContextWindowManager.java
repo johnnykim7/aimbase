@@ -43,6 +43,7 @@ public class ContextWindowManager {
     private final ConversationSummarizer summarizer;
     private final HookDispatcher hookDispatcher;
     private final SessionMemoryCompactionService sessionMemoryCompaction;
+    private final PostCompactRecoveryService postCompactRecovery;
     private final CompactionThresholds thresholds;
 
     // C2: 세션별 마지막 압축 요약 저장 (session_summary 소스에서 활용)
@@ -51,10 +52,12 @@ public class ContextWindowManager {
     public ContextWindowManager(ConversationSummarizer summarizer,
                                 HookDispatcher hookDispatcher,
                                 SessionMemoryCompactionService sessionMemoryCompaction,
+                                PostCompactRecoveryService postCompactRecovery,
                                 CompactionThresholds thresholds) {
         this.summarizer = summarizer;
         this.hookDispatcher = hookDispatcher;
         this.sessionMemoryCompaction = sessionMemoryCompaction;
+        this.postCompactRecovery = postCompactRecovery;
         this.thresholds = thresholds;
         log.info("ContextWindowManager 초기화: thresholds={}", thresholds);
     }
@@ -168,6 +171,20 @@ public class ContextWindowManager {
             }
         }
 
+        // CR-031 PRD-211: Post-Compact Recovery — Level 2~4 압축 후 컨텍스트 복구
+        if (strategyUsed != CompactionStrategy.SNIP) {
+            try {
+                PostCompactRecoveryService.RecoveryResult recovery =
+                        postCompactRecovery.recover(sessionId, userId, result, strategyUsed);
+                result = recovery.messages();
+                log.info("Post-Compact Recovery 적용: 파일 {}개, 메모리 {}개, 토큰 {}",
+                        recovery.restoredFileCount(), recovery.restoredMemoryCount(),
+                        recovery.totalTokensRestored());
+            } catch (Exception e) {
+                log.warn("Post-Compact Recovery 실패 (무시): {}", e.getMessage());
+            }
+        }
+
         // C2: sessionSummaries 갱신
         if (sessionId != null) {
             extractSummary(result).ifPresent(summary -> sessionSummaries.put(sessionId, summary));
@@ -269,7 +286,13 @@ public class ContextWindowManager {
         return result;
     }
 
-    /** Level 2 — microcompact: 오래된 1/3 메시지를 Haiku로 짧게 요약. */
+    /**
+     * Level 2 — MICRO_COMPACT (PRD-212, CR-031): 0비용 마커 대체 우선.
+     *
+     * 1단계: 오래된 TOOL_RESULT 메시지를 마커("[Tool result cleared]")로 대체 (0비용).
+     *        최근 3개 tool result는 보존.
+     * 2단계: 마커 대체 후에도 토큰 초과 시 → Haiku microSummarize() 폴백.
+     */
     private List<UnifiedMessage> tryMicroCompact(List<UnifiedMessage> messages, int targetTokens) {
         List<UnifiedMessage> system = messages.stream()
                 .filter(m -> m.role() == UnifiedMessage.Role.SYSTEM)
@@ -280,19 +303,70 @@ public class ContextWindowManager {
 
         if (others.size() <= 4) return null;
 
+        // ── 1단계: 0비용 마커 대체 (PRD-212) ──
+        int toolResultCount = 0;
+        int totalToolResults = (int) others.stream()
+                .filter(m -> m.role() == UnifiedMessage.Role.TOOL_RESULT)
+                .count();
+        int preserveCount = Math.min(3, totalToolResults);
+
+        // 역순으로 세서 최근 3개 TOOL_RESULT 인덱스를 파악
+        int preserved = 0;
+        java.util.Set<Integer> preserveIndices = new java.util.HashSet<>();
+        for (int i = others.size() - 1; i >= 0 && preserved < preserveCount; i--) {
+            if (others.get(i).role() == UnifiedMessage.Role.TOOL_RESULT) {
+                preserveIndices.add(i);
+                preserved++;
+            }
+        }
+
+        // 오래된 TOOL_RESULT → 마커 대체
+        List<UnifiedMessage> markerReplaced = new ArrayList<>();
+        int markersApplied = 0;
+        for (int i = 0; i < others.size(); i++) {
+            UnifiedMessage msg = others.get(i);
+            if (msg.role() == UnifiedMessage.Role.TOOL_RESULT && !preserveIndices.contains(i)) {
+                // 마커로 대체
+                markerReplaced.add(UnifiedMessage.ofText(
+                        UnifiedMessage.Role.TOOL_RESULT,
+                        "[Tool result cleared]"));
+                markersApplied++;
+            } else {
+                markerReplaced.add(msg);
+            }
+        }
+
+        List<UnifiedMessage> markerResult = new ArrayList<>(system);
+        markerResult.addAll(markerReplaced);
+
+        if (markersApplied > 0) {
+            int markerTokens = estimateTokens(markerResult);
+            log.info("MICRO_COMPACT 마커 대체: {}개 tool result → 마커 (토큰: {} → {})",
+                    markersApplied, estimateTokens(messages), markerTokens);
+
+            if (markerTokens <= targetTokens * 1.3) {
+                // 마커 대체로 충분히 줄어들었으면 LLM 호출 없이 반환
+                return markerResult;
+            }
+        }
+
+        // ── 2단계: Haiku microSummarize 폴백 ──
         int compactCount = others.size() / 3;
         List<UnifiedMessage> toCompact = others.subList(0, compactCount);
         List<UnifiedMessage> toKeep = others.subList(compactCount, others.size());
 
         String micro = summarizer.microSummarize(toCompact);
-        if (micro == null || micro.isBlank()) return null;
+        if (micro == null || micro.isBlank()) {
+            // Haiku도 실패하면 마커 결과라도 반환
+            return markersApplied > 0 ? markerResult : null;
+        }
 
         List<UnifiedMessage> result = new ArrayList<>(system);
         result.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
                 "[이전 대화 압축 요약]\n" + micro));
         result.addAll(toKeep);
 
-        log.info("MICRO_COMPACT: {}개 → 요약 + {}개 유지 (토큰: {} → {})",
+        log.info("MICRO_COMPACT Haiku 폴백: {}개 → 요약 + {}개 유지 (토큰: {} → {})",
                 toCompact.size(), toKeep.size(),
                 estimateTokens(messages), estimateTokens(result));
         return result;

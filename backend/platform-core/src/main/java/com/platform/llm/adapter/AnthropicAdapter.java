@@ -123,19 +123,36 @@ public class AnthropicAdapter implements LLMAdapter {
             }
             builder.messages(userMessages);
 
-            // CR-030: Extended Thinking — thinking 파라미터 빌드
-            boolean thinkingEnabled = request.config() != null
-                    && Boolean.TRUE.equals(request.config().extendedThinking());
-            if (thinkingEnabled) {
+            // CR-031 PRD-214: Adaptive Thinking — 3모드 분기
+            com.platform.llm.model.ThinkingMode thinkingMode = request.config() != null
+                    ? request.config().resolveThinkingMode()
+                    : com.platform.llm.model.ThinkingMode.DISABLED;
+
+            if (thinkingMode == com.platform.llm.model.ThinkingMode.ADAPTIVE) {
+                // ADAPTIVE: 모델이 자동으로 budget 결정
+                // Claude 4.6+ 모델에서만 지원. 미지원 시 ENABLED로 폴백.
+                String reqModel = request.model() != null ? request.model() : "";
+                if (reqModel.contains("opus-4-6") || reqModel.contains("sonnet-4-6")) {
+                    builder.enabledThinking(0); // budget=0 → API가 adaptive로 처리
+                } else {
+                    // 미지원 모델 → ENABLED 폴백 (기본 budget 10000)
+                    int budget = request.config().thinkingBudgetTokens() != null
+                            ? request.config().thinkingBudgetTokens() : 10000;
+                    int maxTok = request.config().maxTokens() != null
+                            ? request.config().maxTokens() : 16000;
+                    budget = Math.max(1024, Math.min(budget, maxTok - 1));
+                    builder.enabledThinking(budget);
+                    log.debug("ADAPTIVE thinking 미지원 모델 '{}' → ENABLED 폴백 (budget={})", modelId, budget);
+                }
+            } else if (thinkingMode == com.platform.llm.model.ThinkingMode.ENABLED) {
                 int budget = request.config().thinkingBudgetTokens() != null
                         ? request.config().thinkingBudgetTokens() : 10000;
                 int maxTok = request.config().maxTokens() != null
                         ? request.config().maxTokens() : 16000;
-                // thinkingBudgetTokens must be >= 1024 and < maxTokens
                 budget = Math.max(1024, Math.min(budget, maxTok - 1));
                 builder.enabledThinking(budget);
-                // Extended Thinking 시 temperature 설정 불가 (Anthropic API 제약)
             } else if (request.config() != null && request.config().temperature() != null) {
+                // DISABLED — temperature 설정 가능 (thinking 비활성 시만)
                 builder.temperature(request.config().temperature());
             }
 
@@ -215,10 +232,24 @@ public class AnthropicAdapter implements LLMAdapter {
             }
             builder.messages(userMessages);
 
-            // CR-030: 스트리밍에도 Extended Thinking 파라미터 적용
-            boolean streamThinking = request.config() != null
-                    && Boolean.TRUE.equals(request.config().extendedThinking());
-            if (streamThinking) {
+            // CR-031 PRD-214: 스트리밍에도 Adaptive Thinking 3모드 적용
+            com.platform.llm.model.ThinkingMode streamThinkingMode = request.config() != null
+                    ? request.config().resolveThinkingMode()
+                    : com.platform.llm.model.ThinkingMode.DISABLED;
+
+            if (streamThinkingMode == com.platform.llm.model.ThinkingMode.ADAPTIVE) {
+                String reqModel = request.model() != null ? request.model() : "";
+                if (reqModel.contains("opus-4-6") || reqModel.contains("sonnet-4-6")) {
+                    builder.enabledThinking(0);
+                } else {
+                    int budget = request.config().thinkingBudgetTokens() != null
+                            ? request.config().thinkingBudgetTokens() : 10000;
+                    int maxTok = request.config().maxTokens() != null
+                            ? request.config().maxTokens() : 16000;
+                    budget = Math.max(1024, Math.min(budget, maxTok - 1));
+                    builder.enabledThinking(budget);
+                }
+            } else if (streamThinkingMode == com.platform.llm.model.ThinkingMode.ENABLED) {
                 int budget = request.config().thinkingBudgetTokens() != null
                         ? request.config().thinkingBudgetTokens() : 10000;
                 int maxTok = request.config().maxTokens() != null

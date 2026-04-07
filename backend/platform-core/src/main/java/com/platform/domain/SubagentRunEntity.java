@@ -88,6 +88,10 @@ public class SubagentRunEntity {
     @Column(name = "timeout_ms")
     private long timeoutMs;
 
+    /** CR-031 PRD-216: 30초 주기 진행 요약 */
+    @Column(name = "progress_summary", length = 500)
+    private String progressSummary;
+
     // --- Getters & Setters ---
 
     public UUID getId() { return id; }
@@ -155,4 +159,7 @@ public class SubagentRunEntity {
 
     public long getTimeoutMs() { return timeoutMs; }
     public void setTimeoutMs(long timeoutMs) { this.timeoutMs = timeoutMs; }
+
+    public String getProgressSummary() { return progressSummary; }
+    public void setProgressSummary(String progressSummary) { this.progressSummary = progressSummary; }
 }

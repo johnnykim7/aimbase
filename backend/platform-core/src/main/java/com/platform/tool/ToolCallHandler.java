@@ -41,13 +41,16 @@ public class ToolCallHandler {
     private final ToolExecutionLogRepository executionLogRepository;
     private final HookDispatcher hookDispatcher;
     private final PermissionClassifier permissionClassifier;
+    private final com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry;
 
     public ToolCallHandler(ToolExecutionLogRepository executionLogRepository,
                            HookDispatcher hookDispatcher,
-                           PermissionClassifier permissionClassifier) {
+                           PermissionClassifier permissionClassifier,
+                           com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry) {
         this.executionLogRepository = executionLogRepository;
         this.hookDispatcher = hookDispatcher;
         this.permissionClassifier = permissionClassifier;
+        this.compactorRegistry = compactorRegistry;
     }
 
     /**
@@ -266,10 +269,10 @@ public class ToolCallHandler {
                 results.add(executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement()));
             }
 
-            // A2: per-message budget (OpenClaude: 3MB, 여기선 50KB)
+            // A2 + CR-031 PRD-215: per-message budget + 도구별 지능형 축약
             int totalChars = results.stream().mapToInt(r -> r.content().length()).sum();
             if (totalChars > 80_000) {
-                log.debug("Tool results total {}KB exceeds 80KB budget, truncating", totalChars / 1000);
+                log.debug("Tool results total {}KB exceeds 80KB budget, applying smart compaction", totalChars / 1000);
                 results.sort((a, b) -> b.content().length() - a.content().length());
                 List<ContentBlock.ToolResult> budgeted = new ArrayList<>();
                 int remaining = 50_000;
@@ -278,12 +281,11 @@ public class ToolCallHandler {
                         budgeted.add(r);
                         remaining -= r.content().length();
                     } else {
-                        String p = r.content().substring(0, Math.min(2000, r.content().length()));
-                        int nl = p.lastIndexOf('\n');
-                        if (nl > 1000) p = p.substring(0, nl);
-                        budgeted.add(new ContentBlock.ToolResult(r.toolUseId(),
-                                p + "\n...(truncated for context budget)"));
-                        remaining -= p.length() + 40;
+                        // CR-031: 도구별 지능형 축약 적용
+                        String compacted = compactorRegistry.compact(
+                                r.toolUseId(), r.content(), Math.min(2000, remaining));
+                        budgeted.add(new ContentBlock.ToolResult(r.toolUseId(), compacted));
+                        remaining -= compacted.length();
                     }
                 }
                 results = budgeted;
