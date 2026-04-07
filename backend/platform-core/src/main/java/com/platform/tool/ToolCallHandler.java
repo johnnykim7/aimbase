@@ -8,6 +8,7 @@ import com.platform.hook.HookInput;
 import com.platform.hook.HookOutput;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
+import com.platform.policy.PermissionClassifier;
 import com.platform.repository.ToolExecutionLogRepository;
 import com.platform.tenant.TenantContext;
 import org.slf4j.Logger;
@@ -39,11 +40,14 @@ public class ToolCallHandler {
 
     private final ToolExecutionLogRepository executionLogRepository;
     private final HookDispatcher hookDispatcher;
+    private final PermissionClassifier permissionClassifier;
 
     public ToolCallHandler(ToolExecutionLogRepository executionLogRepository,
-                           HookDispatcher hookDispatcher) {
+                           HookDispatcher hookDispatcher,
+                           PermissionClassifier permissionClassifier) {
         this.executionLogRepository = executionLogRepository;
         this.hookDispatcher = hookDispatcher;
+        this.permissionClassifier = permissionClassifier;
     }
 
     /**
@@ -217,6 +221,21 @@ public class ToolCallHandler {
                     .toList();
             mutableMessages.add(UnifiedMessage.ofAssistantWithToolUse(toolUseBlocks));
 
+            // PRD-196: AUTO 모드 해소 — LLM이 선택한 도구 목록 기반으로 구체 권한 결정
+            final ToolContext effectiveContext;
+            if (toolContext != null && toolContext.permissionLevel() == PermissionLevel.AUTO) {
+                List<String> callNames = response.toolCalls().stream().map(ToolCall::name).toList();
+                PermissionLevel resolved = permissionClassifier.classify(callNames, toolRegistry);
+                effectiveContext = new ToolContext(
+                        toolContext.tenantId(), toolContext.appId(), toolContext.projectId(),
+                        toolContext.sessionId(), toolContext.workflowRunId(), toolContext.stepId(),
+                        toolContext.actorUserId(), resolved, toolContext.approvalState(),
+                        toolContext.workspacePath(), toolContext.dryRun(), toolContext.turnNumber());
+                log.debug("AUTO permission resolved: tools={} → {}", callNames, resolved);
+            } else {
+                effectiveContext = toolContext;
+            }
+
             // CR-029: concurrencySafe 분기 — OpenClaude partition 패턴
             // concurrencySafe=true인 도구끼리는 병렬, 아니면 순차
             final int turnNum = iteration;
@@ -240,11 +259,11 @@ public class ToolCallHandler {
 
             // 1) concurrencySafe 도구들
             for (ToolCall tc : safeCalls) {
-                results.add(executeAndRecord(tc, toolContext, toolRegistry, turnNum, seq.getAndIncrement()));
+                results.add(executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement()));
             }
             // 2) unsafe 도구들 (순차)
             for (ToolCall tc : unsafeCalls) {
-                results.add(executeAndRecord(tc, toolContext, toolRegistry, turnNum, seq.getAndIncrement()));
+                results.add(executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement()));
             }
 
             // A2: per-message budget (OpenClaude: 3MB, 여기선 50KB)

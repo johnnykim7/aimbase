@@ -1,5 +1,6 @@
 package com.platform.api;
 
+import com.platform.session.BlockingLimitException;
 import com.platform.tenant.quota.QuotaExceededException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +33,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleQuotaExceeded(QuotaExceededException ex) {
         log.warn("Quota exceeded: {} (quota={}, usage={}, requested={})",
                 ex.getMessage(), ex.getQuota(), ex.getCurrentUsage(), ex.getRequested());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(BlockingLimitException.class)
+    public ResponseEntity<ApiResponse<Void>> handleBlockingLimit(BlockingLimitException ex) {
+        log.warn("Context window blocking limit: usage={}%", String.format("%.1f", ex.getUsageRatio() * 100));
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(ApiResponse.error(ex.getMessage()));
     }

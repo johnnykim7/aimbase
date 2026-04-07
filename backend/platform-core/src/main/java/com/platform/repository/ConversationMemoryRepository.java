@@ -17,4 +17,25 @@ public interface ConversationMemoryRepository extends JpaRepository<Conversation
     List<ConversationMemoryEntity> findBySessionIdOrderByCreatedAtDesc(String sessionId);
 
     void deleteBySessionId(String sessionId);
+
+    // ── PRD-200: scope 기반 쿼리 ──
+
+    /** PRIVATE scope: 세션+계층+scope 조회 */
+    List<ConversationMemoryEntity> findBySessionIdAndMemoryTypeAndScopeOrderByCreatedAtDesc(
+            String sessionId, String memoryType, String scope);
+
+    /** TEAM scope: teamId+계층+scope 조회 */
+    List<ConversationMemoryEntity> findByTeamIdAndMemoryTypeAndScopeOrderByCreatedAtDesc(
+            String teamId, String memoryType, String scope);
+
+    /** TEAM scope: teamId 전체 조회 */
+    List<ConversationMemoryEntity> findByTeamIdAndScopeOrderByCreatedAtDesc(
+            String teamId, String scope);
+
+    /** scope별 전체 조회 (GLOBAL용) */
+    List<ConversationMemoryEntity> findByScopeAndMemoryTypeOrderByCreatedAtDesc(
+            String scope, String memoryType);
+
+    /** scope별 전체 조회 */
+    List<ConversationMemoryEntity> findByScopeOrderByCreatedAtDesc(String scope);
 }

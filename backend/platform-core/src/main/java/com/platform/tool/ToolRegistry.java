@@ -143,11 +143,18 @@ public class ToolRegistry {
         try {
             if (executor instanceof EnhancedToolExecutor enhanced) {
                 // C1: Permission 체크 — ctx.permissionLevel이 도구 요구 수준 미충족 시 거부
+                // PRD-196: AUTO는 ToolCallHandler에서 미리 해소되어야 함.
+                //          만약 AUTO가 여기까지 오면 fail-secure로 READ_ONLY 취급.
                 ToolContractMeta meta = enhanced.getContractMeta();
-                if (ctx != null && ctx.permissionLevel() != null && meta != null
-                        && meta.permissionLevel().ordinal() > ctx.permissionLevel().ordinal()) {
+                PermissionLevel effectiveLevel = (ctx != null && ctx.permissionLevel() != null)
+                        ? ctx.permissionLevel() : PermissionLevel.READ_ONLY;
+                if (effectiveLevel == PermissionLevel.AUTO) {
+                    log.warn("AUTO permission reached C1 check unresolved — fail-secure to READ_ONLY");
+                    effectiveLevel = PermissionLevel.READ_ONLY;
+                }
+                if (meta != null && meta.permissionLevel().ordinal() > effectiveLevel.ordinal()) {
                     String reason = String.format("tool '%s' requires %s but context allows %s",
-                            call.name(), meta.permissionLevel(), ctx.permissionLevel());
+                            call.name(), meta.permissionLevel(), effectiveLevel);
                     log.warn("C1 permission denied: {}", reason);
                     platformMetrics.recordToolExecution(call.name(), false);
                     return ToolResult.denied(reason);

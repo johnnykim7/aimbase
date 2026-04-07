@@ -110,6 +110,14 @@ platform:
   default-db-port: ${TENANT_DB_PORT:5432}
   default-db-username: ${TENANT_DB_USERNAME:platform}
   default-db-password: ${TENANT_DB_PASSWORD:platform}
+  # ─── 압축 임계값 (PRD-206, CR-030 Phase 5) ─────────────────────────
+  # 퍼센트 단위 (70 = 70%). 환경변수 PLATFORM_*_PCT가 우선.
+  compaction:
+    snip-percent: 70
+    micro-compact-percent: 85
+    session-memory-percent: 91
+    auto-compact-percent: 93
+    blocking-limit-percent: 98
 
 management:
   endpoints:

@@ -26,6 +26,14 @@ public class ConversationMemoryEntity {
     @Column(columnDefinition = "text", nullable = false)
     private String content;
 
+    /** 메모리 범위 (PRD-199): PRIVATE / TEAM / GLOBAL */
+    @Column(name = "scope", length = 20, nullable = false)
+    private String scope = "PRIVATE";
+
+    /** 팀 ID — TEAM scope 전용 (PRD-200) */
+    @Column(name = "team_id", length = 100)
+    private String teamId;
+
     @Column(name = "relevance_score")
     private Double relevanceScore;
 
@@ -52,6 +60,10 @@ public class ConversationMemoryEntity {
     public void setMemoryType(String memoryType) { this.memoryType = memoryType; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public String getScope() { return scope; }
+    public void setScope(String scope) { this.scope = scope; }
+    public String getTeamId() { return teamId; }
+    public void setTeamId(String teamId) { this.teamId = teamId; }
     public Double getRelevanceScore() { return relevanceScore; }
     public void setRelevanceScore(Double relevanceScore) { this.relevanceScore = relevanceScore; }
     public OffsetDateTime getExpiresAt() { return expiresAt; }

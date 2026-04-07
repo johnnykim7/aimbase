@@ -9,6 +9,7 @@ import com.platform.policy.model.PolicyResult;
 import com.platform.policy.model.TriggeredPolicy;
 import com.platform.repository.PolicyRepository;
 import com.platform.domain.PolicyEntity;
+import com.platform.tool.PermissionLevel;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,6 +77,16 @@ public class PolicyEngine {
      * ActionRequest에 대해 활성화된 모든 Policy를 priority 순으로 평가.
      */
     public PolicyResult evaluate(ActionRequest request) {
+        return evaluate(request, null);
+    }
+
+    /**
+     * PRD-196: PermissionLevel을 SpEL 컨텍스트에 노출하며 정책 평가.
+     *
+     * @param request         액션 요청
+     * @param permissionLevel 현재 도구 실행 권한 (null이면 SpEL에 미노출)
+     */
+    public PolicyResult evaluate(ActionRequest request, PermissionLevel permissionLevel) {
         List<PolicyEntity> activePolicies = policyRepository.findByIsActiveTrueOrderByPriorityDesc();
 
         List<TriggeredPolicy> triggered = new ArrayList<>();
@@ -90,7 +101,8 @@ public class PolicyEngine {
                 String type = (String) rule.get("type");
 
                 // SpEL condition 평가 — false면 이 rule 스킵
-                if (!evaluateCondition(rule, request)) {
+                // PRD-196: #permissionLevel 변수를 SpEL에 노출
+                if (!evaluateCondition(rule, request, permissionLevel)) {
                     log.debug("Policy '{}' rule[{}] condition not met — skipping", policyEntity.getId(), i);
                     continue;
                 }
@@ -260,8 +272,10 @@ public class PolicyEngine {
     /**
      * 규칙에 `condition` 필드가 있으면 SpEL 표현식으로 평가.
      * condition이 없거나 blank면 true 반환 (규칙 항상 적용).
+     * PRD-196: #permissionLevel 변수를 SpEL 컨텍스트에 노출.
      */
-    private boolean evaluateCondition(Map<String, Object> rule, ActionRequest request) {
+    private boolean evaluateCondition(Map<String, Object> rule, ActionRequest request,
+                                       PermissionLevel permissionLevel) {
         Object condObj = rule.get("condition");
         if (!(condObj instanceof String condition) || condition.isBlank()) {
             return true;
@@ -275,6 +289,10 @@ public class PolicyEngine {
             ctx.setVariable("userId", request.metadata() != null ? request.metadata().userId() : null);
             ctx.setVariable("adapter", request.targets() != null && !request.targets().isEmpty()
                     ? request.targets().get(0).adapter() : null);
+            // PRD-196: 권한 수준 노출 — 예: #permissionLevel == 'FULL'
+            if (permissionLevel != null) {
+                ctx.setVariable("permissionLevel", permissionLevel.name());
+            }
 
             Boolean result = parser.parseExpression(condition).getValue(ctx, Boolean.class);
             return result != null && result;
