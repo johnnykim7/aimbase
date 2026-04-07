@@ -178,8 +178,8 @@ frontend/src/
 - [x] Sprint 39: 정리 + 최종 검증 [CR-026]
 - [x] Sprint 40: LLM_CALL 토큰 초과 자동 처리 — 에스컬레이션 + 자동분할 [CR-028]
 - [x] Sprint 41: CR-030 2단계 고도화 6 Phase (PRD-186~210) — Extended Thinking, Hook Architecture, Permission AUTO, Memory Scope, 압축 5전략, Subagent+Worktree Isolation
-- [ ] Sprint 42: CR-031 성능/퀄리티 메커니즘 6 Phase (PRD-211~216) — Post-Compact Recovery, MICRO_COMPACT 0비용, Extract Memories 자동화, Adaptive Thinking, Tool Result 축약, Agent 진행 요약
-- [ ] Sprint 43: CR-032 프로바이더 확장 6 Phase (PRD-217~221) — OpenAI Compatible shim, AWS Bedrock, Vertex AI, 에이전트별 라우팅, FE Connection 폼
+- [x] Sprint 42: CR-031 성능/퀄리티 메커니즘 6 Phase (PRD-211~216) — Post-Compact Recovery, MICRO_COMPACT 0비용, Extract Memories 자동화, Adaptive Thinking, Tool Result 축약, Agent 진행 요약
+- [x] Sprint 43: CR-032 프로바이더 확장 6 Phase (PRD-217~221) — OpenAI Compatible shim, AWS Bedrock, Vertex AI, 에이전트별 라우팅, FE Connection 폼
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)
