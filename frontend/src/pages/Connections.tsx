@@ -56,7 +56,7 @@ const CONNECTION_TYPES = [
 const ADAPTERS: Record<string, string[]> = {
   database: ["PostgreSQL", "MySQL", "MongoDB", "Redis"],
   messaging: ["Slack", "카카오톡", "Discord", "Webhook"],
-  llm: ["Claude (Anthropic)", "OpenAI", "Ollama"],
+  llm: ["Claude (Anthropic)", "OpenAI", "Ollama", "OpenAI Compatible", "AWS Bedrock", "Vertex AI"],
   realtime: ["WebSocket", "SSE"],
 };
 
@@ -106,6 +106,14 @@ export default function Connections() {
       "API Key": (cfg.apiKey as string) ?? "",
       "Token": (cfg.token as string) ?? "",
       "모델": (cfg.model as string) ?? "",
+      // CR-032: 프로바이더 확장 필드
+      "Base URL": (cfg.base_url as string) ?? "",
+      "AWS Region": (cfg.aws_region as string) ?? "",
+      "AWS Access Key ID": (cfg.aws_access_key_id as string) ?? "",
+      "AWS Secret Access Key": (cfg.aws_secret_access_key as string) ?? "",
+      "GCP Project ID": (cfg.project_id as string) ?? "",
+      "Location": (cfg.location as string) ?? "",
+      "Service Account Key": (cfg.service_account_key as string) ?? "",
     });
     setShowModal(true);
   };
@@ -121,6 +129,14 @@ export default function Connections() {
       apiKey: form["API Key"],
       token: form["Token"],
       model: form["모델"],
+      // CR-032: 프로바이더 확장 필드
+      base_url: form["Base URL"],
+      aws_region: form["AWS Region"],
+      aws_access_key_id: form["AWS Access Key ID"],
+      aws_secret_access_key: form["AWS Secret Access Key"],
+      project_id: form["GCP Project ID"],
+      location: form["Location"],
+      service_account_key: form["Service Account Key"],
     };
 
     if (editingConn) {
@@ -285,11 +301,71 @@ export default function Connections() {
             <FormField label="이름">
               <input style={inputStyle} value={form["이름"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, 이름: e.target.value }))} />
             </FormField>
+
+            {/* CR-032: OpenAI Compatible — base_url 필수 */}
+            {(selectedAdapter === "OpenAI Compatible" || selectedAdapter === "AWS Bedrock" || selectedAdapter === "Vertex AI") && (
+              <FormField label="Base URL *">
+                <input
+                  style={inputStyle}
+                  placeholder={
+                    selectedAdapter === "OpenAI Compatible" ? "https://api.deepseek.com/v1" :
+                    selectedAdapter === "AWS Bedrock" ? "https://bedrock-proxy.example.com/v1" :
+                    "https://vertex-proxy.example.com/v1"
+                  }
+                  value={form["Base URL"] ?? ""}
+                  onChange={(e) => setForm((p) => ({ ...p, "Base URL": e.target.value }))}
+                />
+              </FormField>
+            )}
+
             <FormField label="API Key">
               <input type="password" style={inputStyle} value={form["API Key"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "API Key": e.target.value }))} />
             </FormField>
+
+            {/* CR-032: Bedrock 전용 필드 */}
+            {selectedAdapter === "AWS Bedrock" && (
+              <>
+                <FormField label="AWS Region">
+                  <input style={inputStyle} placeholder="us-east-1" value={form["AWS Region"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "AWS Region": e.target.value }))} />
+                </FormField>
+                <FormField label="AWS Access Key ID">
+                  <input type="password" style={inputStyle} value={form["AWS Access Key ID"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "AWS Access Key ID": e.target.value }))} />
+                </FormField>
+                <FormField label="AWS Secret Access Key">
+                  <input type="password" style={inputStyle} value={form["AWS Secret Access Key"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "AWS Secret Access Key": e.target.value }))} />
+                </FormField>
+              </>
+            )}
+
+            {/* CR-032: Vertex AI 전용 필드 */}
+            {selectedAdapter === "Vertex AI" && (
+              <>
+                <FormField label="GCP Project ID">
+                  <input style={inputStyle} placeholder="my-gcp-project" value={form["GCP Project ID"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "GCP Project ID": e.target.value }))} />
+                </FormField>
+                <FormField label="Location">
+                  <input style={inputStyle} placeholder="us-central1" value={form["Location"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, Location: e.target.value }))} />
+                </FormField>
+                <FormField label="Service Account Key (JSON)">
+                  <textarea style={{ ...inputStyle, minHeight: 80 }} placeholder='{"type":"service_account",...}' value={form["Service Account Key"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "Service Account Key": e.target.value }))} />
+                </FormField>
+              </>
+            )}
+
             <FormField label="모델 (선택사항)">
-              <input style={inputStyle} placeholder="claude-sonnet-4-6" value={form["모델"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, 모델: e.target.value }))} />
+              <input
+                style={inputStyle}
+                placeholder={
+                  selectedAdapter === "Claude (Anthropic)" ? "claude-sonnet-4-6" :
+                  selectedAdapter === "OpenAI" ? "gpt-4o" :
+                  selectedAdapter === "Ollama" ? "llama3.2" :
+                  selectedAdapter === "OpenAI Compatible" ? "deepseek-chat" :
+                  selectedAdapter === "AWS Bedrock" ? "anthropic.claude-sonnet-4-5-20250514-v1:0" :
+                  selectedAdapter === "Vertex AI" ? "gemini-2.0-flash" : ""
+                }
+                value={form["모델"] ?? ""}
+                onChange={(e) => setForm((p) => ({ ...p, 모델: e.target.value }))}
+              />
             </FormField>
           </>
         )}

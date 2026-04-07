@@ -151,13 +151,29 @@ public class ConnectionAdapterFactory {
                             .build());
                 }
                 case "ollama" -> {
-                    // Ollama는 로컬 서버 — 모델 목록 조회로 연결 확인
                     String baseUrl = conn.getConfig().get("baseUrl") != null
                             ? conn.getConfig().get("baseUrl").toString() : "http://localhost:11434";
                     OpenAIClient client = OpenAIOkHttpClient.builder()
                             .apiKey("ollama").baseUrl(baseUrl + "/v1").build();
                     client.chat().completions().create(ChatCompletionCreateParams.builder()
                             .model(ChatModel.of(resolveModelId(conn, "llama3.2")))
+                            .maxCompletionTokens(1L)
+                            .addUserMessage("ping")
+                            .build());
+                }
+                // CR-032: OpenAI 호환 / Bedrock / Vertex AI ping
+                case "openai_compatible", "bedrock", "vertex_ai" -> {
+                    String baseUrl = conn.getConfig().get("base_url") != null
+                            ? conn.getConfig().get("base_url").toString() : null;
+                    if (baseUrl == null || baseUrl.isBlank()) {
+                        log.warn("Connection '{}' ping skipped — no 'base_url' for {}", connectionId, adapterType);
+                        return new HealthStatus(false, 0);
+                    }
+                    String pingKey = apiKey != null ? apiKey : "none";
+                    OpenAIClient client = OpenAIOkHttpClient.builder()
+                            .apiKey(pingKey).baseUrl(baseUrl).build();
+                    client.chat().completions().create(ChatCompletionCreateParams.builder()
+                            .model(ChatModel.of(resolveModelId(conn, "default")))
                             .maxCompletionTokens(1L)
                             .addUserMessage("ping")
                             .build());
@@ -210,6 +226,25 @@ public class ConnectionAdapterFactory {
                         .build();
                 yield new OpenAIAdapter(client);
             }
+            // CR-032 PRD-217: OpenAI 호환 범용 shim
+            case "openai_compatible" -> {
+                String baseUrl = (String) conn.getConfig().get("base_url");
+                if (baseUrl == null || baseUrl.isBlank()) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Connection '" + connectionId + "' requires 'base_url' for openai_compatible adapter");
+                }
+                String model = resolveModelId(conn, "default");
+                yield new com.platform.llm.adapter.OpenAICompatibleAdapter(
+                        baseUrl, apiKey, model, "openai_compatible");
+            }
+            // CR-032 PRD-218: AWS Bedrock
+            case "bedrock" -> {
+                yield new com.platform.llm.adapter.BedrockAdapter(conn.getConfig());
+            }
+            // CR-032 PRD-219: Google Vertex AI
+            case "vertex_ai" -> {
+                yield new com.platform.llm.adapter.VertexAIAdapter(conn.getConfig());
+            }
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Unsupported adapter type: " + adapterType);
         };
@@ -219,12 +254,23 @@ public class ConnectionAdapterFactory {
      * FE에서 "Claude (Anthropic)", "OpenAI" 등 표시명으로 저장되므로
      * 내부 어댑터 타입으로 정규화한다.
      */
+    /**
+     * FE에서 다양한 표시명으로 저장되므로 내부 어댑터 타입으로 정규화한다.
+     * CR-032: openai_compatible, bedrock, vertex_ai 추가.
+     */
     private static String normalizeAdapterType(String adapter) {
         if (adapter == null) return "";
         String lower = adapter.toLowerCase();
         if (lower.contains("anthropic") || lower.contains("claude")) return "anthropic";
+        if (lower.equals("openai_compatible") || lower.contains("deepseek")
+                || lower.contains("groq") || lower.contains("mistral")
+                || lower.contains("openrouter") || lower.contains("together")
+                || lower.contains("fireworks") || lower.contains("lm studio")
+                || lower.contains("localai") || lower.contains("vllm")) return "openai_compatible";
         if (lower.contains("openai") || lower.contains("gpt")) return "openai";
         if (lower.contains("ollama")) return "ollama";
+        if (lower.contains("bedrock") || lower.contains("aws")) return "bedrock";
+        if (lower.contains("vertex") || lower.contains("google") || lower.contains("gemini")) return "vertex_ai";
         return lower;
     }
 
