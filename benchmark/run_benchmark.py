@@ -69,7 +69,7 @@ def run_claude_cli(prompt):
     ts = int(time.time())
     start = time.time()
     r = subprocess.run(["claude", "-p", f"[ts={ts}] {prompt}", "--output-format", "json",
-        "--model", "sonnet", "--max-turns", "3"],
+        "--model", "sonnet", "--max-turns", "3", "--no-session-persistence"],
         capture_output=True, text=True, timeout=120, cwd=WORKSPACE)
     elapsed = time.time() - start
     try:
@@ -84,7 +84,7 @@ def run_openclaude(prompt):
     ts = int(time.time())
     start = time.time()
     r = subprocess.run([OPENCLAUDE, "-p", f"[ts={ts}] {prompt}", "--output-format", "json",
-        "--max-turns", "3"],
+        "--max-turns", "3", "--no-session-persistence"],
         capture_output=True, text=True, timeout=120, cwd=WORKSPACE)
     elapsed = time.time() - start
     try:
