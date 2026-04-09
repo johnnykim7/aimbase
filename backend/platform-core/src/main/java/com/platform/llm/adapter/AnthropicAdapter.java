@@ -53,6 +53,7 @@ public class AnthropicAdapter implements LLMAdapter {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final AnthropicClient client;
+    private final int defaultMaxTokens;
 
     // [input$/MTok, output$/MTok, cacheWrite$/MTok, cacheRead$/MTok]
     private static final Map<String, double[]> COSTS = Map.of(
@@ -65,8 +66,10 @@ public class AnthropicAdapter implements LLMAdapter {
     private static final CacheControlEphemeral CACHE_EPHEMERAL =
             CacheControlEphemeral.builder().build();
 
-    public AnthropicAdapter(AnthropicClient client) {
+    public AnthropicAdapter(AnthropicClient client,
+                           @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens) {
         this.client = client;
+        this.defaultMaxTokens = defaultMaxTokens;
     }
 
     @Override
@@ -86,7 +89,7 @@ public class AnthropicAdapter implements LLMAdapter {
             MessageCreateParams.Builder builder = MessageCreateParams.builder()
                     .model(Model.of(modelId))
                     .maxTokens(request.config() != null && request.config().maxTokens() != null
-                            ? request.config().maxTokens() : 4096);
+                            ? request.config().maxTokens() : defaultMaxTokens);
 
             List<MessageParam> userMessages = new ArrayList<>();
             StringBuilder systemText = new StringBuilder();
@@ -211,7 +214,7 @@ public class AnthropicAdapter implements LLMAdapter {
             MessageCreateParams.Builder builder = MessageCreateParams.builder()
                     .model(Model.of(modelId))
                     .maxTokens(request.config() != null && request.config().maxTokens() != null
-                            ? request.config().maxTokens() : 4096);
+                            ? request.config().maxTokens() : defaultMaxTokens);
 
             List<MessageParam> userMessages = new ArrayList<>();
             StringBuilder streamSystemText = new StringBuilder();

@@ -38,12 +38,15 @@ public class ConnectionAdapterFactory {
     private static final String DEFAULT_MODEL = "anthropic/claude-sonnet-4-5";
 
     private final ConnectionRepository connectionRepository;
+    private final int defaultMaxTokens;
 
     // connectionId → LLMAdapter (캐시: 동일 연결은 클라이언트 재사용)
     private final Map<String, LLMAdapter> cache = new ConcurrentHashMap<>();
 
-    public ConnectionAdapterFactory(ConnectionRepository connectionRepository) {
+    public ConnectionAdapterFactory(ConnectionRepository connectionRepository,
+                                    @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens) {
         this.connectionRepository = connectionRepository;
+        this.defaultMaxTokens = defaultMaxTokens;
     }
 
     /**
@@ -218,7 +221,7 @@ public class ConnectionAdapterFactory {
                 AnthropicClient client = AnthropicOkHttpClient.builder()
                         .apiKey(apiKey)
                         .build();
-                yield new AnthropicAdapter(client);
+                yield new AnthropicAdapter(client, defaultMaxTokens);
             }
             case "openai" -> {
                 OpenAIClient client = OpenAIOkHttpClient.builder()

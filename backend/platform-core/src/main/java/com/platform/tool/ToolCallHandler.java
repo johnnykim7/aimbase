@@ -30,15 +30,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  *    a. 어시스턴트 tool_use 메시지를 히스토리에 추가
  *    b. 각 ToolCall을 ToolRegistry에서 실행
  *    c. tool_result 메시지를 히스토리에 추가
- *    d. 재호출 (최대 MAX_ITERATIONS회)
+ *    d. 재호출 (최대 maxIterations회)
  * 3. END 또는 max 도달 시 최종 LLMResponse 반환
  */
 @Component
 public class ToolCallHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ToolCallHandler.class);
-    private static final int MAX_ITERATIONS = 15;
 
+    private final int maxIterations;
     private final ToolExecutionLogRepository executionLogRepository;
     private final HookDispatcher hookDispatcher;
     private final PermissionClassifier permissionClassifier;
@@ -53,12 +53,14 @@ public class ToolCallHandler {
                            HookDispatcher hookDispatcher,
                            PermissionClassifier permissionClassifier,
                            com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry,
-                           RedisTemplate<String, String> redisTemplate) {
+                           RedisTemplate<String, String> redisTemplate,
+                           @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.max-tool-iterations:30}") int maxIterations) {
         this.executionLogRepository = executionLogRepository;
         this.hookDispatcher = hookDispatcher;
         this.permissionClassifier = permissionClassifier;
         this.compactorRegistry = compactorRegistry;
         this.redisTemplate = redisTemplate;
+        this.maxIterations = maxIterations;
     }
 
     /**
@@ -103,7 +105,7 @@ public class ToolCallHandler {
             }
         }
 
-        for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+        for (int iteration = 0; iteration < maxIterations; iteration++) {
             LLMRequest request = new LLMRequest(
                     resolvedModel,
                     mutableMessages,
@@ -176,7 +178,7 @@ public class ToolCallHandler {
             mutableMessages.add(UnifiedMessage.ofToolResults(results));
         }
 
-        return response;
+        return ensureTextResponse(response, adapter, resolvedModel, mutableMessages, config, sessionId);
     }
 
     /**
@@ -209,7 +211,7 @@ public class ToolCallHandler {
             }
         }
 
-        for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+        for (int iteration = 0; iteration < maxIterations; iteration++) {
             LLMRequest request = new LLMRequest(
                     resolvedModel, mutableMessages, filteredTools,
                     config, false, sessionId, toolChoice);
@@ -302,7 +304,78 @@ public class ToolCallHandler {
             mutableMessages.add(UnifiedMessage.ofToolResults(results));
         }
 
-        return response;
+        return ensureTextResponse(response, adapter, resolvedModel, mutableMessages, config, sessionId);
+    }
+
+    /**
+     * 도구 루프 종료 후 최종 응답에 Text 블록이 없으면,
+     * 도구 없이 한 번 더 호출하여 텍스트 응답을 확보한다.
+     */
+    private LLMResponse ensureTextResponse(LLMResponse response, LLMAdapter adapter,
+                                           String resolvedModel, List<UnifiedMessage> messages,
+                                           ModelConfig config, String sessionId) {
+        if (response == null) return response;
+
+        boolean hasText = response.content().stream()
+                .anyMatch(b -> b instanceof ContentBlock.Text t && t.text() != null && !t.text().isBlank());
+
+        log.warn("[ensureTextResponse] hasText={}, finishReason={}, contentTypes={}, hasToolCalls={}",
+                hasText, response.finishReason(),
+                response.content().stream().map(b -> b.getClass().getSimpleName()).toList(),
+                response.hasToolCalls());
+
+        if (hasText) return response;
+
+        log.warn("[ensureTextResponse] No text found — requesting final summary. messages.size={}",
+                messages.size());
+
+        // 도구 히스토리에서 tool_result 텍스트만 추출해서 새 프롬프트로 요약 요청
+        StringBuilder findings = new StringBuilder();
+        String originalPrompt = "";
+        for (UnifiedMessage msg : messages) {
+            // 첫 사용자 메시지 = 원본 프롬프트
+            if (msg.role() == UnifiedMessage.Role.USER && originalPrompt.isEmpty()) {
+                for (ContentBlock b : msg.content()) {
+                    if (b instanceof ContentBlock.Text t) {
+                        originalPrompt = t.text();
+                        break;
+                    }
+                }
+            }
+            // tool_result 텍스트 수집
+            for (ContentBlock b : msg.content()) {
+                if (b instanceof ContentBlock.ToolResult tr && tr.content() != null && !tr.content().isBlank()) {
+                    String snippet = tr.content().length() > 2000
+                            ? tr.content().substring(0, 2000) + "...(truncated)"
+                            : tr.content();
+                    findings.append(snippet).append("\n---\n");
+                }
+            }
+        }
+
+        String summaryPrompt = "You previously analyzed code and gathered the following tool results.\n\n"
+                + "## Original Request\n" + originalPrompt + "\n\n"
+                + "## Tool Results (findings)\n" + findings + "\n\n"
+                + "Now produce the final detailed text briefing based on these findings. "
+                + "Include scenario names, steps, and verification points as requested.";
+
+        log.warn("[ensureTextResponse] summary prompt length={}", summaryPrompt.length());
+
+        List<UnifiedMessage> summaryMessages = List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, summaryPrompt));
+
+        LLMRequest finalRequest = new LLMRequest(
+                resolvedModel, summaryMessages, null, config, false, sessionId, null);
+        try {
+            LLMResponse finalResp = adapter.chat(finalRequest).get();
+            log.warn("[ensureTextResponse] final response: outputTokens={}, contentTypes={}",
+                    finalResp.usage() != null ? finalResp.usage().outputTokens() : -1,
+                    finalResp.content().stream().map(b -> b.getClass().getSimpleName()).toList());
+            return finalResp;
+        } catch (Exception e) {
+            log.error("Final text summary call failed", e);
+            return response;
+        }
     }
 
     /**
