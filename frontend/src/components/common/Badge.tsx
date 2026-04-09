@@ -1,12 +1,14 @@
-import { COLORS, FONTS, type BadgeColor } from "../../theme";
+import { cn } from "@/lib/utils";
 
-const colorMap: Record<BadgeColor, { bg: string; text: string; dot: string }> = {
-  accent: { bg: COLORS.accentDim + "60", text: COLORS.accent, dot: COLORS.accent },
-  success: { bg: COLORS.successDim + "60", text: COLORS.success, dot: COLORS.success },
-  warning: { bg: COLORS.warningDim + "60", text: COLORS.warning, dot: COLORS.warning },
-  danger: { bg: COLORS.dangerDim + "60", text: COLORS.danger, dot: COLORS.danger },
-  purple: { bg: COLORS.purpleDim + "60", text: COLORS.purple, dot: COLORS.purple },
-  muted: { bg: COLORS.border, text: COLORS.textMuted, dot: COLORS.textDim },
+export type BadgeColor = "accent" | "success" | "warning" | "danger" | "purple" | "muted";
+
+const colorClasses: Record<BadgeColor, { badge: string; dot: string }> = {
+  accent:  { badge: "bg-primary/10 text-primary",          dot: "bg-primary" },
+  success: { badge: "bg-success/10 text-success",          dot: "bg-success" },
+  warning: { badge: "bg-warning/10 text-warning",          dot: "bg-warning" },
+  danger:  { badge: "bg-destructive/10 text-destructive",  dot: "bg-destructive" },
+  purple:  { badge: "bg-info/10 text-info",                dot: "bg-info" },
+  muted:   { badge: "bg-muted text-muted-foreground",      dot: "bg-muted-foreground/50" },
 };
 
 interface BadgeProps {
@@ -16,35 +18,16 @@ interface BadgeProps {
 }
 
 export const Badge = ({ color = "accent", pulse, children }: BadgeProps) => {
-  const c = colorMap[color];
+  const c = colorClasses[color];
   return (
     <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "3px 10px",
-        borderRadius: 6,
-        fontSize: 11,
-        fontWeight: 600,
-        fontFamily: FONTS.mono,
-        background: c.bg,
-        color: c.text,
-        letterSpacing: 0.3,
-        whiteSpace: "nowrap",
-      }}
+      className={cn(
+        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide whitespace-nowrap",
+        c.badge
+      )}
     >
       {pulse && (
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: c.dot,
-            animation: "pulse 2s ease-in-out infinite",
-            flexShrink: 0,
-          }}
-        />
+        <span className={cn("size-1.5 rounded-full shrink-0 animate-pulse-dot", c.dot)} />
       )}
       {children}
     </span>

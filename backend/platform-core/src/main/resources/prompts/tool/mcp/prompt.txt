@@ -1,0 +1,1 @@
+(no prompt - actual prompt and description are provided by the MCP server configuration at runtime)

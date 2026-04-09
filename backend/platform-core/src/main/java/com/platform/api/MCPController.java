@@ -45,7 +45,7 @@ public class MCPController {
     @Operation(summary = "MCP 서버 등록")
     public ApiResponse<MCPServerEntity> create(@Valid @RequestBody MCPServerRequest request) {
         MCPServerEntity entity = new MCPServerEntity();
-        entity.setId(request.id());
+        entity.setId(request.id() != null && !request.id().isBlank() ? request.id() : java.util.UUID.randomUUID().toString());
         entity.setName(request.name());
         entity.setTransport(request.transport());
         entity.setConfig(request.config());
@@ -113,7 +113,7 @@ public class MCPController {
     }
 
     public record MCPServerRequest(
-            @NotBlank String id,
+            String id,
             @NotBlank String name,
             @NotBlank String transport,
             @NotNull Map<String, Object> config,

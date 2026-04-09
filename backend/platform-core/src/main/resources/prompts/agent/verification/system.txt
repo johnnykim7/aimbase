@@ -1,0 +1,1 @@
+Verification agent. Specializes in code verification, test execution, and result analysis. Uses only read and execution tools required for verification.

@@ -62,6 +62,7 @@ public class WorkflowController {
         entity.setSteps(request.steps());
         entity.setErrorHandling(request.errorHandling());
         entity.setOutputSchema(request.outputSchema());
+        entity.setInputSchema(request.inputSchema());
         entity.setActive(true);
         return ApiResponse.ok(workflowRepository.save(entity));
     }
@@ -87,6 +88,7 @@ public class WorkflowController {
         entity.setSteps(request.steps());
         entity.setErrorHandling(request.errorHandling());
         entity.setOutputSchema(request.outputSchema());
+        entity.setInputSchema(request.inputSchema());
         return ApiResponse.ok(workflowRepository.save(entity));
     }
 
@@ -154,7 +156,8 @@ public class WorkflowController {
             @NotNull Map<String, Object> triggerConfig,
             @NotNull List<Map<String, Object>> steps,
             Map<String, Object> errorHandling,
-            Map<String, Object> outputSchema
+            Map<String, Object> outputSchema,
+            Map<String, Object> inputSchema
     ) {}
 
     public record ApproveRequest(boolean approved, String reason) {}

@@ -26,4 +26,12 @@ public record LLMResponse(
     public boolean hasToolCalls() {
         return toolCalls != null && !toolCalls.isEmpty();
     }
+
+    /** CR-030: thinking 블록만 추출 */
+    public List<ContentBlock.Thinking> thinkingBlocks() {
+        return content.stream()
+                .filter(b -> b instanceof ContentBlock.Thinking)
+                .map(b -> (ContentBlock.Thinking) b)
+                .toList();
+    }
 }

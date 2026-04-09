@@ -1,235 +1,209 @@
-import { useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
-import { COLORS, FONTS } from "../../theme";
+import { useSyncExternalStore } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import {
+  LayoutDashboard,
+  PlugZap,
+  Wrench,
+  FileJson,
+  Shield,
+  MessageSquare,
+  Zap,
+  BookOpen,
+  Target,
+  FileText,
+  FolderOpen,
+  Users,
+  BarChart3,
+  Building2,
+  CreditCard,
+  KeyRound,
+  Globe,
+  LogOut,
+  MessageSquareText,
+  Layers,
+  Settings2,
+  Clock,
+  Sparkles,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useProjects } from "../../hooks/useProjects";
+import { getProjectId, setProjectId, subscribe } from "../../store/projectContext";
 
-const NAV_ITEMS = [
-  { path: "/", icon: "📋", label: "대시보드", exact: true },
-  { path: "/connections", icon: "🔌", label: "연결 관리" },
-  { path: "/mcp-servers", icon: "🔧", label: "MCP / Tool" },
-  { path: "/schemas", icon: "📝", label: "스키마" },
-  { path: "/policies", icon: "🛡️", label: "정책" },
-  { path: "/prompts", icon: "💬", label: "프롬프트" },
-  { path: "/workflows", icon: "⚡", label: "워크플로우" },
-  { path: "/knowledge", icon: "📚", label: "Knowledge" },
-  { path: "/auth", icon: "👤", label: "사용자/권한" },
-  { path: "/monitoring", icon: "📊", label: "모니터링" },
-];
-
-const PLATFORM_ITEMS = [
-  { path: "/platform/apps", icon: "📱", label: "App 관리" },
-  { path: "/platform/tenants", icon: "🏢", label: "테넌트 관리" },
-  { path: "/platform/subscriptions", icon: "💳", label: "구독 관리" },
-  { path: "/platform/monitoring", icon: "🌐", label: "플랫폼 현황" },
-];
-
-const NavItem = ({
-  path,
-  icon,
-  label,
-  exact,
-}: {
+interface NavItemDef {
   path: string;
-  icon: string;
+  icon: LucideIcon;
   label: string;
   exact?: boolean;
-}) => {
-  const [hover, setHover] = useState(false);
+}
+
+const NAV_ITEMS: NavItemDef[] = [
+  { path: "/", icon: LayoutDashboard, label: "대시보드", exact: true },
+  { path: "/connections", icon: PlugZap, label: "연결 관리" },
+  { path: "/mcp-servers", icon: Wrench, label: "MCP / Tool" },
+  { path: "/schemas", icon: FileJson, label: "스키마" },
+  { path: "/policies", icon: Shield, label: "정책" },
+  { path: "/prompts", icon: MessageSquare, label: "프롬프트" },
+  { path: "/workflows", icon: Zap, label: "워크플로우" },
+  { path: "/knowledge", icon: BookOpen, label: "Knowledge" },
+  { path: "/rag-evaluation", icon: Target, label: "RAG 평가" },
+  { path: "/documents", icon: FileText, label: "문서 생성" },
+  { path: "/projects", icon: FolderOpen, label: "프로젝트" },
+  { path: "/sessions", icon: MessageSquareText, label: "세션" },
+  { path: "/context-recipes", icon: Layers, label: "Context Recipe" },
+  { path: "/domain-configs", icon: Settings2, label: "도메인 설정" },
+  { path: "/scheduled-jobs", icon: Clock, label: "스케줄" },
+  { path: "/skills", icon: Sparkles, label: "스킬" },
+  { path: "/prompt-templates", icon: FileText, label: "프롬프트 템플릿" },
+  { path: "/auth", icon: Users, label: "사용자/권한" },
+  { path: "/monitoring", icon: BarChart3, label: "모니터링" },
+];
+
+const PLATFORM_ITEMS: NavItemDef[] = [
+  { path: "/platform/tenants", icon: Building2, label: "테넌트 관리" },
+  { path: "/platform/subscriptions", icon: CreditCard, label: "구독 관리" },
+  { path: "/platform/api-keys", icon: KeyRound, label: "API Key 관리" },
+  { path: "/platform/monitoring", icon: Globe, label: "플랫폼 현황" },
+  { path: "/platform/settings", icon: Settings2, label: "런타임 설정" },
+];
+
+const NavItem = ({ path, icon: Icon, label, exact }: NavItemDef) => {
   const location = useLocation();
-  const isActive = exact ? location.pathname === path : location.pathname.startsWith(path);
+  const isActive = exact
+    ? location.pathname === path
+    : location.pathname.startsWith(path);
 
   return (
     <NavLink
       to={path}
       end={exact}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "9px 16px",
-        borderRadius: 8,
-        textDecoration: "none",
-        fontSize: 13,
-        fontFamily: FONTS.sans,
-        fontWeight: isActive ? 600 : 400,
-        color: isActive ? COLORS.accent : hover ? COLORS.text : COLORS.textMuted,
-        background: isActive
-          ? COLORS.surfaceActive
-          : hover
-          ? COLORS.surfaceHover
-          : "transparent",
-        borderLeft: isActive ? `2px solid ${COLORS.accent}` : "2px solid transparent",
-        transition: "all 0.15s ease",
-        marginLeft: isActive ? -2 : 0,
-      }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      className={cn(
+        "flex items-center gap-2.5 px-4 py-2 rounded-lg text-[13px] no-underline transition-all duration-150",
+        isActive
+          ? "font-semibold text-primary bg-muted border-l-2 border-primary -ml-0.5"
+          : "font-normal text-muted-foreground hover:text-foreground hover:bg-accent border-l-2 border-transparent"
+      )}
     >
-      <span style={{ fontSize: 16, width: 20, textAlign: "center" }}>{icon}</span>
+      <Icon className="size-4 shrink-0" />
       <span>{label}</span>
     </NavLink>
   );
 };
 
-export const Sidebar = () => (
-  <div
-    style={{
-      width: 220,
-      minWidth: 220,
-      height: "100vh",
-      background: COLORS.surface,
-      borderRight: `1px solid ${COLORS.border}`,
-      display: "flex",
-      flexDirection: "column",
-      overflow: "hidden",
-    }}
-  >
-    {/* Logo */}
-    <div
-      style={{
-        padding: "20px 20px 16px",
-        borderBottom: `1px solid ${COLORS.border}`,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.purple})`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 16,
-            flexShrink: 0,
-          }}
-        >
-          ⚡
-        </div>
-        <div>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              fontFamily: FONTS.display,
-              color: COLORS.text,
-            }}
-          >
-            Aimbase
-          </div>
-          <div
-            style={{ fontSize: 10, fontFamily: FONTS.mono, color: COLORS.textDim }}
-          >
-            v1.0.0
-          </div>
-        </div>
-      </div>
-    </div>
+const ProjectSelector = () => {
+  const currentProjectId = useSyncExternalStore(subscribe, getProjectId);
+  const { data: projects = [] } = useProjects();
 
-    {/* Main nav */}
-    <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0" }}>
-      <div
-        style={{
-          fontSize: 10,
-          fontFamily: FONTS.mono,
-          color: COLORS.textDim,
-          textTransform: "uppercase",
-          letterSpacing: 1.2,
-          padding: "4px 4px 8px",
-        }}
-      >
-        관리
+  return (
+    <div className="px-3 py-2 border-b border-border">
+      <div className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-wider mb-1">
+        프로젝트
       </div>
-      <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {NAV_ITEMS.map((item) => (
-          <NavItem key={item.path} {...item} />
+      <select
+        value={currentProjectId ?? ""}
+        onChange={(e) => setProjectId(e.target.value || null)}
+        className="w-full px-2 py-1.5 rounded-md border border-border bg-accent text-xs text-foreground cursor-pointer outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+      >
+        <option value="">전체 (프로젝트 미선택)</option>
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
         ))}
-      </nav>
+      </select>
+    </div>
+  );
+};
 
-      {/* Platform section */}
-      <div
-        style={{
-          margin: "16px 0 8px",
-          borderTop: `1px solid ${COLORS.border}`,
-          paddingTop: 12,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 10,
-            fontFamily: FONTS.mono,
-            color: COLORS.accentDim,
-            textTransform: "uppercase",
-            letterSpacing: 1.2,
-            padding: "0 4px 8px",
-          }}
-        >
-          Super Admin
+export const Sidebar = () => {
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      const token = localStorage.getItem("access_token");
+      if (token) {
+        await fetch("/api/v1/auth/logout", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+      }
+    } catch {
+      // 서버 오류여도 클라이언트 세션은 정리
+    } finally {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("tenant_id");
+      navigate("/login", { replace: true });
+    }
+  };
+
+  return (
+    <div className="w-[220px] min-w-[220px] h-screen bg-card border-r border-border flex flex-col overflow-hidden">
+      {/* Logo */}
+      <div className="px-5 pt-5 pb-4 border-b border-border">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-info flex items-center justify-center text-base shrink-0">
+            <Zap className="size-4 text-white" />
+          </div>
+          <div>
+            <div className="text-sm font-bold text-foreground">Aimbase</div>
+            <div className="text-[10px] font-mono text-muted-foreground/60">
+              v1.0.0
+            </div>
+          </div>
         </div>
-        <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {PLATFORM_ITEMS.map((item) => (
+      </div>
+
+      {/* Project Selector */}
+      <ProjectSelector />
+
+      {/* Main nav */}
+      <div className="flex-1 overflow-y-auto px-3 pt-3">
+        <div className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-wider px-1 pb-2">
+          관리
+        </div>
+        <nav className="flex flex-col gap-0.5">
+          {NAV_ITEMS.map((item) => (
             <NavItem key={item.path} {...item} />
           ))}
         </nav>
-      </div>
-    </div>
 
-    {/* Footer */}
-    <div
-      style={{
-        padding: "12px 16px",
-        borderTop: `1px solid ${COLORS.border}`,
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-      }}
-    >
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: "50%",
-          background: COLORS.surfaceActive,
-          border: `1px solid ${COLORS.borderLight}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 13,
-          fontWeight: 700,
-          fontFamily: FONTS.mono,
-          color: COLORS.accent,
-          flexShrink: 0,
-        }}
-      >
-        관
+        {/* Platform section */}
+        <div className="mt-4 pt-3 border-t border-border">
+          <div className="text-[10px] font-mono text-primary/50 uppercase tracking-wider px-1 pb-2">
+            Super Admin
+          </div>
+          <nav className="flex flex-col gap-0.5">
+            {PLATFORM_ITEMS.map((item) => (
+              <NavItem key={item.path} {...item} />
+            ))}
+          </nav>
+        </div>
       </div>
-      <div style={{ overflow: "hidden" }}>
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            fontFamily: FONTS.sans,
-            color: COLORS.text,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          관리자
+
+      {/* Footer */}
+      <div className="px-4 py-3 border-t border-border flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold font-mono text-primary shrink-0">
+          관
         </div>
-        <div
-          style={{
-            fontSize: 10,
-            fontFamily: FONTS.mono,
-            color: COLORS.textDim,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          admin@platform.io
+        <div className="flex-1 overflow-hidden">
+          <div className="text-xs font-semibold text-foreground truncate">
+            관리자
+          </div>
+          <div className="text-[10px] font-mono text-muted-foreground/60 truncate">
+            admin@platform.io
+          </div>
         </div>
+        <button
+          onClick={handleLogout}
+          title="로그아웃"
+          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer border-none bg-transparent"
+        >
+          <LogOut className="size-4" />
+        </button>
       </div>
     </div>
-  </div>
-);
+  );
+};

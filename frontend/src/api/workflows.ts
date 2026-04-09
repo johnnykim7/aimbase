@@ -3,7 +3,7 @@ import type { ApiResponse, PagedResponse } from "../types/api";
 import type { Workflow, WorkflowRequest, WorkflowRun } from "../types/workflow";
 
 export const workflowsApi = {
-  list: (params?: { page?: number; size?: number }) =>
+  list: (params?: { page?: number; size?: number; my?: boolean }) =>
     apiClient.get<ApiResponse<PagedResponse<Workflow> | Workflow[]>>("/workflows", { params }),
 
   get: (id: string) =>

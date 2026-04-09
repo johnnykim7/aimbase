@@ -31,10 +31,16 @@ public class ConversationSummarizer {
             "핵심 결정사항, 사용자 요청, 중요한 맥락을 보존하되 불필요한 반복은 제거. " +
             "한국어로 작성하고, 500자 이내로 요약.";
 
-    private final LLMAdapterRegistry adapterRegistry;
+    private static final String MICRO_SUMMARY_PROMPT =
+            "아래 대화를 불릿 포인트 3~5개로 초간단 요약. 핵심 사실만. 한국어, 200자 이내.";
 
-    public ConversationSummarizer(LLMAdapterRegistry adapterRegistry) {
+    private final LLMAdapterRegistry adapterRegistry;
+    private final com.platform.service.PromptTemplateService promptTemplateService;
+
+    public ConversationSummarizer(LLMAdapterRegistry adapterRegistry,
+                                   com.platform.service.PromptTemplateService promptTemplateService) {
         this.adapterRegistry = adapterRegistry;
+        this.promptTemplateService = promptTemplateService;
     }
 
     /**
@@ -62,7 +68,8 @@ public class ConversationSummarizer {
             LLMAdapter adapter = adapterRegistry.getAdapter(SUMMARY_MODEL);
 
             List<UnifiedMessage> messages = new ArrayList<>();
-            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, SUMMARY_PROMPT));
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
+                    promptTemplateService.getTemplateOrFallback("session.summarize.standard", SUMMARY_PROMPT)));
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, conversationText));
 
             LLMRequest request = new LLMRequest(SUMMARY_MODEL, messages);
@@ -75,6 +82,36 @@ public class ConversationSummarizer {
 
         } catch (Exception e) {
             log.warn("대화 요약 실패 (기존 트리밍으로 폴백): {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * B6: microcompact용 짧은 요약 (200자 이내 불릿 포인트).
+     * 비용이 낮고 빠르게 처리되어 85% 임계값에서 사용.
+     */
+    public String microSummarize(List<UnifiedMessage> messagesToSummarize) {
+        if (messagesToSummarize == null || messagesToSummarize.isEmpty()) {
+            return null;
+        }
+        String conversationText = messagesToSummarize.stream()
+                .filter(m -> m.role() != UnifiedMessage.Role.SYSTEM)
+                .map(this::messageToText)
+                .collect(Collectors.joining("\n"));
+        if (conversationText.isBlank()) return null;
+        try {
+            LLMAdapter adapter = adapterRegistry.getAdapter(SUMMARY_MODEL);
+            List<UnifiedMessage> messages = new ArrayList<>();
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
+                    promptTemplateService.getTemplateOrFallback("session.summarize.micro", MICRO_SUMMARY_PROMPT)));
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, conversationText));
+            LLMResponse response = adapter.chat(new LLMRequest(SUMMARY_MODEL, messages)).get();
+            String summary = extractText(response);
+            log.debug("microcompact 생성: {}자 → {}자",
+                    conversationText.length(), summary != null ? summary.length() : 0);
+            return summary;
+        } catch (Exception e) {
+            log.warn("microcompact 실패: {}", e.getMessage());
             return null;
         }
     }

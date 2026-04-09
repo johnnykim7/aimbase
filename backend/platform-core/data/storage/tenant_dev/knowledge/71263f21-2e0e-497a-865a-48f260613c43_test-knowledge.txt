@@ -1,0 +1,14 @@
+Aimbase는 멀티테넌트 LLM 오케스트레이션 플랫폼입니다.
+여러 LLM 프로바이더(Anthropic, OpenAI, Ollama)를 통합 관리합니다.
+
+주요 기능으로는 정책 엔진, 워크플로우, RAG, MCP 도구 통합이 있습니다.
+정책 엔진은 5가지 규칙 타입을 지원합니다: DENY, REQUIRE_APPROVAL, LOG, TRANSFORM, RATE_LIMIT.
+
+RAG(Retrieval-Augmented Generation) 파이프라인은 다음 단계로 구성됩니다:
+1. 문서 파싱: PDF, DOCX, PPTX 등 다양한 형식 지원
+2. 청킹: 의미 단위, 고정 크기, 재귀적 분할 지원
+3. 임베딩: BGE-M3 모델 기반 벡터화
+4. 벡터 검색: pgvector를 활용한 코사인 유사도 검색
+
+멀티테넌시는 Database-per-Tenant 아키텍처를 사용합니다.
+각 테넌트는 독립된 데이터베이스를 가지며, 완전한 데이터 격리를 보장합니다.

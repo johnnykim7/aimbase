@@ -3,9 +3,11 @@ package com.platform.tenant;
 import com.platform.app.AppContext;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -33,6 +35,9 @@ public class TenantResolver implements Filter {
     private static final String TENANT_HEADER = "X-Tenant-Id";
     private static final String APP_HEADER = "X-App-Id";
     private static final String PLATFORM_API_PREFIX = "/api/v1/platform";
+    private static final String AUTH_API_PREFIX = "/api/v1/auth";
+    private static final String ADMIN_API_PREFIX = "/api/v1/admin";
+    private static final String API_PREFIX = "/api/v1/";
     private static final Pattern APP_API_PATTERN = Pattern.compile("^/api/v1/apps/([^/]+)(/.*)?$");
 
     @Override
@@ -40,6 +45,7 @@ public class TenantResolver implements Filter {
             throws IOException, ServletException {
 
         HttpServletRequest httpRequest = (HttpServletRequest) request;
+        HttpServletResponse httpResponse = (HttpServletResponse) response;
         String path = httpRequest.getRequestURI();
 
         try {
@@ -60,6 +66,14 @@ public class TenantResolver implements Filter {
                     if (tenantId != null && !tenantId.isBlank()) {
                         TenantContext.setTenantId(tenantId);
                         log.debug("Tenant resolved: {} for path: {}", tenantId, path);
+                    } else if (requiresTenant(path)) {
+                        // Tenant 필수 경로인데 X-Tenant-Id 누락 → 400
+                        log.warn("Missing X-Tenant-Id header for tenant-required path: {}", path);
+                        httpResponse.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                        httpResponse.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                        httpResponse.getWriter().write(
+                                "{\"status\":\"ERROR\",\"message\":\"X-Tenant-Id header is required\"}");
+                        return;
                     }
 
                     // X-App-Id 헤더가 있으면 AppContext도 설정
@@ -76,6 +90,20 @@ public class TenantResolver implements Filter {
         }
     }
 
+    /**
+     * Tenant ID가 필수인 경로인지 판별.
+     * /api/v1/platform/**, /api/v1/admin/**, 비-API 경로는 제외.
+     * /api/v1/auth/**는 tenant DB(users 테이블)를 조회하므로 tenant 필수.
+     */
+    private boolean requiresTenant(String path) {
+        if (!path.startsWith(API_PREFIX)) return false;
+        if (path.startsWith(PLATFORM_API_PREFIX)) return false;
+        if (path.startsWith(ADMIN_API_PREFIX)) return false;
+        // CR-027: /auth/login은 이메일로 tenant 자동 resolve → tenant 필수 아님
+        if (path.equals("/api/v1/auth/login")) return false;
+        return true;
+    }
+
     private String resolveTenantId(HttpServletRequest request) {
         // 1. X-Tenant-Id 헤더
         String headerTenantId = request.getHeader(TENANT_HEADER);
@@ -83,7 +111,13 @@ public class TenantResolver implements Filter {
             return headerTenantId.trim();
         }
 
-        // 2. 서브도메인 (예: acme.platform.com)
+        // 2. 쿼리 파라미터 tenant_id (MCP SSE 클라이언트용 — 헤더 전달 불가)
+        String queryTenantId = request.getParameter("tenant_id");
+        if (queryTenantId != null && !queryTenantId.isBlank()) {
+            return queryTenantId.trim();
+        }
+
+        // 3. 서브도메인 (예: acme.platform.com)
         String host = request.getServerName();
         if (host != null && host.contains(".")) {
             String subdomain = host.split("\\.")[0];
@@ -92,7 +126,9 @@ public class TenantResolver implements Filter {
             }
         }
 
-        // 3. JWT tenant_id claim (Phase 5에서 구현)
+        // 4. JWT tenant_id claim (Phase 5에서 구현)
+        // String authHeader = request.getHeader("Authorization");
+        // if (authHeader != null && authHeader.startsWith("Bearer ")) { ... }
 
         return null;
     }

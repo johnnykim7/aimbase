@@ -8,6 +8,7 @@ import com.platform.tool.ToolRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -33,7 +34,7 @@ public class MCPServerManager {
     private final Map<String, MCPServerClient> connections = new ConcurrentHashMap<>();
 
     public MCPServerManager(MCPServerRepository mcpServerRepository,
-                             ToolRegistry toolRegistry,
+                             @Lazy ToolRegistry toolRegistry,
                              ObjectMapper objectMapper) {
         this.mcpServerRepository = mcpServerRepository;
         this.toolRegistry = toolRegistry;
@@ -142,6 +143,11 @@ public class MCPServerManager {
     /** 연결 중인 서버 ID 목록 */
     public List<String> getConnectedServerIds() {
         return List.copyOf(connections.keySet());
+    }
+
+    /** 특정 서버의 클라이언트 반환 (연결 안 되어 있으면 null) */
+    public MCPServerClient getClient(String serverId) {
+        return connections.get(serverId);
     }
 
     private MCPServerClient connect(MCPServerEntity entity) {

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { platformApi } from "../api/platform";
 import type { PagedResponse } from "../types/api";
-import type { App, AppCreateRequest, AppUpdateRequest, Tenant, TenantRequest, Subscription, AppTenantCreateRequest } from "../types/tenant";
+import type { Tenant, TenantRequest, Subscription, ApiKey, CreateApiKeyRequest } from "../types/tenant";
 
 const extractList = <T>(d: unknown): T[] => {
   if (!d) return [];
@@ -10,10 +10,10 @@ const extractList = <T>(d: unknown): T[] => {
   return [];
 };
 
-export const useTenants = () =>
+export const useTenants = (domainApp?: string) =>
   useQuery({
-    queryKey: ["tenants"],
-    queryFn: () => platformApi.listTenants().then((r) => extractList<Tenant>(r.data.data)),
+    queryKey: ["tenants", { domainApp }],
+    queryFn: () => platformApi.listTenants(domainApp ? { domain_app: domainApp } : undefined).then((r) => extractList<Tenant>(r.data.data)),
     retry: false,
   });
 
@@ -82,71 +82,34 @@ export const usePlatformUsage = () =>
     retry: false,
   });
 
-// ─── App (소비앱) Hooks ─────────────────────────────────────────
-
-export const useApps = () =>
+// CR-025: API Keys
+export const useApiKeys = (tenantId?: string) =>
   useQuery({
-    queryKey: ["apps"],
-    queryFn: () => platformApi.listApps().then((r) => extractList<App>(r.data.data)),
+    queryKey: ["apiKeys", { tenantId }],
+    queryFn: () => platformApi.listApiKeys(tenantId).then((r) => (r.data.data ?? []) as ApiKey[]),
     retry: false,
   });
 
-export const useCreateApp = () => {
+export const useCreateApiKey = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: AppCreateRequest) => platformApi.createApp(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
+    mutationFn: (data: CreateApiKeyRequest) => platformApi.createApiKey(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
   });
 };
 
-export const useUpdateApp = () => {
+export const useRevokeApiKey = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ appId, data }: { appId: string; data: AppUpdateRequest }) =>
-      platformApi.updateApp(appId, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
+    mutationFn: (id: string) => platformApi.revokeApiKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
   });
 };
 
-export const useDeleteApp = () => {
+export const useRegenerateApiKey = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (appId: string) => platformApi.deleteApp(appId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
-  });
-};
-
-export const useSuspendApp = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (appId: string) => platformApi.suspendApp(appId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
-  });
-};
-
-export const useActivateApp = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (appId: string) => platformApi.activateApp(appId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
-  });
-};
-
-export const useAppTenants = (appId: string) =>
-  useQuery({
-    queryKey: ["appTenants", appId],
-    queryFn: () => platformApi.listAppTenants(appId).then((r) => extractList<Tenant>(r.data.data)),
-    enabled: !!appId,
-    retry: false,
-  });
-
-export const useAppCreateTenant = (appId: string) => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: AppTenantCreateRequest) => platformApi.appCreateTenant(appId, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["appTenants", appId] });
-      qc.invalidateQueries({ queryKey: ["apps"] });
-    },
+    mutationFn: (id: string) => platformApi.regenerateApiKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apiKeys"] }),
   });
 };

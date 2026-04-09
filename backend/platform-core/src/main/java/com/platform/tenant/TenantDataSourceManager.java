@@ -95,9 +95,13 @@ public class TenantDataSourceManager {
         return Map.copyOf(tenantDataSources);
     }
 
+    /** TENANT_DB_HOST 환경변수가 설정되어 있으면 DB에 저장된 db_host를 오버라이드 */
+    private static final String DB_HOST_OVERRIDE = System.getenv("TENANT_DB_HOST");
+
     private HikariDataSource createDataSource(Map<String, Object> tenant) {
         HikariConfig config = new HikariConfig();
-        String host = (String) tenant.get("db_host");
+        String host = DB_HOST_OVERRIDE != null && !DB_HOST_OVERRIDE.isBlank()
+                ? DB_HOST_OVERRIDE : (String) tenant.get("db_host");
         Object portObj = tenant.get("db_port");
         int port = portObj instanceof Number n ? n.intValue() : Integer.parseInt(portObj.toString());
         String dbName = (String) tenant.get("db_name");

@@ -35,7 +35,7 @@ class ClaudeCodeToolTest {
         config.setWorkingDirectory("");
 
         circuitBreaker = new ClaudeCodeCircuitBreaker();
-        tool = new ClaudeCodeTool(config, circuitBreaker, null, null);
+        tool = new ClaudeCodeTool(config, circuitBreaker, null, null, null);
     }
 
     @Test
@@ -48,6 +48,7 @@ class ClaudeCodeToolTest {
 
         @SuppressWarnings("unchecked")
         var properties = (Map<String, Object>) def.inputSchema().get("properties");
+        // 기본 파라미터
         assertThat(properties).containsKey("prompt");
         assertThat(properties).containsKey("input_file");
         assertThat(properties).containsKey("output_format");
@@ -56,12 +57,21 @@ class ClaudeCodeToolTest {
         assertThat(properties).containsKey("json_schema");
         assertThat(properties).containsKey("working_directory");
         assertThat(properties).containsKey("append_system_prompt");
-        // PRD-121: 새 enum 파라미터
         assertThat(properties).containsKey("model");
         assertThat(properties).containsKey("effort");
         assertThat(properties).containsKey("permission_mode");
-        // PRD-116: cli_options 맵
         assertThat(properties).containsKey("cli_options");
+        // 새 파라미터 전수 확인
+        assertThat(properties).containsKey("disallowed_tools");
+        assertThat(properties).containsKey("thinking");
+        assertThat(properties).containsKey("max_thinking_tokens");
+        assertThat(properties).containsKey("system_prompt");
+        assertThat(properties).containsKey("fork_session");
+        assertThat(properties).containsKey("tools");
+        assertThat(properties).containsKey("mcp_config");
+        assertThat(properties).containsKey("max_budget_usd");
+        assertThat(properties).containsKey("fallback_model");
+        assertThat(properties).containsKey("task_budget");
 
         @SuppressWarnings("unchecked")
         var required = (List<String>) def.inputSchema().get("required");
@@ -171,7 +181,7 @@ class ClaudeCodeToolTest {
     void execute_withTimeout_shouldReturnTimeoutError() {
         config.setExecutable("bash");
         config.setTimeoutSeconds(1);
-        var timeoutTool = new ClaudeCodeTool(config, new ClaudeCodeCircuitBreaker(), null, null);
+        var timeoutTool = new ClaudeCodeTool(config, new ClaudeCodeCircuitBreaker(), null, null, null);
 
         Map<String, Object> input = new HashMap<>();
         input.put("prompt", "sleep 60");
@@ -212,13 +222,13 @@ class ClaudeCodeToolTest {
         Map<String, Object> input = new HashMap<>();
         input.put("prompt", "test");
         input.put("output_format", "text");
-        input.put("cli_options", Map.of("--verbose", "", "--continue", "sess_123"));
+        input.put("cli_options", Map.of("--verbose", "", "--color", "always"));
 
         String result = tool.execute(input);
 
         assertThat(result).contains("--verbose");
-        assertThat(result).contains("--continue");
-        assertThat(result).contains("sess_123");
+        assertThat(result).contains("--color");
+        assertThat(result).contains("always");
     }
 
     @Test
@@ -316,7 +326,158 @@ class ClaudeCodeToolTest {
         assertThat(effortProp).containsKey("enum");
         @SuppressWarnings("unchecked")
         var enumValues = (List<String>) effortProp.get("enum");
-        assertThat(enumValues).containsExactly("low", "medium", "high");
+        assertThat(enumValues).containsExactly("low", "medium", "high", "max");
+    }
+
+    @Test
+    void getDefinition_outputFormatShouldIncludeStreamJson() {
+        var def = tool.getDefinition();
+
+        @SuppressWarnings("unchecked")
+        var properties = (Map<String, Object>) def.inputSchema().get("properties");
+        @SuppressWarnings("unchecked")
+        var outputFormatProp = (Map<String, Object>) properties.get("output_format");
+        @SuppressWarnings("unchecked")
+        var enumValues = (List<String>) outputFormatProp.get("enum");
+
+        assertThat(enumValues).containsExactly("text", "json", "stream-json");
+    }
+
+    @Test
+    void getDefinition_thinkingShouldHaveEnumValues() {
+        var def = tool.getDefinition();
+
+        @SuppressWarnings("unchecked")
+        var properties = (Map<String, Object>) def.inputSchema().get("properties");
+        @SuppressWarnings("unchecked")
+        var thinkingProp = (Map<String, Object>) properties.get("thinking");
+        @SuppressWarnings("unchecked")
+        var enumValues = (List<String>) thinkingProp.get("enum");
+
+        assertThat(enumValues).containsExactly("adaptive", "enabled", "disabled");
+    }
+
+    // ── 새 파라미터 CLI 전달 테스트 ──
+
+    @Test
+    void execute_withDisallowedTools_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("disallowed_tools", List.of("Bash", "FileWrite"));
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--disallowedTools");
+        assertThat(result).contains("Bash");
+        assertThat(result).contains("FileWrite");
+    }
+
+    @Test
+    void execute_withThinking_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("thinking", "adaptive");
+        input.put("max_thinking_tokens", 8000);
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--thinking");
+        assertThat(result).contains("adaptive");
+        assertThat(result).contains("--max-thinking-tokens");
+        assertThat(result).contains("8000");
+    }
+
+    @Test
+    void execute_withSystemPrompt_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("system_prompt", "You are a code reviewer.");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--system-prompt");
+        assertThat(result).contains("You are a code reviewer.");
+    }
+
+    @Test
+    void execute_withForkSession_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("continue_mode", "continue");
+        input.put("fork_session", true);
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--fork-session");
+    }
+
+    @Test
+    void execute_withToolsSpec_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("tools", "Bash,Read,Edit");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--tools");
+        assertThat(result).contains("Bash,Read,Edit");
+    }
+
+    @Test
+    void execute_withMcpConfig_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("mcp_config", List.of("/etc/mcp/flowguard.json"));
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--mcp-config");
+        assertThat(result).contains("/etc/mcp/flowguard.json");
+    }
+
+    @Test
+    void execute_withMaxBudgetUsd_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("max_budget_usd", 0.5);
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--max-budget-usd");
+        assertThat(result).contains("0.5");
+    }
+
+    @Test
+    void execute_withFallbackModel_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("fallback_model", "claude-haiku-4-20250414");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--fallback-model");
+        assertThat(result).contains("claude-haiku-4-20250414");
+    }
+
+    @Test
+    void execute_withTaskBudget_shouldPassToCommand() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("task_budget", 10000);
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--task-budget");
+        assertThat(result).contains("10000");
     }
 
     // ── PRD-118: 서킷 브레이커 테스트 ──
@@ -363,6 +524,89 @@ class ClaudeCodeToolTest {
 
         assertThat(circuitBreaker.getState())
                 .isEqualTo(ClaudeCodeCircuitBreaker.State.CLOSED);
+    }
+
+    // ── 세션 관리 테스트 ──
+
+    @Test
+    void execute_defaultSessionPersistence_shouldNotAddNoSessionFlag() {
+        // Config 기본값 true → --no-session-persistence 없어야 함
+        config.setDefaultSessionPersistence(true);
+        var sessionTool = new ClaudeCodeTool(config, new ClaudeCodeCircuitBreaker(), null, null, null);
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+
+        String result = sessionTool.execute(input);
+
+        assertThat(result).doesNotContain("--no-session-persistence");
+    }
+
+    @Test
+    void execute_sessionPersistenceDisabled_shouldAddNoSessionFlag() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "test");
+        input.put("output_format", "text");
+        input.put("session_persistence", false);
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--no-session-persistence");
+    }
+
+    @Test
+    void execute_continueMode_shouldAddContinueFlag() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "이전 작업 이어서 진행");
+        input.put("output_format", "text");
+        input.put("continue_mode", "continue");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--continue");
+    }
+
+    @Test
+    void execute_resumeMode_shouldAddResumeWithSessionId() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "세션 재개");
+        input.put("output_format", "text");
+        input.put("continue_mode", "resume");
+        input.put("session_id", "sess_abc123");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("--resume");
+        assertThat(result).contains("sess_abc123");
+    }
+
+    @Test
+    void execute_resumeModeWithoutSessionId_shouldReturnError() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("prompt", "세션 재개");
+        input.put("continue_mode", "resume");
+
+        String result = tool.execute(input);
+
+        assertThat(result).contains("INVALID_INPUT");
+        assertThat(result).contains("session_id");
+    }
+
+    @Test
+    void getDefinition_shouldContainContinueModeAndSessionId() {
+        var def = tool.getDefinition();
+
+        @SuppressWarnings("unchecked")
+        var properties = (Map<String, Object>) def.inputSchema().get("properties");
+        assertThat(properties).containsKey("continue_mode");
+        assertThat(properties).containsKey("session_id");
+
+        @SuppressWarnings("unchecked")
+        var continueProp = (Map<String, Object>) properties.get("continue_mode");
+        @SuppressWarnings("unchecked")
+        var enumValues = (List<String>) continueProp.get("enum");
+        assertThat(enumValues).containsExactly("new", "continue", "resume");
     }
 
     @Test

@@ -1,10 +1,22 @@
 package com.platform.llm.model;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import java.util.Map;
 
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonSubTypes({
+        @JsonSubTypes.Type(value = ContentBlock.Text.class, name = "text"),
+        @JsonSubTypes.Type(value = ContentBlock.Image.class, name = "image"),
+        @JsonSubTypes.Type(value = ContentBlock.ToolUse.class, name = "tool_use"),
+        @JsonSubTypes.Type(value = ContentBlock.ToolResult.class, name = "tool_result"),
+        @JsonSubTypes.Type(value = ContentBlock.Structured.class, name = "structured"),
+        @JsonSubTypes.Type(value = ContentBlock.Thinking.class, name = "thinking"),
+})
 public sealed interface ContentBlock
         permits ContentBlock.Text, ContentBlock.Image, ContentBlock.ToolUse, ContentBlock.ToolResult,
-                ContentBlock.Structured {
+                ContentBlock.Structured, ContentBlock.Thinking {
 
     record Text(String text) implements ContentBlock {}
 
@@ -42,4 +54,7 @@ public sealed interface ContentBlock
 
     /** 구조화된 출력 블록 (CR-007). LLM이 JSON Schema에 맞춰 반환한 구조화 데이터. */
     record Structured(String schema, Map<String, Object> data) implements ContentBlock {}
+
+    /** Extended Thinking 블록 (CR-030). LLM 내부 추론 과정 + 서명. */
+    record Thinking(String thinking, String signature) implements ContentBlock {}
 }

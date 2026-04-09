@@ -27,13 +27,14 @@ import static org.mockito.Mockito.*;
 class MCPRagClientTest {
 
     @Mock private MCPServerClient mcpServerClient;
+    @Mock private com.platform.tool.ToolRegistry toolRegistry;
 
     private MCPRagClient client;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() throws Exception {
-        client = new MCPRagClient(objectMapper);
+        client = new MCPRagClient(objectMapper, toolRegistry);
 
         Field mcpClientField = MCPRagClient.class.getDeclaredField("mcpClient");
         mcpClientField.setAccessible(true);

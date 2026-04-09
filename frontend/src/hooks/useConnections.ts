@@ -44,8 +44,11 @@ export const useDeleteConnection = () => {
   });
 };
 
-export const useTestConnection = () =>
-  useMutation({
+export const useTestConnection = () => {
+  const qc = useQueryClient();
+  return useMutation({
     mutationFn: (id: string) =>
       connectionsApi.test(id).then((r) => r.data.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connections"] }),
   });
+};

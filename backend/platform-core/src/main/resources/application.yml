@@ -45,14 +45,12 @@ spring:
       port: ${SPRING_REDIS_PORT:6379}
       timeout: 5000ms
 
-  # LLM 채팅은 Connection DB 기반 (AppConfig에서 직접 SDK 사용)
-  # Spring AI는 임베딩(RAG)용으로만 사용
+  # LLM 채팅은 Connection DB 기반 — Chat 자동설정 제외 (PlatformApplication)
+  # Spring AI 임베딩: OPENAI_API_KEY 환경변수 설정 시 EmbeddingModel 자동 생성
+  #                   미설정 시 EmbeddingService가 ConditionalOnBean으로 비활성화
   ai:
     openai:
       api-key: ${OPENAI_API_KEY:}
-      chat:
-        options:
-          model: gpt-4o
       embedding:
         options:
           model: text-embedding-3-small
@@ -92,12 +90,38 @@ agent:
     url: ${AGENT_MCP_URL:http://localhost:8003}
     enabled: ${AGENT_MCP_ENABLED:false}
 
+# ─── Claude Code CLI 도구 설정 ───────────────────────────────────────
+# Claude Code를 워크플로우 TOOL_CALL Step으로 사용.
+# 인증: 로컬은 `claude login`, 서버/AWS는 api-key 설정.
+claude-code:
+  enabled: ${CLAUDE_CODE_ENABLED:false}
+  executable: ${CLAUDE_CODE_EXECUTABLE:claude}
+  api-key: ${CLAUDE_CODE_API_KEY:}
+  timeout-seconds: ${CLAUDE_CODE_TIMEOUT:300}
+  max-turns: ${CLAUDE_CODE_MAX_TURNS:10}
+  default-allowed-tools: ${CLAUDE_CODE_ALLOWED_TOOLS:}
+  working-directory: ${CLAUDE_CODE_WORKING_DIR:}
+  default-session-persistence: ${CLAUDE_CODE_SESSION_PERSISTENCE:true}
+  default-system-prompt: ${CLAUDE_CODE_SYSTEM_PROMPT:PDF 파일은 반드시 Read 도구로 읽어라. 문서 요약 시 모든 페이지와 첨부자료, 표, 수치 데이터를 빠짐없이 포함하라.}
+
 # ─── Platform 설정 (테넌트 프로비저닝 기본값) ────────────────────────
 platform:
   default-db-host: ${TENANT_DB_HOST:localhost}
   default-db-port: ${TENANT_DB_PORT:5432}
   default-db-username: ${TENANT_DB_USERNAME:platform}
   default-db-password: ${TENANT_DB_PASSWORD:platform}
+  # ─── 오케스트레이터 설정 ─────────────────────────────────────────────
+  orchestrator:
+    max-tool-iterations: ${PLATFORM_MAX_TOOL_ITERATIONS:30}
+    default-max-tokens: ${PLATFORM_DEFAULT_MAX_TOKENS:16000}
+  # ─── 압축 임계값 (PRD-206, CR-030 Phase 5) ─────────────────────────
+  # 퍼센트 단위 (70 = 70%). 환경변수 PLATFORM_*_PCT가 우선.
+  compaction:
+    snip-percent: 70
+    micro-compact-percent: 85
+    session-memory-percent: 91
+    auto-compact-percent: 93
+    blocking-limit-percent: 98
 
 management:
   endpoints:

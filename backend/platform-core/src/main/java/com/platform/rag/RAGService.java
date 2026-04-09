@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.util.List;
+import java.util.*;
 
 /**
  * RAG 컨텍스트를 LLM에 주입할 문자열로 빌드하는 서비스.
@@ -24,11 +24,17 @@ public class RAGService {
 
     private final VectorSearcher vectorSearcher;
     private final RetrievalConfigRepository retrievalConfigRepository;
+    private final MCPRagClient mcpRagClient;
+    private final com.platform.service.PromptTemplateService promptTemplateService;
 
     public RAGService(VectorSearcher vectorSearcher,
-                      RetrievalConfigRepository retrievalConfigRepository) {
+                      RetrievalConfigRepository retrievalConfigRepository,
+                      MCPRagClient mcpRagClient,
+                      com.platform.service.PromptTemplateService promptTemplateService) {
         this.vectorSearcher = vectorSearcher;
         this.retrievalConfigRepository = retrievalConfigRepository;
+        this.mcpRagClient = mcpRagClient;
+        this.promptTemplateService = promptTemplateService;
     }
 
     /**
@@ -59,7 +65,62 @@ public class RAGService {
             k = topK > 0 ? topK : DEFAULT_TOP_K;
         }
 
-        List<RetrievedChunk> chunks = vectorSearcher.search(query, sourceId, k);
+        // PRD-119: Query Transform 오케스트레이션
+        String searchType = config != null ? config.getSearchType() : null;
+        String effectiveQuery = query;
+        List<String> additionalQueries = List.of();
+
+        String transformStrategy = config != null && config.getQueryProcessing() != null
+                ? (String) config.getQueryProcessing().get("transform_strategy") : null;
+
+        if (transformStrategy != null && mcpRagClient.isAvailable()) {
+            String strategy = transformStrategy;
+            try {
+                Map<String, Object> transformResult = mcpRagClient.transformQuery(query, strategy);
+                Object transformed = transformResult.get("transformed_queries");
+                if (transformed instanceof List<?> tList && !tList.isEmpty()) {
+                    @SuppressWarnings("unchecked")
+                    List<String> tQueries = (List<String>) tList;
+                    effectiveQuery = tQueries.get(0);
+                    additionalQueries = tQueries.size() > 1 ? tQueries.subList(1, tQueries.size()) : List.of();
+                    log.debug("Query transform '{}': {} → {} queries", strategy, query, tQueries.size());
+                }
+            } catch (Exception e) {
+                log.warn("Query transform failed, using original query: {}", e.getMessage());
+            }
+        }
+
+        // PRD-117: parent_child 검색 타입이면 계층적 검색
+        List<RetrievedChunk> chunks;
+        if ("parent_child".equals(searchType)) {
+            chunks = vectorSearcher.searchParentChild(effectiveQuery, sourceId, k);
+        } else {
+            chunks = vectorSearcher.search(effectiveQuery, sourceId, k);
+        }
+
+        // Multi-Query: 추가 쿼리로 검색 후 결과 병합 (중복 제거)
+        if (!additionalQueries.isEmpty()) {
+            Set<String> seenContents = new LinkedHashSet<>();
+            chunks.forEach(c -> seenContents.add(c.content()));
+
+            for (String addQuery : additionalQueries) {
+                List<RetrievedChunk> addResults = "parent_child".equals(searchType)
+                        ? vectorSearcher.searchParentChild(addQuery, sourceId, k)
+                        : vectorSearcher.search(addQuery, sourceId, k);
+                for (RetrievedChunk r : addResults) {
+                    if (seenContents.add(r.content())) {
+                        chunks = new ArrayList<>(chunks);
+                        chunks.add(r);
+                    }
+                }
+            }
+
+            // 점수 내림차순 재정렬 후 topK 제한
+            chunks = chunks.stream()
+                    .sorted((a, b) -> Double.compare(b.score(), a.score()))
+                    .limit(k)
+                    .toList();
+        }
 
         // 유사도 임계값 필터링
         BigDecimal threshold = similarityThreshold;
@@ -76,24 +137,105 @@ public class RAGService {
 
         log.debug("Building RAG context from {} chunks for query='{}'", chunks.size(), query);
 
-        // 컨텍스트 템플릿이 설정되어 있으면 사용, 아니면 기본 포맷
-        String header = (contextTemplate != null && !contextTemplate.isBlank())
-                ? contextTemplate
-                : "다음 참고 자료를 바탕으로 답변하세요:";
-
+        // 컨텍스트 템플릿이 설정되어 있으면 사용, 아니면 기본 RAG 시스템 프롬프트
         StringBuilder sb = new StringBuilder();
-        sb.append(header).append("\n\n");
+
+        if (contextTemplate != null && !contextTemplate.isBlank()) {
+            sb.append(contextTemplate).append("\n\n");
+        } else {
+            // CR-036: DB 외부화된 RAG 기본 프롬프트
+            String ragDefault = promptTemplateService.getTemplate("rag.default.system");
+            if (ragDefault != null) {
+                sb.append(ragDefault).append("\n\n");
+            } else {
+                sb.append("You are an AI assistant that answers accurately based on the provided documents.\n\n");
+                sb.append("## Rules\n");
+                sb.append("1. You must answer solely based on the [Reference Documents] below.\n");
+                sb.append("2. If the information is not found, respond with \"The requested information could not be found in the provided documents.\"\n");
+                sb.append("3. Cite sources using [1], [2] format in your answers.\n");
+                sb.append("4. You may synthesize content from multiple documents, but must clearly attribute each source.\n");
+                sb.append("5. Do not use speculation or external knowledge.\n\n");
+            }
+        }
+
+        sb.append("## 참고 문서\n\n");
 
         for (int i = 0; i < chunks.size(); i++) {
             RetrievedChunk chunk = chunks.get(i);
             sb.append("[").append(i + 1).append("] ")
               .append(chunk.content())
-              .append("\n출처: ").append(chunk.sourceId())
-              .append(String.format(", 유사도: %.3f", chunk.score()))
+              .append("\n(출처: ").append(chunk.sourceId())
+              .append(String.format(", 유사도: %.3f)", chunk.score()))
               .append("\n\n");
         }
 
         return sb.toString().strip();
+    }
+
+    /**
+     * PRD-124: 시맨틱 캐시를 포함한 컨텍스트 빌드.
+     * 캐시 히트 시 DB 검색 없이 즉시 반환, 미스 시 검색 후 캐시 저장.
+     */
+    @SuppressWarnings("unchecked")
+    public String buildContextWithCache(String query, String sourceId, int topK) {
+        if (mcpRagClient.isAvailable()) {
+            try {
+                // 캐시 조회
+                Map<String, Object> cacheResult = mcpRagClient.callToolRaw("cache_lookup", Map.of(
+                        "query", query, "source_id", sourceId, "threshold", 0.95));
+                if (Boolean.TRUE.equals(cacheResult.get("hit"))) {
+                    log.info("Semantic cache HIT for query='{}', similarity={}",
+                            query, cacheResult.get("similarity"));
+                    return (String) cacheResult.get("response_text");
+                }
+            } catch (Exception e) {
+                log.debug("Cache lookup failed: {}", e.getMessage());
+            }
+        }
+
+        // 캐시 미스: 일반 검색
+        String context = buildContext(query, sourceId, topK);
+
+        // 검색 결과를 캐시에 저장
+        if (!context.isEmpty() && mcpRagClient.isAvailable()) {
+            try {
+                mcpRagClient.callToolRaw("cache_store", Map.of(
+                        "query", query, "source_id", sourceId,
+                        "response_text", context, "metadata", "{}", "ttl_hours", 24));
+            } catch (Exception e) {
+                log.debug("Cache store failed: {}", e.getMessage());
+            }
+        }
+
+        return context;
+    }
+
+    /**
+     * PRD-125: 인용 번호 포함 컨텍스트 빌드.
+     * [1][2] 형태의 인라인 인용과 citations 메타데이터를 함께 반환.
+     *
+     * @return {context: String, citations: List<Map>}
+     */
+    public Map<String, Object> buildContextWithCitations(String query, String sourceId, int topK) {
+        String context = buildContext(query, sourceId, topK);
+
+        // citations 메타데이터 구성 (BIZ-028)
+        List<Map<String, Object>> citations = new ArrayList<>();
+        // 기존 buildContext가 [1] [2] 형식으로 포함하므로 파싱
+        String[] lines = context.split("\n");
+        int citationIndex = 0;
+        for (String line : lines) {
+            if (line.startsWith("[") && line.contains("]")) {
+                citationIndex++;
+                citations.add(Map.of(
+                        "index", citationIndex,
+                        "source_id", sourceId,
+                        "excerpt", line.length() > 100 ? line.substring(0, 100) + "..." : line
+                ));
+            }
+        }
+
+        return Map.of("context", context, "citations", citations);
     }
 
     /**

@@ -1,0 +1,1 @@
+Codebase exploration agent. Specializes in file search, keyword search, and structural analysis. Does not modify code.

@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 2.2 | 최종 수정: 2026-03-15 | 관련 CR: CR-007
+> 설계 버전: 3.2 | 최종 수정: 2026-04-07 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -32,6 +32,36 @@ flowchart LR
     S12 --> S13
     S10 --> S14[Sprint 14: FE 플랫폼]
     S13 --> S14
+    S5 --> S22[Sprint 22: RAG A++ Phase 1]
+    S15 --> S22
+    S22 --> S23[Sprint 23: RAG A++ Phase 2]
+    S17 --> S23
+    S23 --> S24[Sprint 24: RAG A++ Phase 3]
+    S3 --> S20[Sprint 20: 도구 선택 제어]
+    S1 --> S21[Sprint 21: 구조화된 출력]
+    S8 --> S21
+    S4 --> S25[Sprint 25: 정책 엔진 확장]
+    S12 --> S25
+    S23 --> S26[Sprint 26: RAG 평가 LLM Judge]
+    S19 --> S27[Sprint 27: ConfigPanel 완성]
+    S6 --> S27
+    S14 --> S34[Sprint 34: Metronic 인프라+레이아웃]
+    S34 --> S35[Sprint 35: 공통 컴포넌트 교체]
+    S35 --> S36[Sprint 36: 기본 CRUD 페이지]
+    S35 --> S37[Sprint 37: 고급 페이지]
+    S35 --> S38[Sprint 38: WorkflowStudio+플랫폼]
+    S36 --> S39[Sprint 39: 정리+검증]
+    S37 --> S39
+    S38 --> S39
+    S1 --> S42[Sprint 42: 성능/퀄리티 CR-031]
+    S39 --> S42
+    S2 --> S43[Sprint 43: 프로바이더 확장 CR-032]
+    S39 --> S43
+    S3 --> S46[Sprint 46: Tool/Policy 확장 CR-035]
+    S4 --> S46
+    S6 --> S46
+    S3 --> S47[Sprint 47: 핵심 도구 네이티브화 CR-037]
+    S2 --> S47
 ```
 
 ---
@@ -299,6 +329,254 @@ flowchart LR
 | PRD-101 | 워크플로우 스튜디오 스키마 편집 UI | Sprint 19, PRD-100 | 스키마 선택/편집 → JSON 반영 | FE | 미완료 |
 | - | Flyway 마이그레이션 (workflows 테이블에 output_schema 컬럼 추가) | Sprint 0 | 마이그레이션 성공 | BE | 미완료 |
 | - | ContentBlock.Structured 레코드 추가 | PRD-098 | sealed interface 확장 | BE | 미완료 |
+
+---
+
+### Sprint 22: RAG A++ 고도화 — Phase 1 (Contextual Retrieval + Parent-Child) [v3.1, CR-011]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-116 | Contextual Retrieval — IngestionPipeline에 contextual 모드 추가 | Sprint 5, Sprint 15 | contextual=true 인제스션 시 맥락 프리픽스 포함 임베딩 생성 | BE+Python | 미완료 |
+| PY-023 | contextual_chunk MCP 도구 구현 | Sprint 15 | MCP tool 호출 → LLM 맥락 프리픽스 생성 | Python | 미완료 |
+| PRD-117 | Parent-Child 계층 청킹 + 검색 | Sprint 5 | child 매칭 → parent 반환 검증 | BE+Python | 미완료 |
+| PY-024 | parent_child_search MCP 도구 구현 | Sprint 15 | MCP tool 호출 → 계층 검색 결과 반환 | Python | 미완료 |
+| PRD-118 | Parent-Child FE 설정 UI | Sprint 12 | 청킹 전략 드롭다운 + 파라미터 입력 | FE | 미완료 |
+| - | Flyway 마이그레이션 (embeddings.parent_id, context_prefix, content_hash) | Sprint 0 | 마이그레이션 성공 | BE | 미완료 |
+| PRD-119 | Query Transform 전략 오케스트레이션 | Sprint 5, PY-025 | HyDE/Multi-Query/Step-Back 검색 결과 확인 | BE | 미완료 |
+| PY-025 | transform_query 고도화 (HyDE/Multi-Query/Step-Back LLM 연동) | Sprint 18 | 3가지 전략별 MCP tool 호출 성공 | Python | 미완료 |
+
+---
+
+### Sprint 23: RAG A++ 고도화 — Phase 2 (RAGAS + 고급 파싱) [v3.1, CR-011]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-120 | RAG 평가 API (RAGAS 5개 메트릭) | Sprint 17, PY-026 | 5개 메트릭 점수 반환 + DB 저장 | BE | 미완료 |
+| PY-026 | evaluate_rag_quality MCP 도구 (RAGAS) | Sprint 17 | MCP tool 호출 → 5개 메트릭 산출 | Python | 미완료 |
+| PRD-121 | RAG 평가 대시보드 (FE) | Sprint 12, PRD-120 | 레이더 차트 + 추이 라인 차트 렌더링 | FE | 미완료 |
+| PRD-122 | 테이블 구조 추출 파싱 | Sprint 15, PY-027 | PDF 내 표가 Markdown 테이블로 변환 확인 | BE+Python | 미완료 |
+| PRD-123 | OCR 지원 (스캔 PDF/이미지) | Sprint 15, PY-027 | 스캔 PDF에서 텍스트 추출 확인 | BE+Python | 미완료 |
+| PY-027 | advanced_parse MCP 도구 (테이블/OCR/레이아웃) | Sprint 15 | MCP tool 호출 → 구조화된 파싱 결과 반환 | Python | 미완료 |
+
+---
+
+### Sprint 24: RAG A++ 고도화 — Phase 3 (캐시 + Citation + 증분 + TTS/STT) [v3.1, CR-011]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-124 | 시맨틱 캐시 (Redis 임베딩 비교) | Sprint 5, PY-028 | 유사 질문 캐시 히트 + 캐시 미스 정상 동작 | BE+Python | 미완료 |
+| PY-028 | semantic_cache MCP 도구 | Sprint 15 | MCP tool 호출 → 캐시 비교 결과 반환 | Python | 미완료 |
+| PRD-125 | 인라인 Citation (출처 번호 삽입) | Sprint 1, Sprint 5 | LLM 응답에 [1][2] 인용 + citations 필드 반환 | BE | 미완료 |
+| - | 증분 인제스션 (content_hash 비교 → 변경분만 재처리) | Sprint 5 | 동일 문서 재sync 시 스킵 확인 | BE | 미완료 |
+| - | 인제스션 로그 확장 (documents_skipped/updated/new 필드) | Sprint 5 | 증분 인제스션 통계 반환 확인 | BE | 미완료 |
+| PRD-126 | TTS API (OpenAI TTS 프록시) | Sprint 1, Sprint 2 | POST /tts → 오디오 바이너리 스트리밍 반환 | BE | 미완료 |
+| PRD-127 | STT API (OpenAI Whisper 프록시) | Sprint 1, Sprint 2 | POST /stt → 텍스트 + segments 반환 | BE | 미완료 |
+
+---
+
+### Sprint 20: 도구 선택 제어 (BE + FE) [v3.0, CR-006]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-096 | ToolFilterContext record 구현 (allowedTools, excludeTools, tags) | Sprint 3 | isToolAllowed(), filterTools() 정상 동작 | BE | 미완료 |
+| PRD-097 | tool_choice 파라미터 지원 (auto/none/required/{tool_name}) | Sprint 3 | LLM 어댑터별 tool_choice 매핑 검증 | BE | 미완료 |
+| - | ChatRequest에 tool_choice, allowed_tools, blocked_tools 필드 추가 | PRD-096, PRD-097 | API 파라미터 정상 수신 | BE | 미완료 |
+| - | ConfigPanel에서 LLM_CALL 노드에 tool_choice, allowed_tools, blocked_tools 필드 제공 | Sprint 19 | FE에서 도구 선택 제어 설정 가능 | FE | 미완료 |
+
+---
+
+### Sprint 25: 정책 엔진 Rule Type 확장 (BE + FE) [v3.3, CR-015]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-128 | 6개 규칙 타입 정의 + JSON 템플릿 자동 생성 | Sprint 4 | content_filter, cost_limit, token_limit, rate_limit, model_filter, time_restriction 템플릿 생성 확인 | BE | 미완료 |
+| PRD-129 | FE Policies 페이지에 규칙 타입 select + 자동 JSON 템플릿 | Sprint 12 | 타입 변경 시 JSON 에디터에 템플릿 자동 채움 | FE | 미완료 |
+| - | generateRuleTemplate() 함수 구현 | PRD-128 | 6개 타입별 올바른 JSON 구조 반환 | FE | 미완료 |
+
+---
+
+### Sprint 26: RAG 평가 LLM Judge (Python + BE + FE) [v3.4, CR-016]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PY-029 | LLM Judge 함수 구현 (_llm_judge_faithfulness, _llm_judge_context_relevancy, _llm_judge_answer_relevancy) | Sprint 23 | Claude Haiku API 호출 → 점수+근거 반환 | Python | 미완료 |
+| - | _call_llm_for_score() 공통 함수 (Claude Haiku API 호출) | PY-029 | 프롬프트→점수(0.0~1.0)+reasoning 반환 | Python | 미완료 |
+| PRD-130 | evaluate_rag() API에 mode 파라미터 추가 (fast/accurate) | PY-029 | fast=임베딩 유사도, accurate=LLM Judge 분기 검증 | BE+Python | 미완료 |
+| PRD-131 | FE RagEvaluation 페이지에 Fast/Accurate 라디오 버튼 | PRD-130 | 모드 선택 → API 호출 시 mode 전달 | FE | 미완료 |
+| - | 평가 결과에 judge_reasoning 접이식 패널 추가 | PRD-131 | Accurate 모드 결과에서 근거 표시 | FE | 미완료 |
+
+---
+
+### Sprint 27: 워크플로우 ConfigPanel 완성 (BE + FE) [v3.5, CR-017]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-132 | WorkflowStep record에 name 필드 추가 + @JsonIgnoreProperties + @JsonAlias("dependencies") | Sprint 6 | 기존 JSON 호환 + name 필드 정상 저장 | BE | 미완료 |
+| PRD-133 | ConfigPanel 전체 StepType별 설정 폼 구현 | Sprint 19 | LLM_CALL, TOOL_CALL, CONDITION, PARALLEL, HUMAN_INPUT, ACTION 6가지 설정 편집 가능 | FE | 미완료 |
+| - | LLM_CALL 설정: connection_id, model, prompt, system, temperature, tool_choice, allowed_tools, blocked_tools, response_schema | PRD-133, Sprint 20 | 모든 필드 입력→JSON 반영 검증 | FE | 미완료 |
+| - | ACTION 설정: type(WRITE/NOTIFY), adapter, destination, payload ({{step.output}} 변수 치환) | PRD-133 | 변수 치환 가이드 인라인 표시 + payload 정상 반영 | FE | 미완료 |
+| - | 스키마 프리셋 (분류/요약/추출) 제공 | PRD-133, Sprint 21 | 프리셋 선택 → response_schema 자동 채움 | FE | 미완료 |
+
+---
+
+### Sprint 34: Metronic 인프라 + 레이아웃 교체 (FE) [v5.0, CR-026]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| - | Tailwind CSS 4 + Metronic 의존성 추가 | 없음 | npm run dev 정상 기동 | FE | 완료 |
+| - | Metronic UI 컴포넌트 ~25개 선별 복사 | 없음 | 컴포넌트 import 정상 | FE | 완료 |
+| - | CSS 변수 커스터마이징 (Aimbase 브랜드 색상) | 없음 | 색상 테마 적용 확인 | FE | 완료 |
+| - | AppShell 레이아웃 교체 (인라인→Tailwind) | Tailwind 설치 | 전체 레이아웃 정상 | FE | 완료 |
+| - | Sidebar(LNB) 교체 (이모지→Lucide, 인라인→Tailwind) | Tailwind 설치 | 네비게이션 + 활성 상태 정상 | FE | 완료 |
+| - | PageHeader 교체 | Tailwind 설치 | 제목/액션 영역 정상 | FE | 완료 |
+
+---
+
+### Sprint 35: 공통 컴포넌트 교체 (FE) [v5.0, CR-026]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| - | ActionButton → Metronic Button 래퍼 | Sprint 34 | 5개 variant 시각 확인 | FE | 완료 |
+| - | Badge → Metronic Badge 래퍼 | Sprint 34 | 6개 color 시각 확인 | FE | 완료 |
+| - | Modal → Metronic Dialog 래퍼 | Sprint 34 | 열기/닫기 정상 | FE | 완료 |
+| - | DataTable → Metronic Table 기반 | Sprint 34 | hover + click 정상 | FE | 완료 |
+| - | FormField + inputStyle/selectStyle/textareaStyle 교체 | Sprint 34 | 폼 입력 정상 | FE | 완료 |
+| - | StatCard, EmptyState, LoadingSpinner 교체 | Sprint 34 | 렌더링 정상 | FE | 완료 |
+| - | theme.ts → CSS 변수 브릿지 전환 | Sprint 34 | 기존 페이지 색상 유지 | FE | 완료 |
+
+---
+
+### Sprint 36: 기본 CRUD 페이지 교체 (FE) [v5.0, CR-026]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| - | Login 페이지 스타일 교체 | Sprint 35 | 로그인 폼 동작 정상 | FE | 완료 |
+| - | Dashboard 페이지 스타일 교체 | Sprint 35 | StatCard + 로그 카드 표시 정상 | FE | 완료 |
+| - | Connections 페이지 스타일 교체 | Sprint 35 | 카드 CRUD + 모달 정상 | FE | 완료 |
+| - | Schemas 페이지 스타일 교체 | Sprint 35 | DataTable + 편집 패널 정상 | FE | 완료 |
+| - | Policies 페이지 스타일 교체 | Sprint 35 | 아코디언 + 모달 CRUD 정상 | FE | 완료 |
+| - | Prompts, Knowledge, MCPServers, Auth 페이지 스타일 교체 | Sprint 35 | 각 페이지 CRUD 정상 | FE | 완료 |
+
+---
+
+### Sprint 37: 고급 페이지 교체 (FE) [v5.0, CR-026]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| - | Workflows 목록 + WorkflowDetail 스타일 교체 | Sprint 35 | 목록→상세 흐름 정상 | FE | 완료 |
+| - | RagEvaluation 페이지 스타일 교체 | Sprint 35 | 메트릭 카드 표시 정상 | FE | 완료 |
+| - | Documents 페이지 스타일 교체 (Tabs 적용) | Sprint 35 | 탭 전환 + 업로드 정상 | FE | 완료 |
+| - | Projects 페이지 스타일 교체 | Sprint 35 | 카드 CRUD 정상 | FE | 완료 |
+| - | Monitoring 페이지 스타일 교체 (Recharts 유지) | Sprint 35 | 차트 렌더링 정상 | FE | 완료 |
+
+---
+
+### Sprint 38: WorkflowStudio + 플랫폼 페이지 교체 (FE) [v5.0, CR-026]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| - | WorkflowStudio 주변 UI 교체 (React Flow 캔버스 유지) | Sprint 35 | 노드 드래그&드롭, 연결, 저장, 실행 정상 | FE | 완료 |
+| - | NodePalette, StudioToolbar, ConfigPanel 스타일 교체 | Sprint 35 | 설정 폼 입력 정상 | FE | 완료 |
+| - | WorkflowNode 카드 스타일 교체 (Handle 유지) | Sprint 35 | 노드 표시 + 연결점 정상 | FE | 완료 |
+| - | Tenants, Subscriptions, ApiKeys, PlatformMonitoring 교체 | Sprint 35 | 플랫폼 CRUD 정상 | FE | 완료 |
+
+---
+
+### Sprint 39: 정리 + 최종 검증 (FE) [v5.0, CR-026]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| - | theme.ts 잔여 인라인 참조 정리 | Sprint 36~38 | 인라인 스타일 잔여물 제거 | FE | 완료 |
+| - | 미사용 코드 제거 (hover useState 등) | Sprint 36~38 | Tailwind hover: 클래스로 전환 완료 | FE | 완료 |
+| - | 전체 페이지 시각 + 반응형 검증 | Sprint 36~38 | 20+ 페이지 정상 | FE | 완료 |
+| - | npm run build 정상 + tsc --noEmit 통과 | Sprint 36~38 | 빌드 에러 없음 | FE | 완료 |
+| - | 설계 문서 최종 갱신 (T2-1, CLAUDE.md, T1-7) | Sprint 38 | 문서 현행화 완료 | FE | 완료 |
+
+---
+
+### Sprint 42: 성능/퀄리티 메커니즘 (BE) [v6.0, CR-031]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-211 | PostCompactRecoveryService 구현 | Sprint 1(ContextWindowManager) | 압축 후 최근 파일 5개 + 메모리 재주입 확인 | BE | ✅ 구현완료 |
+| PRD-212 | MICRO_COMPACT 0비용 최적화 | Sprint 1(ConversationSummarizer) | Haiku 호출 없이 마커 대체 동작 확인 | BE | ✅ 구현완료 |
+| PRD-213 | MemoryAutoExtractService 구현 | Sprint 1(OrchestratorEngine) | 5턴 이상 대화 종료 시 LONG_TERM 메모리 자동 생성 확인 | BE | ✅ 구현완료 |
+| PRD-214 | ModelConfig ThinkingMode + AnthropicAdapter 분기 | Sprint 1(AnthropicAdapter) | ADAPTIVE 모드 → `{"type":"adaptive"}` API 파라미터 전송 확인 | BE | ✅ 구현완료 |
+| PRD-215 | ToolResultCompactor 구현 | Sprint 3(ToolCallHandler) | 도구별 축약 전략 적용 + compact_output 생성 확인 | BE | ✅ 구현완료 |
+| PRD-216 | SubagentProgressReporter 구현 | Sprint 41(SubagentRunner) | 30초 주기 progressSummary SSE 푸시 확인 | BE | ✅ 구현완료 |
+
+---
+
+### Sprint 43: 프로바이더 확장 (BE + FE) [v6.0, CR-032]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-217 | OpenAICompatibleAdapter 구현 | Sprint 2(ConnectionAdapterFactory) | base_url + api_key로 DeepSeek/Groq 채팅 성공 | BE | ✅ 구현완료 |
+| PRD-218 | BedrockAdapter 구현 + Gradle 의존성 | Sprint 2(ConnectionAdapterFactory) | AWS Bedrock Claude/Llama 채팅 성공 | BE | ✅ 구현완료 |
+| PRD-219 | VertexAIAdapter 구현 + Gradle 의존성 | Sprint 2(ConnectionAdapterFactory) | Vertex AI Gemini/Claude 채팅 성공 | BE | ✅ 구현완료 |
+| PRD-220 | SubagentRequest 라우팅 확장 | Sprint 41(SubagentRunner) | preferredConnectionId 지정 시 해당 커넥션 사용 확인 | BE | 미구현 |
+| PRD-221 | Connection 생성 폼 동적 필드 | Sprint 11(FE Connection) | adapter별 동적 입력 필드 렌더링 확인 | FE | 부분 구현 |
+| - | ConnectionAdapterFactory switch 확장 | PRD-217~219 | 4개 신규 adapter 분기 동작 확인 | BE | ✅ 구현완료 |
+| - | ConnectionAdapter enum + normalizeAdapterType 확장 | PRD-217~219 | openai_compatible/bedrock/vertex_ai 정규화 확인 | BE | ✅ 구현완료 |
+
+---
+
+### Sprint 44: 에이전트 구조적 사고 체계 (BE + FE) [v6.1, CR-033]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-222 | EnterPlanModeTool — Plan 도메인 + 계획모드 진입 | Sprint 3(ToolRegistry), CR-006(ToolFilterContext), CR-029(EnhancedToolExecutor) | 계획 모드 진입 시 readOnlyMode 활성화 + 쓰기 도구 차단 확인 | BE | ✅ 구현완료 |
+| PRD-223 | ExitPlanModeTool — 계획모드 종료 + 실행 전환 | PRD-222 | 계획 확정 + planModeActive=false 복원 + 쓰기 도구 재활성화 확인 | BE | ✅ 구현완료 |
+| PRD-224 | VerifyPlanExecutionTool — 계획 대비 실행 검증 | PRD-223 | 완료율 산출 + 미완료 gap 식별 + 100% 시 COMPLETED 전환 확인 | BE | ✅ 구현완료 |
+| PRD-225 | TodoWriteTool — 세션 체크리스트 | Sprint 1(SessionStore), CR-029(EnhancedToolExecutor) | todos 전체 교체 + Redis 캐시 + DB 영속 확인 | BE | ✅ 구현완료 |
+| PRD-226 | TaskCreate/Get/List — 태스크 생성/조회/목록 | CR-030(SubagentRunner) | SubagentRunner 백그라운드 실행 + 상태 조회 + 목록 필터링 확인 | BE | ✅ 구현완료 |
+| PRD-227 | TaskUpdate/Output/Stop — 태스크 수정/출력/중지 | PRD-226 | large_output 저장 + 실행 중 태스크 취소 + COMPLETED 수정 거부 확인 | BE | ✅ 구현완료 |
+| FE-015 | Plan/Todo/Task 대시보드 — 세션 상세 확장 | PRD-222~227, Sprint 11(FE Sessions) | 3개 탭 패널 렌더링 + SSE 실시간 업데이트 확인 | FE | ✅ 구현완료 |
+| - | Flyway V42 마이그레이션 (plans + todos + subagent_runs 확장) | V41 이후 | 마이그레이션 성공 + 테이블 생성 확인 | BE | ✅ 구현완료 |
+| - | BIZ-052~056 비즈니스 규칙 구현 검증 | PRD-222~227 | Plan 읽기전용 모드, 세션당 Plan 1개, FSM 전이, Task 5개 제한 검증 | BE | ✅ 구현완료 |
+
+---
+
+### Sprint 46: Tool/Policy 확장성·자동화 (BE + FE) [v6.2, CR-035]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-234 | CronScheduleManager — Spring TaskScheduler 래핑, scheduled_jobs 테이블, 서버 기동 시 active job 로드 | Sprint 6(WorkflowEngine), Sprint 9(TenantContext) | Cron 표현식 등록 + 지정 시각 워크플로우/도구 자동 실행 확인 | BE | 완료 |
+| PRD-235 | ScheduleCronTool + CronListTool + CronDeleteTool — LLM 자율 Cron CRUD | PRD-234 | 테넌트당 50개 제한 + 최소 1분 간격 + 3회 실패 시 비활성화 확인 | BE | 완료 |
+| PRD-236 | SkillInvokeTool — 재사용 프롬프트+도구 조합 경량 실행 | Sprint 3(ToolRegistry), CR-029(EnhancedToolExecutor) | skills 테이블 기반 단일 LLM 호출 + 결과 반환 확인 | BE | 완료 |
+| PRD-237 | ToolSearchTool — ToolContractMeta tags/capabilities/description 키워드 검색 | Sprint 3(ToolRegistry) | ToolRegistry.searchTools() 키워드 매칭 + 결과 반환 확인 | BE | 완료 |
+| PRD-238 | Python 사이드카 Firecrawl 어댑터 — scraper.py firecrawl 모드, Self-hosted 지원 | Sprint 15(Python 사이드카) | firecrawl-py 의존성 + API Key 미설정 시 js_render 폴백 확인 | Python | 완료 |
+| PRD-239 | BE 지식소스 Firecrawl 모드 — KnowledgeSource.crawl_mode + IngestionPipeline 분기 | PRD-238, Sprint 5(RAG) | crawl_mode 선택 시 Firecrawl 경유 인제스션 + FE 크롤링 모드 선택 확인 | BE | 완료 |
+| PRD-240 | DOMAIN_FILTER 규칙 타입 — PolicyEngine 도메인 필터링 | Sprint 4(PolicyEngine) | ALLOWLIST/BLOCKLIST 모드 + 와일드카드 서브도메인 + 차단 시 DENY 반환 확인 | BE | 완료 |
+| FE-017 | 스케줄/스킬/도구탐색/도메인필터 관리 UI | PRD-234~240, Sprint 11(FE 기본) | 스케줄 모니터링 탭 + 스킬 관리 페이지 + 도구 탐색 패널 + 정책 도메인 필터 UI 렌더링 확인 | FE | 완료 |
+| - | Flyway V20 (Master: scheduled_jobs) + V44 (Tenant: skills) 마이그레이션 | V19/V43 이후 | 마이그레이션 성공 + 테이블 생성 확인 | BE | 완료 |
+| - | BIZ-057~065 비즈니스 규칙 구현 검증 | PRD-234~240 | 스케줄 제한, 스킬 규칙, Firecrawl 폴백, 도메인 필터링 검증 | BE | 완료 |
+
+---
+
+### Sprint 47: 핵심 도구 네이티브화 (BE) [v6.3, CR-037]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-241 | BashTool — ProcessBuilder 셸 명령 실행, 위험 명령 차단 목록 | Sprint 3(ToolRegistry), CR-029(EnhancedToolExecutor) | 타임아웃 120초 + stdout/stderr 분리 캡처 + WorkspaceResolver 작업 디렉토리 제한 확인 | BE | ✅ 구현완료 |
+| PRD-242 | FileWriteTool — 신규 파일 생성 (SafeEditTool 보완) | Sprint 3(ToolRegistry), CR-029(EnhancedToolExecutor) | 부모 디렉토리 자동 생성 + 기존 파일 덮어쓰기 경고 + WorkspacePolicyEngine 경로 검증 확인 | BE | ✅ 구현완료 |
+| PRD-243 | WebSearchTool — Tavily API 우선 + DuckDuckGo HTML 폴백 | Sprint 2(Connection), Sprint 3(ToolRegistry) | Connection에서 API Key 조회 + title/url/snippet 구조화 반환 + 폴백 동작 확인 | BE | ✅ 구현완료 |
+| PRD-244 | SuggestBackgroundPR — Git 커밋 + GitHub PR 자동 생성 | Sprint 3(ToolRegistry), CR-029(EnhancedToolExecutor) | ProcessBuilder git 명령 + GitHub REST API + Connection 토큰 조회 확인 | BE | ✅ 구현완료 |
+| FE-018 | 도구 목록 자동 노출 (ToolRegistry 기반) | PRD-241~244, Sprint 12(FE 확장) | 기존 도구 목록 페이지에 4종 자동 노출 확인 | FE | ✅ 구현완료 |
+
+---
+
+### Sprint 48: 에이전트 자율성 강화 (BE + FE) [v6.4, CR-038]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-245 | ListMcpResourcesTool — MCP 리소스 목록 탐색 | Sprint 3(MCP), CR-029(EnhancedToolExecutor) | 연결된 서버의 리소스 URI/name/mimeType 반환 확인 | BE | ✅ 구현완료 |
+| PRD-246 | ReadMcpResourceTool — MCP 리소스 읽기 | PRD-245 | text/blob 콘텐츠 반환 + 32KB 트렁케이션 확인 | BE | ✅ 구현완료 |
+| PRD-247 | RemoteTriggerTool — 이벤트 기반 즉시 트리거 | CR-035(CronScheduleManager) | 워크플로우/도구 즉시 실행 + 분당 10회 제한 확인 | BE | ✅ 구현완료 |
+| PRD-248 | BriefTool — 세션 브리핑 | Sprint 1(SessionStore), CR-029(EnhancedToolExecutor) | 최근 50개 메시지 기반 요약 생성 + 캐시 확인 | BE | ✅ 구현완료 |
+| FE-019 | 세션 브리핑 패널 — 세션 상세 확장 | PRD-248, Sprint 11(FE Sessions) | Brief 탭 렌더링 + 수동 생성 버튼 확인 | FE | ✅ 구현완료 |
+| - | Flyway V45 마이그레이션 (session_briefs) | V44 이후 | 마이그레이션 성공 + 테이블 생성 확인 | BE | ✅ 구현완료 |
+| - | BIZ-066~069 비즈니스 규칙 구현 검증 | PRD-245~248 | 32KB 트렁케이션, 분당 10회 제한, 캐시 TTL, 50개 메시지 제한 검증 | BE | ✅ 구현완료 |
 
 ---
 

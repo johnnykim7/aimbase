@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { COLORS, FONTS } from "../../theme";
 import { Badge } from "../../components/common/Badge";
 import { ActionButton } from "../../components/common/ActionButton";
 import { DataTable, type Column } from "../../components/common/DataTable";
@@ -7,7 +6,8 @@ import { Modal } from "../../components/common/Modal";
 import { FormField, inputStyle, selectStyle } from "../../components/common/FormField";
 import { EmptyState } from "../../components/common/EmptyState";
 import { LoadingSpinner } from "../../components/common/LoadingSpinner";
-import { PageHeader } from "../../components/layout/PageHeader";
+import { Page } from "../../components/layout/Page";
+import { Building2 } from "lucide-react";
 import {
   useTenants, useCreateTenant, useDeleteTenant,
   useSuspendTenant, useActivateTenant,
@@ -15,23 +15,24 @@ import {
 import type { Tenant, TenantRequest } from "../../types/tenant";
 
 export default function Tenants() {
-  const { data: tenants = [], isLoading } = useTenants();
+  const [domainAppFilter] = useState<string>("");
+  const { data: tenants = [], isLoading } = useTenants(domainAppFilter || undefined);
   const createTenant = useCreateTenant();
   const deleteTenant = useDeleteTenant();
   const suspendTenant = useSuspendTenant();
   const activateTenant = useActivateTenant();
 
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState<TenantRequest>({ id: "", name: "", adminEmail: "", plan: "standard" });
+  const [form, setForm] = useState<TenantRequest>({ id: "", name: "", adminEmail: "", plan: "standard", domainApp: "" });
 
   const columns: Column<Tenant>[] = [
     {
-      header: "테넌트 ID",
-      render: (t) => <span style={{ fontFamily: FONTS.mono, color: COLORS.accent }}>{t.id}</span>,
+      header: "테넌트",
+      render: (t) => <span className="font-mono text-primary">{t.name || t.id}</span>,
     },
     {
       header: "이름",
-      render: (t) => <span style={{ fontWeight: 600 }}>{t.name}</span>,
+      render: (t) => <span className="font-semibold">{t.name}</span>,
     },
     {
       header: "플랜",
@@ -54,7 +55,7 @@ export default function Tenants() {
     {
       header: "DB",
       render: (t) => (
-        <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.textDim }}>
+        <span className="font-mono text-[11px] text-muted-foreground/40">
           {t.dbName ?? "—"}
         </span>
       ),
@@ -62,7 +63,7 @@ export default function Tenants() {
     {
       header: "생성일",
       render: (t) => (
-        <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.textMuted }}>
+        <span className="font-mono text-[11px] text-muted-foreground">
           {t.createdAt ? new Date(t.createdAt).toLocaleDateString("ko-KR") : "—"}
         </span>
       ),
@@ -71,7 +72,7 @@ export default function Tenants() {
     {
       header: "액션",
       render: (t) => (
-        <div style={{ display: "flex", gap: 4 }}>
+        <div className="flex gap-1">
           {t.status === "active" ? (
             <ActionButton small variant="danger" disabled={suspendTenant.isPending} onClick={() => suspendTenant.mutate(t.id)}>
               정지
@@ -93,20 +94,17 @@ export default function Tenants() {
   if (isLoading) return <LoadingSpinner fullPage />;
 
   return (
-    <div>
-      <PageHeader
-        title="테넌트 관리"
-        subtitle="Super Admin — 플랫폼 테넌트 전체 관리"
-        actions={
-          <ActionButton variant="primary" icon="+" onClick={() => setShowModal(true)}>
-            테넌트 생성
-          </ActionButton>
-        }
-      />
+    <Page
+      actions={
+        <ActionButton variant="primary" icon="+" onClick={() => setShowModal(true)}>
+          테넌트 생성
+        </ActionButton>
+      }
+    >
 
       {tenants.length === 0 ? (
         <EmptyState
-          icon="🏢"
+          icon={<Building2 className="size-6" />}
           title="등록된 테넌트가 없습니다"
           description="플랫폼에 새로운 테넌트를 추가하고 DB를 자동 프로비저닝합니다"
           action={
@@ -136,21 +134,10 @@ export default function Tenants() {
             <option value="enterprise">Enterprise</option>
           </select>
         </FormField>
-        <div
-          style={{
-            padding: "12px 14px",
-            borderRadius: 8,
-            background: COLORS.accentDim + "20",
-            border: `1px solid ${COLORS.accentDim}`,
-            fontSize: 12,
-            fontFamily: FONTS.mono,
-            color: COLORS.textMuted,
-            marginBottom: 16,
-          }}
-        >
+        <div className="py-3 px-3.5 rounded-lg bg-primary/10 border border-primary/30 text-xs font-mono text-muted-foreground mb-4">
           ℹ️ 테넌트 생성 시 PostgreSQL DB가 자동 생성되고 Flyway 마이그레이션이 실행됩니다.
         </div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <div className="flex gap-2 justify-end">
           <ActionButton variant="ghost" onClick={() => setShowModal(false)}>취소</ActionButton>
           <ActionButton
             variant="primary"
@@ -162,6 +149,6 @@ export default function Tenants() {
           </ActionButton>
         </div>
       </Modal>
-    </div>
+    </Page>
   );
 }

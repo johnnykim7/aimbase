@@ -92,6 +92,59 @@ public class MCPServerClient implements AutoCloseable {
                 .collect(Collectors.joining("\n"));
     }
 
+    /**
+     * MCP 서버에서 리소스 목록 조회.
+     * @return 리소스 목록 (URI, name, description, mimeType)
+     */
+    public List<Map<String, Object>> listResources() {
+        ensureConnected();
+        try {
+            McpSchema.ListResourcesResult result = client.listResources();
+            return result.resources().stream()
+                    .map(r -> {
+                        Map<String, Object> m = new java.util.LinkedHashMap<>();
+                        m.put("uri", r.uri());
+                        m.put("name", r.name());
+                        if (r.description() != null) m.put("description", r.description());
+                        if (r.mimeType() != null) m.put("mimeType", r.mimeType());
+                        m.put("serverId", serverId);
+                        return m;
+                    })
+                    .toList();
+        } catch (Exception e) {
+            log.warn("listResources failed for server '{}': {}", serverId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * MCP 서버에서 특정 리소스 읽기.
+     * @param uri 리소스 URI
+     * @return 콘텐츠 맵 { uri, mimeType, content, type }
+     */
+    public Map<String, Object> readResource(String uri) {
+        ensureConnected();
+        McpSchema.ReadResourceResult result = client.readResource(
+                new McpSchema.ReadResourceRequest(uri));
+
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("uri", uri);
+
+        if (result.contents() != null && !result.contents().isEmpty()) {
+            var content = result.contents().get(0);
+            if (content instanceof McpSchema.TextResourceContents textContent) {
+                response.put("type", "text");
+                response.put("mimeType", textContent.mimeType());
+                response.put("content", textContent.text());
+            } else if (content instanceof McpSchema.BlobResourceContents blobContent) {
+                response.put("type", "blob");
+                response.put("mimeType", blobContent.mimeType());
+                response.put("content", blobContent.blob());
+            }
+        }
+        return response;
+    }
+
     public boolean isInitialized() {
         return initialized;
     }

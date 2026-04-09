@@ -3,6 +3,7 @@ package com.platform.config;
 import com.platform.auth.ApiKeyAuthenticationFilter;
 import com.platform.auth.JwtAuthenticationFilter;
 import com.platform.auth.JwtProvider;
+import com.platform.repository.master.ApiKeyRepository;
 import com.platform.repository.RoleRepository;
 import com.platform.repository.UserRepository;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -31,13 +32,16 @@ public class SecurityConfig {
     private final JwtProvider jwtProvider;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final ApiKeyRepository apiKeyRepository;
 
     public SecurityConfig(JwtProvider jwtProvider,
                           UserRepository userRepository,
-                          RoleRepository roleRepository) {
+                          RoleRepository roleRepository,
+                          ApiKeyRepository apiKeyRepository) {
         this.jwtProvider = jwtProvider;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
+        this.apiKeyRepository = apiKeyRepository;
     }
 
     @Bean
@@ -49,7 +53,7 @@ public class SecurityConfig {
     @ConditionalOnProperty(name = "security.enabled", havingValue = "true", matchIfMissing = true)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         var jwtFilter = new JwtAuthenticationFilter(jwtProvider, userRepository, roleRepository);
-        var apiKeyFilter = new ApiKeyAuthenticationFilter(userRepository, roleRepository);
+        var apiKeyFilter = new ApiKeyAuthenticationFilter(userRepository, roleRepository, apiKeyRepository);
 
         http
             .csrf(csrf -> csrf.disable())
@@ -57,14 +61,16 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/**", "/swagger-ui/**", "/api-docs/**", "/ws/**").permitAll()
                 // MCP SSE 엔드포인트
-                .requestMatchers("/sse/**", "/mcp/**").permitAll()
+                .requestMatchers("/sse/**", "/mcp/**", "/admin-mcp/**").permitAll()
                 // 인증 엔드포인트
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                // 사이드카 토큰 조회 (인증 없이 접근 가능 — 사이드카 기동 시 호출)
+                .requestMatchers("/api/v1/platform/agent-accounts/*/token").permitAll()
                 // RBAC
                 .requestMatchers("/api/v1/platform/**").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/apps/*/auth/**").permitAll()
                 .requestMatchers("/api/v1/apps/**").authenticated()
-                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/v1/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 // 그 외 API — 인증 필요
                 .requestMatchers("/api/v1/**").authenticated()
                 .anyRequest().permitAll()

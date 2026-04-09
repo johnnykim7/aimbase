@@ -6,23 +6,37 @@ services:
       context: .
       dockerfile: platform-core/Dockerfile
     ports:
-      - "8080:8080"
+      - "8280:8080"
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      postgres-master:
-        condition: service_healthy
-      postgres-tenant-dev:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: local
+      # 로컬 DB 접속 (host.docker.internal → 호스트 머신)
+      MASTER_DB_URL: jdbc:postgresql://host.docker.internal:5432/aimbase_master
+      TENANT_DB_HOST: host.docker.internal
+      TENANT_DB_PORT: "5432"
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: "6379"
+      # Claude Code CLI 도구 활성화 (CLAUDE_CONFIG_DIR 방식 다중 계정)
+      CLAUDE_CODE_ENABLED: "true"
+      CLAUDE_CODE_TIMEOUT: "600"
+      CLAUDE_CODE_MAX_TURNS: "10"
+      CLAUDE_CODE_WORKING_DIR: "/data/workspace"
+    volumes:
+      # 계정별 Claude 설정 디렉토리 (CLAUDE_CONFIG_DIR 방식)
+      - ~/.claude-accounts:/home/appuser/.claude-accounts
+      # 작업 데이터 디렉토리
+      - /tmp/aimbase-workspace:/data/workspace
 
   # Master DB — 테넌트 레지스트리, 구독, 글로벌 설정
   postgres-master:
     image: postgres:16
     ports:
-      - "5434:5432"
+      - "5435:5432"
     environment:
       POSTGRES_DB: aimbase_master
       POSTGRES_USER: platform
@@ -56,7 +70,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6381:6379"
+      - "6382:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

@@ -12,7 +12,18 @@
       "Bash(JAR=\"/Users/sykim/.gradle/caches/modules-2/files-2.1/com.anthropic/anthropic-java-core/2.12.0/93cc57ab474793a9cf39f56b8212e7402a27db5d/anthropic-java-core-2.12.0.jar\" javap:*)",
       "Bash(JAR=/Users/sykim/.gradle/caches/modules-2/files-2.1/com.openai/openai-java-core/2.1.0/bc957b45a8a1fe1d78ab4e5041a740c43ad9d0dc/openai-java-core-2.1.0.jar)",
       "Bash(JAR=/tmp/openai-java-core-2.1.0.jar javap:*)",
-      "Bash(JAR=/tmp/openai-java-core-2.1.0.jar)"
+      "Bash(JAR=/tmp/openai-java-core-2.1.0.jar)",
+      "mcp__flowguard__flowguard_list_solutions",
+      "mcp__flowguard__flowguard_register_solution",
+      "mcp__flowguard__flowguard_create_connector",
+      "mcp__flowguard__flowguard_validate_step_dsl",
+      "mcp__flowguard__flowguard_create_step",
+      "mcp__flowguard__flowguard_create_scenario",
+      "mcp__flowguard__flowguard_list_scenarios",
+      "mcp__flowguard__flowguard_list_steps",
+      "mcp__flowguard__flowguard_run_scenario",
+      "mcp__flowguard__flowguard_list_runs",
+      "mcp__flowguard__flowguard_list_connectors"
     ],
     "additionalDirectories": [
       "/Users/sykim/.gradle/caches/modules-2/files-2.1/com.openai/openai-java-core/2.1.0/bc957b45a8a1fe1d78ab4e5041a740c43ad9d0dc"

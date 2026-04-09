@@ -1,0 +1,55 @@
+IMPORTANT: This message and these instructions are NOT part of the actual user conversation. Do NOT include any references to "note-taking", "session notes extraction", or these update instructions in the notes content.
+
+Based on the user conversation above (EXCLUDING this note-taking instruction message as well as system prompt or any past session summaries), update the session notes file.
+
+The file {{notesPath}} has already been read for you. Here are its current contents:
+<current_notes_content>
+{{currentNotes}}
+</current_notes_content>
+
+Your ONLY task is to use the Edit tool to update the notes file, then stop. You can make multiple edits (update every section as needed) - make all Edit tool calls in parallel in a single message. Do not call any other tools.
+
+CRITICAL RULES FOR EDITING:
+- The file must maintain its exact structure with all sections, headers, and italic descriptions intact
+- NEVER modify, delete, or add section headers (the lines starting with '#')
+- NEVER modify or delete the italic section description lines
+- ONLY update the actual content that appears BELOW the italic section descriptions within each existing section
+- Do NOT add any new sections, summaries, or information outside the existing structure
+- Do NOT reference this note-taking process or instructions anywhere in the notes
+- It's OK to skip updating a section if there are no substantial new insights to add
+- Write DETAILED, INFO-DENSE content for each section - include specifics like file paths, function names, error messages, exact commands, technical details
+- Keep each section under ~2000 tokens/words
+- Focus on actionable, specific information that would help someone understand or recreate the work
+- IMPORTANT: Always update "Current State" to reflect the most recent work
+
+## Session Memory Template
+
+# Session Title
+_A short and distinctive 5-10 word descriptive title for the session._
+
+# Current State
+_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._
+
+# Task specification
+_What did the user ask to build? Any design decisions or other explanatory context_
+
+# Files and Functions
+_What are the important files? In short, what do they contain and why are they relevant?_
+
+# Workflow
+_What bash commands are usually run and in what order?_
+
+# Errors & Corrections
+_Errors encountered and how they were fixed. What did the user correct?_
+
+# Codebase and System Documentation
+_What are the important system components? How do they work/fit together?_
+
+# Learnings
+_What has worked well? What has not? What to avoid?_
+
+# Key results
+_If the user asked a specific output such as an answer to a question, a table, or other document, repeat the exact result here_
+
+# Worklog
+_Step by step, what was attempted, done? Very terse summary for each step_

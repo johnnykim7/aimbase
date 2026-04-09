@@ -1,0 +1,17 @@
+The output of the following task is too large to generate at once.
+Create a split plan into independently generable parts.
+
+=== Original System Prompt ===
+{{system}}
+
+=== Original Request ===
+{{prompt}}
+
+=== Output Schema ===
+{{schema}}
+
+Rules:
+- Each part must be generable within 3000 tokens
+- Number of parts: 2 to {{max_parts}}
+- Each part's scope must be specific and clear
+- Part results must be mergeable into the final schema

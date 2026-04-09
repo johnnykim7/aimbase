@@ -14,4 +14,5 @@ public interface WorkflowRunRepository extends JpaRepository<WorkflowRunEntity, 
     Page<WorkflowRunEntity> findByWorkflowIdOrderByStartedAtDesc(String workflowId, Pageable pageable);
     List<WorkflowRunEntity> findBySessionId(String sessionId);
     Page<WorkflowRunEntity> findByStatusOrderByStartedAtDesc(String status, Pageable pageable);
+    void deleteByWorkflowId(String workflowId);
 }

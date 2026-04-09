@@ -4,6 +4,7 @@ import com.platform.action.AdapterRegistry;
 import com.platform.action.model.HealthStatus;
 import com.platform.domain.ConnectionEntity;
 import com.platform.llm.ConnectionAdapterFactory;
+import com.platform.llm.ConnectionManagementService;
 import com.platform.repository.ConnectionRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -25,13 +26,16 @@ public class ConnectionController {
     private final ConnectionRepository connectionRepository;
     private final AdapterRegistry adapterRegistry;
     private final ConnectionAdapterFactory connectionAdapterFactory;
+    private final ConnectionManagementService connectionManagementService;
 
     public ConnectionController(ConnectionRepository connectionRepository,
                                  AdapterRegistry adapterRegistry,
-                                 ConnectionAdapterFactory connectionAdapterFactory) {
+                                 ConnectionAdapterFactory connectionAdapterFactory,
+                                 ConnectionManagementService connectionManagementService) {
         this.connectionRepository = connectionRepository;
         this.adapterRegistry = adapterRegistry;
         this.connectionAdapterFactory = connectionAdapterFactory;
+        this.connectionManagementService = connectionManagementService;
     }
 
     @GetMapping
@@ -52,8 +56,11 @@ public class ConnectionController {
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "연결 생성")
     public ApiResponse<ConnectionEntity> create(@Valid @RequestBody ConnectionRequest request) {
+        connectionManagementService.checkTenantCanModifyConnections();
         ConnectionEntity entity = new ConnectionEntity();
-        entity.setId(request.id());
+        entity.setId(request.id() != null && !request.id().isBlank()
+                ? request.id()
+                : java.util.UUID.randomUUID().toString());
         entity.setName(request.name());
         entity.setAdapter(request.adapter());
         entity.setType(request.type());
@@ -74,6 +81,7 @@ public class ConnectionController {
     @Operation(summary = "연결 수정")
     public ApiResponse<ConnectionEntity> update(@PathVariable String id,
                                                   @Valid @RequestBody ConnectionRequest request) {
+        connectionManagementService.checkTenantCanModifyConnections();
         ConnectionEntity entity = connectionRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Connection not found: " + id));
         entity.setName(request.name());
@@ -86,6 +94,7 @@ public class ConnectionController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "연결 삭제")
     public void delete(@PathVariable String id) {
+        connectionManagementService.checkTenantCanModifyConnections();
         connectionRepository.deleteById(id);
     }
 
@@ -118,7 +127,7 @@ public class ConnectionController {
     }
 
     public record ConnectionRequest(
-            @NotBlank String id,
+            String id,
             @NotBlank String name,
             @NotBlank String adapter,
             @NotBlank String type,

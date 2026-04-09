@@ -19,13 +19,24 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  *   → masterJdbcTemplate → dataSourceScriptDatabaseInitializer 순환 참조 방지.
  *   데이터 초기화는 FlywayMultiTenantConfig에서 직접 처리한다.
  */
-@SpringBootApplication(exclude = {
-    DataSourceAutoConfiguration.class,
-    DataSourceTransactionManagerAutoConfiguration.class,
-    HibernateJpaAutoConfiguration.class,
-    FlywayAutoConfiguration.class,
-    SqlInitializationAutoConfiguration.class
-})
+@SpringBootApplication(
+    exclude = {
+        DataSourceAutoConfiguration.class,
+        DataSourceTransactionManagerAutoConfiguration.class,
+        HibernateJpaAutoConfiguration.class,
+        FlywayAutoConfiguration.class,
+        SqlInitializationAutoConfiguration.class
+    },
+    excludeName = {
+        "org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration",
+        "org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration",
+        "org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration",
+        "org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration",
+        "org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration",
+        "org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration",
+        "org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration"
+    }
+)
 @EnableAsync
 @EnableScheduling
 public class PlatformApplication {

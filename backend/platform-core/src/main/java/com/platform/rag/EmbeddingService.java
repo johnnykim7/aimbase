@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 /**
  * Spring AI EmbeddingModel을 래핑하는 서비스.
  * 기본 모델: OpenAI text-embedding-3-small (1536 차원)
+ * OPENAI_API_KEY 미설정 시 EmbeddingModel 빈이 없으므로 이 서비스도 생성되지 않는다.
  */
 @Component
 public class EmbeddingService {
@@ -21,8 +22,16 @@ public class EmbeddingService {
 
     private final EmbeddingModel embeddingModel;
 
-    public EmbeddingService(EmbeddingModel embeddingModel) {
+    public EmbeddingService(@org.springframework.beans.factory.annotation.Autowired(required = false)
+                             EmbeddingModel embeddingModel) {
         this.embeddingModel = embeddingModel;
+        if (embeddingModel == null) {
+            log.warn("EmbeddingModel not available (OPENAI_API_KEY not set). Embedding features disabled.");
+        }
+    }
+
+    public boolean isAvailable() {
+        return embeddingModel != null;
     }
 
     /**
@@ -32,6 +41,9 @@ public class EmbeddingService {
      * @return float[] 벡터 (1536 차원)
      */
     public float[] embed(String text) {
+        if (embeddingModel == null) {
+            throw new IllegalStateException("EmbeddingModel not available. Set OPENAI_API_KEY to enable embedding.");
+        }
         EmbeddingResponse response = embeddingModel.embedForResponse(List.of(text));
         float[] vector = response.getResult().getOutput();
         log.debug("Embedded text ({}chars) → {}d vector", text.length(), vector.length);
@@ -46,6 +58,9 @@ public class EmbeddingService {
      */
     public List<float[]> embed(List<String> texts) {
         if (texts.isEmpty()) return List.of();
+        if (embeddingModel == null) {
+            throw new IllegalStateException("EmbeddingModel not available. Set OPENAI_API_KEY to enable embedding.");
+        }
         EmbeddingResponse response = embeddingModel.embedForResponse(texts);
         List<float[]> vectors = response.getResults().stream()
                 .map(r -> r.getOutput())

@@ -130,11 +130,11 @@ class PlatformIntegrationTest {
         String pass = postgres.getPassword();
 
         onboardingService.provision(new TenantOnboardingRequest(
-                TENANT_A, "Alpha Corp", "admin@alpha.test", "TestPass1!", "starter",
+                TENANT_A, null, "Alpha Corp", "admin@alpha.test", "TestPass1!", "starter",
                 host, port, user, pass));
 
         onboardingService.provision(new TenantOnboardingRequest(
-                TENANT_B, "Beta Corp", "admin@beta.test", "TestPass1!", "starter",
+                TENANT_B, null, "Beta Corp", "admin@beta.test", "TestPass1!", "starter",
                 host, port, user, pass));
     }
 

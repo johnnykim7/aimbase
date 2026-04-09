@@ -1,0 +1,5 @@
+Transform the following question into a more general, abstract higher-level concept question. Remove specific details and focus on core concepts.
+
+Specific question: {{query}}
+
+Abstract question:

@@ -1,10 +1,13 @@
 export interface WorkflowStep {
   id: string;
   name: string;
-  type: "llm" | "tool" | "condition" | "parallel" | "approval" | "action";
+  type: "llm" | "tool" | "condition" | "parallel" | "approval" | "action" | string;
   config?: Record<string, unknown>;
   dependsOn?: string[];
   nextSteps?: string[];
+  onSuccess?: string;
+  onFailure?: string;
+  timeoutMs?: number;
   conditionBranches?: { condition: string; nextStep: string }[];
 }
 
@@ -14,6 +17,7 @@ export interface Workflow {
   description?: string;
   trigger?: string;
   steps?: WorkflowStep[];
+  inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   stepCount?: number;
   runCount?: number;
@@ -29,7 +33,10 @@ export interface WorkflowRun {
   status: "running" | "completed" | "failed" | "pending_approval";
   startedAt?: string;
   completedAt?: string;
-  error?: string;
+  error?: Record<string, unknown> | string;
+  stepResults?: Record<string, Record<string, unknown>>;
+  currentStep?: string;
+  inputData?: Record<string, unknown>;
   steps?: { stepId: string; status: string; output?: unknown }[];
 }
 
@@ -39,6 +46,9 @@ export interface WorkflowRequest {
   description?: string;
   trigger?: string;
   steps?: WorkflowStep[];
+  inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   status?: string;
 }
+
+export type PlatformWorkflow = Workflow;

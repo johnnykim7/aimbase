@@ -4,6 +4,7 @@ import com.anthropic.client.AnthropicClient;
 import com.anthropic.core.JsonValue;
 import com.anthropic.helpers.MessageAccumulator;
 import com.anthropic.models.messages.Base64ImageSource;
+import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.ContentBlockParam;
 import com.anthropic.models.messages.ImageBlockParam;
@@ -16,6 +17,8 @@ import com.anthropic.models.messages.Tool;
 import com.anthropic.models.messages.ToolResultBlockParam;
 import com.anthropic.models.messages.ToolUseBlock;
 import com.anthropic.models.messages.ToolUseBlockParam;
+import com.anthropic.models.messages.ThinkingBlock;
+import com.anthropic.models.messages.ThinkingConfigEnabled;
 import com.anthropic.models.messages.ToolChoice;
 import com.anthropic.models.messages.ToolChoiceAny;
 import com.anthropic.models.messages.ToolChoiceAuto;
@@ -50,15 +53,23 @@ public class AnthropicAdapter implements LLMAdapter {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final AnthropicClient client;
+    private final int defaultMaxTokens;
 
+    // [input$/MTok, output$/MTok, cacheWrite$/MTok, cacheRead$/MTok]
     private static final Map<String, double[]> COSTS = Map.of(
-            "claude-opus-4-6",           new double[]{15.0, 75.0},
-            "claude-sonnet-4-5",         new double[]{3.0,  15.0},
-            "claude-haiku-4-5-20251001", new double[]{0.25,  1.25}
+            "claude-opus-4-6",           new double[]{15.0,  75.0, 18.75, 1.50},
+            "claude-sonnet-4-6",         new double[]{ 3.0,  15.0,  3.75, 0.30},
+            "claude-sonnet-4-5",         new double[]{ 3.0,  15.0,  3.75, 0.30},
+            "claude-haiku-4-5-20251001", new double[]{ 0.25,  1.25, 0.30, 0.03}
     );
 
-    public AnthropicAdapter(AnthropicClient client) {
+    private static final CacheControlEphemeral CACHE_EPHEMERAL =
+            CacheControlEphemeral.builder().build();
+
+    public AnthropicAdapter(AnthropicClient client,
+                           @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens) {
         this.client = client;
+        this.defaultMaxTokens = defaultMaxTokens;
     }
 
     @Override
@@ -78,7 +89,7 @@ public class AnthropicAdapter implements LLMAdapter {
             MessageCreateParams.Builder builder = MessageCreateParams.builder()
                     .model(Model.of(modelId))
                     .maxTokens(request.config() != null && request.config().maxTokens() != null
-                            ? request.config().maxTokens() : 4096);
+                            ? request.config().maxTokens() : defaultMaxTokens);
 
             List<MessageParam> userMessages = new ArrayList<>();
             StringBuilder systemText = new StringBuilder();
@@ -103,12 +114,48 @@ public class AnthropicAdapter implements LLMAdapter {
                     log.warn("Failed to serialize schema for Anthropic prompt injection: {}", e.getMessage());
                 }
             }
+            // Prompt Cache: system prompt를 TextBlockParam 목록으로 전달하고 마지막 블록에 cache_control 적용
+            // 5분 ephemeral 캐시 → 반복 호출 시 cache_read 요금(0.1x)만 과금
             if (!systemText.isEmpty()) {
-                builder.system(systemText.toString());
+                builder.systemOfTextBlockParams(List.of(
+                        TextBlockParam.builder()
+                                .text(systemText.toString())
+                                .cacheControl(CACHE_EPHEMERAL)
+                                .build()
+                ));
             }
             builder.messages(userMessages);
 
-            if (request.config() != null && request.config().temperature() != null) {
+            // CR-031 PRD-214: Adaptive Thinking — 3모드 분기
+            com.platform.llm.model.ThinkingMode thinkingMode = request.config() != null
+                    ? request.config().resolveThinkingMode()
+                    : com.platform.llm.model.ThinkingMode.DISABLED;
+
+            if (thinkingMode == com.platform.llm.model.ThinkingMode.ADAPTIVE) {
+                // ADAPTIVE: 모델이 자동으로 budget 결정
+                // Claude 4.6+ 모델에서만 지원. 미지원 시 ENABLED로 폴백.
+                String reqModel = request.model() != null ? request.model() : "";
+                if (reqModel.contains("opus-4-6") || reqModel.contains("sonnet-4-6")) {
+                    builder.enabledThinking(0); // budget=0 → API가 adaptive로 처리
+                } else {
+                    // 미지원 모델 → ENABLED 폴백 (기본 budget 10000)
+                    int budget = request.config().thinkingBudgetTokens() != null
+                            ? request.config().thinkingBudgetTokens() : 10000;
+                    int maxTok = request.config().maxTokens() != null
+                            ? request.config().maxTokens() : 16000;
+                    budget = Math.max(1024, Math.min(budget, maxTok - 1));
+                    builder.enabledThinking(budget);
+                    log.debug("ADAPTIVE thinking 미지원 모델 '{}' → ENABLED 폴백 (budget={})", modelId, budget);
+                }
+            } else if (thinkingMode == com.platform.llm.model.ThinkingMode.ENABLED) {
+                int budget = request.config().thinkingBudgetTokens() != null
+                        ? request.config().thinkingBudgetTokens() : 10000;
+                int maxTok = request.config().maxTokens() != null
+                        ? request.config().maxTokens() : 16000;
+                budget = Math.max(1024, Math.min(budget, maxTok - 1));
+                builder.enabledThinking(budget);
+            } else if (request.config() != null && request.config().temperature() != null) {
+                // DISABLED — temperature 설정 가능 (thinking 비활성 시만)
                 builder.temperature(request.config().temperature());
             }
 
@@ -129,7 +176,15 @@ public class AnthropicAdapter implements LLMAdapter {
             } else if (request.tools() != null && !request.tools().isEmpty()) {
                 @SuppressWarnings("unchecked")
                 List<Tool> anthropicTools = (List<Tool>) transformToolDefs(request.tools());
-                List<ToolUnion> toolUnions = anthropicTools.stream()
+                // Prompt Cache: 마지막 도구 정의에 cache_control 적용 (도구 목록 전체 캐시)
+                List<Tool> cachedTools = new ArrayList<>(anthropicTools);
+                if (!cachedTools.isEmpty()) {
+                    int last = cachedTools.size() - 1;
+                    cachedTools.set(last, cachedTools.get(last).toBuilder()
+                            .cacheControl(CACHE_EPHEMERAL)
+                            .build());
+                }
+                List<ToolUnion> toolUnions = cachedTools.stream()
                         .map(t -> ToolUnion.Companion.ofTool(t))
                         .toList();
                 builder.tools(toolUnions);
@@ -159,17 +214,52 @@ public class AnthropicAdapter implements LLMAdapter {
             MessageCreateParams.Builder builder = MessageCreateParams.builder()
                     .model(Model.of(modelId))
                     .maxTokens(request.config() != null && request.config().maxTokens() != null
-                            ? request.config().maxTokens() : 4096);
+                            ? request.config().maxTokens() : defaultMaxTokens);
 
             List<MessageParam> userMessages = new ArrayList<>();
+            StringBuilder streamSystemText = new StringBuilder();
             for (UnifiedMessage msg : request.messages()) {
                 if (msg.role() == UnifiedMessage.Role.SYSTEM) {
-                    builder.system(extractText(msg));
+                    streamSystemText.append(extractText(msg));
                 } else {
                     userMessages.add(toAnthropicMessage(msg));
                 }
             }
+            if (!streamSystemText.isEmpty()) {
+                builder.systemOfTextBlockParams(List.of(
+                        TextBlockParam.builder()
+                                .text(streamSystemText.toString())
+                                .cacheControl(CACHE_EPHEMERAL)
+                                .build()
+                ));
+            }
             builder.messages(userMessages);
+
+            // CR-031 PRD-214: 스트리밍에도 Adaptive Thinking 3모드 적용
+            com.platform.llm.model.ThinkingMode streamThinkingMode = request.config() != null
+                    ? request.config().resolveThinkingMode()
+                    : com.platform.llm.model.ThinkingMode.DISABLED;
+
+            if (streamThinkingMode == com.platform.llm.model.ThinkingMode.ADAPTIVE) {
+                String reqModel = request.model() != null ? request.model() : "";
+                if (reqModel.contains("opus-4-6") || reqModel.contains("sonnet-4-6")) {
+                    builder.enabledThinking(0);
+                } else {
+                    int budget = request.config().thinkingBudgetTokens() != null
+                            ? request.config().thinkingBudgetTokens() : 10000;
+                    int maxTok = request.config().maxTokens() != null
+                            ? request.config().maxTokens() : 16000;
+                    budget = Math.max(1024, Math.min(budget, maxTok - 1));
+                    builder.enabledThinking(budget);
+                }
+            } else if (streamThinkingMode == com.platform.llm.model.ThinkingMode.ENABLED) {
+                int budget = request.config().thinkingBudgetTokens() != null
+                        ? request.config().thinkingBudgetTokens() : 10000;
+                int maxTok = request.config().maxTokens() != null
+                        ? request.config().maxTokens() : 16000;
+                budget = Math.max(1024, Math.min(budget, maxTok - 1));
+                builder.enabledThinking(budget);
+            }
 
             MessageAccumulator accumulator = MessageAccumulator.create();
             try (var stream = client.messages().createStreaming(builder.build())) {
@@ -180,6 +270,10 @@ public class AnthropicAdapter implements LLMAdapter {
                         if (delta.isText()) {
                             String text = delta.asText().text();
                             chunkConsumer.accept(LLMStreamChunk.text(responseId, request.model(), text));
+                        } else if (delta.isThinking()) {
+                            // CR-030: thinking delta는 별도 타입으로 전달
+                            String thinking = delta.asThinking().thinking();
+                            chunkConsumer.accept(LLMStreamChunk.thinking(responseId, request.model(), thinking));
                         }
                     }
                 });
@@ -382,7 +476,13 @@ public class AnthropicAdapter implements LLMAdapter {
                                        String modelId, long latencyMs) {
         List<com.platform.llm.model.ContentBlock> content = msg.content().stream()
                 .map(block -> {
-                    if (block.isText()) {
+                    // CR-030: Extended Thinking 블록 처리
+                    if (block.isThinking()) {
+                        ThinkingBlock tb = block.asThinking();
+                        return (com.platform.llm.model.ContentBlock)
+                                new com.platform.llm.model.ContentBlock.Thinking(
+                                        tb.thinking(), tb.signature());
+                    } else if (block.isText()) {
                         return (com.platform.llm.model.ContentBlock)
                                 new com.platform.llm.model.ContentBlock.Text(block.asText().text());
                     } else if (block.isToolUse()) {
@@ -402,13 +502,21 @@ public class AnthropicAdapter implements LLMAdapter {
                 })
                 .toList();
 
+        int cacheCreate = msg.usage().cacheCreationInputTokens().orElse(0L).intValue();
+        int cacheRead   = msg.usage().cacheReadInputTokens().orElse(0L).intValue();
         TokenUsage usage = new TokenUsage(
                 (int) msg.usage().inputTokens(),
-                (int) msg.usage().outputTokens()
+                (int) msg.usage().outputTokens(),
+                cacheCreate,
+                cacheRead
         );
 
-        double[] costPerMillion = COSTS.getOrDefault(extractModelId(modelId), new double[]{3.0, 15.0});
-        double cost = (usage.inputTokens() * costPerMillion[0] + usage.outputTokens() * costPerMillion[1]) / 1_000_000;
+        // [input, output, cacheWrite, cacheRead] in $/MTok
+        double[] c = COSTS.getOrDefault(extractModelId(modelId), new double[]{3.0, 15.0, 3.75, 0.30});
+        double cost = (usage.inputTokens()              * c[0]
+                     + usage.outputTokens()             * c[1]
+                     + usage.cacheCreationInputTokens() * c[2]
+                     + usage.cacheReadInputTokens()     * c[3]) / 1_000_000;
 
         String stopReasonStr = msg.stopReason().map(StopReason::asString).orElse("end_turn");
         LLMResponse.FinishReason finishReason = switch (stopReasonStr) {

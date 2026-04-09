@@ -1,0 +1,23 @@
+# 로컬 PostgreSQL(5432)만 사용 — Docker DB 기동 금지
+# CLAUDE.md 규칙: "DB는 로컬 PostgreSQL(5432) 사용, Docker DB 접근 절대 금지"
+services:
+  api:
+    depends_on: {}
+    environment:
+      MASTER_DB_URL: jdbc:postgresql://host.docker.internal:5432/aimbase_master
+      TENANT_DB_HOST: host.docker.internal
+      SPRING_REDIS_HOST: host.docker.internal
+      SPRING_REDIS_PORT: "6379"
+
+  # Docker DB 완전 비활성화 (scale: 0)
+  postgres-master:
+    deploy:
+      replicas: 0
+
+  postgres-tenant-dev:
+    deploy:
+      replicas: 0
+
+  redis:
+    deploy:
+      replicas: 0

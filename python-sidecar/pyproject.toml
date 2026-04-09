@@ -29,11 +29,17 @@ dependencies = [
     # Utilities
     "numpy>=1.26.0",
     "pydantic>=2.0.0",
+    # Document Generation (CR-018)
+    "python-pptx>=1.0.0",
+    "python-docx>=1.1.0",
+    "reportlab>=4.0.0",
+    "openpyxl>=3.1.0",
 ]
 
 [project.optional-dependencies]
 multimodal = ["transformers>=4.40.0", "Pillow>=10.0.0"]
 scraping = ["playwright>=1.40.0"]
+firecrawl = ["firecrawl-py>=1.0.0"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

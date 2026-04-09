@@ -1,11 +1,15 @@
 package com.platform.policy;
 
 import com.platform.action.model.ActionRequest;
+import com.platform.hook.HookDispatcher;
+import com.platform.hook.HookEvent;
+import com.platform.hook.HookInput;
 import com.platform.monitoring.PlatformMetrics;
 import com.platform.policy.model.PolicyResult;
 import com.platform.policy.model.TriggeredPolicy;
 import com.platform.repository.PolicyRepository;
 import com.platform.domain.PolicyEntity;
+import com.platform.tool.PermissionLevel;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +33,7 @@ import java.util.Map;
  * - LOG             → 감사 로그 기록 후 ALLOW
  * - TRANSFORM       → Presidio MCP(우선) 또는 PIIMasker(폴백)로 PII 마스킹 후 ALLOW
  * - RATE_LIMIT      → 슬라이딩 윈도우 초과 시 DENY
+ * - DOMAIN_FILTER   → CR-035 PRD-240: 도메인 기반 접근 제어 (allowed/blocked)
  * - ALLOW           → 명시적 허용
  *
  * 각 규칙에 `condition` 필드가 있으면 SpEL 표현식으로 평가;
@@ -49,6 +54,7 @@ public class PolicyEngine {
     private final MCPSafetyClient mcpSafetyClient;
     private final RateLimiter rateLimiter;
     private final PlatformMetrics platformMetrics;
+    private final HookDispatcher hookDispatcher;
 
     public PolicyEngine(PolicyRepository policyRepository,
                         AuditLogger auditLogger,
@@ -56,7 +62,8 @@ public class PolicyEngine {
                         PIIMasker piiMasker,
                         MCPSafetyClient mcpSafetyClient,
                         RateLimiter rateLimiter,
-                        PlatformMetrics platformMetrics) {
+                        PlatformMetrics platformMetrics,
+                        HookDispatcher hookDispatcher) {
         this.policyRepository = policyRepository;
         this.auditLogger = auditLogger;
         this.objectMapper = objectMapper;
@@ -64,12 +71,23 @@ public class PolicyEngine {
         this.mcpSafetyClient = mcpSafetyClient;
         this.rateLimiter = rateLimiter;
         this.platformMetrics = platformMetrics;
+        this.hookDispatcher = hookDispatcher;
     }
 
     /**
      * ActionRequest에 대해 활성화된 모든 Policy를 priority 순으로 평가.
      */
     public PolicyResult evaluate(ActionRequest request) {
+        return evaluate(request, null);
+    }
+
+    /**
+     * PRD-196: PermissionLevel을 SpEL 컨텍스트에 노출하며 정책 평가.
+     *
+     * @param request         액션 요청
+     * @param permissionLevel 현재 도구 실행 권한 (null이면 SpEL에 미노출)
+     */
+    public PolicyResult evaluate(ActionRequest request, PermissionLevel permissionLevel) {
         List<PolicyEntity> activePolicies = policyRepository.findByIsActiveTrueOrderByPriorityDesc();
 
         List<TriggeredPolicy> triggered = new ArrayList<>();
@@ -84,7 +102,8 @@ public class PolicyEngine {
                 String type = (String) rule.get("type");
 
                 // SpEL condition 평가 — false면 이 rule 스킵
-                if (!evaluateCondition(rule, request)) {
+                // PRD-196: #permissionLevel 변수를 SpEL에 노출
+                if (!evaluateCondition(rule, request, permissionLevel)) {
                     log.debug("Policy '{}' rule[{}] condition not met — skipping", policyEntity.getId(), i);
                     continue;
                 }
@@ -99,11 +118,26 @@ public class PolicyEngine {
                     // RATE_LIMIT DENY vs 일반 DENY 구분
                     String violationType = "RATE_LIMIT".equalsIgnoreCase(type) ? "rate_limit" : "deny";
                     platformMetrics.recordPolicyViolation(violationType);
+                    // CR-030 PRD-194: PermissionDenied 훅
+                    String sessionId = request.metadata() != null ? request.metadata().sessionId() : null;
+                    hookDispatcher.dispatch(HookEvent.PERMISSION_DENIED,
+                            HookInput.of(HookEvent.PERMISSION_DENIED, sessionId,
+                                    Map.of("policyId", policyEntity.getId(),
+                                            "intent", request.intent(),
+                                            "reason", reason),
+                                    Map.of()));
                     return new PolicyResult(false, PolicyResult.PolicyAction.DENY, triggered, transforms, reason);
                 }
                 if (action == PolicyResult.PolicyAction.REQUIRE_APPROVAL) {
                     log.info("Policy REQUIRE_APPROVAL: {} rule[{}] for intent '{}'",
                             policyEntity.getId(), i, request.intent());
+                    // CR-030 PRD-194: PermissionRequest 훅
+                    String sessionId = request.metadata() != null ? request.metadata().sessionId() : null;
+                    hookDispatcher.dispatch(HookEvent.PERMISSION_REQUEST,
+                            HookInput.of(HookEvent.PERMISSION_REQUEST, sessionId,
+                                    Map.of("policyId", policyEntity.getId(),
+                                            "intent", request.intent()),
+                                    Map.of()));
                     return new PolicyResult(true, PolicyResult.PolicyAction.REQUIRE_APPROVAL,
                             triggered, transforms, null);
                 }
@@ -208,6 +242,45 @@ public class PolicyEngine {
                 yield PolicyResult.PolicyAction.ALLOW;
             }
 
+            // CR-035 PRD-240: 도메인 기반 접근 제어
+            case "DOMAIN_FILTER" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> config = rule.get("config") instanceof Map
+                        ? (Map<String, Object>) rule.get("config") : Map.of();
+
+                // BIZ-064: URL 포함 요청에만 적용
+                String targetUrl = extractTargetUrl(request);
+                if (targetUrl == null || targetUrl.isBlank()) {
+                    yield PolicyResult.PolicyAction.ALLOW; // URL 없으면 필터 불적용
+                }
+
+                String domain = extractDomain(targetUrl);
+                String filterMode = (String) config.getOrDefault("mode", "BLOCKLIST");
+
+                @SuppressWarnings("unchecked")
+                List<String> allowedDomains = config.get("allowed_domains") instanceof List
+                        ? (List<String>) config.get("allowed_domains") : List.of();
+                @SuppressWarnings("unchecked")
+                List<String> blockedDomains = config.get("blocked_domains") instanceof List
+                        ? (List<String>) config.get("blocked_domains") : List.of();
+
+                boolean denied = false;
+                if ("ALLOWLIST".equalsIgnoreCase(filterMode)) {
+                    denied = !allowedDomains.isEmpty() && !matchesDomainPattern(domain, allowedDomains);
+                } else { // BLOCKLIST
+                    denied = matchesDomainPattern(domain, blockedDomains);
+                }
+
+                if (denied) {
+                    String msg = (String) rule.getOrDefault("message",
+                            "도메인 접근이 차단되었습니다: " + domain);
+                    log.info("Policy DOMAIN_FILTER denied: domain='{}' url='{}'", domain, targetUrl);
+                    transforms.put("domain_filter_denied", msg);
+                    yield PolicyResult.PolicyAction.DENY;
+                }
+                yield PolicyResult.PolicyAction.ALLOW;
+            }
+
             default -> PolicyResult.PolicyAction.ALLOW;
         };
     }
@@ -234,13 +307,74 @@ public class PolicyEngine {
         return masked;
     }
 
+    // ─── CR-035 도메인 필터링 헬퍼 ─────────────────────────────────────────
+
+    /**
+     * ActionRequest에서 대상 URL을 추출.
+     * payload.data.url → targets[0].destination 순으로 탐색.
+     */
+    private String extractTargetUrl(ActionRequest request) {
+        // payload.data에서 url/target_url 키 탐색
+        if (request.payload() != null && request.payload().data() != null) {
+            Map<String, Object> data = request.payload().data();
+            for (String key : List.of("url", "target_url", "endpoint", "href")) {
+                if (data.get(key) instanceof String urlVal && !urlVal.isBlank()) {
+                    return urlVal;
+                }
+            }
+        }
+        // targets[0].destination에서 추출
+        if (request.targets() != null && !request.targets().isEmpty()) {
+            String dest = request.targets().get(0).destination();
+            if (dest != null && (dest.startsWith("http://") || dest.startsWith("https://"))) {
+                return dest;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * URL에서 도메인 추출.
+     */
+    private String extractDomain(String url) {
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+            String host = uri.getHost();
+            return host != null ? host.toLowerCase() : "";
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 도메인이 패턴 목록에 매칭되는지 확인.
+     * BIZ-065: *.example.com은 서브도메인만 매칭 (example.com 자체는 별도 등록).
+     */
+    private boolean matchesDomainPattern(String domain, List<String> patterns) {
+        if (domain == null || domain.isEmpty() || patterns == null) return false;
+        for (String pattern : patterns) {
+            if (pattern.startsWith("*.")) {
+                // *.example.com → sub.example.com 매칭, example.com은 비매칭
+                String suffix = pattern.substring(1); // .example.com
+                if (domain.endsWith(suffix) && domain.length() > suffix.length()) {
+                    return true;
+                }
+            } else if (domain.equals(pattern.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ─── SpEL 조건 평가 ───────────────────────────────────────────────────
 
     /**
      * 규칙에 `condition` 필드가 있으면 SpEL 표현식으로 평가.
      * condition이 없거나 blank면 true 반환 (규칙 항상 적용).
+     * PRD-196: #permissionLevel 변수를 SpEL 컨텍스트에 노출.
      */
-    private boolean evaluateCondition(Map<String, Object> rule, ActionRequest request) {
+    private boolean evaluateCondition(Map<String, Object> rule, ActionRequest request,
+                                       PermissionLevel permissionLevel) {
         Object condObj = rule.get("condition");
         if (!(condObj instanceof String condition) || condition.isBlank()) {
             return true;
@@ -254,6 +388,10 @@ public class PolicyEngine {
             ctx.setVariable("userId", request.metadata() != null ? request.metadata().userId() : null);
             ctx.setVariable("adapter", request.targets() != null && !request.targets().isEmpty()
                     ? request.targets().get(0).adapter() : null);
+            // PRD-196: 권한 수준 노출 — 예: #permissionLevel == 'FULL'
+            if (permissionLevel != null) {
+                ctx.setVariable("permissionLevel", permissionLevel.name());
+            }
 
             Boolean result = parser.parseExpression(condition).getValue(ctx, Boolean.class);
             return result != null && result;

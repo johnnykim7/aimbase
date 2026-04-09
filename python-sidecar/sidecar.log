@@ -1,0 +1,212 @@
+INFO:__main__:Starting Aimbase RAG Pipeline MCP Server on 0.0.0.0:8002
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.1.1                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                 🖥  Server:      Aimbase RAG Pipeline, 3.1.1                  │
+│                 🚀 Deploy free: https://fastmcp.cloud                        │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[03/24/26 23:42:58] INFO     Starting MCP server 'Aimbase RAG   transport.py:273
+                             Pipeline' with transport 'sse' on                  
+                             http://0.0.0.0:8002/sse                            
+INFO:     Started server process [12862]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
+INFO:     127.0.0.1:60810 - "GET /sse HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60811 - "POST /messages/?session_id=14d88536e53443cab92381373bc2296a HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:60811 - "POST /messages/?session_id=14d88536e53443cab92381373bc2296a HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:60812 - "GET /sse HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60813 - "POST /messages/?session_id=b3e994dcee004f16af8022f3eee526e1 HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:60813 - "POST /messages/?session_id=b3e994dcee004f16af8022f3eee526e1 HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:60979 - "POST /messages/?session_id=14d88536e53443cab92381373bc2296a HTTP/1.1" 202 Accepted
+INFO:mcp.server.lowlevel.server:Processing request of type CallToolRequest
+INFO:     127.0.0.1:61366 - "POST /messages/?session_id=14d88536e53443cab92381373bc2296a HTTP/1.1" 202 Accepted
+INFO:mcp.server.lowlevel.server:Processing request of type CallToolRequest
+INFO:     127.0.0.1:61404 - "POST /messages/?session_id=14d88536e53443cab92381373bc2296a HTTP/1.1" 202 Accepted
+INFO:mcp.server.lowlevel.server:Processing request of type CallToolRequest
+INFO:     127.0.0.1:61404 - "POST /messages/?session_id=14d88536e53443cab92381373bc2296a HTTP/1.1" 202 Accepted
+INFO:mcp.server.lowlevel.server:Processing request of type CallToolRequest
+INFO:     127.0.0.1:61553 - "GET /sse HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61554 - "POST /messages/?session_id=df9937572e3c46778876c14855022036 HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:61554 - "POST /messages/?session_id=df9937572e3c46778876c14855022036 HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:61555 - "GET /sse HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61556 - "POST /messages/?session_id=272c4dbbb9e3416990c4e3354e8ff646 HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:61556 - "POST /messages/?session_id=272c4dbbb9e3416990c4e3354e8ff646 HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:61674 - "POST /messages/?session_id=df9937572e3c46778876c14855022036 HTTP/1.1" 202 Accepted
+INFO:mcp.server.lowlevel.server:Processing request of type CallToolRequest
+INFO:     127.0.0.1:62046 - "GET /sse HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62047 - "POST /messages/?session_id=76295cb56b8f4f22a942f5f6d87460fd HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:62047 - "POST /messages/?session_id=76295cb56b8f4f22a942f5f6d87460fd HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:62052 - "GET /sse HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62053 - "POST /messages/?session_id=7703caef065d41bebf2df22c71341bf1 HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:62053 - "POST /messages/?session_id=7703caef065d41bebf2df22c71341bf1 HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:62168 - "POST /messages/?session_id=76295cb56b8f4f22a942f5f6d87460fd HTTP/1.1" 202 Accepted
+INFO:mcp.server.lowlevel.server:Processing request of type CallToolRequest
+INFO:rag_pipeline.tools.ingestor:Created 1 chunks for source '6033e02d-a42b-4a2f-bd52-263182c1dd7d'
+INFO:sentence_transformers.SentenceTransformer:Use pytorch device_name: mps
+INFO:sentence_transformers.SentenceTransformer:Load pretrained SentenceTransformer: BAAI/bge-m3
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/modules.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/modules.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/modules.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/config_sentence_transformers.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/config_sentence_transformers.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/config_sentence_transformers.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/config_sentence_transformers.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/config_sentence_transformers.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/README.md "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/README.md "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/README.md "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/modules.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/modules.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/sentence_bert_config.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/sentence_bert_config.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/sentence_bert_config.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/adapter_config.json "HTTP/1.1 404 Not Found"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/config.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/model.safetensors "HTTP/1.1 404 Not Found"
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 46989.28it/s]
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/config.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/BAAI/bge-m3 "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/BAAI/bge-m3/commits/main "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/tokenizer_config.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/BAAI/bge-m3/discussions?p=0 "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/BAAI/bge-m3/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/BAAI/bge-m3/commits/refs%2Fpr%2F130 "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/BAAI/bge-m3/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/refs%2Fpr%2F130/model.safetensors.index.json "HTTP/1.1 404 Not Found"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/refs%2Fpr%2F130/model.safetensors "HTTP/1.1 302 Found"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/BAAI/bge-m3 "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/BAAI/bge-m3/resolve/main/1_Pooling/config.json "HTTP/1.1 307 Temporary Redirect"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/1_Pooling%2Fconfig.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/resolve-cache/models/BAAI/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/1_Pooling%2Fconfig.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/BAAI/bge-m3 "HTTP/1.1 200 OK"
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00,  1.05it/s]Batches: 100%|██████████| 1/1 [00:00<00:00,  1.05it/s]
+WARNING:rag_pipeline.tools.ingestor:Batch 0 failed: cannot adapt type 'dict' using placeholder '%s' (format: AUTO)
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/uvicorn/protocols/http/h11_impl.py", line 410, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/fastmcp/server/http.py", line 102, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 76, in app
+    await response(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/responses.py", line 157, in __call__
+    await send(
+    ...<5 lines>...
+    )
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 39, in sender
+    await send(message)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 39, in sender
+    await send(message)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 161, in _send
+    await send(message)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/uvicorn/protocols/http/h11_impl.py", line 499, in send
+    raise RuntimeError(msg % message_type)
+RuntimeError: Expected ASGI message 'http.response.body', but got 'http.response.start'.
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/uvicorn/protocols/http/h11_impl.py", line 410, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/fastmcp/server/http.py", line 102, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 78, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/routing.py", line 76, in app
+    await response(scope, receive, send)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/responses.py", line 157, in __call__
+    await send(
+    ...<5 lines>...
+    )
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 39, in sender
+    await send(message)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/_exception_handler.py", line 39, in sender
+    await send(message)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/starlette/middleware/errors.py", line 161, in _send
+    await send(message)
+  File "/Users/sykim/Documents/GitHub/bp-platform/aimbase/python-sidecar/.venv/lib/python3.13/site-packages/uvicorn/protocols/http/h11_impl.py", line 499, in send
+    raise RuntimeError(msg % message_type)
+RuntimeError: Expected ASGI message 'http.response.body', but got 'http.response.start'.
+INFO:     Shutting down
+ERROR:    Cancel 0 running task(s), timeout graceful shutdown exceeded
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [12862]
+/opt/homebrew/Cellar/python@3.13/3.13.1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/resource_tracker.py:276: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/loky-12862-5qo2yh11'}
+  warnings.warn(

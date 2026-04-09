@@ -1,0 +1,9 @@
+Score from 0.0 to 1.0 how relevant the retrieved context is to the following question.
+
+Question:
+{{question}}
+
+Context:
+{{context}}
+
+Score (0.0-1.0):

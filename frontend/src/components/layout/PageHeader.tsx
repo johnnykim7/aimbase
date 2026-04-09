@@ -1,5 +1,3 @@
-import { COLORS, FONTS } from "../../theme";
-
 interface PageHeaderProps {
   title: string;
   subtitle?: string;
@@ -7,39 +5,13 @@ interface PageHeaderProps {
 }
 
 export const PageHeader = ({ title, subtitle, actions }: PageHeaderProps) => (
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 28,
-    }}
-  >
+  <div className="flex items-center justify-between mb-7">
     <div>
-      <h1
-        style={{
-          fontSize: 22,
-          fontWeight: 700,
-          fontFamily: FONTS.display,
-          color: COLORS.text,
-          margin: 0,
-        }}
-      >
-        {title}
-      </h1>
+      <h1 className="text-xl font-bold text-foreground">{title}</h1>
       {subtitle && (
-        <p
-          style={{
-            fontSize: 12,
-            color: COLORS.textMuted,
-            fontFamily: FONTS.mono,
-            margin: "4px 0 0",
-          }}
-        >
-          {subtitle}
-        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
       )}
     </div>
-    {actions && <div style={{ display: "flex", gap: 8 }}>{actions}</div>}
+    {actions && <div className="flex gap-2">{actions}</div>}
   </div>
 );

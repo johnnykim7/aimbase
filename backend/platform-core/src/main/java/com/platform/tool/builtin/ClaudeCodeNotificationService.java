@@ -38,16 +38,24 @@ public class ClaudeCodeNotificationService {
 
     /** NOTIFY 액션 에러 발생 시 즉시 알림 */
     public void notifyError(ErrorClassification classification) {
+        notifyError(null, classification);
+    }
+
+    /** NOTIFY 액션 에러 발생 시 즉시 알림 (계정 식별 포함) */
+    public void notifyError(String accountId, ErrorClassification classification) {
         if (classification == null) return;
 
-        String key = "error:" + classification.errorType();
+        String key = "error:" + classification.errorType() + (accountId != null ? ":" + accountId : "");
         if (isDuplicate(key, DEDUP_WINDOW_MS)) {
             log.debug("중복 알림 억제: {} (5분 이내)", key);
             return;
         }
 
-        String message = "[ClaudeCodeTool] 에러 감지 — 유형: %s, 패턴: %s"
-                .formatted(classification.errorType(),
+        String prefix = accountId != null
+                ? "[ClaudeCodeTool][account:%s]".formatted(accountId)
+                : "[ClaudeCodeTool]";
+        String message = "%s 에러 감지 — 유형: %s, 패턴: %s"
+                .formatted(prefix, classification.errorType(),
                         classification.pattern() != null ? classification.pattern() : "N/A");
 
         sendNotification("claude-code-error", message);
@@ -56,14 +64,22 @@ public class ClaudeCodeNotificationService {
 
     /** 서킷 OPEN 진입 시 알림 */
     public void notifyCircuitOpen(int consecutiveFailures) {
-        String key = "circuit:OPEN";
+        notifyCircuitOpen(null, consecutiveFailures);
+    }
+
+    /** 서킷 OPEN 진입 시 알림 (계정 식별 포함) */
+    public void notifyCircuitOpen(String accountId, int consecutiveFailures) {
+        String key = "circuit:OPEN" + (accountId != null ? ":" + accountId : "");
         if (isDuplicate(key, CIRCUIT_RENOTIFY_MS)) {
             log.debug("서킷 OPEN 재알림 억제: 30분 이내");
             return;
         }
 
-        String message = "[ClaudeCodeTool] 서킷 브레이커 OPEN — 연속 실패 %d회. 5분간 요청 차단됩니다."
-                .formatted(consecutiveFailures);
+        String prefix = accountId != null
+                ? "[ClaudeCodeTool][account:%s]".formatted(accountId)
+                : "[ClaudeCodeTool]";
+        String message = "%s 서킷 브레이커 OPEN — 연속 실패 %d회. 5분간 요청 차단됩니다."
+                .formatted(prefix, consecutiveFailures);
 
         sendNotification("claude-code-circuit", message);
         lastNotifiedAt.put(key, Instant.now());
@@ -71,9 +87,18 @@ public class ClaudeCodeNotificationService {
 
     /** 서킷 복구 알림 */
     public void notifyCircuitRecovered() {
-        lastNotifiedAt.remove("circuit:OPEN");
+        notifyCircuitRecovered(null);
+    }
 
-        String message = "[ClaudeCodeTool] 서킷 브레이커 복구 — 정상 동작 재개";
+    /** 서킷 복구 알림 (계정 식별 포함) */
+    public void notifyCircuitRecovered(String accountId) {
+        String key = "circuit:OPEN" + (accountId != null ? ":" + accountId : "");
+        lastNotifiedAt.remove(key);
+
+        String prefix = accountId != null
+                ? "[ClaudeCodeTool][account:%s]".formatted(accountId)
+                : "[ClaudeCodeTool]";
+        String message = "%s 서킷 브레이커 복구 — 정상 동작 재개".formatted(prefix);
         sendNotification("claude-code-circuit", message);
     }
 

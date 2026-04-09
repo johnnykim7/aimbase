@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { knowledgeApi } from "../api/knowledge";
 import type { PagedResponse } from "../types/api";
-import type { KnowledgeSource, SearchRequest } from "../types/knowledge";
+import type { KnowledgeSource, SearchRequest, SearchResult } from "../types/knowledge";
 
 const extractList = (d: unknown): KnowledgeSource[] => {
   if (!d) return [];
@@ -11,10 +11,10 @@ const extractList = (d: unknown): KnowledgeSource[] => {
   return [];
 };
 
-export const useKnowledgeSources = () =>
+export const useKnowledgeSources = (my?: boolean) =>
   useQuery({
-    queryKey: ["knowledgeSources"],
-    queryFn: () => knowledgeApi.list().then((r) => extractList(r.data.data)),
+    queryKey: ["knowledgeSources", { my }],
+    queryFn: () => knowledgeApi.list(my ? { my: true } : undefined).then((r) => extractList(r.data.data)),
     retry: false,
   });
 
@@ -29,7 +29,13 @@ export const useSyncKnowledge = () => {
 export const useSearchKnowledge = () =>
   useMutation({
     mutationFn: (data: SearchRequest) =>
-      knowledgeApi.search(data).then((r) => r.data.data),
+      knowledgeApi.search(data).then((r) => {
+        const d = r.data.data as unknown;
+        if (d && typeof d === "object" && "results" in (d as Record<string, unknown>)) {
+          return (d as { results: SearchResult[] }).results;
+        }
+        return (d ?? []) as SearchResult[];
+      }),
   });
 
 export const useCreateKnowledgeSource = () => {

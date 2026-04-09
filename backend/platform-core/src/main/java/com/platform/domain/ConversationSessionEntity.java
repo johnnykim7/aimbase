@@ -1,8 +1,11 @@
 package com.platform.domain;
 
+import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Type;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -41,10 +44,45 @@ public class ConversationSessionEntity {
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt = OffsetDateTime.now();
 
+    // --- CR-029: Session Meta 확장 ---
+
+    @Column(name = "scope_type", length = 20)
+    private String scopeType = "chat";
+
+    @Column(name = "runtime_kind", length = 20)
+    private String runtimeKind;
+
+    @Column(name = "workspace_ref", length = 500)
+    private String workspaceRef;
+
+    @Column(name = "persistent_session")
+    private boolean persistentSession = false;
+
+    @Column(name = "summary_version")
+    private int summaryVersion = 0;
+
+    @Column(name = "context_recipe_id", length = 100)
+    private String contextRecipeId;
+
+    @Type(JsonBinaryType.class)
+    @Column(name = "last_tool_chain", columnDefinition = "jsonb")
+    private Map<String, Object> lastToolChain;
+
+    @Column(name = "app_id", length = 100)
+    private String appId;
+
+    @Column(name = "project_id", length = 100)
+    private String projectId;
+
+    @Column(name = "parent_session_id", length = 100)
+    private String parentSessionId;
+
     @PreUpdate
     protected void onUpdate() {
         updatedAt = OffsetDateTime.now();
     }
+
+    // --- 기존 Getters & Setters ---
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
@@ -64,4 +102,27 @@ public class ConversationSessionEntity {
     public void setSummaryText(String summaryText) { this.summaryText = summaryText; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
+
+    // --- CR-029 Getters & Setters ---
+
+    public String getScopeType() { return scopeType; }
+    public void setScopeType(String scopeType) { this.scopeType = scopeType; }
+    public String getRuntimeKind() { return runtimeKind; }
+    public void setRuntimeKind(String runtimeKind) { this.runtimeKind = runtimeKind; }
+    public String getWorkspaceRef() { return workspaceRef; }
+    public void setWorkspaceRef(String workspaceRef) { this.workspaceRef = workspaceRef; }
+    public boolean isPersistentSession() { return persistentSession; }
+    public void setPersistentSession(boolean persistentSession) { this.persistentSession = persistentSession; }
+    public int getSummaryVersion() { return summaryVersion; }
+    public void setSummaryVersion(int summaryVersion) { this.summaryVersion = summaryVersion; }
+    public String getContextRecipeId() { return contextRecipeId; }
+    public void setContextRecipeId(String contextRecipeId) { this.contextRecipeId = contextRecipeId; }
+    public Map<String, Object> getLastToolChain() { return lastToolChain; }
+    public void setLastToolChain(Map<String, Object> lastToolChain) { this.lastToolChain = lastToolChain; }
+    public String getAppId() { return appId; }
+    public void setAppId(String appId) { this.appId = appId; }
+    public String getProjectId() { return projectId; }
+    public void setProjectId(String projectId) { this.projectId = projectId; }
+    public String getParentSessionId() { return parentSessionId; }
+    public void setParentSessionId(String parentSessionId) { this.parentSessionId = parentSessionId; }
 }

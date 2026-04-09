@@ -35,9 +35,9 @@ public class ClaudeCodeToolConfig {
     private String executable = "claude";
 
     /**
-     * Anthropic API 키 (서버/클라우드 배포 시 사용).
-     * 설정하면 환경변수 ANTHROPIC_API_KEY로 프로세스에 전달.
-     * 미설정 시 기존 `claude login` OAuth 토큰 사용.
+     * Anthropic API 키 (종량제 배포 시 사용).
+     * 설정하면 --bare 모드 + ANTHROPIC_API_KEY 환경변수로 프로세스에 전달.
+     * 미설정 시 CLAUDE_CONFIG_DIR 내 OAuth 인증 사용 (setup-token 방식).
      */
     private String apiKey;
 
@@ -55,6 +55,13 @@ public class ClaudeCodeToolConfig {
 
     /** 기본 시스템 프롬프트 (CLI에 --append-system-prompt로 전달) */
     private String defaultSystemPrompt = "";
+
+    /**
+     * 세션 영속성 기본값 (기본: true).
+     * true면 Claude Code가 프로젝트 단위 메모리를 축적하고,
+     * --continue/--resume으로 이전 세션 재개 가능.
+     */
+    private boolean defaultSessionPersistence = true;
 
     // ── Getters & Setters ──
 
@@ -81,4 +88,7 @@ public class ClaudeCodeToolConfig {
 
     public String getDefaultSystemPrompt() { return defaultSystemPrompt; }
     public void setDefaultSystemPrompt(String defaultSystemPrompt) { this.defaultSystemPrompt = defaultSystemPrompt; }
+
+    public boolean isDefaultSessionPersistence() { return defaultSessionPersistence; }
+    public void setDefaultSessionPersistence(boolean defaultSessionPersistence) { this.defaultSessionPersistence = defaultSessionPersistence; }
 }

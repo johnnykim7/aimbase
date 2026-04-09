@@ -3,7 +3,7 @@ import type { ApiResponse, PagedResponse } from "../types/api";
 import type { KnowledgeSource, IngestionLog, SearchRequest, SearchResult } from "../types/knowledge";
 
 export const knowledgeApi = {
-  list: (params?: { page?: number; size?: number }) =>
+  list: (params?: { page?: number; size?: number; my?: boolean }) =>
     apiClient.get<ApiResponse<PagedResponse<KnowledgeSource> | KnowledgeSource[]>>("/knowledge-sources", { params }),
 
   get: (id: string) =>
@@ -17,6 +17,11 @@ export const knowledgeApi = {
 
   delete: (id: string) =>
     apiClient.delete(`/knowledge-sources/${id}`),
+
+  upload: (id: string, formData: FormData) =>
+    apiClient.post(`/knowledge-sources/${id}/upload`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
 
   sync: (id: string) =>
     apiClient.post<ApiResponse<{ message: string }>>(`/knowledge-sources/${id}/sync`),

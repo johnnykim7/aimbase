@@ -18,6 +18,6 @@ export const policiesApi = {
   delete: (id: string) =>
     apiClient.delete(`/policies/${id}`),
 
-  simulate: (id: string, data: SimulateRequest) =>
-    apiClient.post<ApiResponse<SimulateResult>>(`/policies/${id}/simulate`, data),
+  simulate: (_id: string, data: SimulateRequest) =>
+    apiClient.post<ApiResponse<SimulateResult>>("/policies/simulate", data),
 };

@@ -1,0 +1,5 @@
+Write a hypothetical document paragraph (150-300 characters) that would contain the answer to the following question. It does not need to be factual information. This is a hypothetical document for search purposes.
+
+Question: {{query}}
+
+Hypothetical document:

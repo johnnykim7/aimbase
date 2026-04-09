@@ -1,5 +1,3 @@
-import { COLORS, FONTS } from "../../theme";
-
 interface StatCardProps {
   label: string;
   value: string | number;
@@ -7,45 +5,19 @@ interface StatCardProps {
   color?: string;
 }
 
-export const StatCard = ({ label, value, sub, color = COLORS.accent }: StatCardProps) => (
+export const StatCard = ({ label, value, sub, color = "hsl(var(--primary))" }: StatCardProps) => (
   <div
-    style={{
-      background: COLORS.surface,
-      border: `1px solid ${COLORS.border}`,
-      borderRadius: 12,
-      padding: "20px 24px",
-      flex: 1,
-      minWidth: 160,
-      borderTop: `2px solid ${color}`,
-    }}
+    className="bg-card border border-border rounded-xl px-5 py-4 flex-1 min-w-[160px] shadow-xs shadow-black/5"
+    style={{ borderTop: `2.5px solid ${color}` }}
   >
-    <div
-      style={{
-        fontSize: 11,
-        color: COLORS.textMuted,
-        fontFamily: FONTS.mono,
-        textTransform: "uppercase",
-        letterSpacing: 1.2,
-        marginBottom: 8,
-      }}
-    >
+    <div className="text-xs text-muted-foreground font-medium mb-2">
       {label}
     </div>
-    <div
-      style={{
-        fontSize: 32,
-        fontWeight: 700,
-        fontFamily: FONTS.display,
-        color: COLORS.text,
-        lineHeight: 1,
-      }}
-    >
+    <div className="text-2xl font-bold text-foreground leading-none">
       {value}
     </div>
     {sub && (
-      <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 6, fontFamily: FONTS.mono }}>
-        {sub}
-      </div>
+      <div className="text-[11px] text-muted-foreground/60 mt-1.5">{sub}</div>
     )}
   </div>
 );

@@ -14,6 +14,7 @@ import com.platform.domain.ConnectionEntity;
 import com.platform.llm.adapter.AnthropicAdapter;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.adapter.OpenAIAdapter;
+import com.platform.llm.model.ModelConfig;
 import com.platform.repository.ConnectionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,12 +38,15 @@ public class ConnectionAdapterFactory {
     private static final String DEFAULT_MODEL = "anthropic/claude-sonnet-4-5";
 
     private final ConnectionRepository connectionRepository;
+    private final int defaultMaxTokens;
 
     // connectionId → LLMAdapter (캐시: 동일 연결은 클라이언트 재사용)
     private final Map<String, LLMAdapter> cache = new ConcurrentHashMap<>();
 
-    public ConnectionAdapterFactory(ConnectionRepository connectionRepository) {
+    public ConnectionAdapterFactory(ConnectionRepository connectionRepository,
+                                    @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens) {
         this.connectionRepository = connectionRepository;
+        this.defaultMaxTokens = defaultMaxTokens;
     }
 
     /**
@@ -68,6 +72,42 @@ public class ConnectionAdapterFactory {
     }
 
     /**
+     * CR-030: connection config에서 ModelConfig를 구성한다.
+     * config JSONB에 extended_thinking, thinking_budget_tokens 필드가 있으면 반영.
+     */
+    public ModelConfig resolveModelConfig(String connectionId) {
+        ConnectionEntity conn = findConnection(connectionId);
+        Map<String, Object> cfg = conn.getConfig();
+
+        Boolean extendedThinking = null;
+        Integer thinkingBudgetTokens = null;
+        Integer maxTokens = null;
+        com.platform.llm.model.ThinkingMode thinkingMode = null;
+
+        if (cfg.containsKey("extended_thinking")) {
+            extendedThinking = Boolean.valueOf(cfg.get("extended_thinking").toString());
+        }
+        if (cfg.containsKey("thinking_budget_tokens")) {
+            thinkingBudgetTokens = ((Number) cfg.get("thinking_budget_tokens")).intValue();
+        }
+        if (cfg.containsKey("max_tokens")) {
+            maxTokens = ((Number) cfg.get("max_tokens")).intValue();
+        }
+        // CR-031 PRD-214: thinking_mode 파싱 (DISABLED/ENABLED/ADAPTIVE)
+        if (cfg.containsKey("thinking_mode")) {
+            try {
+                thinkingMode = com.platform.llm.model.ThinkingMode.valueOf(
+                        cfg.get("thinking_mode").toString().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("Connection '{}' 잘못된 thinking_mode '{}' — 무시",
+                        connectionId, cfg.get("thinking_mode"));
+            }
+        }
+
+        return new ModelConfig(null, maxTokens, null, null, extendedThinking, thinkingBudgetTokens, thinkingMode);
+    }
+
+    /**
      * Connection의 API Key가 변경됐을 때 캐시를 무효화한다.
      * ConnectionController.update() 에서 호출.
      */
@@ -85,6 +125,7 @@ public class ConnectionAdapterFactory {
         String apiKey = (String) conn.getConfig().get("apiKey");
 
         if (apiKey == null || apiKey.isBlank()) {
+            log.warn("Connection '{}' ping skipped — no 'apiKey'. Available keys: {}", connectionId, conn.getConfig().keySet());
             return new HealthStatus(false, 0);
         }
 
@@ -113,13 +154,29 @@ public class ConnectionAdapterFactory {
                             .build());
                 }
                 case "ollama" -> {
-                    // Ollama는 로컬 서버 — 모델 목록 조회로 연결 확인
                     String baseUrl = conn.getConfig().get("baseUrl") != null
                             ? conn.getConfig().get("baseUrl").toString() : "http://localhost:11434";
                     OpenAIClient client = OpenAIOkHttpClient.builder()
                             .apiKey("ollama").baseUrl(baseUrl + "/v1").build();
                     client.chat().completions().create(ChatCompletionCreateParams.builder()
                             .model(ChatModel.of(resolveModelId(conn, "llama3.2")))
+                            .maxCompletionTokens(1L)
+                            .addUserMessage("ping")
+                            .build());
+                }
+                // CR-032: OpenAI 호환 / Bedrock / Vertex AI ping
+                case "openai_compatible", "bedrock", "vertex_ai" -> {
+                    String baseUrl = conn.getConfig().get("base_url") != null
+                            ? conn.getConfig().get("base_url").toString() : null;
+                    if (baseUrl == null || baseUrl.isBlank()) {
+                        log.warn("Connection '{}' ping skipped — no 'base_url' for {}", connectionId, adapterType);
+                        return new HealthStatus(false, 0);
+                    }
+                    String pingKey = apiKey != null ? apiKey : "none";
+                    OpenAIClient client = OpenAIOkHttpClient.builder()
+                            .apiKey(pingKey).baseUrl(baseUrl).build();
+                    client.chat().completions().create(ChatCompletionCreateParams.builder()
+                            .model(ChatModel.of(resolveModelId(conn, "default")))
                             .maxCompletionTokens(1L)
                             .addUserMessage("ping")
                             .build());
@@ -153,6 +210,8 @@ public class ConnectionAdapterFactory {
         String apiKey = (String) conn.getConfig().get("apiKey");
 
         if (apiKey == null || apiKey.isBlank()) {
+            log.error("Connection '{}' config has no 'apiKey'. Available keys: {}, config: {}",
+                    connectionId, conn.getConfig().keySet(), conn.getConfig());
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Connection '" + connectionId + "' has no apiKey configured");
         }
@@ -162,13 +221,32 @@ public class ConnectionAdapterFactory {
                 AnthropicClient client = AnthropicOkHttpClient.builder()
                         .apiKey(apiKey)
                         .build();
-                yield new AnthropicAdapter(client);
+                yield new AnthropicAdapter(client, defaultMaxTokens);
             }
             case "openai" -> {
                 OpenAIClient client = OpenAIOkHttpClient.builder()
                         .apiKey(apiKey)
                         .build();
                 yield new OpenAIAdapter(client);
+            }
+            // CR-032 PRD-217: OpenAI 호환 범용 shim
+            case "openai_compatible" -> {
+                String baseUrl = (String) conn.getConfig().get("base_url");
+                if (baseUrl == null || baseUrl.isBlank()) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Connection '" + connectionId + "' requires 'base_url' for openai_compatible adapter");
+                }
+                String model = resolveModelId(conn, "default");
+                yield new com.platform.llm.adapter.OpenAICompatibleAdapter(
+                        baseUrl, apiKey, model, "openai_compatible");
+            }
+            // CR-032 PRD-218: AWS Bedrock
+            case "bedrock" -> {
+                yield new com.platform.llm.adapter.BedrockAdapter(conn.getConfig());
+            }
+            // CR-032 PRD-219: Google Vertex AI
+            case "vertex_ai" -> {
+                yield new com.platform.llm.adapter.VertexAIAdapter(conn.getConfig());
             }
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Unsupported adapter type: " + adapterType);
@@ -179,12 +257,23 @@ public class ConnectionAdapterFactory {
      * FE에서 "Claude (Anthropic)", "OpenAI" 등 표시명으로 저장되므로
      * 내부 어댑터 타입으로 정규화한다.
      */
+    /**
+     * FE에서 다양한 표시명으로 저장되므로 내부 어댑터 타입으로 정규화한다.
+     * CR-032: openai_compatible, bedrock, vertex_ai 추가.
+     */
     private static String normalizeAdapterType(String adapter) {
         if (adapter == null) return "";
         String lower = adapter.toLowerCase();
         if (lower.contains("anthropic") || lower.contains("claude")) return "anthropic";
+        if (lower.equals("openai_compatible") || lower.contains("deepseek")
+                || lower.contains("groq") || lower.contains("mistral")
+                || lower.contains("openrouter") || lower.contains("together")
+                || lower.contains("fireworks") || lower.contains("lm studio")
+                || lower.contains("localai") || lower.contains("vllm")) return "openai_compatible";
         if (lower.contains("openai") || lower.contains("gpt")) return "openai";
         if (lower.contains("ollama")) return "ollama";
+        if (lower.contains("bedrock") || lower.contains("aws")) return "bedrock";
+        if (lower.contains("vertex") || lower.contains("google") || lower.contains("gemini")) return "vertex_ai";
         return lower;
     }
 

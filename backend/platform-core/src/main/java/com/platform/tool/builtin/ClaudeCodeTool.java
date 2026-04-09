@@ -9,6 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import com.platform.domain.master.AgentAccountEntity;
+import com.platform.tenant.TenantContext;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -37,6 +40,8 @@ import java.util.concurrent.TimeUnit;
  * 설계 원칙:
  * - 오케스트레이션은 Aimbase가, 실행은 Claude Code가 (이중 루프 방지)
  * - 기본 읽기 전용 (Read, Grep, Glob만 허용)
+ * - allowed_tools에 MCP 도구명을 추가하면 외부 서비스 연동 가능 (예: FlowGuard Step 등록)
+ * - 로컬 경로를 working_directory로 지정하면 zip 없이 직접 파일 접근 (패스 모드)
  * - 후속 Step 연결 시 json_schema로 출력 구조 강제
  * - 프로세스 레벨 실패만 처리, 비즈니스 재시도는 워크플로우 엔진 위임
  */
@@ -50,7 +55,8 @@ public class ClaudeCodeTool implements ToolExecutor {
     /** 보안상 차단하는 CLI 옵션 (화이트리스트 검증) */
     private static final Set<String> BLOCKED_OPTIONS = Set.of(
             "--dangerously-skip-permissions",
-            "--dangerously-skip-permissions=true"
+            "--dangerously-skip-permissions=true",
+            "--dangerously-skip-permissions-with-classifiers"
     );
 
     private static final UnifiedToolDef DEFINITION = new UnifiedToolDef(
@@ -71,8 +77,9 @@ public class ClaudeCodeTool implements ToolExecutor {
                             )),
                             Map.entry("output_format", Map.of(
                                     "type", "string",
-                                    "enum", List.of("text", "json"),
-                                    "description", "출력 포맷. 후속 Step 연결 시 json 권장 (기본: text)"
+                                    "enum", List.of("text", "json", "stream-json"),
+                                    "description", "출력 포맷. 후속 Step 연결 시 json 권장. "
+                                            + "stream-json=NDJSON 이벤트 스트림(장시간 작업 진행 추적 가능) (기본: text)"
                             )),
                             Map.entry("max_turns", Map.of(
                                     "type", "integer",
@@ -82,7 +89,15 @@ public class ClaudeCodeTool implements ToolExecutor {
                                     "type", "array",
                                     "items", Map.of("type", "string"),
                                     "description", "허용할 Claude Code 도구 목록. "
-                                            + "레벨1=Read,Grep,Glob(분석) / 레벨2=+Write(생성) / 레벨3=+Bash(실행)"
+                                            + "레벨1=Read,Grep,Glob(분석) / 레벨2=+Write(생성) / 레벨3=+Bash(실행) "
+                                            + "/ 레벨4=+mcp__*(MCP 도구). "
+                                            + "MCP 서버에 등록된 도구명을 직접 지정 가능 (예: mcp__flowguard__create_step)"
+                            )),
+                            Map.entry("disallowed_tools", Map.of(
+                                    "type", "array",
+                                    "items", Map.of("type", "string"),
+                                    "description", "거부할 Claude Code 도구 목록. allowed_tools와 반대 방향 — "
+                                            + "모든 도구를 허용하되 일부만 차단할 때 사용 (예: [\"Bash\", \"FileWrite\"])"
                             )),
                             Map.entry("json_schema", Map.of(
                                     "type", "object",
@@ -92,9 +107,15 @@ public class ClaudeCodeTool implements ToolExecutor {
                                     "type", "string",
                                     "description", "작업 디렉토리 (기본: 시스템 설정값)"
                             )),
+                            Map.entry("system_prompt", Map.of(
+                                    "type", "string",
+                                    "description", "기본 시스템 프롬프트 전체 교체 (선택). "
+                                            + "append_system_prompt와 달리 Claude Code 기본 프롬프트를 완전히 대체함. "
+                                            + "주의: 기본 안전 지시도 제거되므로 신중하게 사용"
+                            )),
                             Map.entry("append_system_prompt", Map.of(
                                     "type", "string",
-                                    "description", "시스템 프롬프트에 추가할 지시 (선택)"
+                                    "description", "시스템 프롬프트에 추가할 지시 (선택). 기본 프롬프트는 유지됨"
                             )),
                             Map.entry("model", Map.of(
                                     "type", "string",
@@ -105,8 +126,20 @@ public class ClaudeCodeTool implements ToolExecutor {
                             )),
                             Map.entry("effort", Map.of(
                                     "type", "string",
-                                    "enum", List.of("low", "medium", "high"),
-                                    "description", "추론 노력 수준 (기본: medium)"
+                                    "enum", List.of("low", "medium", "high", "max"),
+                                    "description", "추론 노력 수준 (기본: medium). max=Extended Thinking 최대 활성화"
+                            )),
+                            Map.entry("thinking", Map.of(
+                                    "type", "string",
+                                    "enum", List.of("adaptive", "enabled", "disabled"),
+                                    "description", "Extended Thinking 모드. "
+                                            + "adaptive=복잡도에 따라 자동 조절(권장) / "
+                                            + "enabled=항상 활성화 / disabled=비활성화 (기본: adaptive)"
+                            )),
+                            Map.entry("max_thinking_tokens", Map.of(
+                                    "type", "integer",
+                                    "description", "Extended Thinking 토큰 예산 (선택). "
+                                            + "thinking=enabled/adaptive 시 유효. 값이 클수록 깊은 추론 가능"
                             )),
                             Map.entry("permission_mode", Map.of(
                                     "type", "string",
@@ -115,13 +148,57 @@ public class ClaudeCodeTool implements ToolExecutor {
                             )),
                             Map.entry("session_persistence", Map.of(
                                     "type", "boolean",
-                                    "description", "세션 영속 활성화 (기본: false). true면 --continue/--resume으로 이전 작업 재개 가능"
+                                    "description", "세션 영속 활성화 (기본: 설정값, 보통 true). "
+                                            + "true면 프로젝트 단위 메모리 축적 + --continue/--resume 재개 가능"
+                            )),
+                            Map.entry("continue_mode", Map.of(
+                                    "type", "string",
+                                    "enum", List.of("new", "continue", "resume"),
+                                    "description", "세션 모드. new=새 세션(기본), "
+                                            + "continue=해당 워킹 디렉토리의 마지막 세션 이어가기, "
+                                            + "resume=session_id로 특정 세션 재개"
+                            )),
+                            Map.entry("session_id", Map.of(
+                                    "type", "string",
+                                    "description", "재개할 세션 ID (continue_mode=resume 시 필수)"
+                            )),
+                            Map.entry("fork_session", Map.of(
+                                    "type", "boolean",
+                                    "description", "세션 분기 (continue/resume 시 유효). "
+                                            + "true면 원본 세션은 보존하고 새 세션 ID로 분기 — 원본을 망치지 않고 탐색 가능"
+                            )),
+                            Map.entry("tools", Map.of(
+                                    "type", "string",
+                                    "description", "세션에서 사용 가능한 도구 셋 정의. "
+                                            + "\"\"=모든 도구 비활성화 / \"default\"=기본 셋 / "
+                                            + "\"Bash,Read,Edit\"=개별 지정. allowed_tools(권한 제어)와 다름"
+                            )),
+                            Map.entry("mcp_config", Map.of(
+                                    "type", "array",
+                                    "items", Map.of("type", "string"),
+                                    "description", "세션 단위로 주입할 MCP 서버 설정 목록. "
+                                            + "각 항목은 JSON 파일 경로 또는 인라인 JSON 문자열. "
+                                            + "예: [\"/etc/mcp/flowguard.json\", \"{\\\"mcpServers\\\":{...}}\"]"
+                            )),
+                            Map.entry("max_budget_usd", Map.of(
+                                    "type", "number",
+                                    "description", "세션 전체 USD 비용 상한선. 초과 시 실행 중단 (예: 0.5 = $0.50)"
+                            )),
+                            Map.entry("fallback_model", Map.of(
+                                    "type", "string",
+                                    "description", "주 모델 실패 시 사용할 폴백 모델 (예: claude-haiku-4-20250414)"
+                            )),
+                            Map.entry("task_budget", Map.of(
+                                    "type", "integer",
+                                    "description", "API 사이드 태스크 토큰 예산 (output_config.task_budget). "
+                                            + "서버 사이드 비용 제어 — max_budget_usd와 함께 이중 가드로 사용 가능"
                             )),
                             Map.entry("cli_options", Map.of(
                                     "type", "object",
                                     "additionalProperties", Map.of("type", "string"),
-                                    "description", "추가 CLI 옵션 맵 (예: {\"--verbose\": \"\", \"--continue\": \"session_id\"}). "
-                                            + "키는 옵션명(--포함), 값은 옵션 인수(플래그면 빈 문자열)"
+                                    "description", "추가 CLI 옵션 맵 (예: {\"--verbose\": \"\", \"--color\": \"always\"}). "
+                                            + "키는 옵션명(--포함), 값은 옵션 인수(플래그면 빈 문자열). "
+                                            + "주의: --continue/--resume은 continue_mode 파라미터 사용"
                             ))
                     )),
                     "required", List.of("prompt")
@@ -132,18 +209,23 @@ public class ClaudeCodeTool implements ToolExecutor {
     private final ClaudeCodeCircuitBreaker circuitBreaker;
     private final ErrorClassificationService errorClassificationService;
     private final ClaudeCodeNotificationService notificationService;
+    private final AgentAccountPoolManager poolManager; // nullable — 풀 미설정 시 null
 
     public ClaudeCodeTool(ClaudeCodeToolConfig config,
                           ClaudeCodeCircuitBreaker circuitBreaker,
                           ErrorClassificationService errorClassificationService,
-                          ClaudeCodeNotificationService notificationService) {
+                          ClaudeCodeNotificationService notificationService,
+                          @org.springframework.beans.factory.annotation.Autowired(required = false)
+                          AgentAccountPoolManager poolManager) {
         this.config = config;
         this.circuitBreaker = circuitBreaker;
         this.errorClassificationService = errorClassificationService;
         this.notificationService = notificationService;
-        log.info("ClaudeCodeTool 초기화: executable={}, timeout={}s, maxTurns={}, apiKey={}",
+        this.poolManager = poolManager;
+        log.info("ClaudeCodeTool 초기화: executable={}, timeout={}s, maxTurns={}, apiKey={}, pool={}",
                 config.getExecutable(), config.getTimeoutSeconds(), config.getMaxTurns(),
-                config.getApiKey() != null && !config.getApiKey().isBlank() ? "[설정됨]" : "[미설정-OAuth]");
+                config.getApiKey() != null && !config.getApiKey().isBlank() ? "[설정됨]" : "[미설정-OAuth]",
+                poolManager != null ? "[활성]" : "[미사용]");
     }
 
     @Override
@@ -159,6 +241,20 @@ public class ClaudeCodeTool implements ToolExecutor {
             return toError("INVALID_INPUT", "prompt는 필수 파라미터입니다.");
         }
 
+        // response_schema가 있으면 프롬프트에 JSON 출력 지시 주입
+        Object responseSchema = input.get("response_schema");
+        if (responseSchema != null) {
+            try {
+                String schemaJson = objectMapper.writeValueAsString(responseSchema);
+                prompt = prompt + "\n\n[출력 규칙] 반드시 아래 JSON 스키마에 맞는 순수 JSON만 출력하라. "
+                        + "마크다운, 코드펜스, 설명 텍스트 없이 JSON 객체만 응답하라.\n"
+                        + "스키마: " + schemaJson;
+                log.debug("response_schema를 프롬프트에 주입");
+            } catch (JsonProcessingException e) {
+                log.warn("response_schema 직렬화 실패: {}", e.getMessage());
+            }
+        }
+
         String inputFile = (String) input.getOrDefault("input_file", null);
         String outputFormat = (String) input.getOrDefault("output_format", "text");
         int maxTurns = input.containsKey("max_turns")
@@ -172,14 +268,42 @@ public class ClaudeCodeTool implements ToolExecutor {
         Map<String, Object> jsonSchema = (Map<String, Object>) input.getOrDefault("json_schema", null);
         String workDir = (String) input.getOrDefault("working_directory",
                 config.getWorkingDirectory());
+        String systemPrompt = (String) input.getOrDefault("system_prompt", null);
         String appendSystemPrompt = (String) input.getOrDefault("append_system_prompt",
                 config.getDefaultSystemPrompt());
         String model = (String) input.getOrDefault("model", null);
         String effort = (String) input.getOrDefault("effort", null);
+        String thinking = (String) input.getOrDefault("thinking", null);
+        Integer maxThinkingTokens = input.containsKey("max_thinking_tokens")
+                ? ((Number) input.get("max_thinking_tokens")).intValue()
+                : null;
         String permissionMode = (String) input.getOrDefault("permission_mode", null);
+        List<String> disallowedTools = input.containsKey("disallowed_tools")
+                ? (List<String>) input.get("disallowed_tools")
+                : List.of();
+        boolean forkSession = Boolean.TRUE.equals(input.get("fork_session"));
+        String toolsSpec = (String) input.getOrDefault("tools", null);
+        List<String> mcpConfig = input.containsKey("mcp_config")
+                ? (List<String>) input.get("mcp_config")
+                : List.of();
+        Double maxBudgetUsd = input.containsKey("max_budget_usd")
+                ? ((Number) input.get("max_budget_usd")).doubleValue()
+                : null;
+        String fallbackModel = (String) input.getOrDefault("fallback_model", null);
+        Integer taskBudget = input.containsKey("task_budget")
+                ? ((Number) input.get("task_budget")).intValue()
+                : null;
         boolean sessionPersistence = input.containsKey("session_persistence")
                 ? Boolean.TRUE.equals(input.get("session_persistence"))
-                : false;
+                : config.isDefaultSessionPersistence();
+        String continueMode = (String) input.getOrDefault("continue_mode", "new");
+        String sessionId = (String) input.getOrDefault("session_id", null);
+
+        // continue_mode=resume인데 session_id 없으면 에러
+        if ("resume".equals(continueMode) && (sessionId == null || sessionId.isBlank())) {
+            return toError("INVALID_INPUT", "continue_mode=resume 시 session_id는 필수입니다.");
+        }
+
         Map<String, String> cliOptions = input.containsKey("cli_options")
                 ? (Map<String, String>) input.get("cli_options")
                 : Map.of();
@@ -200,22 +324,40 @@ public class ClaudeCodeTool implements ToolExecutor {
 
         try {
             List<String> command = buildCommand(prompt, outputFormat, maxTurns,
-                    allowedTools, jsonSchema, appendSystemPrompt, model,
-                    effort, permissionMode, sessionPersistence, cliOptions);
+                    allowedTools, disallowedTools, jsonSchema,
+                    systemPrompt, appendSystemPrompt, model, effort, thinking, maxThinkingTokens,
+                    permissionMode, sessionPersistence, continueMode, sessionId,
+                    forkSession, toolsSpec, mcpConfig, maxBudgetUsd, fallbackModel, taskBudget,
+                    cliOptions);
 
             log.info("ClaudeCodeTool 실행: max_turns={}, allowed_tools={}, output_format={}, model={}",
                     maxTurns, allowedTools, outputFormat, model != null ? model : "default");
             log.debug("ClaudeCodeTool 커맨드: {}", String.join(" ", command));
 
+            // ── 풀 매니저 경로: 사이드카 HTTP 실행 ──
+            if (poolManager != null) {
+                String result = tryExecuteViaPool(input, command, workDir,
+                        config.getTimeoutSeconds(), inputFile, outputFormat);
+                if (result != null) {
+                    return result;
+                }
+                // 풀에서 가용 계정 없으면 로컬 ProcessBuilder 폴백
+            }
+
+            // ── 로컬 ProcessBuilder 경로 (기존) ──
             ProcessBuilder pb = new ProcessBuilder(command);
 
             // 중첩 세션 방지: 부모 프로세스가 Claude Code 세션이면 CLAUDECODE 환경변수 제거
             pb.environment().remove("CLAUDECODE");
 
-            // API 키가 설정되어 있으면 프로세스 환경변수로 전달 (서버/AWS 배포용)
+            // API 키가 설정되어 있으면 --bare 모드로 전환 (CLI가 bare에서만 API Key 인증)
             String apiKey = config.getApiKey();
             if (apiKey != null && !apiKey.isBlank()) {
                 pb.environment().put("ANTHROPIC_API_KEY", apiKey);
+                if (!command.contains("--bare")) {
+                    command = new ArrayList<>(command);
+                    command.add(1, "--bare");
+                }
             }
 
             if (workDir != null && !workDir.isBlank()) {
@@ -279,9 +421,12 @@ public class ClaudeCodeTool implements ToolExecutor {
 
             log.info("ClaudeCodeTool 완료: exit_code=0, output_length={}", stdout.length());
 
-            // json 포맷이면 결과에서 실제 응답 텍스트 추출
+            // 포맷에 따라 결과 추출
             if ("json".equals(outputFormat)) {
                 return extractResultFromJson(stdout);
+            }
+            if ("stream-json".equals(outputFormat)) {
+                return extractResultFromStreamJson(stdout);
             }
             return stdout;
 
@@ -297,22 +442,49 @@ public class ClaudeCodeTool implements ToolExecutor {
      * 우선순위: named params → cli_options (중복 시 named params 우선)
      * -p (print mode)는 항상 강제, --add-dir는 working-directory 설정 시 자동 추가.
      */
+    @SuppressWarnings("java:S107") // 파라미터 수가 많지만 CLI 옵션 1:1 매핑으로 분리 불가
     private List<String> buildCommand(String prompt, String outputFormat, int maxTurns,
-                                       List<String> allowedTools, Map<String, Object> jsonSchema,
-                                       String appendSystemPrompt, String model,
-                                       String effort, String permissionMode,
-                                       boolean sessionPersistence,
+                                       List<String> allowedTools, List<String> disallowedTools,
+                                       Map<String, Object> jsonSchema,
+                                       String systemPrompt, String appendSystemPrompt,
+                                       String model, String effort,
+                                       String thinking, Integer maxThinkingTokens,
+                                       String permissionMode, boolean sessionPersistence,
+                                       String continueMode, String sessionId,
+                                       boolean forkSession, String toolsSpec,
+                                       List<String> mcpConfig,
+                                       Double maxBudgetUsd, String fallbackModel, Integer taskBudget,
                                        Map<String, String> cliOptions) {
         // named params가 이미 처리하는 옵션 — cli_options에서 중복 방지
         Set<String> handledOptions = Set.of(
-                "-p", "--output-format", "--max-turns", "--allowedTools",
-                "--json-schema", "--append-system-prompt", "--model",
+                "-p", "--output-format", "--max-turns",
+                "--allowedTools", "--allowed-tools",
+                "--disallowedTools", "--disallowed-tools",
+                "--json-schema", "--system-prompt",
+                "--append-system-prompt", "--model", "--fallback-model",
                 "--add-dir", "--no-session-persistence", "--permission-mode",
-                "--reasoning-effort"
+                "--reasoning-effort", "--thinking", "--max-thinking-tokens",
+                "--continue", "--resume", "--fork-session",
+                "--tools", "--mcp-config",
+                "--max-budget-usd", "--task-budget"
         );
 
         List<String> cmd = new ArrayList<>();
         cmd.add(config.getExecutable());
+
+        // continue_mode에 따른 세션 재개 옵션 (프롬프트 앞에 위치)
+        if ("continue".equals(continueMode)) {
+            cmd.add("--continue");
+        } else if ("resume".equals(continueMode) && sessionId != null && !sessionId.isBlank()) {
+            cmd.add("--resume");
+            cmd.add(sessionId);
+        }
+
+        // 세션 분기: resume/continue 시 원본 보존하고 새 세션 ID로 분기
+        if (forkSession) {
+            cmd.add("--fork-session");
+        }
+
         cmd.add("-p");
         cmd.add(prompt);
         cmd.add("--output-format");
@@ -320,7 +492,7 @@ public class ClaudeCodeTool implements ToolExecutor {
         cmd.add("--max-turns");
         cmd.add(String.valueOf(maxTurns));
 
-        // 세션 영속 비활성이 기본, 워크플로우에서 명시적으로 활성화 가능 (PRD-120)
+        // 세션 영속 제어: 기본 true (프로젝트 메모리 축적), 명시적으로 비활성화 가능
         if (!sessionPersistence) {
             cmd.add("--no-session-persistence");
         }
@@ -333,6 +505,20 @@ public class ClaudeCodeTool implements ToolExecutor {
             }
         }
 
+        for (String tool : disallowedTools) {
+            String trimmed = tool.trim();
+            if (!trimmed.isEmpty()) {
+                cmd.add("--disallowedTools");
+                cmd.add(trimmed);
+            }
+        }
+
+        // 가용 도구 셋 정의 (allowedTools와 다른 개념 — 사용 가능한 도구 셋 자체를 제한)
+        if (toolsSpec != null && !toolsSpec.isBlank()) {
+            cmd.add("--tools");
+            cmd.add(toolsSpec);
+        }
+
         if (jsonSchema != null && !jsonSchema.isEmpty()) {
             try {
                 cmd.add("--json-schema");
@@ -340,6 +526,12 @@ public class ClaudeCodeTool implements ToolExecutor {
             } catch (JsonProcessingException e) {
                 log.warn("JSON 스키마 직렬화 실패, 스키마 무시: {}", e.getMessage());
             }
+        }
+
+        // 시스템 프롬프트 전체 교체 (append보다 먼저 처리)
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            cmd.add("--system-prompt");
+            cmd.add(systemPrompt);
         }
 
         if (appendSystemPrompt != null && !appendSystemPrompt.isBlank()) {
@@ -352,14 +544,47 @@ public class ClaudeCodeTool implements ToolExecutor {
             cmd.add(model);
         }
 
+        if (fallbackModel != null && !fallbackModel.isBlank()) {
+            cmd.add("--fallback-model");
+            cmd.add(fallbackModel);
+        }
+
         if (effort != null && !effort.isBlank()) {
             cmd.add("--reasoning-effort");
             cmd.add(effort);
         }
 
+        if (thinking != null && !thinking.isBlank()) {
+            cmd.add("--thinking");
+            cmd.add(thinking);
+        }
+
+        if (maxThinkingTokens != null) {
+            cmd.add("--max-thinking-tokens");
+            cmd.add(String.valueOf(maxThinkingTokens));
+        }
+
         if (permissionMode != null && !permissionMode.isBlank()) {
             cmd.add("--permission-mode");
             cmd.add(permissionMode);
+        }
+
+        if (maxBudgetUsd != null) {
+            cmd.add("--max-budget-usd");
+            cmd.add(String.valueOf(maxBudgetUsd));
+        }
+
+        if (taskBudget != null) {
+            cmd.add("--task-budget");
+            cmd.add(String.valueOf(taskBudget));
+        }
+
+        // MCP 서버 설정 주입 (세션 단위)
+        for (String mcpEntry : mcpConfig) {
+            if (mcpEntry != null && !mcpEntry.isBlank()) {
+                cmd.add("--mcp-config");
+                cmd.add(mcpEntry);
+            }
         }
 
         // cli_options 맵에서 추가 옵션 병합 (named params와 중복되지 않는 것만)
@@ -427,28 +652,114 @@ public class ClaudeCodeTool implements ToolExecutor {
     }
 
     /**
-     * Claude Code의 --output-format json 결과에서 실제 응답 텍스트를 추출.
-     * JSON 구조: {"result": "...", "session_id": "...", "cost_usd": ..., ...}
+     * Claude Code의 --output-format json 결과에서 실제 응답을 추출.
+     *
+     * --json-schema 사용 시: structured_output 필드에 스키마 준수 JSON 객체 반환
+     * 그 외: result 필드의 텍스트 반환
      */
     @SuppressWarnings("unchecked")
     private String extractResultFromJson(String jsonOutput) {
         try {
             Map<String, Object> parsed = objectMapper.readValue(jsonOutput, Map.class);
-            // result 필드가 있으면 그것을 반환
+
+            // structured_output 우선 (--json-schema 사용 시 스키마 준수 JSON)
+            if (parsed.containsKey("structured_output") && parsed.get("structured_output") != null) {
+                Object structured = parsed.get("structured_output");
+                log.debug("structured_output 필드 발견, JSON 반환");
+                return objectMapper.writeValueAsString(structured);
+            }
+
+            // result 필드 fallback
             if (parsed.containsKey("result")) {
                 Object result = parsed.get("result");
-                if (result instanceof String) {
-                    return (String) result;
+                if (result instanceof String resultStr) {
+                    // 코드펜스 제거 후 JSON 파싱 시도
+                    String stripped = stripCodeFence(resultStr);
+                    try {
+                        Object jsonObj = objectMapper.readValue(stripped, Object.class);
+                        return objectMapper.writeValueAsString(jsonObj);
+                    } catch (Exception ignore) {
+                        return stripped;
+                    }
                 }
                 return objectMapper.writeValueAsString(result);
             }
-            // result 필드가 없으면 전체 JSON 반환
             return jsonOutput;
         } catch (Exception e) {
-            // JSON 파싱 실패 시 원본 반환
             log.debug("JSON 결과 추출 실패, 원본 반환: {}", e.getMessage());
             return jsonOutput;
         }
+    }
+
+    /**
+     * stream-json 출력(NDJSON)에서 최종 결과를 추출.
+     *
+     * openclaude의 stream-json 형식은 각 줄이 독립적인 JSON 이벤트:
+     *   {"type":"system","subtype":"init",...}
+     *   {"type":"assistant","message":{...}}
+     *   {"type":"result","subtype":"success","result":"...","session_id":"...","total_cost_usd":0.001}
+     *
+     * result 타입 이벤트의 result 필드를 추출해서 반환.
+     * result 이벤트가 없으면 마지막 assistant 메시지 텍스트 반환.
+     * 둘 다 없으면 원본 그대로 반환.
+     */
+    @SuppressWarnings("unchecked")
+    private String extractResultFromStreamJson(String ndjsonOutput) {
+        if (ndjsonOutput == null || ndjsonOutput.isBlank()) return ndjsonOutput;
+
+        String resultText = null;
+        String lastAssistantText = null;
+
+        for (String line : ndjsonOutput.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) continue;
+            try {
+                Map<String, Object> event = objectMapper.readValue(trimmed, Map.class);
+                String type = (String) event.get("type");
+
+                if ("result".equals(type)) {
+                    Object result = event.get("result");
+                    if (result instanceof String s) {
+                        resultText = stripCodeFence(s);
+                    } else if (result != null) {
+                        resultText = objectMapper.writeValueAsString(result);
+                    }
+                    // result 이벤트를 찾으면 즉시 반환 (마지막에 오는 게 보장됨)
+                    if (resultText != null) {
+                        // JSON 파싱 시도 (structured output인 경우)
+                        try {
+                            Object jsonObj = objectMapper.readValue(resultText, Object.class);
+                            return objectMapper.writeValueAsString(jsonObj);
+                        } catch (Exception ignore) {
+                            return resultText;
+                        }
+                    }
+                } else if ("assistant".equals(type)) {
+                    // 폴백용: 마지막 assistant 메시지 텍스트 보관
+                    Object message = event.get("message");
+                    if (message instanceof Map<?, ?> msgMap) {
+                        Object content = msgMap.get("content");
+                        if (content instanceof List<?> contentList && !contentList.isEmpty()) {
+                            Object firstBlock = contentList.get(0);
+                            if (firstBlock instanceof Map<?, ?> block && "text".equals(block.get("type"))) {
+                                lastAssistantText = (String) block.get("text");
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.trace("stream-json 라인 파싱 스킵: {}", trimmed);
+            }
+        }
+
+        // result 이벤트 없으면 마지막 assistant 텍스트 폴백
+        if (lastAssistantText != null) {
+            log.debug("stream-json: result 이벤트 없음, 마지막 assistant 텍스트 반환");
+            return lastAssistantText;
+        }
+
+        log.debug("stream-json: 결과 이벤트 없음, 원본 반환");
+        return ndjsonOutput;
     }
 
     private String readStream(InputStream inputStream) {
@@ -465,6 +776,74 @@ public class ClaudeCodeTool implements ToolExecutor {
             log.error("스트림 읽기 실패: {}", e.getMessage());
             return "";
         }
+    }
+
+    /**
+     * 풀 매니저를 통한 로컬 실행 시도 (CLAUDE_CONFIG_DIR로 계정 격리).
+     * 가용 계정이 있으면 실행 결과 반환, 없으면 null (기본 로컬 경로 폴백).
+     */
+    private String tryExecuteViaPool(Map<String, Object> input, List<String> command,
+                                      String workDir, int timeoutSeconds,
+                                      String inputFile, String outputFormat) {
+        String explicitAccountId = (String) input.get("_agent_account_id");
+        String tenantId = TenantContext.hasTenant() ? TenantContext.getTenantId() : null;
+
+        AgentAccountEntity account;
+        if (explicitAccountId != null) {
+            account = poolManager.getAccount(explicitAccountId);
+            if (account == null) {
+                log.warn("명시된 계정 없음: {}, 로컬 폴백", explicitAccountId);
+                return null;
+            }
+        } else {
+            account = poolManager.resolveAccount("claude_code", tenantId, null);
+            if (account == null) {
+                return null; // 기본 로컬 경로 폴백
+            }
+        }
+
+        // 계정별 서킷 브레이커 체크
+        if (!poolManager.getCircuitBreaker(account.getId()).allowRequest()) {
+            log.warn("[{}] 서킷 OPEN, 다른 계정 시도 또는 로컬 폴백", account.getId());
+            return null;
+        }
+
+        var result = poolManager.executeLocal(account, command, workDir, timeoutSeconds, inputFile);
+
+        if (result.exitCode() != 0) {
+            log.error("[{}] 실행 실패: exit={}, stderr={}", account.getId(), result.exitCode(), result.stderr());
+            poolManager.recordFailure(account.getId());
+            handleFailure("EXIT_" + result.exitCode(), result.stderr().isBlank() ? result.stdout() : result.stderr());
+            return toError("EXIT_" + result.exitCode(), result.stderr().isBlank() ? result.stdout() : result.stderr());
+        }
+
+        poolManager.recordSuccess(account.getId());
+
+        log.info("[{}] 실행 완료: output_length={}", account.getId(), result.stdout().length());
+
+        if ("json".equals(outputFormat)) {
+            return extractResultFromJson(result.stdout());
+        }
+        if ("stream-json".equals(outputFormat)) {
+            return extractResultFromStreamJson(result.stdout());
+        }
+        return result.stdout();
+    }
+
+    /** 마크다운 코드펜스(```json ... ```) 제거 */
+    private static String stripCodeFence(String text) {
+        if (text == null) return "";
+        String trimmed = text.strip();
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline > 0) {
+                trimmed = trimmed.substring(firstNewline + 1);
+            }
+            if (trimmed.endsWith("```")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 3).strip();
+            }
+        }
+        return trimmed;
     }
 
     private String toError(String code, String message) {

@@ -15,4 +15,7 @@ public interface TenantRepository extends JpaRepository<TenantEntity, String> {
     long countByAppId(String appId);
     Optional<TenantEntity> findByDbName(String dbName);
     boolean existsByAdminEmail(String adminEmail);
+
+    // CR-023: 소비앱별 필터링
+    List<TenantEntity> findByDomainApp(String domainApp);
 }

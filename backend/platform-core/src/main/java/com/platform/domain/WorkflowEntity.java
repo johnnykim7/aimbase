@@ -22,6 +22,9 @@ public class WorkflowEntity {
     @Column(length = 50)
     private String domain;
 
+    @Column(name = "project_id", length = 100)
+    private String projectId;
+
     @Type(JsonBinaryType.class)
     @Column(name = "trigger_config", columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> triggerConfig;
@@ -38,6 +41,13 @@ public class WorkflowEntity {
     @Type(JsonBinaryType.class)
     @Column(name = "output_schema", columnDefinition = "jsonb")
     private Map<String, Object> outputSchema;
+
+    @Type(JsonBinaryType.class)
+    @Column(name = "input_schema", columnDefinition = "jsonb")
+    private Map<String, Object> inputSchema;
+
+    @Column(name = "created_by", length = 100)
+    private String createdBy;
 
     @Column(name = "is_active")
     private boolean isActive = true;
@@ -59,6 +69,8 @@ public class WorkflowEntity {
     public void setName(String name) { this.name = name; }
     public String getDomain() { return domain; }
     public void setDomain(String domain) { this.domain = domain; }
+    public String getProjectId() { return projectId; }
+    public void setProjectId(String projectId) { this.projectId = projectId; }
     public Map<String, Object> getTriggerConfig() { return triggerConfig; }
     public void setTriggerConfig(Map<String, Object> triggerConfig) { this.triggerConfig = triggerConfig; }
     public List<Map<String, Object>> getSteps() { return steps; }
@@ -67,6 +79,10 @@ public class WorkflowEntity {
     public void setErrorHandling(Map<String, Object> errorHandling) { this.errorHandling = errorHandling; }
     public Map<String, Object> getOutputSchema() { return outputSchema; }
     public void setOutputSchema(Map<String, Object> outputSchema) { this.outputSchema = outputSchema; }
+    public Map<String, Object> getInputSchema() { return inputSchema; }
+    public void setInputSchema(Map<String, Object> inputSchema) { this.inputSchema = inputSchema; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
     public OffsetDateTime getCreatedAt() { return createdAt; }

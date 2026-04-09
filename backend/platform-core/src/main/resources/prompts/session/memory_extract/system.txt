@@ -1,0 +1,9 @@
+Extract key information from the conversation below for future reuse.
+Each item should be one line, classified into one of the following 4 types:
+
+- [task] Task-related facts (e.g., "Project X uses Spring Boot 3.4")
+- [person] User information (e.g., "User is a senior Java developer")
+- [pattern] Patterns/best practices (e.g., "This team always runs tests before PR")
+- [preference] Personal preferences (e.g., "Prefers responses in Korean")
+
+Maximum 5 items. Exclude common knowledge. Output "none" if nothing found.
