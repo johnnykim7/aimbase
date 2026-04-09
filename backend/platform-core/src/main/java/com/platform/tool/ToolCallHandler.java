@@ -44,6 +44,7 @@ public class ToolCallHandler {
     private final PermissionClassifier permissionClassifier;
     private final com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry;
     private final RedisTemplate<String, String> redisTemplate;
+    private final com.platform.config.PlatformSettingsService platformSettings;
 
     /** CR-033: Plan Mode 읽기전용 검사에서 허용하는 도구 (Plan Mode 자체 제어용) */
     private static final java.util.Set<String> PLAN_MODE_ALLOWED_WRITES =
@@ -54,13 +55,15 @@ public class ToolCallHandler {
                            PermissionClassifier permissionClassifier,
                            com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry,
                            RedisTemplate<String, String> redisTemplate,
-                           @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.max-tool-iterations:30}") int maxIterations) {
+                           @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.max-tool-iterations:30}") int maxIterations,
+                           com.platform.config.PlatformSettingsService platformSettings) {
         this.executionLogRepository = executionLogRepository;
         this.hookDispatcher = hookDispatcher;
         this.permissionClassifier = permissionClassifier;
         this.compactorRegistry = compactorRegistry;
         this.redisTemplate = redisTemplate;
         this.maxIterations = maxIterations;
+        this.platformSettings = platformSettings;
     }
 
     /**
@@ -279,13 +282,15 @@ public class ToolCallHandler {
                 results.add(executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement()));
             }
 
-            // A2 + CR-031 PRD-215: per-message budget + 도구별 지능형 축약
+            // A2 + CR-031 PRD-215 + CR-040: per-message budget + 도구별 지능형 축약 (런타임 설정)
+            int compactionThreshold = platformSettings.getInt("orchestrator.tool-result-compaction-threshold", 81920);
+            int budgetBytes = platformSettings.getInt("orchestrator.tool-result-budget-bytes", 51200);
             int totalChars = results.stream().mapToInt(r -> r.content().length()).sum();
-            if (totalChars > 80_000) {
-                log.debug("Tool results total {}KB exceeds 80KB budget, applying smart compaction", totalChars / 1000);
+            if (totalChars > compactionThreshold) {
+                log.debug("Tool results total {}B exceeds {}B threshold, applying smart compaction", totalChars, compactionThreshold);
                 results.sort((a, b) -> b.content().length() - a.content().length());
                 List<ContentBlock.ToolResult> budgeted = new ArrayList<>();
-                int remaining = 50_000;
+                int remaining = budgetBytes;
                 for (ContentBlock.ToolResult r : results) {
                     if (r.content().length() <= remaining) {
                         budgeted.add(r);

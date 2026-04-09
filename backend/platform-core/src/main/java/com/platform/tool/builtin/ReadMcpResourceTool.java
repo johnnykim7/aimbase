@@ -17,12 +17,13 @@ import java.util.Map;
 @Component
 public class ReadMcpResourceTool implements EnhancedToolExecutor {
 
-    private static final int MAX_TEXT_LENGTH = 32_768; // BIZ-066
-
     private final MCPServerManager mcpServerManager;
+    private final com.platform.config.PlatformSettingsService platformSettings;
 
-    public ReadMcpResourceTool(MCPServerManager mcpServerManager) {
+    public ReadMcpResourceTool(MCPServerManager mcpServerManager,
+                               com.platform.config.PlatformSettingsService platformSettings) {
         this.mcpServerManager = mcpServerManager;
+        this.platformSettings = platformSettings;
     }
 
     @Override
@@ -74,12 +75,13 @@ public class ReadMcpResourceTool implements EnhancedToolExecutor {
         try {
             Map<String, Object> result = client.readResource(uri);
 
-            // BIZ-066: 텍스트 32KB 트렁케이션
+            // BIZ-066 + CR-040: 텍스트 트렁케이션 (런타임 설정)
+            int maxTextLength = platformSettings.getInt("session.message-body-max-bytes", 32768);
             boolean truncated = false;
             if ("text".equals(result.get("type"))) {
                 String content = (String) result.get("content");
-                if (content != null && content.length() > MAX_TEXT_LENGTH) {
-                    result.put("content", content.substring(0, MAX_TEXT_LENGTH));
+                if (content != null && content.length() > maxTextLength) {
+                    result.put("content", content.substring(0, maxTextLength));
                     truncated = true;
                 }
             }

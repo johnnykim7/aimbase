@@ -84,15 +84,15 @@ export default function ScheduledJobs() {
                   <td className="px-4 py-3 font-medium">{job.name}</td>
                   <td className="px-4 py-3 font-mono text-xs">{job.cron_expression}</td>
                   <td className="px-4 py-3">
-                    <Badge variant="outline">{job.target_type}</Badge>
+                    <Badge color="muted">{job.target_type}</Badge>
                     <span className="ml-1 text-muted-foreground">{job.target_id}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <Badge variant={job.is_active ? "success" : "secondary"}>
+                    <Badge color={job.is_active ? "success" : "muted"}>
                       {job.is_active ? "활성" : "비활성"}
                     </Badge>
                     {job.failure_count > 0 && (
-                      <Badge variant="destructive" className="ml-1">
+                      <Badge color="danger">
                         실패 {job.failure_count}회
                       </Badge>
                     )}
@@ -101,8 +101,7 @@ export default function ScheduledJobs() {
                     {job.last_run_status !== "NEVER" ? (
                       <>
                         <Badge
-                          variant={job.last_run_status === "SUCCESS" ? "success" : "destructive"}
-                          className="mr-1"
+                          color={job.last_run_status === "SUCCESS" ? "success" : "danger"}
                         >
                           {job.last_run_status}
                         </Badge>
@@ -147,20 +146,11 @@ export default function ScheduledJobs() {
         open={showModal}
         onClose={() => setShowModal(false)}
         title="새 스케줄 추가"
-        footer={
-          <ActionButton
-            variant="primary"
-            onClick={() => createJob.mutate(form)}
-            isLoading={createJob.isPending}
-          >
-            생성
-          </ActionButton>
-        }
       >
         <div className="space-y-4">
           <FormField label="이름">
             <input
-              className={inputStyle}
+              style={inputStyle}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="일일 보고서 생성"
@@ -168,14 +158,14 @@ export default function ScheduledJobs() {
           </FormField>
           <FormField label="Cron 표현식" hint="초 분 시 일 월 요일 (예: 0 0 9 * * * = 매일 09시)">
             <input
-              className={inputStyle}
+              style={inputStyle}
               value={form.cron_expression}
               onChange={(e) => setForm({ ...form, cron_expression: e.target.value })}
             />
           </FormField>
           <FormField label="대상 타입">
             <select
-              className={inputStyle}
+              style={inputStyle}
               value={form.target_type}
               onChange={(e) => setForm({ ...form, target_type: e.target.value })}
             >
@@ -185,12 +175,19 @@ export default function ScheduledJobs() {
           </FormField>
           <FormField label="대상 ID">
             <input
-              className={inputStyle}
+              style={inputStyle}
               value={form.target_id}
               onChange={(e) => setForm({ ...form, target_id: e.target.value })}
               placeholder="워크플로우 ID 또는 도구 이름"
             />
           </FormField>
+          <ActionButton
+            variant="primary"
+            onClick={() => createJob.mutate(form)}
+            disabled={createJob.isPending}
+          >
+            생성
+          </ActionButton>
         </div>
       </Modal>
     </Page>

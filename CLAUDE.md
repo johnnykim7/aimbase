@@ -136,6 +136,11 @@ frontend/src/
 - 에이전트 메시지 본문 최대 32KB, 세션당 500개 제한 (BIZ-057)
 - Built-in Agent 5타입: GENERAL/PLAN/EXPLORE/GUIDE/VERIFICATION (BIZ-058)
 - Hook 이벤트 26종: Tool(3) + Orchestration(4) + Compact(2) + Subagent(2) + CR-034(14+1) (BIZ-059)
+- 팀당 멤버 최대 5명 (BIZ-073)
+- 세션당 활성 팀 최대 3개 (BIZ-074)
+- Notebook 최대 10MB (BIZ-075)
+- LSP 프로세스 5분 미사용 자동 종료 (BIZ-076)
+- LSP 초기 지원 언어 3개: java/typescript/python (BIZ-077)
 
 ## 테스트 전략
 
@@ -189,6 +194,8 @@ frontend/src/
 - [x] Sprint 47: CR-037 핵심 도구 네이티브화 4 Phase (PRD-241~244, FE-018) — BashTool, FileWriteTool, WebSearchTool, SuggestBackgroundPR (ClaudeCodeTool 의존 해소)
 - [x] Sprint 48: CR-038 에이전트 자율성 강화 4 Phase (PRD-245~248, FE-019) — ListMcpResources, ReadMcpResource, RemoteTriggerTool, BriefTool, FE 세션 브리핑
 - [x] Sprint 49: CR-036 프롬프트 외부화 + 영문 전환 + OpenClaude 포팅 10 Phase (PRD-249~260, FE-020~021) — prompt_templates 테이블, PromptTemplateService(캐시+폴백), 기존 25개 외부화, OpenClaude 48개 포팅, Python 연동, FE 관리화면
+- [x] Sprint 50: CR-040 런타임 설정 관리 3 Phase (PRD-269~272, FE-023) — global_config seed 12개, PlatformSettingsService(캐시+감사), GET/PUT API, 하드코딩 7곳 교체, FE 설정 관리 페이지
+- [ ] Sprint 50: CR-039 고급 확장 도구 4 Phase (PRD-265~268, FE-022) — TeamCreate/Delete(Swarm 팀 협업), NotebookEditTool(.ipynb 편집), LSPTool(코드 분석), FE 팀 관리 UI
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)

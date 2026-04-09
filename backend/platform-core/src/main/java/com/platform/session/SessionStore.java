@@ -24,24 +24,31 @@ public class SessionStore {
 
     private static final Logger log = LoggerFactory.getLogger(SessionStore.class);
     private static final String SESSION_PREFIX = "session:messages:";
-    private static final Duration TTL = Duration.ofHours(24);
 
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
     private final ConversationSessionRepository sessionRepository;
     private final ConversationMessageRepository messageRepository;
     private final TransactionTemplate transactionTemplate;
+    private final com.platform.config.PlatformSettingsService platformSettings;
 
     public SessionStore(RedisTemplate<String, String> redisTemplate,
                         ObjectMapper objectMapper,
                         ConversationSessionRepository sessionRepository,
                         ConversationMessageRepository messageRepository,
-                        TransactionTemplate transactionTemplate) {
+                        TransactionTemplate transactionTemplate,
+                        com.platform.config.PlatformSettingsService platformSettings) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.transactionTemplate = transactionTemplate;
+        this.platformSettings = platformSettings;
+    }
+
+    private Duration getSessionTtl() {
+        int hours = platformSettings.getInt("session.session-ttl-hours", 24);
+        return Duration.ofHours(hours);
     }
 
     public List<UnifiedMessage> getMessages(String sessionId) {
@@ -63,7 +70,7 @@ public class SessionStore {
         try {
             String key = buildKey(sessionId);
             String json = objectMapper.writeValueAsString(messages);
-            redisTemplate.opsForValue().set(key, json, TTL);
+            redisTemplate.opsForValue().set(key, json, getSessionTtl());
         } catch (Exception e) {
             log.warn("Failed to save session {} to Redis: {}", sessionId, e.getMessage());
         }
@@ -133,7 +140,7 @@ public class SessionStore {
             try {
                 String key = buildKey(sessionId);
                 String json = objectMapper.writeValueAsString(messages);
-                redisTemplate.opsForValue().set(key, json, TTL);
+                redisTemplate.opsForValue().set(key, json, getSessionTtl());
             } catch (Exception e) {
                 log.warn("Failed to re-cache session {} in Redis: {}", sessionId, e.getMessage());
             }

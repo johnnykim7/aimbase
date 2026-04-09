@@ -45,4 +45,27 @@ export const platformApi = {
 
   regenerateApiKey: (id: string) =>
     apiClient.post<ApiResponse<ApiKey & { apiKey: string }>>(`/platform/api-keys/${id}/regenerate`),
+
+  // CR-040: Platform Settings
+  getSettings: (category?: string) =>
+    apiClient.get<{ success: boolean; data: Record<string, SettingItem[]> }>("/platform/settings", {
+      params: category ? { category } : undefined,
+    }),
+
+  updateSettings: (settings: { key: string; value: string }[], userId?: string) =>
+    apiClient.put<{ success: boolean; updated: number; data: Record<string, SettingItem[]> }>(
+      "/platform/settings",
+      { settings, userId }
+    ),
+
+  evictSettingsCache: () =>
+    apiClient.post<{ success: boolean; message: string }>("/platform/settings/evict-cache"),
 };
+
+export interface SettingItem {
+  key: string;
+  value: string;
+  description: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}

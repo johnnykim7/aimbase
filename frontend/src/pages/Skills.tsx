@@ -6,7 +6,7 @@ import { FormField, inputStyle, textareaStyle } from "../components/common/FormF
 import { EmptyState } from "../components/common/EmptyState";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { Page } from "../components/layout/Page";
-import { Sparkles, Trash2, Pencil } from "lucide-react";
+import { Sparkles, Trash2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { skillsApi, type Skill } from "../api/skills";
 
@@ -95,7 +95,7 @@ export default function Skills() {
               )}
               <div className="flex flex-wrap gap-1">
                 {skill.tags?.map((tag) => (
-                  <Badge key={tag} variant="outline">{tag}</Badge>
+                  <Badge key={tag} color="muted">{tag}</Badge>
                 ))}
               </div>
               {skill.tools?.length > 0 && (
@@ -113,20 +113,11 @@ export default function Skills() {
         open={showModal}
         onClose={() => setShowModal(false)}
         title="새 스킬 추가"
-        footer={
-          <ActionButton
-            variant="primary"
-            onClick={() => createSkill.mutate(form)}
-            isLoading={createSkill.isPending}
-          >
-            생성
-          </ActionButton>
-        }
       >
         <div className="space-y-4">
           <FormField label="이름">
             <input
-              className={inputStyle}
+              style={inputStyle}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="코드 리뷰 스킬"
@@ -134,7 +125,7 @@ export default function Skills() {
           </FormField>
           <FormField label="설명">
             <input
-              className={inputStyle}
+              style={inputStyle}
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               placeholder="코드를 리뷰하고 개선 사항을 제안합니다"
@@ -142,7 +133,7 @@ export default function Skills() {
           </FormField>
           <FormField label="시스템 프롬프트">
             <textarea
-              className={textareaStyle}
+              style={textareaStyle}
               rows={5}
               value={form.system_prompt}
               onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
@@ -151,18 +142,25 @@ export default function Skills() {
           </FormField>
           <FormField label="허용 도구" hint="쉼표로 구분 (예: builtin_file_read, builtin_grep)">
             <input
-              className={inputStyle}
+              style={inputStyle}
               value={form.tools}
               onChange={(e) => setForm({ ...form, tools: e.target.value })}
             />
           </FormField>
           <FormField label="태그" hint="쉼표로 구분">
             <input
-              className={inputStyle}
+              style={inputStyle}
               value={form.tags}
               onChange={(e) => setForm({ ...form, tags: e.target.value })}
             />
           </FormField>
+          <ActionButton
+            variant="primary"
+            onClick={() => createSkill.mutate(form)}
+            disabled={createSkill.isPending}
+          >
+            생성
+          </ActionButton>
         </div>
       </Modal>
     </Page>

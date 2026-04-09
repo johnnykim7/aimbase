@@ -117,10 +117,10 @@ export default function PromptTemplates() {
       actions={
         <div className="flex gap-2">
           <ActionButton
-            variant="outline"
+            variant="ghost"
             icon={<RefreshCw className="size-4" />}
             onClick={() => clearCache.mutate()}
-            isLoading={clearCache.isPending}
+            disabled={clearCache.isPending}
           >
             캐시 초기화
           </ActionButton>
@@ -172,8 +172,8 @@ export default function PromptTemplates() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="font-semibold text-sm truncate">{t.name}</h3>
-                  <Badge variant="outline">{t.category}</Badge>
-                  <Badge variant={t.is_system ? "default" : "outline"}>
+                  <Badge color="muted">{t.category}</Badge>
+                  <Badge color={t.is_system ? "accent" : "muted"}>
                     {t.is_system ? "system" : "custom"}
                   </Badge>
                   <span className="text-xs text-muted-foreground">v{t.version}</span>
@@ -221,7 +221,64 @@ export default function PromptTemplates() {
         open={showModal}
         onClose={() => { setShowModal(false); setEditItem(null); }}
         title={editItem ? "프롬프트 템플릿 편집" : "새 프롬프트 템플릿"}
-        footer={
+      >
+        <div className="space-y-4">
+          {!editItem && (
+            <>
+              <FormField label="Key" hint="예: tool.bash.prompt">
+                <input
+                  style={inputStyle}
+                  value={form.key}
+                  onChange={(e) => setForm({ ...form, key: e.target.value })}
+                  placeholder="category.subcategory.identifier"
+                />
+              </FormField>
+              <FormField label="카테고리">
+                <select
+                  style={inputStyle}
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                >
+                  {CATEGORIES.filter((c) => c !== "all").map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </FormField>
+            </>
+          )}
+          <FormField label="이름">
+            <input
+              style={inputStyle}
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="Bash Tool Prompt"
+            />
+          </FormField>
+          <FormField label="설명">
+            <input
+              style={inputStyle}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </FormField>
+          <FormField label="템플릿" hint="{{variable}} 형식으로 변수 사용">
+            <textarea
+              style={{ ...textareaStyle, fontFamily: "monospace", fontSize: "13px" }}
+              rows={12}
+              value={form.template}
+              onChange={(e) => setForm({ ...form, template: e.target.value })}
+            />
+          </FormField>
+          <FormField label="언어">
+            <select
+              style={inputStyle}
+              value={form.language}
+              onChange={(e) => setForm({ ...form, language: e.target.value })}
+            >
+              <option value="en">English</option>
+              <option value="ko">Korean</option>
+            </select>
+          </FormField>
           <ActionButton
             variant="primary"
             onClick={() => {
@@ -235,70 +292,10 @@ export default function PromptTemplates() {
                 createTemplate.mutate(form);
               }
             }}
-            isLoading={createTemplate.isPending || updateTemplate.isPending}
+            disabled={createTemplate.isPending || updateTemplate.isPending}
           >
             {editItem ? "저장" : "생성"}
           </ActionButton>
-        }
-      >
-        <div className="space-y-4">
-          {!editItem && (
-            <>
-              <FormField label="Key" hint="예: tool.bash.prompt">
-                <input
-                  className={inputStyle}
-                  value={form.key}
-                  onChange={(e) => setForm({ ...form, key: e.target.value })}
-                  placeholder="category.subcategory.identifier"
-                />
-              </FormField>
-              <FormField label="카테고리">
-                <select
-                  className={inputStyle}
-                  value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                >
-                  {CATEGORIES.filter((c) => c !== "all").map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </FormField>
-            </>
-          )}
-          <FormField label="이름">
-            <input
-              className={inputStyle}
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="Bash Tool Prompt"
-            />
-          </FormField>
-          <FormField label="설명">
-            <input
-              className={inputStyle}
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
-          </FormField>
-          <FormField label="템플릿" hint="{{variable}} 형식으로 변수 사용">
-            <textarea
-              className={textareaStyle}
-              rows={12}
-              value={form.template}
-              onChange={(e) => setForm({ ...form, template: e.target.value })}
-              style={{ fontFamily: "monospace", fontSize: "13px" }}
-            />
-          </FormField>
-          <FormField label="언어">
-            <select
-              className={inputStyle}
-              value={form.language}
-              onChange={(e) => setForm({ ...form, language: e.target.value })}
-            >
-              <option value="en">English</option>
-              <option value="ko">Korean</option>
-            </select>
-          </FormField>
         </div>
       </Modal>
 
@@ -307,27 +304,17 @@ export default function PromptTemplates() {
         open={showTestModal}
         onClose={() => setShowTestModal(false)}
         title="프롬프트 렌더링 테스트"
-        footer={
-          <ActionButton
-            variant="primary"
-            onClick={() => testRender.mutate()}
-            isLoading={testRender.isPending}
-          >
-            렌더링
-          </ActionButton>
-        }
       >
         <div className="space-y-4">
           <FormField label="Key">
-            <input className={inputStyle} value={testKey} disabled />
+            <input style={inputStyle} value={testKey} disabled />
           </FormField>
           <FormField label="변수 (JSON)" hint='예: {"query": "test question"}'>
             <textarea
-              className={textareaStyle}
+              style={{ ...textareaStyle, fontFamily: "monospace" }}
               rows={3}
               value={testVars}
               onChange={(e) => setTestVars(e.target.value)}
-              style={{ fontFamily: "monospace" }}
             />
           </FormField>
           {testResult && (
@@ -337,6 +324,13 @@ export default function PromptTemplates() {
               </pre>
             </FormField>
           )}
+          <ActionButton
+            variant="primary"
+            onClick={() => testRender.mutate()}
+            disabled={testRender.isPending}
+          >
+            렌더링
+          </ActionButton>
         </div>
       </Modal>
     </Page>

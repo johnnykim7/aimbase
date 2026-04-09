@@ -36,6 +36,8 @@
 | CR-036 | 프롬프트 외부화 + 영문 전환 + OpenClaude 프롬프트 전수 포팅 (PRD-249~264, FE-020~021) | 변경 | High | v6.5.0 | 🔧 진행중 |
 | CR-037 | 핵심 도구 네이티브화 — BashTool + FileWriteTool + WebSearchTool + SuggestBackgroundPR (PRD-241~244) | 변경 | High | v6.3.0 | ✅ 완료 |
 | CR-038 | 에이전트 자율성 강화 — MCP 리소스 탐색·읽기 + 이벤트 트리거 + 세션 브리핑 (PRD-245~248, FE-019) | 변경 | High | v6.4.0 | ✅ 완료 |
+| CR-039 | 고급 확장 도구 — Swarm 팀 협업 + Notebook 편집 + LSP 코드 분석 (PRD-265~268, FE-022) | 변경 | High | v6.6.0 | 🔧 진행중 |
+| CR-040 | 런타임 설정 관리 — DB 기반 설정 + 관리자 UI + 하드코딩 제거 (PRD-269~272, FE-023) | 변경 | High | v6.7.0 | 🔧 진행중 |
 
 ---
 
@@ -616,6 +618,70 @@
 - **영향 설계서**: T1-1, T1-3, T1-7, T3-1, T3-2, T3-6
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v6.4.0
 - **변경 일자**: 2026-04-08
+
+---
+
+### CR-039 | 고급 확장 도구 — Swarm 팀 협업 + Notebook 편집 + LSP 코드 분석
+- **대상 기능 ID**: PRD-265 ~ PRD-268 (신규), FE-022 (신규)
+- **변경 타입**: 변경
+- **변경 내용**: openclaude 갭 분석 최종 잔여 4개 도구 — Swarm 팀 협업, Notebook 편집, LSP 코드 분석 (4 Phase)
+  - **PRD-265 TeamCreateTool**: Swarm 패턴 동적 팀 생성. 팀 이름, 목적, 멤버 에이전트(AgentType + 역할) 정의. 세션 스코프 휘발성 (Redis 캐시 + teams 테이블 기록용). AgentOrchestrator.runParallel()로 팀 멤버 병렬 실행. 팀 내 에이전트간 SendMessageTool 통신 자동 활성화. 팀당 최대 5명 멤버 제한
+    - 입력: `{"name": "code-review-team", "objective": "PR #42 리뷰", "members": [{"agent_type": "EXPLORE", "role": "코드 탐색"}, {"agent_type": "VERIFICATION", "role": "테스트 검증"}]}`
+    - 출력: `{"team_id": "...", "members": [...], "status": "ACTIVE"}`
+    - TeamService: 팀 CRUD + 멤버 관리 + 상태 추적 (ACTIVE/COMPLETED/DISSOLVED)
+    - teams 테이블 (Tenant DB): id, session_id, name, objective, status, members(JSONB), created_at, dissolved_at
+  - **PRD-266 TeamDeleteTool**: 팀 해체. 실행 중 멤버 에이전트 graceful stop (SubagentLifecycleManager 활용). 팀 상태 DISSOLVED로 전환. Redis 캐시 삭제 + DB 기록 유지
+    - 입력: `{"team_id": "...", "reason": "리뷰 완료"}`
+    - 출력: `{"team_id": "...", "status": "DISSOLVED", "members_stopped": 3}`
+  - **PRD-267 NotebookEditTool**: Jupyter Notebook(.ipynb) 셀 CRUD. .ipynb는 JSON 구조이므로 Java 직접 편집 (Python sidecar 불필요). nbformat v4 호환. 5가지 작업 지원:
+    - `add_cell`: 지정 위치에 code/markdown 셀 추가. execution_count 자동 관리
+    - `edit_cell`: 기존 셀 소스 교체 (인덱스 또는 셀 ID 지정)
+    - `delete_cell`: 셀 삭제
+    - `move_cell`: 셀 순서 변경
+    - `read_cell`: 특정 셀 또는 전체 노트북 읽기
+    - WorkspacePolicyEngine 경로 검증 (허용된 워크스페이스 내 .ipynb만 편집)
+    - 셀 출력(outputs) 보존 — 편집 시 기존 출력 유지, 명시적 clear 옵션 제공
+    - 최대 노트북 크기 10MB 제한
+  - **PRD-268 LSPTool**: Language Server Protocol 클라이언트 — 핵심 3개 기능만 초기 구현
+    - `definition`: 심볼 정의 위치 추적 (textDocument/definition)
+    - `references`: 심볼 참조 위치 목록 (textDocument/references)
+    - `hover`: 심볼 타입 정보 조회 (textDocument/hover)
+    - LSPClientManager: 언어별 Language Server 프로세스 관리 (Java → Eclipse JDT LS, TypeScript → typescript-language-server, Python → pylsp)
+    - JSON-RPC 2.0 통신 (stdin/stdout). ProcessBuilder로 LS 프로세스 기동
+    - Lazy 초기화: 첫 요청 시 해당 언어 LS 기동 + initialize 핸드셰이크. 5분 미사용 시 자동 종료
+    - 입력: `{"action": "definition", "file_path": "src/Main.java", "line": 42, "character": 15}`
+    - 출력: `{"uri": "file:///src/Service.java", "range": {"start": {"line": 10, "character": 4}, ...}}`
+    - 세션 스코프: 세션 종료 시 모든 LS 프로세스 정리
+    - 지원 언어: java, typescript, python (초기). 설정으로 확장 가능
+  - **FE-022 팀 관리 + 도구 상태 UI**:
+    - 세션 상세 화면에 Teams 탭 추가: 활성 팀 목록, 멤버 상태, 팀 생성/해체 이력
+    - 도구 목록 페이지에 LSP 상태 표시: 언어별 LS 프로세스 상태 (IDLE/RUNNING/ERROR)
+  - **DB**: V48__cr039_teams.sql (Tenant) — teams 테이블
+  - **BIZ 규칙**: BIZ-073(팀당 멤버 최대 5명), BIZ-074(세션당 활성 팀 최대 3개), BIZ-075(Notebook 최대 10MB), BIZ-076(LSP 프로세스 5분 미사용 자동 종료), BIZ-077(LSP 초기 지원 언어 3개: java/typescript/python)
+- **변경 사유**: openclaude 갭 분석 최종 잔여 4개. TeamCreate/Delete로 Swarm 패턴 멀티에이전트 협업 완성 (기존 AgentOrchestrator + SendMessage 위에 팀 추상화). NotebookEdit로 RAG 평가/벤치마크 결과의 재현 가능한 관리. LSPTool로 에이전트 코드 분석 품질 향상 (파일 텍스트 검색 → 타입 인식 심볼 추적)
+- **영향 모듈**: Agent(TeamService 신규, AgentOrchestrator 확장), Tool(도구 4종 신규), FE(세션 상세 Teams 탭, 도구 LSP 상태)
+- **영향도**: High
+- **영향 범위**: PRD-265 ~ PRD-268, FE-022, BIZ-073 ~ BIZ-077
+- **영향 설계서**: T1-1, T1-3, T1-7, T3-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v6.6.0
+- **변경 일자**: 2026-04-09
+
+### CR-040 | 런타임 설정 관리 — DB 기반 설정 + 관리자 UI + 하드코딩 제거
+- **대상 기능 ID**: PRD-269 ~ PRD-272, FE-023
+- **변경 타입**: 변경
+- **변경 내용**: 서버 재기동 없이 관리자가 런타임에 미세조정할 수 있도록 DB 기반 설정 관리 + FE 관리 UI 제공
+  - **PRD-269 PlatformSettingsService**: global_config 테이블 기반 런타임 설정 서비스. Caffeine 캐시(5분 TTL) + 변경 시 캐시 무효화 + 감사 로그 기록. 카테고리별 그룹핑(orchestrator/session/compaction). 기본값 폴백(application.yml → 하드코딩).
+  - **PRD-270 PlatformSettingsController**: GET/PUT /api/v1/platform/settings API. 카테고리별 조회, 단건/다건 수정. Super Admin 전용.
+  - **PRD-271 V13 seed 마이그레이션**: global_config에 ~13개 기본 설정값 INSERT (max-tool-iterations, default-max-tokens, tool-result-budget-bytes, session-ttl-hours, compaction 임계값 등)
+  - **PRD-272 하드코딩 제거**: ToolCallHandler(80KB/50KB 임계값), SessionStore(24h TTL), SendMessageTool(500/32KB), ReadMcpResourceTool(32KB)을 PlatformSettingsService 조회로 교체
+  - **FE-023 플랫폼 설정 관리 페이지**: /platform/settings 라우트. 카테고리별 그룹핑(오케스트레이터/세션/압축). 인라인 편집 + 저장 + 즉시 반영. 기본값 리셋 버튼.
+- **변경 사유**: 3자 벤치마크에서 max-tool-iterations, default-max-tokens 등의 하드코딩 값이 응답 품질에 직접 영향 확인. 변경 시 빌드/재기동 필요한 구조를 런타임 조정 가능하도록 개선.
+- **영향 모듈**: Config(PlatformSettingsService 신규, PlatformSettingsController 신규), Tool(ToolCallHandler 수정), Session(SessionStore 수정), FE(설정 페이지 신규)
+- **영향도**: High
+- **영향 범위**: PRD-269 ~ PRD-272, FE-023
+- **영향 설계서**: T1-1, T3-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v6.7.0
+- **변경 일자**: 2026-04-09
 
 ---
 

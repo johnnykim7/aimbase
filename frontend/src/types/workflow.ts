@@ -50,3 +50,5 @@ export interface WorkflowRequest {
   outputSchema?: Record<string, unknown>;
   status?: string;
 }
+
+export type PlatformWorkflow = Workflow;

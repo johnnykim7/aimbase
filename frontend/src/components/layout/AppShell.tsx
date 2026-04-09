@@ -39,6 +39,7 @@ const ROUTE_HEADERS: Record<string, RouteHeader> = {
   "/platform/subscriptions":{ title: "구독/쿼터 관리", subtitle: "Super Admin — 테넌트별 사용 한도 설정", icon: <CreditCard className={ICON} /> },
   "/platform/api-keys":     { title: "API Key 관리", subtitle: "Super Admin — 시스템 API Key 발급 및 관리", icon: <KeyRound className={ICON} /> },
   "/platform/monitoring":   { title: "플랫폼 현황", subtitle: "Super Admin — 전체 테넌트 사용량 총괄", icon: <Globe className={ICON} /> },
+  "/platform/settings":    { title: "런타임 설정", subtitle: "Super Admin — 서버 재기동 없이 플랫폼 설정 미세조정", icon: <Settings2 className={ICON} /> },
 };
 
 function resolveHeader(pathname: string): RouteHeader | null {

@@ -26,15 +26,15 @@ import java.util.Map;
 @Component
 public class SendMessageTool implements EnhancedToolExecutor {
 
-    private static final int MAX_CONTENT_LENGTH = 32 * 1024;
-    private static final int MAX_MESSAGES_PER_SESSION = 500;
-
     private final AgentMessageBus messageBus;
     private final HookDispatcher hookDispatcher;
+    private final com.platform.config.PlatformSettingsService platformSettings;
 
-    public SendMessageTool(AgentMessageBus messageBus, HookDispatcher hookDispatcher) {
+    public SendMessageTool(AgentMessageBus messageBus, HookDispatcher hookDispatcher,
+                           com.platform.config.PlatformSettingsService platformSettings) {
         this.messageBus = messageBus;
         this.hookDispatcher = hookDispatcher;
+        this.platformSettings = platformSettings;
     }
 
     @Override
@@ -84,15 +84,17 @@ public class SendMessageTool implements EnhancedToolExecutor {
         if (content == null || content.isBlank()) {
             return ToolResult.error("'content' is required");
         }
-        if (content.length() > MAX_CONTENT_LENGTH) {
-            return ToolResult.error("Message content exceeds maximum length of " + MAX_CONTENT_LENGTH + " bytes");
+        int maxContentLength = platformSettings.getInt("session.message-body-max-bytes", 32768);
+        if (content.length() > maxContentLength) {
+            return ToolResult.error("Message content exceeds maximum length of " + maxContentLength + " bytes");
         }
 
         // 세션 메시지 수 제한
         String sessionId = ctx.sessionId();
+        int maxMessages = platformSettings.getInt("session.max-messages-per-session", 500);
         long sessionMsgCount = messageBus.getSessionMessages(sessionId).size();
-        if (sessionMsgCount >= MAX_MESSAGES_PER_SESSION) {
-            return ToolResult.denied("Session message limit reached (" + MAX_MESSAGES_PER_SESSION + ")");
+        if (sessionMsgCount >= maxMessages) {
+            return ToolResult.denied("Session message limit reached (" + maxMessages + ")");
         }
 
         // 발신자 결정: 서브에이전트면 자신의 세션ID, 아니면 "orchestrator"

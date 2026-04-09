@@ -27,6 +27,7 @@ import Tenants from "./pages/platform/Tenants";
 import Subscriptions from "./pages/platform/Subscriptions";
 import PlatformMonitoring from "./pages/platform/PlatformMonitoring";
 import ApiKeys from "./pages/platform/ApiKeys";
+import PlatformSettings from "./pages/platform/PlatformSettings";
 
 export default function App() {
   return (
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="api-keys" element={<ApiKeys />} />
           <Route path="monitoring" element={<PlatformMonitoring />} />
+          <Route path="settings" element={<PlatformSettings />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

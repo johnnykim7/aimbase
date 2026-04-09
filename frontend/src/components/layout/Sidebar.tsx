@@ -64,6 +64,7 @@ const PLATFORM_ITEMS: NavItemDef[] = [
   { path: "/platform/subscriptions", icon: CreditCard, label: "구독 관리" },
   { path: "/platform/api-keys", icon: KeyRound, label: "API Key 관리" },
   { path: "/platform/monitoring", icon: Globe, label: "플랫폼 현황" },
+  { path: "/platform/settings", icon: Settings2, label: "런타임 설정" },
 ];
 
 const NavItem = ({ path, icon: Icon, label, exact }: NavItemDef) => {
