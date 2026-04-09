@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.ToolRegistry;
 
 import org.springframework.context.annotation.Lazy;

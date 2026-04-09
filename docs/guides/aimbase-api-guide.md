@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v1.8.0** | 2026-04-08 | Aimbase v6.3.0 기준
+> **v2.0.0** | 2026-04-10 | Aimbase v6.3.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -822,12 +822,110 @@ GET /api/v1/agents/active
 | POST | `/agents/{runId}/cancel` | 강제 취소 |
 | GET | `/agents/active` | 활성 에이전트 현황 |
 
+### Agent Registry [v2.0, CR-041]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| POST | `/agents/register` | 원격 에이전트 등록 |
+| DELETE | `/agents/{id}` | 에이전트 해제 |
+| GET | `/agents?status=ACTIVE` | 에이전트 목록 조회 |
+| POST | `/agents/{id}/heartbeat` | 하트비트 |
+
+---
+
+## 14. Agent Registry API [CR-041]
+
+원격 에이전트(소비앱)가 MCP 서버로 도구를 노출하고, Aimbase에 자가 등록/해제하는 API.
+
+### 14-1. 에이전트 등록
+
+```
+POST /api/v1/agents/register
+Content-Type: application/json
+```
+
+**Request Body:**
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| agentName | string | Y | 에이전트 이름 |
+| publicAddress | string | Y | 에이전트 공인 IP 주소 |
+| mcpPort | integer | Y | MCP 서버 포트 |
+| toolNames | string[] | N | 도구 이름 목록 (MCP 탐색 실패 시 폴백) |
+| metadata | object | N | 추가 메타데이터 |
+
+**Response (201):**
+```json
+{
+  "data": {
+    "id": "uuid",
+    "agentName": "flowguard-agent",
+    "publicAddress": "1.2.3.4",
+    "mcpPort": 8190,
+    "status": "ACTIVE",
+    "toolsCache": [...],
+    "registeredAt": "2026-04-10T...",
+    "lastHeartbeatAt": "2026-04-10T..."
+  }
+}
+```
+
+### 14-2. 에이전트 해제
+
+```
+DELETE /api/v1/agents/{id}
+```
+
+**Response:** 204 No Content
+
+### 14-3. 에이전트 목록 조회
+
+```
+GET /api/v1/agents?status=ACTIVE
+```
+
+**Query Parameters:**
+| 파라미터 | 기본값 | 설명 |
+|---------|--------|------|
+| status | ACTIVE | 상태 필터 (ACTIVE, STALE, DEREGISTERED) |
+
+**Response (200):**
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "agentName": "flowguard-agent",
+      "publicAddress": "1.2.3.4",
+      "mcpPort": 8190,
+      "status": "ACTIVE",
+      "toolsCache": [{"name": "builtin_file_read", "description": "..."}],
+      "registeredAt": "2026-04-10T...",
+      "lastHeartbeatAt": "2026-04-10T..."
+    }
+  ]
+}
+```
+
+### 14-4. 하트비트
+
+```
+POST /api/v1/agents/{id}/heartbeat
+```
+
+**Response (200):**
+```json
+{"status": "ok"}
+```
+
+> BIZ-078: 하트비트 간격 60초 권장. BIZ-079: 5분 무응답 시 STALE 처리.
+
 ---
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.0.0 | 2026-04-10 | CR-041 Agent Registry API 4개 엔드포인트 추가 (§ 14) |
 | v1.9.1 | 2026-04-08 | 워크플로우 수정(PUT) 예시에 필수 `id` 필드 누락 수정. 필수/선택 필드 테이블에 `id` 추가 |
 | v1.9.0 | 2026-04-08 | 에이전트 자율성 도구 4종 추가: list_mcp_resources, read_mcp_resource, remote_trigger, brief. 세션 브리핑 REST API 2개 추가 (CR-038) |
 | v1.8.0 | 2026-04-08 | 네이티브 도구 4종 추가: bash(셸 실행), file_write(파일 생성), web_search(웹 검색), suggest_background_pr(PR 자동 생성). ClaudeCodeTool 의존 해소 (CR-037) |

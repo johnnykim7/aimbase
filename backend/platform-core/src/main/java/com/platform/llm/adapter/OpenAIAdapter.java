@@ -29,7 +29,7 @@ import com.platform.llm.model.LLMStreamChunk;
 import com.platform.llm.model.TokenUsage;
 import com.platform.llm.model.ToolCall;
 import com.platform.llm.model.UnifiedMessage;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;

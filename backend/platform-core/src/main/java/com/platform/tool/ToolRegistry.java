@@ -1,7 +1,7 @@
 package com.platform.tool;
 
 import com.platform.llm.model.ToolCall;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.monitoring.PlatformMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

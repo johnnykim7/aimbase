@@ -2,7 +2,7 @@ package com.platform.session;
 
 import com.platform.domain.ToolExecutionLogEntity;
 import com.platform.llm.model.UnifiedMessage;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.repository.ToolExecutionLogRepository;
 import com.platform.tool.ToolRegistry;
 import org.junit.jupiter.api.BeforeEach;

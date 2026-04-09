@@ -141,6 +141,9 @@ frontend/src/
 - Notebook 최대 10MB (BIZ-075)
 - LSP 프로세스 5분 미사용 자동 종료 (BIZ-076)
 - LSP 초기 지원 언어 3개: java/typescript/python (BIZ-077)
+- 에이전트 하트비트 간격 60초 (BIZ-078)
+- 에이전트 stale 임계값 5분 (BIZ-079)
+- 원격 도구 동기화 주기 30초 (BIZ-080)
 
 ## 테스트 전략
 
@@ -196,6 +199,7 @@ frontend/src/
 - [x] Sprint 49: CR-036 프롬프트 외부화 + 영문 전환 + OpenClaude 포팅 10 Phase (PRD-249~260, FE-020~021) — prompt_templates 테이블, PromptTemplateService(캐시+폴백), 기존 25개 외부화, OpenClaude 48개 포팅, Python 연동, FE 관리화면
 - [x] Sprint 50: CR-040 런타임 설정 관리 3 Phase (PRD-269~272, FE-023) — global_config seed 12개, PlatformSettingsService(캐시+감사), GET/PUT API, 하드코딩 7곳 교체, FE 설정 관리 페이지
 - [ ] Sprint 50: CR-039 고급 확장 도구 4 Phase (PRD-265~268, FE-022) — TeamCreate/Delete(Swarm 팀 협업), NotebookEditTool(.ipynb 편집), LSPTool(코드 분석), FE 팀 관리 UI
+- [x] Sprint 51: CR-041 Agent SDK 추출 + Agent Registry 5 Phase (PRD-273~278) — aimbase-tool-sdk-core(도구 17개 추출), aimbase-tool-sdk-mcp(MCP 서버+STUN+등록), Agent Registry(등록/해제/하트비트), RemoteToolDiscovery(원격 도구 동기화)
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)

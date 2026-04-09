@@ -1,5 +1,6 @@
 package com.platform.llm.model;
 
+import com.platform.tool.model.UnifiedToolDef;
 import java.util.List;
 import java.util.Map;
 

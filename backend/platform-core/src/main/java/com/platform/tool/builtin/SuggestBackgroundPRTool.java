@@ -2,7 +2,7 @@ package com.platform.tool.builtin;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.repository.ConnectionRepository;
 import com.platform.tool.*;
 import com.platform.tool.workspace.WorkspaceResolver;

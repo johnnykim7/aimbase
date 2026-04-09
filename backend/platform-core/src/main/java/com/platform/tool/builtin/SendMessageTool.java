@@ -5,7 +5,7 @@ import com.platform.domain.AgentMessageEntity;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookEvent;
 import com.platform.hook.HookInput;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.*;
 import org.springframework.stereotype.Component;
 

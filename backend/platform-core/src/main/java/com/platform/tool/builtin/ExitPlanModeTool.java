@@ -2,7 +2,7 @@ package com.platform.tool.builtin;
 
 import com.platform.agent.PlanService;
 import com.platform.domain.PlanEntity;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.*;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;

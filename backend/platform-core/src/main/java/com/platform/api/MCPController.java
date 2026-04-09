@@ -1,7 +1,7 @@
 package com.platform.api;
 
 import com.platform.domain.MCPServerEntity;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.mcp.MCPServerManager;
 import com.platform.repository.MCPServerRepository;
 import io.swagger.v3.oas.annotations.Operation;

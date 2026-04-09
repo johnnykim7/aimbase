@@ -1,5 +1,6 @@
 package com.platform.llm.adapter;
 
+import com.platform.tool.model.UnifiedToolDef;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;

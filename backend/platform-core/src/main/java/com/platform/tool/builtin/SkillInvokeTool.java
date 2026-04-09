@@ -3,7 +3,7 @@ package com.platform.tool.builtin;
 import com.platform.domain.SkillEntity;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.UnifiedMessage;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.orchestrator.ChatRequest;
 import com.platform.orchestrator.ChatResponse;
 import com.platform.orchestrator.OrchestratorEngine;

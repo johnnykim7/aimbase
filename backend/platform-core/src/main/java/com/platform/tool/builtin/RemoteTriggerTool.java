@@ -1,7 +1,7 @@
 package com.platform.tool.builtin;
 
 import com.platform.llm.model.ToolCall;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.policy.AuditLogger;
 import com.platform.tenant.TenantContext;
 import com.platform.tool.*;

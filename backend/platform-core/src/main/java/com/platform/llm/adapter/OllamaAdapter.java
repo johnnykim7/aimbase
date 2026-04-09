@@ -1,5 +1,6 @@
 package com.platform.llm.adapter;
 
+import com.platform.tool.model.UnifiedToolDef;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.llm.model.*;
 import org.slf4j.Logger;

@@ -1,7 +1,7 @@
 package com.platform.extension.sample.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.ToolExecutor;
 
 import java.util.ArrayList;

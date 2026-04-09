@@ -4,7 +4,7 @@ import com.platform.llm.model.LLMRequest;
 import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.LLMStreamChunk;
 import com.platform.llm.model.ToolCall;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;

@@ -1,5 +1,6 @@
 package com.platform.tool;
 
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.domain.ToolExecutionLogEntity;
 import com.platform.hook.HookDecision;
 import com.platform.hook.HookDispatcher;

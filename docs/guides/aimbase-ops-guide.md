@@ -694,6 +694,36 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
    POST /agents/{runId}/cancel → 필요 시 강제 종료
 ```
 
+### 시나리오 G: 원격 에이전트 관리 [CR-041]
+
+**시나리오**: 소비앱이 Aimbase Agent SDK를 사용해 원격 에이전트로 등록하고, Aimbase가 해당 에이전트의 도구를 오케스트레이션에 활용한다.
+
+**사전 조건:**
+- 소비앱이 `aimbase-tool-sdk-mcp` 의존성 추가
+- 소비앱이 Agent MCP 서버 기동 완료
+
+**절차:**
+
+```
+1. [소비앱] AgentLifecycle.start() 호출
+   → MCP 서버 기동 + STUN 주소 탐색 + Aimbase 자동 등록
+
+2. [운영자] 등록된 에이전트 확인
+   GET /agents?status=ACTIVE
+
+3. [Aimbase] 에이전트의 도구가 30초 내 ToolRegistry에 자동 동기화
+
+4. [소비앱/오케스트레이터] LLM 오케스트레이션 시 원격 도구 자동 호출 가능
+
+5. [소비앱] 에이전트 종료 시 AgentLifecycle.close() 호출
+   → Aimbase에서 자동 해제
+```
+
+**주의사항:**
+- BIZ-079: 5분간 하트비트 없으면 STALE 처리됨
+- 같은 주소:포트로 재등록 시 기존 등록 갱신
+- STALE 에이전트가 하트비트 재개하면 자동 ACTIVE 복구
+
 ---
 
 ## 5. 운영 주의사항
@@ -724,6 +754,7 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.6.0 | 2026-04-10 | CR-041 원격 에이전트 관리 시나리오 G 추가 (§ 4) |
 | v1.5.0 | 2026-04-08 | 에이전트 자율성 도구 4종 추가: ListMcpResourcesTool, ReadMcpResourceTool, RemoteTriggerTool, BriefTool. 세션 브리핑 패널 추가 (CR-038) |
 | v1.4.0 | 2026-04-08 | 네이티브 도구 4종 추가: BashTool, FileWriteTool, WebSearchTool, SuggestBackgroundPRTool. ToolRegistry 자동 등록으로 도구 목록 자동 노출 (CR-037) |
 | v1.3.0 | 2026-04-08 | 스케줄 관리(Cron 작업), 스킬 관리, Firecrawl 크롤링 모드, 도메인 필터링 정책 추가 (CR-035) |

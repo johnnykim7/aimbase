@@ -2,7 +2,7 @@ package com.platform.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.domain.MCPServerEntity;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.repository.MCPServerRepository;
 import com.platform.tool.ToolRegistry;
 import org.slf4j.Logger;

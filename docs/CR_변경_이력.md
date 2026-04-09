@@ -683,6 +683,25 @@
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v6.7.0
 - **변경 일자**: 2026-04-09
 
+### CR-041 | Agent SDK 추출 + Agent Registry — 소비앱 도구 SDK 배포 + 원격 에이전트 오케스트레이션
+- **대상 기능 ID**: PRD-273 ~ PRD-278, FE-024
+- **변경 타입**: 신규
+- **변경 내용**: platform-core의 순수 도구(파일시스템, Bash, 유틸리티)를 독립 SDK로 추출하고, 원격 Agent가 MCP 서버로 도구를 노출하여 Aimbase가 오케스트레이션하는 구조 구현
+  - **PRD-273 aimbase-tool-sdk-core**: Gradle 멀티모듈 구조. 도구 인터페이스(ToolExecutor, EnhancedToolExecutor) + 레코드(ToolContext, ToolResult, UnifiedToolDef 등 13개) + 워크스페이스 인프라(WorkspaceResolver, WorkspacePolicyEngine) + 도구 구현체 16개(FileRead/Write, Glob, Grep, SafeEdit, Bash, Calculator 등) 추출. Spring 의존성 제거, 순수 Java 라이브러리.
+  - **PRD-274 aimbase-tool-sdk-mcp**: sdk-core 도구를 MCP 서버로 자동 노출하는 모듈. AgentMcpServer(SSE transport), StunAddressResolver(공인주소 탐색), AimbaseRegistrationClient(REST 등록), AgentLifecycle(기동→등록→하트비트→종료).
+  - **PRD-275 Agent Registry BE**: agent_registry 테이블 + AgentRegistryEntity/Repository/Service/Controller. 에이전트 자가 등록(POST /api/v1/agents/register), 해제(DELETE), 목록(GET), 하트비트(POST). 5분 무응답 시 STALE 처리.
+  - **PRD-276 RemoteToolDiscovery**: 30초 주기로 활성 에이전트의 도구를 ToolRegistry에 동기화. RemoteAgentToolExecutor로 온디맨드 MCP 연결→도구 실행→연결 종료.
+  - **PRD-277 SdkToolBeanConfig**: SDK 도구를 Spring Bean으로 등록하는 브릿지. 기존 ToolRegistry 자동 수집 코드 변경 없음.
+  - **PRD-278 UnifiedToolDef 패키지 이동**: com.platform.llm.model → com.platform.tool.model. platform-core 전체 import 일괄 변경.
+  - **BIZ 규칙**: BIZ-078(에이전트 하트비트 간격 60초), BIZ-079(에이전트 stale 임계값 5분), BIZ-080(원격 도구 동기화 주기 30초)
+- **변경 사유**: FlowGuard Agent가 claude -p(Claude CLI) 경유로 LLM 이중 호출 비용 + 도구 제한 문제. Aimbase 도구를 SDK로 배포하면 소비앱이 LLM 호출 없이 도구만 실행하고, 오케스트레이션은 Aimbase 서버가 담당하여 비용 절감 + 도구 통합.
+- **영향 모듈**: SDK(tool-sdk-core 신규, tool-sdk-mcp 신규), Tool(인터페이스/구현체 SDK 이동), MCP(RemoteToolDiscovery, RemoteAgentToolExecutor 신규), Config(SdkToolBeanConfig 신규), API(AgentRegistryController 신규)
+- **영향도**: High
+- **영향 범위**: PRD-273 ~ PRD-278, BIZ-078 ~ BIZ-080
+- **영향 설계서**: T1-1, T2-1, T3-1, T3-2, T3-6
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v7.0.0
+- **변경 일자**: 2026-04-09
+
 ---
 
 ## 작성 가이드

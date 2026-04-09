@@ -1,6 +1,6 @@
 package com.platform.tool.builtin;
 
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.*;
 import com.platform.workflow.CronScheduleManager;
 import org.springframework.stereotype.Component;

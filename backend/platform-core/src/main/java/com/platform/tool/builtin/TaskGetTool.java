@@ -1,7 +1,7 @@
 package com.platform.tool.builtin;
 
 import com.platform.domain.SubagentRunEntity;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.repository.SubagentRunRepository;
 import com.platform.tool.*;
 import org.springframework.stereotype.Component;

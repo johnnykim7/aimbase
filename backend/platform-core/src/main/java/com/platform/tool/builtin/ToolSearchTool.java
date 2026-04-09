@@ -1,6 +1,6 @@
 package com.platform.tool.builtin;
 
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.*;
 import org.springframework.stereotype.Component;
 

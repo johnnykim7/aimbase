@@ -2,7 +2,7 @@ package com.platform.tool.builtin;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.platform.llm.model.UnifiedToolDef;
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.ToolExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

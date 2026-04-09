@@ -1,5 +1,6 @@
 package com.platform.tool.builtin;
 
+import com.platform.tool.model.UnifiedToolDef;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
