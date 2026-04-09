@@ -142,6 +142,7 @@ public class ContextAssemblyEngine {
     private final ContextWindowManager contextWindowManager;
     private final ContextRecipeRepository recipeRepository;
     private final com.platform.service.PromptTemplateService promptTemplateService;
+    private final com.platform.tool.ToolRegistry toolRegistry;
 
     // 세션별 연속 압축 실패 카운터 (circuit breaker)
     private final Map<String, Integer> compactFailures = new HashMap<>();
@@ -155,12 +156,14 @@ public class ContextAssemblyEngine {
             MemoryService memoryService,
             ContextWindowManager contextWindowManager,
             ContextRecipeRepository recipeRepository,
-            com.platform.service.PromptTemplateService promptTemplateService) {
+            com.platform.service.PromptTemplateService promptTemplateService,
+            com.platform.tool.ToolRegistry toolRegistry) {
         this.sessionStore = sessionStore;
         this.memoryService = memoryService;
         this.contextWindowManager = contextWindowManager;
         this.recipeRepository = recipeRepository;
         this.promptTemplateService = promptTemplateService;
+        this.toolRegistry = toolRegistry;
     }
 
     /**
@@ -201,9 +204,8 @@ public class ContextAssemblyEngine {
         List<UnifiedMessage> history = sessionStore.getMessages(sessionId);
 
         List<UnifiedMessage> allMessages = new ArrayList<>();
-        // CR-029/CR-036: 도구 사용 지침을 최상위 SYSTEM 메시지로 주입 (DB 외부화)
-        allMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
-                promptTemplateService.getTemplateOrFallback("context.tool_usage.system", TOOL_USAGE_PROMPT)));
+        // CR-036: OpenClaude 수준 시스템 프롬프트 조립 (core + tool descriptions)
+        allMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, assembleSystemPrompt()));
         allMessages.addAll(memoryContext);
         allMessages.addAll(history);
         if (request.messages() != null) {
@@ -311,9 +313,8 @@ public class ContextAssemblyEngine {
         return switch (source) {
             case "system_policy" -> {
                 List<UnifiedMessage> policyMessages = new ArrayList<>();
-                // CR-029/CR-036: 도구 사용 지침 (DB 외부화)
-                policyMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
-                        promptTemplateService.getTemplateOrFallback("context.tool_usage.system", TOOL_USAGE_PROMPT)));
+                // CR-036: OpenClaude 수준 시스템 프롬프트 조립
+                policyMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, assembleSystemPrompt()));
                 policyMessages.addAll(memoryService.buildMemoryContext(sessionId, request.userId()));
                 yield policyMessages;
             }
@@ -333,6 +334,72 @@ public class ContextAssemblyEngine {
                 yield List.of();
             }
         };
+    }
+
+    /**
+     * CR-036: OpenClaude 수준 시스템 프롬프트 조립.
+     *
+     * core/* 섹션을 순서대로 조합하여 하나의 시스템 프롬프트를 생성한다.
+     * DB에 있으면 DB값, 없으면 resources/prompts/*.txt 파일 폴백.
+     * 기존 TOOL_USAGE_PROMPT는 최종 폴백으로 유지.
+     */
+    private String assembleSystemPrompt() {
+        // core 섹션 키 (OpenClaude prompts.ts 순서와 동일)
+        String[] coreSections = {
+                "core.system.prefix",
+                "core.doing_tasks.prompt",
+                "core.executing_actions.prompt",
+                "core.using_tools.prompt",
+                "core.output_efficiency.prompt",
+                "core.tone_style.prompt",
+                "core.git_instructions.prompt",
+        };
+
+        StringBuilder sb = new StringBuilder();
+        boolean anyFound = false;
+
+        for (String key : coreSections) {
+            String section = promptTemplateService.getTemplate(key);
+            if (section != null && !section.isBlank()) {
+                if (!sb.isEmpty()) sb.append("\n\n");
+                sb.append(section);
+                anyFound = true;
+            }
+        }
+
+        // Tool별 프롬프트도 조합 — 등록된 도구 이름 기준으로 tool.{name}.prompt 조회
+        StringBuilder toolPrompts = new StringBuilder();
+        for (String toolName : getRegisteredToolNames()) {
+            String toolKey = "tool." + toolName.replace("builtin_", "").replace("-", "_") + ".prompt";
+            String toolPrompt = promptTemplateService.getTemplate(toolKey);
+            if (toolPrompt != null && !toolPrompt.isBlank()) {
+                toolPrompts.append("\n\n### ").append(toolName).append("\n");
+                toolPrompts.append(toolPrompt);
+            }
+        }
+
+        if (!toolPrompts.isEmpty()) {
+            if (!sb.isEmpty()) sb.append("\n\n");
+            sb.append("# Tool-specific guidance\n");
+            sb.append(toolPrompts);
+        }
+
+        // core 프롬프트가 하나라도 있으면 조립 결과 사용, 없으면 기존 TOOL_USAGE_PROMPT 폴백
+        if (anyFound) {
+            return sb.toString();
+        }
+
+        // 최종 폴백: 기존 하드코딩 프롬프트
+        return promptTemplateService.getTemplateOrFallback("context.tool_usage.system", TOOL_USAGE_PROMPT);
+    }
+
+    /** 등록된 도구 이름 집합 */
+    private java.util.Set<String> getRegisteredToolNames() {
+        try {
+            return toolRegistry.getRegisteredToolNames();
+        } catch (Exception e) {
+            return Set.of();
+        }
     }
 
     /**

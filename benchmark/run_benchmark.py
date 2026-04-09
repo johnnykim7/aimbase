@@ -48,7 +48,7 @@ def run_aimbase(prompt, token, actions=False):
             "cost_usd": u.get("cost_usd", 0),
             "input_tokens": u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) + u.get("cache_creation_input_tokens", 0),
             "output_tokens": u.get("output_tokens", 0),
-            "response": text[:200]
+            "response": text
         }
     except:
         return {"platform": "aimbase", "elapsed_s": round(elapsed, 1), "error": r.stdout[:200]}
@@ -62,7 +62,7 @@ def parse_cli_response(d, platform):
         "cost_usd": d.get("total_cost_usd", 0),
         "input_tokens": inp,
         "output_tokens": u.get("output_tokens", 0),
-        "response": d.get("result", "")[:200]
+        "response": d.get("result", "")
     }
 
 def run_claude_cli(prompt):

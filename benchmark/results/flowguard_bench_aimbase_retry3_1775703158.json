@@ -1,0 +1,9 @@
+{
+  "platform": "aimbase",
+  "elapsed_s": 75.8,
+  "cost_usd": 0.14107725,
+  "input_tokens": 46221,
+  "output_tokens": 8,
+  "response": "",
+  "task": "flowguard_scenario_extraction_retry3"
+}
