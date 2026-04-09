@@ -209,6 +209,7 @@ frontend/src/
 - `docs/T3-6_실행_지시서.md` — 구현 마스터 문서
 - `docs/guides/aimbase-api-guide.md` — REST API 통합 가이드 (소비앱 연동용, 버전 관리됨)
 - `docs/guides/aimbase-ops-guide.md` — 운용 가이드 (플랫폼/테넌트 관리자용, 버전 관리됨)
+- `docs/guides/aimbase-sdk-guide.md` — Tool SDK 사용 가이드 (소비앱 Agent 구축용, 버전 관리됨)
 
 ## 가이드 문서 유지보수 규칙
 
