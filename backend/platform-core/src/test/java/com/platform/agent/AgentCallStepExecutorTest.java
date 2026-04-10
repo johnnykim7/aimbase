@@ -44,6 +44,11 @@ class AgentCallStepExecutorTest {
         lenient().when(hookDispatcher.dispatch(any(), any())).thenReturn(HookOutput.PASSTHROUGH);
         lenient().when(subagentRunRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
+        // CR-034: AgentTypeRegistry mock
+        lenient().when(agentTypeRegistry.getConfig(any()))
+                .thenReturn(new AgentTypeRegistry.AgentTypeConfig(
+                        AgentType.GENERAL, "범용 에이전트", null, false));
+
         SubagentRunner runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
                 worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry);
         AgentOrchestrator orchestrator = new AgentOrchestrator(runner);

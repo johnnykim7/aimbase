@@ -48,6 +48,11 @@ class SubagentRunnerTest {
         lenient().when(hookDispatcher.dispatch(any(), any()))
                 .thenReturn(HookOutput.PASSTHROUGH);
         lenient().when(subagentRunRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // CR-034: AgentTypeRegistry mock — GENERAL 타입 기본 설정
+        lenient().when(agentTypeRegistry.getConfig(any()))
+                .thenReturn(new AgentTypeRegistry.AgentTypeConfig(
+                        AgentType.GENERAL, "범용 에이전트", null, false));
     }
 
     @Test
