@@ -66,16 +66,17 @@ public class AgentRegistryController {
     }
 
     private Map<String, Object> entityToMap(AgentRegistryEntity e) {
-        return Map.of(
-                "id", e.getId(),
-                "agentName", e.getAgentName(),
-                "publicAddress", e.getPublicAddress(),
-                "mcpPort", e.getMcpPort(),
-                "status", e.getStatus(),
-                "toolsCache", e.getToolsCache(),
-                "registeredAt", e.getRegisteredAt().toString(),
-                "lastHeartbeatAt", e.getLastHeartbeatAt().toString()
-        );
+        var map = new java.util.LinkedHashMap<String, Object>();
+        map.put("id", e.getId());
+        map.put("agentName", e.getAgentName());
+        map.put("publicAddress", e.getPublicAddress());
+        map.put("mcpPort", e.getMcpPort());
+        map.put("turnRelayAddress", e.getTurnRelayAddress());
+        map.put("status", e.getStatus());
+        map.put("toolsCache", e.getToolsCache());
+        map.put("registeredAt", e.getRegisteredAt().toString());
+        map.put("lastHeartbeatAt", e.getLastHeartbeatAt().toString());
+        return map;
     }
 
     /**

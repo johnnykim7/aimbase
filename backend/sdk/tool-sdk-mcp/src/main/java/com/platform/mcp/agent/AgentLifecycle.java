@@ -33,6 +33,7 @@ public class AgentLifecycle implements AutoCloseable {
     private ScheduledExecutorService heartbeatScheduler;
     private String agentId;
     private String publicAddress;
+    private String turnRelayAddress;
 
     /**
      * 기본 SDK 도구로 Agent 생성.
@@ -65,14 +66,31 @@ public class AgentLifecycle implements AutoCloseable {
                 config.stunServer(), config.stunPort());
         log.info("Discovered public address: {}", publicAddress);
 
-        // 3. Aimbase에 등록
+        // 3. TURN 릴레이 주소 획득 (선택 — 실패해도 직접 연결로 진행)
+        if (config.turnServer() != null && !config.turnServer().isBlank()) {
+            turnRelayAddress = TurnRelayClient.allocateRelay(
+                    config.turnServer(), config.turnPort(),
+                    config.turnRealm(), config.turnSharedSecret(),
+                    config.agentName());
+            if (turnRelayAddress != null) {
+                log.info("TURN relay allocated: {}", turnRelayAddress);
+            } else {
+                log.warn("TURN relay allocation failed — direct connection only");
+            }
+        }
+
+        // 4. Aimbase에 등록
         List<String> toolNames = mcpServer.getToolNames();
+        Map<String, Object> metadata = new java.util.HashMap<>(Map.of("sdk_version", "1.0.0"));
+        if (turnRelayAddress != null) {
+            metadata.put("turnRelayAddress", turnRelayAddress);
+        }
         agentId = registrationClient.register(
                 config.agentName(), publicAddress, config.mcpPort(),
-                toolNames, Map.of("sdk_version", "1.0.0"));
+                toolNames, metadata);
         log.info("Registered with Aimbase: agentId={}", agentId);
 
-        // 4. 하트비트 스레드 시작
+        // 5. 하트비트 스레드 시작
         heartbeatScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "agent-heartbeat");
             t.setDaemon(true);
@@ -126,6 +144,10 @@ public class AgentLifecycle implements AutoCloseable {
 
     public String getPublicAddress() {
         return publicAddress;
+    }
+
+    public String getTurnRelayAddress() {
+        return turnRelayAddress;
     }
 
     public boolean isRunning() {

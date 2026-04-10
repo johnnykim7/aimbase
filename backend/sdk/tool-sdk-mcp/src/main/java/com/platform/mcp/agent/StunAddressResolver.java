@@ -18,8 +18,8 @@ public final class StunAddressResolver {
 
     private static final Logger log = LoggerFactory.getLogger(StunAddressResolver.class);
 
-    private static final String DEFAULT_STUN_SERVER = "stun.l.google.com";
-    private static final int DEFAULT_STUN_PORT = 19302;
+    private static final String DEFAULT_STUN_SERVER = "14.63.25.49";
+    private static final int DEFAULT_STUN_PORT = 3478;
     private static final int STUN_TIMEOUT_MS = 3000;
 
     // STUN message type: Binding Request

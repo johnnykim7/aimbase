@@ -77,7 +77,8 @@ public class RemoteToolDiscovery {
                     Map<String, Object> inputSchema = (Map<String, Object>) toolInfo.getOrDefault("inputSchema", Map.of());
                     UnifiedToolDef def = new UnifiedToolDef(toolName, description, inputSchema);
 
-                    ToolExecutor executor = new RemoteAgentToolExecutor(mcpUrl, def);
+                    String turnMcpUrl = agent.getTurnMcpUrl();
+                    ToolExecutor executor = new RemoteAgentToolExecutor(mcpUrl, turnMcpUrl, def);
                     toolRegistry.register(executor);
                     registeredRemoteTools.put(toolName, mcpUrl);
 

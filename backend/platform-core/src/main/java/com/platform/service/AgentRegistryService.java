@@ -50,7 +50,14 @@ public class AgentRegistryService {
         entity.setMcpPort(mcpPort);
         entity.setStatus("ACTIVE");
         entity.setLastHeartbeatAt(OffsetDateTime.now());
-        if (metadata != null) entity.setMetadata(metadata);
+        if (metadata != null) {
+            entity.setMetadata(metadata);
+            // TURN 릴레이 주소 추출
+            Object turnRelay = metadata.get("turnRelayAddress");
+            if (turnRelay instanceof String addr && !addr.isBlank()) {
+                entity.setTurnRelayAddress(addr);
+            }
+        }
         if (existing.isEmpty()) entity.setRegisteredAt(OffsetDateTime.now());
 
         // MCP 연결하여 실제 도구 탐색

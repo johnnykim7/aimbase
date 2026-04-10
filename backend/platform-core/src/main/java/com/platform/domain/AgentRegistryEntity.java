@@ -36,6 +36,9 @@ public class AgentRegistryEntity {
     @Column(name = "mcp_port", nullable = false)
     private int mcpPort;
 
+    @Column(name = "turn_relay_address", length = 255)
+    private String turnRelayAddress;
+
     @Column(length = 20, nullable = false)
     private String status = "ACTIVE";
 
@@ -58,9 +61,15 @@ public class AgentRegistryEntity {
 
     // ── Convenience ──
 
-    /** MCP 서버 접속 URL 생성 */
+    /** MCP 서버 접속 URL 생성 (직접 연결) */
     public String getMcpUrl() {
         return "http://" + publicAddress + ":" + mcpPort;
+    }
+
+    /** TURN 릴레이 경유 MCP URL (turnRelayAddress가 "IP:port" 형식) */
+    public String getTurnMcpUrl() {
+        if (turnRelayAddress == null || turnRelayAddress.isBlank()) return null;
+        return "http://" + turnRelayAddress;
     }
 
     // ── Getters / Setters ──
@@ -82,6 +91,9 @@ public class AgentRegistryEntity {
 
     public int getMcpPort() { return mcpPort; }
     public void setMcpPort(int mcpPort) { this.mcpPort = mcpPort; }
+
+    public String getTurnRelayAddress() { return turnRelayAddress; }
+    public void setTurnRelayAddress(String turnRelayAddress) { this.turnRelayAddress = turnRelayAddress; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
