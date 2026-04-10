@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.platform.aimbase-agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/AimbaseAgent.app/Contents/MacOS/AimbaseAgent</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/aimbase-agent.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/aimbase-agent.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+    </dict>
+</dict>
+</plist>

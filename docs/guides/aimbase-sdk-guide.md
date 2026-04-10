@@ -1,6 +1,6 @@
 # Aimbase Tool SDK 사용 가이드
 
-> **v1.0.0** | 2026-04-10 | CR-041
+> **v1.1.0** | 2026-04-10 | CR-041, CR-042
 
 소비앱이 Aimbase 도구를 로컬에서 사용하거나, 원격 Agent로 Aimbase 오케스트레이션에 참여하는 방법을 안내합니다.
 
@@ -29,6 +29,7 @@
 | ① LLM 대화만 | SDK 불필요 | Aimbase REST API 호출 ([API 가이드](aimbase-api-guide.md) 참조) |
 | ② 로컬 도구만 | `sdk-core` | 파일 읽기/쓰기, Bash, Grep 등을 앱 내부에서 직접 사용 |
 | ③ Aimbase 연동 Agent | `sdk-mcp` | MCP 서버로 도구 노출 + Aimbase 자동 등록 |
+| ④ 독립 실행형 Agent | `aimbase-agent.jar` | 코드 작성 없이 설치만으로 Agent 실행 (§ 6 참조) |
 
 ---
 
@@ -330,8 +331,79 @@ WARN  RemoteAgentToolExecutor - Remote tool execution failed: Connection timed o
 
 ---
 
+## 6. 독립 실행형 Agent (aimbase-agent)
+
+코드 작성 없이 **설치만으로** Aimbase Agent를 사용할 수 있는 독립 실행형 모듈입니다.
+
+### 설치
+
+| 플랫폼 | 설치 파일 | 설치 방법 |
+|--------|----------|----------|
+| macOS | `AimbaseAgent.dmg` | DMG 열기 → Applications 드래그 |
+| Windows | `AimbaseAgent.msi` | MSI 더블클릭 → 설치 마법사 |
+| Linux | `aimbase-agent.jar` | `java -jar aimbase-agent.jar` |
+
+### 설정
+
+설치 후 `~/.aimbase-agent/config/application.yml`을 편집합니다:
+
+```yaml
+agent:
+  name: my-agent                    # 에이전트 이름
+  aimbase-url: http://server:8181   # Aimbase 서버 URL (필수)
+  api-key: your-api-key             # API 키 (필수)
+  mcp-port: 8190                    # MCP 서버 포트
+  workspace-path: ~/my-workspace    # 작업 디렉토리 (비우면 ~/aimbase-workspace)
+  disabled-tools: []                # 비활성화할 도구 (예: [bash])
+```
+
+### 실행/관리
+
+```bash
+# macOS — launchd 서비스 (설치 시 자동 등록)
+launchctl start com.platform.aimbase-agent
+launchctl stop com.platform.aimbase-agent
+
+# Windows — WinSW 서비스 (설치 시 자동 등록)
+# 시작 메뉴 → AimbaseAgent
+
+# Linux — 수동 실행
+java -jar aimbase-agent.jar \
+  --agent.aimbase-url=http://server:8181 \
+  --agent.api-key=your-key
+```
+
+### 로그/상태
+
+- 로그: `~/.aimbase-agent/logs/agent.log` (14일 보관)
+- 상태: `~/.aimbase-agent/status.json` (5분 주기 갱신)
+
+### 기본 제공 도구 (14개)
+
+| 도구 | 설명 |
+|------|------|
+| `file_read` | 파일 읽기 |
+| `file_write` | 파일 쓰기 |
+| `glob` | 패턴 파일 검색 |
+| `grep` | 파일 내용 검색 |
+| `safe_edit` | 안전한 파일 편집 |
+| `patch_apply` | 패치 적용 |
+| `path_info` | 경로 정보 조회 |
+| `structured_search` | 구조화된 검색 |
+| `document_section_read` | 문서 섹션 읽기 |
+| `workspace_snapshot` | 워크스페이스 스냅샷 |
+| `bash` | 셸 명령 실행 |
+| `calculator` | 계산 |
+| `get_current_time` | 현재 시간 |
+| `zip_extract` | ZIP 압축 해제 |
+
+> `disabled-tools`에 도구 이름을 추가하면 해당 도구가 비활성화됩니다.
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.1.0 | 2026-04-10 | CR-042 독립 실행형 Agent (aimbase-agent) 섹션 추가 |
 | v1.0.0 | 2026-04-10 | CR-041 초판 — sdk-core 14개 도구, sdk-mcp Agent 생명주기, Agent Registry API |

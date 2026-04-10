@@ -1,0 +1,25 @@
+<!--
+  CR-042: WinSW service wrapper configuration.
+  Place AimbaseAgentService.exe (winsw renamed) alongside this XML.
+  Install: AimbaseAgentService.exe install
+  Start:   AimbaseAgentService.exe start
+  Stop:    AimbaseAgentService.exe stop
+-->
+<service>
+    <id>AimbaseAgent</id>
+    <name>Aimbase Tool Agent</name>
+    <description>Aimbase MCP Tool Agent — provides file and code tools to Aimbase platform</description>
+
+    <executable>%BASE%\AimbaseAgent.exe</executable>
+
+    <log mode="roll-by-size">
+        <sizeThreshold>10240</sizeThreshold>
+        <keepFiles>5</keepFiles>
+    </log>
+
+    <onfailure action="restart" delay="10 sec"/>
+    <onfailure action="restart" delay="30 sec"/>
+    <onfailure action="none"/>
+
+    <startmode>Automatic</startmode>
+</service>

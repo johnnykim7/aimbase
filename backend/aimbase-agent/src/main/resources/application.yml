@@ -1,0 +1,17 @@
+agent:
+  name: my-agent
+  aimbase-url: ""          # REQUIRED — Aimbase server URL (e.g. http://aimbase-server:8181)
+  api-key: ""              # REQUIRED — Aimbase API key
+  mcp-port: 8190           # MCP server port
+  workspace-path: ""       # Empty = ~/aimbase-workspace
+  heartbeat-interval-ms: 60000
+  stun-server: stun.l.google.com
+  stun-port: 19302
+  disabled-tools: []       # Tool names to exclude (e.g. [bash, zip_extract])
+
+logging:
+  file:
+    name: ${user.home}/.aimbase-agent/logs/agent.log
+  level:
+    com.platform: INFO
+    root: WARN

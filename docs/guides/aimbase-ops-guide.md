@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v1.4.0** | 2026-04-08 | Aimbase v6.3.0 기준
+> **v1.7.0** | 2026-04-10 | Aimbase v6.4.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -724,6 +724,47 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 - 같은 주소:포트로 재등록 시 기존 등록 갱신
 - STALE 에이전트가 하트비트 재개하면 자동 ACTIVE 복구
 
+### 시나리오 H: 독립 실행형 Agent 설치/운영 [CR-042]
+
+**시나리오**: 코드 작성 없이 `aimbase-agent` 설치 패키지(dmg/msi)를 고객 PC에 설치하여 Aimbase 원격 도구 에이전트로 활용한다.
+
+**사전 조건:**
+- Aimbase 서버 기동 중
+- 고객에게 API Key 발급 완료
+
+**절차:**
+
+```
+1. [고객] 설치 파일 실행
+   macOS: AimbaseAgent.dmg → Applications 드래그
+   Windows: AimbaseAgent.msi → 설치 마법사
+
+2. [고객] 설정 파일 편집
+   ~/.aimbase-agent/config/application.yml
+   → agent.aimbase-url, agent.api-key 설정
+
+3. [자동] OS 서비스로 자동 기동
+   macOS: launchd (com.platform.aimbase-agent)
+   Windows: WinSW 서비스
+
+4. [자동] Aimbase 서버에 자동 등록 + 하트비트 시작
+
+5. [운영자] 등록된 에이전트 확인
+   GET /agents?status=ACTIVE
+
+6. [Aimbase] 에이전트의 14개 도구 자동 동기화
+```
+
+**도구 비활성화:**
+- `agent.disabled-tools: [bash]` — 보안상 위험한 도구 제외 가능
+
+**모니터링:**
+- 로그: `~/.aimbase-agent/logs/agent.log` (14일 보관, 100MB 상한)
+- 상태: `~/.aimbase-agent/status.json` (5분 주기 갱신)
+
+**업그레이드:**
+- 새 설치 패키지를 덮어 설치. 사용자 설정(`~/.aimbase-agent/config/`)은 유지됨
+
 ---
 
 ## 5. 운영 주의사항
@@ -754,6 +795,7 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.7.0 | 2026-04-10 | CR-042 독립 실행형 Agent 시나리오 H 추가 (§ 4) |
 | v1.6.0 | 2026-04-10 | CR-041 원격 에이전트 관리 시나리오 G 추가 (§ 4) |
 | v1.5.0 | 2026-04-08 | 에이전트 자율성 도구 4종 추가: ListMcpResourcesTool, ReadMcpResourceTool, RemoteTriggerTool, BriefTool. 세션 브리핑 패널 추가 (CR-038) |
 | v1.4.0 | 2026-04-08 | 네이티브 도구 4종 추가: BashTool, FileWriteTool, WebSearchTool, SuggestBackgroundPRTool. ToolRegistry 자동 등록으로 도구 목록 자동 노출 (CR-037) |
