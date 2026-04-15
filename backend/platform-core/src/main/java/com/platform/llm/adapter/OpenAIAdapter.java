@@ -134,7 +134,6 @@ public class OpenAIAdapter implements LLMAdapter {
     @Override
     public void chatStream(LLMRequest request, Consumer<LLMStreamChunk> chunkConsumer) {
         Thread.ofVirtual().start(() -> {
-            long start = Instant.now().toEpochMilli();
             String modelId = extractModelId(request.model());
             String responseId = "chatcmpl_" + System.currentTimeMillis();
 
@@ -143,21 +142,62 @@ public class OpenAIAdapter implements LLMAdapter {
 
             builder.messages(buildOpenAIMessages(request.messages()));
 
+            // CR-045 Phase 2-B: tool_calls 인덱스별 누적 (id/name/arguments_string)
+            java.util.Map<Long, String[]> toolAcc = new java.util.LinkedHashMap<>();
+            final String[] finishReasonHolder = new String[]{""};
+
             try (var stream = client.chat().completions().createStreaming(builder.build())) {
                 stream.stream().forEach(chunk -> {
-                    chunk.choices().stream()
-                            .filter(c -> c.delta().content().isPresent())
-                            .forEach(c -> {
-                                String delta = c.delta().content().get();
-                                chunkConsumer.accept(LLMStreamChunk.text(responseId, request.model(), delta));
-                            });
+                    chunk.choices().forEach(c -> {
+                        // 텍스트 델타
+                        if (c.delta().content().isPresent()) {
+                            String delta = c.delta().content().get();
+                            chunkConsumer.accept(LLMStreamChunk.text(responseId, request.model(), delta));
+                        }
+                        // tool_calls 누적
+                        c.delta().toolCalls().ifPresent(tcs -> {
+                            for (var tc : tcs) {
+                                long idx = tc.index();
+                                String[] slot = toolAcc.computeIfAbsent(idx, k -> new String[]{null, null, ""});
+                                tc.id().ifPresent(v -> slot[0] = v);
+                                tc.function().ifPresent(fn -> {
+                                    fn.name().ifPresent(v -> slot[1] = v);
+                                    fn.arguments().ifPresent(v -> slot[2] = slot[2] + v);
+                                });
+                            }
+                        });
+                        c.finishReason().ifPresent(fr -> finishReasonHolder[0] = fr.asString());
+                    });
                 });
-                chunkConsumer.accept(LLMStreamChunk.done(responseId, request.model(), null));
+
+                LLMResponse.FinishReason fr = switch (finishReasonHolder[0]) {
+                    case "tool_calls" -> LLMResponse.FinishReason.TOOL_USE;
+                    case "length"     -> LLMResponse.FinishReason.MAX_TOKENS;
+                    default           -> LLMResponse.FinishReason.END;
+                };
+
+                List<com.platform.llm.model.ToolCall> toolUses = toolAcc.values().stream()
+                        .filter(s -> s[0] != null && s[1] != null)
+                        .map(s -> new com.platform.llm.model.ToolCall(s[0], s[1], parseJsonArgs(s[2])))
+                        .toList();
+
+                chunkConsumer.accept(LLMStreamChunk.done(responseId, request.model(), null, fr, toolUses));
             } catch (Exception e) {
                 log.error("OpenAI streaming error", e);
                 chunkConsumer.accept(new LLMStreamChunk("error", request.model(), null, true, null));
             }
         });
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseJsonArgs(String json) {
+        if (json == null || json.isBlank()) return Map.of();
+        try {
+            return (Map<String, Object>) new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
+        } catch (Exception e) {
+            log.warn("OpenAI tool args parse failed: {}", json);
+            return Map.of();
+        }
     }
 
     @Override

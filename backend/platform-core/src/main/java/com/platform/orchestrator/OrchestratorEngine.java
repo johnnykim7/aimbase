@@ -423,9 +423,12 @@ public class OrchestratorEngine {
     }
 
     /**
-     * 스트리밍 채팅 요청 처리
+     * 스트리밍 채팅 요청 처리.
+     * CR-045 Phase 2-B: StreamEvent 5종(TextDelta/ThinkingDelta/ToolUseStart/ToolResultEvent/Done)
+     * 을 streamSink로 흘린다. 도구 루프는 ToolCallHandler.executeLoopStream()에 위임.
      */
-    public void chatStream(ChatRequest request, Consumer<LLMStreamChunk> chunkConsumer) {
+    public void chatStream(ChatRequest request,
+                            Consumer<com.platform.orchestrator.stream.StreamEvent> streamSink) {
         String sessionId = request.sessionId() != null
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
@@ -441,11 +444,17 @@ public class OrchestratorEngine {
         allMessages.addAll(request.messages());
         List<UnifiedMessage> trimmedMessages = contextWindowManager.trim(allMessages);
 
+        // CR-045: workspacePath 결정 (비스트리밍 경로와 동일)
+        String tenantId = TenantContext.getTenantId();
+        String workspacePath = resolveWorkspace(request, sessionId);
+        ToolContext toolContext = new ToolContext(
+                tenantId, null, null, sessionId, null, null,
+                request.userId(), PermissionLevel.FULL,
+                ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
+
         LLMAdapter adapter;
         String resolvedModel;
         if (request.connectionGroupId() != null && !request.connectionGroupId().isBlank()) {
-            // CR-015: 스트리밍에서는 그룹의 첫 사용 가능 커넥션을 선택
-            // (스트리밍 중 폴백은 불가능하므로 시작 전 건강한 커넥션 선택)
             var selectedConn = connectionGroupSelector.selectConnection(request.connectionGroupId());
             adapter = connectionAdapterFactory.getAdapter(selectedConn);
             resolvedModel = connectionAdapterFactory.resolveModel(selectedConn, request.model());
@@ -457,32 +466,54 @@ public class OrchestratorEngine {
             resolvedModel = modelRouter.resolveModelId(request.model());
         }
 
-        // CR-030: 스트리밍에도 connection config 기반 ModelConfig 적용
         ModelConfig streamModelConfig = (request.connectionId() != null && !request.connectionId().isBlank())
                 ? connectionAdapterFactory.resolveModelConfig(request.connectionId())
                 : ModelConfig.defaults();
-        LLMRequest llmRequest = new LLMRequest(
-                resolvedModel, trimmedMessages, null,
-                streamModelConfig, true, sessionId);
 
-        StringBuilder fullResponse = new StringBuilder();
-        adapter.chatStream(llmRequest, chunk -> {
-            if (chunk.delta() != null && !"thinking".equals(chunk.type())) {
-                fullResponse.append(chunk.delta());
-            }
-            if (chunk.done()) {
-                // 스트리밍 완료 후 세션 저장
-                request.messages().forEach(m -> sessionStore.appendMessage(sessionId, m));
-                sessionStore.appendMessage(sessionId,
-                        UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, fullResponse.toString()));
-                if (chunk.usage() != null) {
-                    saveUsageLog(request.userId(), sessionId, resolvedModel,
-                            new LLMResponse(chunk.id(), resolvedModel, List.of(),
-                                    List.of(), chunk.usage(), LLMResponse.FinishReason.END, 0, 0));
+        // CR-045 Phase 2-B: 도구 루프 통합 스트리밍
+        LLMResponse finalResponse;
+        if (request.actionsEnabled() && toolRegistry.hasTools()) {
+            finalResponse = toolCallHandler.executeLoopStream(
+                    adapter, resolvedModel, trimmedMessages,
+                    streamModelConfig, sessionId, toolRegistry,
+                    request.toolFilter(), request.toolChoice(), toolContext,
+                    streamSink);
+        } else {
+            // 도구 비활성/없음 → 단순 스트리밍
+            LLMRequest llmRequest = new LLMRequest(
+                    resolvedModel, trimmedMessages, null,
+                    streamModelConfig, true, sessionId);
+            StringBuilder textBuf = new StringBuilder();
+            final TokenUsage[] usageHolder = new TokenUsage[]{null};
+            final String[] idHolder = new String[]{""};
+            adapter.chatStream(llmRequest, chunk -> {
+                if (idHolder[0].isEmpty() && chunk.id() != null) idHolder[0] = chunk.id();
+                if (chunk.done()) {
+                    usageHolder[0] = chunk.usage();
+                    return;
                 }
-            }
-            chunkConsumer.accept(chunk);
-        });
+                if (chunk.delta() == null) return;
+                if ("thinking".equals(chunk.type())) {
+                    streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.ThinkingDelta(chunk.delta()));
+                } else {
+                    textBuf.append(chunk.delta());
+                    streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.TextDelta(chunk.delta()));
+                }
+            });
+            finalResponse = new LLMResponse(idHolder[0], resolvedModel,
+                    List.of(new ContentBlock.Text(textBuf.toString())),
+                    List.of(), usageHolder[0] != null ? usageHolder[0] : new TokenUsage(0, 0),
+                    LLMResponse.FinishReason.END, 0, 0);
+            streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.Done(usageHolder[0]));
+        }
+
+        // 세션 저장 + 사용량 로그
+        request.messages().forEach(m -> sessionStore.appendMessage(sessionId, m));
+        sessionStore.appendMessage(sessionId,
+                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, finalResponse.textContent()));
+        if (finalResponse.usage() != null) {
+            saveUsageLog(request.userId(), sessionId, resolvedModel, finalResponse);
+        }
     }
 
     /**

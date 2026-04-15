@@ -100,27 +100,45 @@ public class ChatController {
     }
 
     private SseEmitter streamResponse(ChatRequest chatRequest) {
-        SseEmitter emitter = new SseEmitter(120_000L);
+        SseEmitter emitter = new SseEmitter(300_000L);
         Thread.ofVirtual().start(() -> {
-            orchestrator.chatStream(chatRequest, chunk -> {
-                try {
-                    if (chunk.done()) {
-                        emitter.send(SseEmitter.event()
-                                .name("done")
-                                .data(Map.of("done", true)));
-                        emitter.complete();
-                    } else {
-                        // CR-045 Phase 2-A: type별 이벤트 분기
-                        // "thinking" → thinking 이벤트, 그 외(text/null) → delta 이벤트
-                        String eventName = "thinking".equals(chunk.type()) ? "thinking" : "delta";
-                        emitter.send(SseEmitter.event()
-                                .name(eventName)
-                                .data(Map.of("delta", chunk.delta() != null ? chunk.delta() : "")));
+            try {
+                orchestrator.chatStream(chatRequest, ev -> {
+                    try {
+                        switch (ev) {
+                            case com.platform.orchestrator.stream.StreamEvent.TextDelta t ->
+                                emitter.send(SseEmitter.event()
+                                        .name("delta")
+                                        .data(Map.of("delta", t.delta() != null ? t.delta() : "")));
+                            case com.platform.orchestrator.stream.StreamEvent.ThinkingDelta t ->
+                                emitter.send(SseEmitter.event()
+                                        .name("thinking")
+                                        .data(Map.of("delta", t.delta() != null ? t.delta() : "")));
+                            case com.platform.orchestrator.stream.StreamEvent.ToolUseStart s ->
+                                emitter.send(SseEmitter.event()
+                                        .name("tool_use_start")
+                                        .data(Map.of("id", s.id(), "name", s.name(),
+                                                "input", s.input() != null ? s.input() : Map.of())));
+                            case com.platform.orchestrator.stream.StreamEvent.ToolResultEvent r ->
+                                emitter.send(SseEmitter.event()
+                                        .name("tool_result")
+                                        .data(Map.of("tool_use_id", r.toolUseId(),
+                                                "output", r.output() != null ? r.output() : "",
+                                                "is_error", r.isError())));
+                            case com.platform.orchestrator.stream.StreamEvent.Done d -> {
+                                emitter.send(SseEmitter.event()
+                                        .name("done")
+                                        .data(Map.of("done", true)));
+                                emitter.complete();
+                            }
+                        }
+                    } catch (IOException e) {
+                        emitter.completeWithError(e);
                     }
-                } catch (IOException e) {
-                    emitter.completeWithError(e);
-                }
-            });
+                });
+            } catch (Exception e) {
+                emitter.completeWithError(e);
+            }
         });
         return emitter;
     }

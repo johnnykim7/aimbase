@@ -9,6 +9,7 @@ import com.platform.hook.HookInput;
 import com.platform.hook.HookOutput;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
+import com.platform.orchestrator.stream.StreamEvent;
 import com.platform.policy.PermissionClassifier;
 import com.platform.repository.ToolExecutionLogRepository;
 import com.platform.tenant.TenantContext;
@@ -311,6 +312,191 @@ public class ToolCallHandler {
         }
 
         return ensureTextResponse(response, adapter, resolvedModel, mutableMessages, config, sessionId);
+    }
+
+    /**
+     * CR-045 Phase 2-B: 스트리밍 버전의 도구 루프.
+     *
+     * 기존 executeLoop(ToolContext)와 동일 로직이되, adapter.chat() 대신 adapter.chatStream()을
+     * 사용하여 매 청크를 streamSink로 흘리고, 도구 실행 전후에 ToolUseStart/ToolResultEvent를 발행.
+     * 완료 시 마지막 LLM 응답의 텍스트를 누적해 최종 LLMResponse를 재구성한다.
+     */
+    public LLMResponse executeLoopStream(
+            LLMAdapter adapter,
+            String resolvedModel,
+            List<UnifiedMessage> messages,
+            ModelConfig config,
+            String sessionId,
+            ToolRegistry toolRegistry,
+            ToolFilterContext toolFilter,
+            String toolChoice,
+            ToolContext toolContext,
+            java.util.function.Consumer<StreamEvent> streamSink) {
+
+        List<UnifiedMessage> mutableMessages = new ArrayList<>(messages);
+        LLMResponse response = null;
+        List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
+
+        // 도구 없음 → 단순 스트리밍 한 번
+        if (filteredTools.isEmpty()) {
+            LLMRequest request = new LLMRequest(
+                    resolvedModel, mutableMessages, null, config, true, sessionId, null);
+            StreamingAccumulator acc = new StreamingAccumulator(streamSink);
+            adapter.chatStream(request, acc::accept);
+            acc.await();
+            return new LLMResponse(acc.id(), resolvedModel,
+                    List.of(new ContentBlock.Text(acc.text())),
+                    List.of(), acc.usage() != null ? acc.usage() : new TokenUsage(0, 0),
+                    LLMResponse.FinishReason.END, 0, 0);
+        }
+
+        for (int iteration = 0; iteration < maxIterations; iteration++) {
+            LLMRequest request = new LLMRequest(
+                    resolvedModel, mutableMessages, filteredTools,
+                    config, true, sessionId, toolChoice);
+
+            StreamingAccumulator acc = new StreamingAccumulator(streamSink);
+            adapter.chatStream(request, acc::accept);
+            acc.await();
+
+            List<ToolCall> toolCalls = acc.toolUses() != null ? acc.toolUses() : List.of();
+            LLMResponse.FinishReason fr = acc.finishReason() != null
+                    ? acc.finishReason() : LLMResponse.FinishReason.END;
+            TokenUsage usage = acc.usage() != null ? acc.usage() : new TokenUsage(0, 0);
+            List<ContentBlock> respContent = acc.text().isEmpty()
+                    ? List.of()
+                    : List.of(new ContentBlock.Text(acc.text()));
+            response = new LLMResponse(acc.id(), resolvedModel, respContent,
+                    toolCalls, usage, fr, 0, 0);
+
+            if (fr != LLMResponse.FinishReason.TOOL_USE || toolCalls.isEmpty()) {
+                break;
+            }
+
+            // 1. 어시스턴트 tool_use 메시지
+            List<ContentBlock.ToolUse> toolUseBlocks = toolCalls.stream()
+                    .map(tc -> new ContentBlock.ToolUse(tc.id(), tc.name(), tc.input()))
+                    .toList();
+            mutableMessages.add(UnifiedMessage.ofAssistantWithToolUse(toolUseBlocks));
+
+            // 2. AUTO 권한 해소 (비스트리밍 경로와 동일)
+            final ToolContext effectiveContext;
+            if (toolContext != null && toolContext.permissionLevel() == PermissionLevel.AUTO) {
+                List<String> callNames = toolCalls.stream().map(ToolCall::name).toList();
+                PermissionLevel resolved = permissionClassifier.classify(callNames, toolRegistry);
+                effectiveContext = new ToolContext(
+                        toolContext.tenantId(), toolContext.appId(), toolContext.projectId(),
+                        toolContext.sessionId(), toolContext.workflowRunId(), toolContext.stepId(),
+                        toolContext.actorUserId(), resolved, toolContext.approvalState(),
+                        toolContext.workspacePath(), toolContext.dryRun(), toolContext.turnNumber());
+            } else {
+                effectiveContext = toolContext;
+            }
+
+            // 3. 도구 실행 + 이벤트 발행
+            final int turnNum = iteration;
+            AtomicInteger seq = new AtomicInteger(0);
+
+            List<ToolCall> safeCalls = new ArrayList<>();
+            List<ToolCall> unsafeCalls = new ArrayList<>();
+            for (ToolCall tc : toolCalls) {
+                ToolContractMeta meta = toolRegistry.getContractMeta(tc.name());
+                if (meta != null && meta.concurrencySafe()) safeCalls.add(tc);
+                else unsafeCalls.add(tc);
+            }
+
+            List<ContentBlock.ToolResult> results = new ArrayList<>();
+            for (ToolCall tc : safeCalls) {
+                streamSink.accept(new StreamEvent.ToolUseStart(tc.id(), tc.name(), tc.input()));
+                ContentBlock.ToolResult r = executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement());
+                results.add(r);
+                streamSink.accept(new StreamEvent.ToolResultEvent(r.toolUseId(), r.content(), false));
+            }
+            for (ToolCall tc : unsafeCalls) {
+                streamSink.accept(new StreamEvent.ToolUseStart(tc.id(), tc.name(), tc.input()));
+                ContentBlock.ToolResult r = executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement());
+                results.add(r);
+                streamSink.accept(new StreamEvent.ToolResultEvent(r.toolUseId(), r.content(), false));
+            }
+
+            // 4. 축약 (비스트리밍 경로와 동일)
+            int compactionThreshold = platformSettings.getInt("orchestrator.tool-result-compaction-threshold", 81920);
+            int budgetBytes = platformSettings.getInt("orchestrator.tool-result-budget-bytes", 51200);
+            int totalChars = results.stream().mapToInt(r -> r.content().length()).sum();
+            if (totalChars > compactionThreshold) {
+                results.sort((a, b) -> b.content().length() - a.content().length());
+                List<ContentBlock.ToolResult> budgeted = new ArrayList<>();
+                int remaining = budgetBytes;
+                for (ContentBlock.ToolResult r : results) {
+                    if (r.content().length() <= remaining) {
+                        budgeted.add(r);
+                        remaining -= r.content().length();
+                    } else {
+                        String compacted = compactorRegistry.compact(
+                                r.toolUseId(), r.content(), Math.min(2000, remaining));
+                        budgeted.add(new ContentBlock.ToolResult(r.toolUseId(), compacted));
+                        remaining -= compacted.length();
+                    }
+                }
+                results = budgeted;
+            }
+
+            mutableMessages.add(UnifiedMessage.ofToolResults(results));
+        }
+
+        // 5. 마지막 응답에 텍스트가 없다면 비스트리밍 한 번 더 (ensureTextResponse 재사용)
+        response = ensureTextResponse(response, adapter, resolvedModel, mutableMessages, config, sessionId);
+        streamSink.accept(new StreamEvent.Done(response != null ? response.usage() : null));
+        return response;
+    }
+
+    /**
+     * CR-045 Phase 2-B: adapter.chatStream 청크를 누적하고 streamSink로 흘리는 헬퍼.
+     */
+    private static final class StreamingAccumulator {
+        private final java.util.function.Consumer<StreamEvent> sink;
+        private final StringBuilder text = new StringBuilder();
+        private volatile String id;
+        private volatile TokenUsage usage;
+        private volatile LLMResponse.FinishReason finishReason;
+        private volatile List<ToolCall> toolUses;
+        private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+
+        StreamingAccumulator(java.util.function.Consumer<StreamEvent> sink) {
+            this.sink = sink;
+        }
+
+        void accept(LLMStreamChunk chunk) {
+            if (id == null) id = chunk.id();
+            if (chunk.done()) {
+                usage = chunk.usage();
+                finishReason = chunk.finishReason();
+                toolUses = chunk.toolUses();
+                latch.countDown();
+                return;
+            }
+            if (chunk.delta() == null) return;
+            if ("thinking".equals(chunk.type())) {
+                sink.accept(new StreamEvent.ThinkingDelta(chunk.delta()));
+            } else {
+                text.append(chunk.delta());
+                sink.accept(new StreamEvent.TextDelta(chunk.delta()));
+            }
+        }
+
+        void await() {
+            try {
+                latch.await(5, java.util.concurrent.TimeUnit.MINUTES);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        String id()                             { return id != null ? id : ""; }
+        String text()                           { return text.toString(); }
+        TokenUsage usage()                      { return usage; }
+        LLMResponse.FinishReason finishReason() { return finishReason; }
+        List<ToolCall> toolUses()               { return toolUses; }
     }
 
     /**

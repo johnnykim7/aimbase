@@ -282,7 +282,18 @@ public class AnthropicAdapter implements LLMAdapter {
                         (int) finalMsg.usage().inputTokens(),
                         (int) finalMsg.usage().outputTokens()
                 );
-                chunkConsumer.accept(LLMStreamChunk.done(responseId, request.model(), usage));
+                // CR-045 Phase 2-B: finishReason + toolUses를 완료 청크에 실어 보냄
+                String stopReason = finalMsg.stopReason() != null
+                        ? finalMsg.stopReason().toString() : "";
+                LLMResponse.FinishReason fr = switch (stopReason) {
+                    case "tool_use"   -> LLMResponse.FinishReason.TOOL_USE;
+                    case "max_tokens" -> LLMResponse.FinishReason.MAX_TOKENS;
+                    default           -> LLMResponse.FinishReason.END;
+                };
+                @SuppressWarnings("unchecked")
+                List<com.platform.llm.model.ToolCall> toolUses =
+                        (List<com.platform.llm.model.ToolCall>) (List<?>) parseToolCalls(finalMsg);
+                chunkConsumer.accept(LLMStreamChunk.done(responseId, request.model(), usage, fr, toolUses));
             } catch (Exception e) {
                 log.error("Anthropic streaming error", e);
                 chunkConsumer.accept(new LLMStreamChunk("error", request.model(), null, true, null));
