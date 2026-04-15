@@ -2,6 +2,8 @@ package com.platform.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.domain.MCPServerEntity;
+import com.platform.tenant.TenantContext;
+import com.platform.tenant.TenantDataSourceManager;
 import com.platform.tool.model.UnifiedToolDef;
 import com.platform.repository.MCPServerRepository;
 import com.platform.tool.ToolRegistry;
@@ -31,14 +33,17 @@ public class MCPServerManager {
     private final MCPServerRepository mcpServerRepository;
     private final ToolRegistry toolRegistry;
     private final ObjectMapper objectMapper;
+    private final TenantDataSourceManager tenantDataSourceManager;
     private final Map<String, MCPServerClient> connections = new ConcurrentHashMap<>();
 
     public MCPServerManager(MCPServerRepository mcpServerRepository,
                              @Lazy ToolRegistry toolRegistry,
-                             ObjectMapper objectMapper) {
+                             ObjectMapper objectMapper,
+                             TenantDataSourceManager tenantDataSourceManager) {
         this.mcpServerRepository = mcpServerRepository;
         this.toolRegistry = toolRegistry;
         this.objectMapper = objectMapper;
+        this.tenantDataSourceManager = tenantDataSourceManager;
     }
 
     /**
@@ -47,31 +52,33 @@ public class MCPServerManager {
      */
     @EventListener(ApplicationReadyEvent.class)
     public void connectAutoStartServers() {
-        // tenant context 없는 상태에서 실행되므로, DB 조회 실패(테이블 미존재 등)는 warn만 출력 (non-fatal)
-        try {
-            List<MCPServerEntity> autoStartServers = mcpServerRepository.findAll()
-                    .stream()
-                    .filter(MCPServerEntity::isAutoStart)
-                    .toList();
+        for (String tenantId : tenantDataSourceManager.getAllCachedDataSources().keySet()) {
+            try {
+                TenantContext.setTenantId(tenantId);
+                List<MCPServerEntity> autoStartServers = mcpServerRepository.findAll()
+                        .stream()
+                        .filter(MCPServerEntity::isAutoStart)
+                        .toList();
 
-            if (autoStartServers.isEmpty()) {
-                log.info("No auto-start MCP servers configured");
-                return;
-            }
-
-            log.info("Auto-connecting {} MCP server(s)...", autoStartServers.size());
-            for (MCPServerEntity server : autoStartServers) {
-                try {
-                    connect(server);
-                    log.info("Auto-connected to MCP server: {}", server.getId());
-                } catch (Exception e) {
-                    log.warn("Failed to auto-connect to MCP server '{}': {} (server may not be running)",
-                            server.getId(), e.getMessage());
+                if (autoStartServers.isEmpty()) {
+                    continue;
                 }
+
+                log.info("Auto-connecting {} MCP server(s) for tenant {}...", autoStartServers.size(), tenantId);
+                for (MCPServerEntity server : autoStartServers) {
+                    try {
+                        connect(server);
+                        log.info("Auto-connected to MCP server: {} (tenant {})", server.getId(), tenantId);
+                    } catch (Exception e) {
+                        log.warn("Failed to auto-connect to MCP server '{}' (tenant {}): {}",
+                                server.getId(), tenantId, e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Could not load MCP servers for tenant {}: {}", tenantId, e.getMessage());
+            } finally {
+                TenantContext.clear();
             }
-        } catch (Exception e) {
-            log.warn("Could not load MCP servers at startup (tenant DB may not be initialized yet): {}",
-                    e.getMessage());
         }
     }
 

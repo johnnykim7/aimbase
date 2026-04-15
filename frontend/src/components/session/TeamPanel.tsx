@@ -1,7 +1,7 @@
 import { Badge } from "../common/Badge";
 import { EmptyState } from "../common/EmptyState";
 import { Users } from "lucide-react";
-import type { TeamData } from "../../api/sessions";
+import type { TeamData, TeamMember } from "../../api/sessions";
 
 const STATUS_COLOR: Record<string, "accent" | "success" | "danger" | "warning" | "muted"> = {
   ACTIVE: "accent",
@@ -48,7 +48,7 @@ export function TeamPanel({ teams }: { teams: TeamData[] }) {
 
           {/* Members */}
           <div className="space-y-1">
-            {team.members.map((member) => (
+            {team.members.map((member: TeamMember) => (
               <div
                 key={member.member_id}
                 className="flex items-center gap-2 text-xs bg-muted/30 rounded px-2 py-1"

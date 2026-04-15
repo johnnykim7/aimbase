@@ -428,12 +428,28 @@ public class AgentAccountPoolManager {
                     log.debug("[{}] API Key 방식 — 파일 배포 불필요", accountId);
                     return true;
                 }
-                // OAuth setup-token: .claude.json에 인증 정보 기록
-                Map<String, Object> claudeJson = new java.util.LinkedHashMap<>();
-                claudeJson.put("oauthToken", authToken);
-                Files.writeString(configDir.resolve(".claude.json"),
-                        objectMapper.writeValueAsString(claudeJson), StandardCharsets.UTF_8);
-                log.debug("[{}] .claude.json 배포 완료 (setup-token)", accountId);
+                // OAuth setup-token: claude CLI 호환 .credentials.json 생성
+                // 포맷: {"claudeAiOauth":{"accessToken":..,"refreshToken":..,"expiresAt":..,"scopes":..,"subscriptionType":..}}
+                long expiresAt = System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000;
+                Map<String, Object> oauth = new java.util.LinkedHashMap<>();
+                oauth.put("accessToken", authToken);
+                oauth.put("refreshToken", "");
+                oauth.put("expiresAt", expiresAt);
+                oauth.put("scopes", java.util.List.of("user:inference", "user:profile"));
+                oauth.put("subscriptionType", "max");
+                Map<String, Object> credentialsJson = Map.of("claudeAiOauth", oauth);
+                Path credentialsFile = configDir.resolve(".credentials.json");
+                Files.writeString(credentialsFile,
+                        objectMapper.writeValueAsString(credentialsJson), StandardCharsets.UTF_8);
+                try {
+                    Files.setPosixFilePermissions(credentialsFile,
+                            java.util.EnumSet.of(
+                                    java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                                    java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+                } catch (UnsupportedOperationException ignored) {
+                    // Windows 등 POSIX 미지원 환경
+                }
+                log.debug("[{}] .credentials.json 배포 완료 (setup-token)", accountId);
                 return true;
             }
 

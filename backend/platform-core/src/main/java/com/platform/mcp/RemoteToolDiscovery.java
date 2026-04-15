@@ -2,6 +2,8 @@ package com.platform.mcp;
 
 import com.platform.domain.AgentRegistryEntity;
 import com.platform.service.AgentRegistryService;
+import com.platform.tenant.TenantContext;
+import com.platform.tenant.TenantDataSourceManager;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.ToolRegistry;
 import com.platform.tool.model.UnifiedToolDef;
@@ -10,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,13 +31,17 @@ public class RemoteToolDiscovery {
 
     private final AgentRegistryService agentRegistryService;
     private final ToolRegistry toolRegistry;
+    private final TenantDataSourceManager tenantDataSourceManager;
 
     /** 현재 등록된 원격 도구 이름 → 에이전트 MCP URL */
     private final Map<String, String> registeredRemoteTools = new ConcurrentHashMap<>();
 
-    public RemoteToolDiscovery(AgentRegistryService agentRegistryService, ToolRegistry toolRegistry) {
+    public RemoteToolDiscovery(AgentRegistryService agentRegistryService,
+                               ToolRegistry toolRegistry,
+                               TenantDataSourceManager tenantDataSourceManager) {
         this.agentRegistryService = agentRegistryService;
         this.toolRegistry = toolRegistry;
+        this.tenantDataSourceManager = tenantDataSourceManager;
     }
 
     /**
@@ -43,7 +50,17 @@ public class RemoteToolDiscovery {
     @Scheduled(fixedRate = 30_000, initialDelay = 10_000)
     public void syncRemoteTools() {
         try {
-            List<AgentRegistryEntity> agents = agentRegistryService.listActive();
+            List<AgentRegistryEntity> agents = new ArrayList<>();
+            for (String tenantId : tenantDataSourceManager.getAllCachedDataSources().keySet()) {
+                try {
+                    TenantContext.setTenantId(tenantId);
+                    agents.addAll(agentRegistryService.listActive());
+                } catch (Exception e) {
+                    log.warn("Failed to load agents for tenant {}: {}", tenantId, e.getMessage());
+                } finally {
+                    TenantContext.clear();
+                }
+            }
 
             Set<String> currentRemoteTools = new HashSet<>();
 

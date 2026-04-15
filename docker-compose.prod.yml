@@ -1,0 +1,65 @@
+# Aimbase 운영 Docker Compose (deploy.sh로 배포)
+# 배포 구조: /home/therecommerce/aimbase/
+#   ├── platform-core.jar           (BE 빌드 산출물)
+#   ├── docker-compose.yml          (이 파일)
+#   ├── .env                        (서버에서 관리, deploy.sh는 건드리지 않음)
+#   ├── frontend/                   (FE 정적 파일, 외부 nginx가 서빙)
+#   └── python-sidecar/             (RAG 소스, 서버에서 빌드)
+#
+# 최초 기동: docker compose up -d --build
+# 이후 기동: docker compose up -d            (rag 의존성 변경 시 --build)
+
+services:
+  # ── Backend (Spring Boot + Claude Code CLI) ──
+  api:
+    build:
+      context: ./backend
+      dockerfile: platform-core/Dockerfile
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "8280:8080"
+    volumes:
+      - ./workspace:/data/workspace
+      - ./claude-accounts:/home/appuser/.claude-accounts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: "8080"
+      RAG_MCP_URL: http://rag-pipeline:8000
+      RAG_MCP_ENABLED: "true"
+      CLAUDE_CODE_ENABLED: "true"
+      CLAUDE_CODE_TIMEOUT_SECONDS: "600"
+      CLAUDE_CODE_MAX_TURNS: "50"
+      CLAUDE_CODE_WORKING_DIRECTORY: /data/workspace
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # ── Python Sidecar — RAG Pipeline MCP Server ──
+  rag-pipeline:
+    build:
+      context: ./python-sidecar
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8281:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/sse')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s

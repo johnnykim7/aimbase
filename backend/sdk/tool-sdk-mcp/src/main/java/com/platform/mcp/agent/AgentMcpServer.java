@@ -1,10 +1,12 @@
 package com.platform.mcp.agent;
 
+import com.platform.tool.McpResultTruncator;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.McpSyncServer;
+import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 import io.modelcontextprotocol.server.transport.WebMvcSseServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
@@ -83,6 +85,60 @@ public class AgentMcpServer {
     }
 
     /**
+     * CR-044 PRD-282: stdio 모드로 MCP 서버를 실행한다.
+     *
+     * Claude CLI가 --mcp-config로 이 jar를 자식 프로세스로 기동할 때 사용.
+     * stdin/stdout을 MCP 채널로 사용하므로 SSE 타이밍 이슈 없음.
+     * 이 메서드는 프로세스가 종료될 때까지 블로킹된다.
+     *
+     * 진입점: AimbaseStdioMcpMain.main() 또는 --mcp-stdio 플래그
+     */
+    public void startStdio() {
+        log.info("AgentMcpServer stdio 모드 시작: {} 도구 노출", tools.size());
+        McpSyncServer server = buildMcpServer(new StdioServerTransportProvider());
+        // stdio transport는 stdin이 닫힐 때까지 블로킹 처리한다.
+        // JVM 종료 시그널(SIGTERM/SIGINT)에 graceful 종료 등록
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.info("AgentMcpServer stdio 종료 중...");
+            server.closeGracefully();
+        }, "aimbase-stdio-mcp-shutdown"));
+        // Claude CLI가 자식 프로세스를 종료할 때까지 메인 스레드 대기
+        try {
+            Thread.currentThread().join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.info("AgentMcpServer stdio 인터럽트 수신, 종료");
+        }
+    }
+
+    /**
+     * 공통 도구 스펙 빌더 — SSE/stdio 모두 동일한 도구 목록을 노출한다.
+     */
+    private McpSyncServer buildMcpServer(io.modelcontextprotocol.spec.McpServerTransportProvider transport) {
+        List<McpServerFeatures.SyncToolSpecification> toolSpecs = new ArrayList<>();
+        for (ToolExecutor tool : tools) {
+            UnifiedToolDef def = tool.getDefinition();
+            var mcpTool = new McpSchema.Tool(def.name(), def.description(),
+                    AgentMcpServerApp.toJsonSchemaStatic(def.inputSchema()));
+            toolSpecs.add(new McpServerFeatures.SyncToolSpecification(mcpTool,
+                    (exchange, args) -> {
+                        try {
+                            String result = tool.execute(args);
+                            result = McpResultTruncator.truncate(def.name(), result);
+                            return new McpSchema.CallToolResult(result, false);
+                        } catch (Exception e) {
+                            return new McpSchema.CallToolResult(
+                                    "{\"error\":\"" + e.getMessage() + "\"}", true);
+                        }
+                    }));
+        }
+        return McpServer.sync(transport)
+                .serverInfo("aimbase-agent", "1.0.0")
+                .tools(toolSpecs)
+                .build();
+    }
+
+    /**
      * 내장 Spring Boot 앱 — MCP SSE 엔드포인트 제공.
      */
     @SpringBootApplication(scanBasePackages = "com.platform.mcp.agent.internal")
@@ -110,34 +166,17 @@ public class AgentMcpServer {
 
         @Bean
         public McpSyncServer mcpServer(WebMvcSseServerTransportProvider transport) {
-            // Build tool specifications list
-            List<McpServerFeatures.SyncToolSpecification> toolSpecs = new ArrayList<>();
-            if (toolExecutors != null) {
-                for (ToolExecutor tool : toolExecutors) {
-                    UnifiedToolDef def = tool.getDefinition();
-                    var mcpTool = new McpSchema.Tool(def.name(), def.description(),
-                            toJsonSchema(def.inputSchema()));
-                    toolSpecs.add(new McpServerFeatures.SyncToolSpecification(mcpTool,
-                            (exchange, args) -> {
-                                try {
-                                    String result = tool.execute(args);
-                                    return new McpSchema.CallToolResult(result, false);
-                                } catch (Exception e) {
-                                    return new McpSchema.CallToolResult(
-                                            "{\"error\":\"" + e.getMessage() + "\"}", true);
-                                }
-                            }));
-                }
+            // SSE 모드: 외부 AgentMcpServer 인스턴스의 공통 빌더 재사용
+            // toolExecutors가 없으면(직접 Spring Boot 기동 시) 빈 서버로 대기
+            if (toolExecutors == null || toolExecutors.isEmpty()) {
+                return McpServer.sync(transport).serverInfo("aimbase-agent", "1.0.0").build();
             }
-
-            return McpServer.sync(transport)
-                    .serverInfo("aimbase-agent", "1.0.0")
-                    .tools(toolSpecs)
-                    .build();
+            AgentMcpServer outer = new AgentMcpServer(toolExecutors, 0);
+            return outer.buildMcpServer(transport);
         }
 
         @SuppressWarnings("unchecked")
-        private static McpSchema.JsonSchema toJsonSchema(Map<String, Object> schema) {
+        static McpSchema.JsonSchema toJsonSchemaStatic(Map<String, Object> schema) {
             if (schema == null) {
                 return new McpSchema.JsonSchema("object", Map.of(), List.of(), null, null, null);
             }

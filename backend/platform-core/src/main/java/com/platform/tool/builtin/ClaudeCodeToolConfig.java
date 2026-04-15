@@ -63,6 +63,17 @@ public class ClaudeCodeToolConfig {
      */
     private boolean defaultSessionPersistence = true;
 
+    /**
+     * CR-044: Aimbase Tool SDK MCP 서버 jar 경로.
+     * tool_bridge=aimbase-mcp-only/hybrid 모드에서 Claude CLI에 주입하는 stdio MCP 서버.
+     * 미설정 시 AIMBASE_MCP_JAR 환경변수 → /opt/aimbase/aimbase-agent.jar 순으로 폴백.
+     *
+     * 예시:
+     *   claude-code:
+     *     mcp-server-jar: /opt/aimbase/aimbase-agent.jar
+     */
+    private String mcpServerJar;
+
     // ── Getters & Setters ──
 
     public boolean isEnabled() { return enabled; }
@@ -91,4 +102,7 @@ public class ClaudeCodeToolConfig {
 
     public boolean isDefaultSessionPersistence() { return defaultSessionPersistence; }
     public void setDefaultSessionPersistence(boolean defaultSessionPersistence) { this.defaultSessionPersistence = defaultSessionPersistence; }
+
+    public String getMcpServerJar() { return mcpServerJar; }
+    public void setMcpServerJar(String mcpServerJar) { this.mcpServerJar = mcpServerJar; }
 }

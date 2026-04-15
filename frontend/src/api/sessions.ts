@@ -23,6 +23,24 @@ export interface TaskData {
   output?: string; large_output?: Record<string, unknown>; error?: string;
 }
 
+/* CR-039: Team 타입 */
+export interface TeamMember {
+  member_id: string;
+  agent_type: string;
+  role: string;
+  status: "IDLE" | "RUNNING" | "COMPLETED" | "FAILED" | string;
+}
+export interface TeamData {
+  team_id: string;
+  name: string;
+  status: "ACTIVE" | "COMPLETED" | "DISSOLVED" | string;
+  objective?: string;
+  result_summary?: string;
+  members: TeamMember[];
+  created_at: string;
+  dissolved_at?: string | null;
+}
+
 /* CR-038: Brief 타입 */
 export interface BriefData {
   session_id: string;

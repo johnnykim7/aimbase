@@ -3,6 +3,8 @@ package com.platform.service;
 import com.platform.domain.AgentRegistryEntity;
 import com.platform.mcp.MCPServerClient;
 import com.platform.repository.AgentRegistryRepository;
+import com.platform.tenant.TenantContext;
+import com.platform.tenant.TenantDataSourceManager;
 import com.platform.tool.model.UnifiedToolDef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,9 +30,12 @@ public class AgentRegistryService {
     private static final Duration STALE_THRESHOLD = Duration.ofMinutes(5);
 
     private final AgentRegistryRepository repository;
+    private final TenantDataSourceManager tenantDataSourceManager;
 
-    public AgentRegistryService(AgentRegistryRepository repository) {
+    public AgentRegistryService(AgentRegistryRepository repository,
+                                TenantDataSourceManager tenantDataSourceManager) {
         this.repository = repository;
+        this.tenantDataSourceManager = tenantDataSourceManager;
     }
 
     /**
@@ -134,14 +139,22 @@ public class AgentRegistryService {
     @Scheduled(fixedRate = 60_000)
     public void cleanupStaleAgents() {
         OffsetDateTime cutoff = OffsetDateTime.now().minus(STALE_THRESHOLD);
-        List<AgentRegistryEntity> stale = repository
-                .findByStatusAndLastHeartbeatAtBefore("ACTIVE", cutoff);
-
-        for (AgentRegistryEntity agent : stale) {
-            agent.setStatus("STALE");
-            repository.save(agent);
-            log.warn("Agent marked STALE: id={}, name={}, lastHeartbeat={}",
-                    agent.getId(), agent.getAgentName(), agent.getLastHeartbeatAt());
+        for (String tenantId : tenantDataSourceManager.getAllCachedDataSources().keySet()) {
+            try {
+                TenantContext.setTenantId(tenantId);
+                List<AgentRegistryEntity> stale = repository
+                        .findByStatusAndLastHeartbeatAtBefore("ACTIVE", cutoff);
+                for (AgentRegistryEntity agent : stale) {
+                    agent.setStatus("STALE");
+                    repository.save(agent);
+                    log.warn("Agent marked STALE: tenant={}, id={}, name={}, lastHeartbeat={}",
+                            tenantId, agent.getId(), agent.getAgentName(), agent.getLastHeartbeatAt());
+                }
+            } catch (Exception e) {
+                log.warn("cleanupStaleAgents failed for tenant {}: {}", tenantId, e.getMessage());
+            } finally {
+                TenantContext.clear();
+            }
         }
     }
 

@@ -2,6 +2,8 @@ package com.platform.agent;
 
 import com.platform.domain.SubagentRunEntity;
 import com.platform.repository.SubagentRunRepository;
+import com.platform.tenant.TenantContext;
+import com.platform.tenant.TenantDataSourceManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -10,6 +12,7 @@ import org.springframework.stereotype.Component;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -27,14 +30,31 @@ public class SubagentLifecycleManager {
 
     private final SubagentRunRepository subagentRunRepository;
     private final WorktreeManager worktreeManager;
+    private final TenantDataSourceManager tenantDataSourceManager;
 
     /** 활성 서브에이전트 컨텍스트 (runId → context) */
     private final Map<String, SubagentContext> activeAgents = new ConcurrentHashMap<>();
 
     public SubagentLifecycleManager(SubagentRunRepository subagentRunRepository,
-                                    WorktreeManager worktreeManager) {
+                                    WorktreeManager worktreeManager,
+                                    TenantDataSourceManager tenantDataSourceManager) {
         this.subagentRunRepository = subagentRunRepository;
         this.worktreeManager = worktreeManager;
+        this.tenantDataSourceManager = tenantDataSourceManager;
+    }
+
+    /** 모든 활성 테넌트 컨텍스트에서 작업을 실행한다. */
+    private void forEachTenant(Runnable task) {
+        for (String tenantId : tenantDataSourceManager.getAllCachedDataSources().keySet()) {
+            try {
+                TenantContext.setTenantId(tenantId);
+                task.run();
+            } catch (Exception e) {
+                log.warn("Tenant {} task failed: {}", tenantId, e.getMessage());
+            } finally {
+                TenantContext.clear();
+            }
+        }
     }
 
     /**
@@ -101,6 +121,10 @@ public class SubagentLifecycleManager {
      */
     @Scheduled(fixedDelay = 30_000, initialDelay = 60_000)
     public void scanTimeouts() {
+        forEachTenant(this::scanTimeoutsForCurrentTenant);
+    }
+
+    private void scanTimeoutsForCurrentTenant() {
         List<SubagentRunEntity> runningEntities = subagentRunRepository.findByStatus("RUNNING");
         OffsetDateTime now = OffsetDateTime.now();
 
@@ -134,6 +158,10 @@ public class SubagentLifecycleManager {
      */
     @Scheduled(fixedDelay = 300_000, initialDelay = 120_000)
     public void cleanupOrphanedWorktrees() {
+        forEachTenant(this::cleanupOrphanedWorktreesForCurrentTenant);
+    }
+
+    private void cleanupOrphanedWorktreesForCurrentTenant() {
         List<SubagentRunEntity> completed = subagentRunRepository.findByStatus("COMPLETED");
         completed.addAll(subagentRunRepository.findByStatus("FAILED"));
         completed.addAll(subagentRunRepository.findByStatus("TIMEOUT"));

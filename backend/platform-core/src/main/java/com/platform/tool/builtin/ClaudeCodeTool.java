@@ -199,6 +199,14 @@ public class ClaudeCodeTool implements ToolExecutor {
                                     "description", "추가 CLI 옵션 맵 (예: {\"--verbose\": \"\", \"--color\": \"always\"}). "
                                             + "키는 옵션명(--포함), 값은 옵션 인수(플래그면 빈 문자열). "
                                             + "주의: --continue/--resume은 continue_mode 파라미터 사용"
+                            )),
+                            Map.entry("tool_bridge", Map.of(
+                                    "type", "string",
+                                    "enum", List.of("aimbase-mcp-only", "hybrid", "native"),
+                                    "description", "CR-044 CLI 도구 브리지 모드. "
+                                            + "aimbase-mcp-only=네이티브 도구 전면 봉인 + Aimbase MCP 도구만 허용 (정책·감사 완전 경유) / "
+                                            + "hybrid=일부 네이티브(Bash/Read/Grep/Glob) 허용 + Aimbase MCP 병행 (실험·디버깅용) / "
+                                            + "native=도구 제한 없음, 현재와 동일 동작 (기본값, 하위 호환)"
                             ))
                     )),
                     "required", List.of("prompt")
@@ -222,6 +230,8 @@ public class ClaudeCodeTool implements ToolExecutor {
         this.errorClassificationService = errorClassificationService;
         this.notificationService = notificationService;
         this.poolManager = poolManager;
+        // CR-044: MCP 설정 생성기에 jar 경로 주입
+        AimbaseMcpConfigGenerator.configure(config.getMcpServerJar());
         log.info("ClaudeCodeTool 초기화: executable={}, timeout={}s, maxTurns={}, apiKey={}, pool={}",
                 config.getExecutable(), config.getTimeoutSeconds(), config.getMaxTurns(),
                 config.getApiKey() != null && !config.getApiKey().isBlank() ? "[설정됨]" : "[미설정-OAuth]",
@@ -284,8 +294,55 @@ public class ClaudeCodeTool implements ToolExecutor {
         boolean forkSession = Boolean.TRUE.equals(input.get("fork_session"));
         String toolsSpec = (String) input.getOrDefault("tools", null);
         List<String> mcpConfig = input.containsKey("mcp_config")
-                ? (List<String>) input.get("mcp_config")
-                : List.of();
+                ? new ArrayList<>((List<String>) input.get("mcp_config"))
+                : new ArrayList<>();
+        String toolBridge = (String) input.getOrDefault("tool_bridge", "native");
+
+        // CR-044: tool_bridge 모드에 따라 allowed/disallowed 도구 목록 자동 구성
+        if (!"native".equals(toolBridge)) {
+            allowedTools = new ArrayList<>(allowedTools);
+            disallowedTools = new ArrayList<>(disallowedTools);
+
+            if ("aimbase-mcp-only".equals(toolBridge)) {
+                // 네이티브 도구 전면 봉인 — Aimbase MCP 도구만 허용
+                if (allowedTools.isEmpty()) {
+                    allowedTools.addAll(List.of("mcp__aimbase__*", "TodoWrite", "ExitPlanMode"));
+                }
+                List<String> nativeToBlock = List.of(
+                        "Bash", "Read", "Write", "Edit", "Grep", "Glob",
+                        "Task", "WebFetch", "WebSearch", "NotebookEdit"
+                );
+                for (String tool : nativeToBlock) {
+                    if (!disallowedTools.contains(tool)) {
+                        disallowedTools.add(tool);
+                    }
+                }
+                // Aimbase MCP 세션 설정 파일 자동 주입
+                String mcpConfigPath = AimbaseMcpConfigGenerator.generateSessionConfig(
+                        (String) input.getOrDefault("session_id", "default"));
+                if (mcpConfigPath != null && !mcpConfig.contains(mcpConfigPath)) {
+                    mcpConfig.add(mcpConfigPath);
+                }
+                log.info("tool_bridge=aimbase-mcp-only: 네이티브 도구 봉인, Aimbase MCP 전용 모드");
+
+            } else if ("hybrid".equals(toolBridge)) {
+                // 고위험 네이티브 도구만 차단 — Bash/Read/Grep/Glob 허용, 실행계 도구만 봉인
+                List<String> hybridBlock = List.of("Write", "Edit", "Task", "WebFetch", "WebSearch", "NotebookEdit");
+                for (String tool : hybridBlock) {
+                    if (!disallowedTools.contains(tool)) {
+                        disallowedTools.add(tool);
+                    }
+                }
+                // Aimbase MCP 세션 설정 파일 자동 주입 (병행 사용)
+                String mcpConfigPath = AimbaseMcpConfigGenerator.generateSessionConfig(
+                        (String) input.getOrDefault("session_id", "default"));
+                if (mcpConfigPath != null && !mcpConfig.contains(mcpConfigPath)) {
+                    mcpConfig.add(mcpConfigPath);
+                }
+                log.info("tool_bridge=hybrid: 고위험 도구 봉인, Bash/Read/Grep/Glob + Aimbase MCP 병행 모드");
+            }
+        }
+
         Double maxBudgetUsd = input.containsKey("max_budget_usd")
                 ? ((Number) input.get("max_budget_usd")).doubleValue()
                 : null;
