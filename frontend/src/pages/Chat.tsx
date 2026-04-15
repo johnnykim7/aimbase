@@ -1,12 +1,14 @@
 import { useParams } from "react-router-dom";
-import { MessageCircle } from "lucide-react";
 import { useConversation } from "../hooks/useConversation";
+import { ChatSidebar } from "../components/chat/ChatSidebar";
+import { ChatHeader } from "../components/chat/ChatHeader";
+import { ChatInput } from "../components/chat/ChatInput";
 
 /**
  * CR-045: 대화형 채팅 페이지.
- * Phase 3-A: 기반 레이아웃만 (사이드바/헤더/대화창/입력창 placeholder).
- * Phase 3-B: 새 대화 모달 + 세션 사이드바 + 입력창 UI.
- * Phase 4: SSE 스트림 훅 + 메시지 블록 렌더.
+ * Phase 3-A: 라우트/레이아웃.
+ * Phase 3-B (현재): ChatSidebar + NewChatModal + ChatHeader + ChatInput 배선.
+ * Phase 4: useChatStream 훅 + 블록 렌더 (현재 입력창은 disabled).
  */
 export default function Chat() {
   const { sessionId } = useParams<{ sessionId?: string }>();
@@ -14,37 +16,29 @@ export default function Chat() {
 
   return (
     <div className="flex h-full">
-      {/* 좌측 사이드바 placeholder — Phase 3-B에서 ChatSidebar로 교체 */}
-      <aside className="w-72 shrink-0 border-r border-border bg-card">
-        <div className="p-4 text-sm text-muted-foreground">
-          세션 목록 (Phase 3-B 예정)
-        </div>
-      </aside>
+      <ChatSidebar />
 
-      {/* 우측 대화창 */}
       <section className="flex flex-1 flex-col">
-        {/* 헤더 placeholder — Phase 3-B에서 ChatHeader로 교체 */}
-        <header className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <MessageCircle className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium">
-            {sessionId ? `세션: ${sessionId}` : "새 대화"}
-          </span>
-          {conversation?.session.workspaceRef && (
-            <span className="ml-2 rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-              💼 {conversation.session.workspaceRef}
-            </span>
-          )}
-        </header>
+        <ChatHeader
+          sessionId={sessionId}
+          workspaceRef={conversation?.session.workspaceRef}
+        />
 
-        {/* 메시지 영역 placeholder */}
         <div className="flex-1 overflow-y-auto p-4">
-          {isLoading && <div className="text-sm text-muted-foreground">로딩 중…</div>}
+          {isLoading && (
+            <div className="text-sm text-muted-foreground">로딩 중…</div>
+          )}
           {!sessionId && (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              새 대화를 시작하려면 좌측 <b className="mx-1">+ 새 대화</b> 버튼을 눌러주세요 (Phase 3-B 예정)
+              좌측 <b className="mx-1">+ 새 대화</b> 버튼으로 시작하세요
             </div>
           )}
-          {sessionId && conversation && (
+          {sessionId && conversation && conversation.messages.length === 0 && (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              메시지 없음 — 입력창 활성화는 Phase 4 예정
+            </div>
+          )}
+          {sessionId && conversation && conversation.messages.length > 0 && (
             <div className="space-y-3">
               {conversation.messages.map((m) => (
                 <div key={m.id} className="rounded border border-border p-3 text-sm">
@@ -56,15 +50,7 @@ export default function Chat() {
           )}
         </div>
 
-        {/* 입력창 placeholder — Phase 3-B에서 ChatInput으로 교체 */}
-        <footer className="border-t border-border p-3">
-          <input
-            type="text"
-            disabled
-            placeholder="입력 (Phase 3-B 예정)"
-            className="w-full rounded border border-border bg-muted px-3 py-2 text-sm"
-          />
-        </footer>
+        <ChatInput disabled placeholder="메시지 입력 (Phase 4에서 활성화)" />
       </section>
     </div>
   );
