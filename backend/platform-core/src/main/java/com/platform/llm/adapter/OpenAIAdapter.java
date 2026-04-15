@@ -148,6 +148,13 @@ public class OpenAIAdapter implements LLMAdapter {
 
             builder.messages(buildOpenAIMessages(request.messages()));
 
+            // CR-045 Phase 2-B: 스트리밍에도 tools 전달 (비스트리밍 경로와 동일)
+            if (request.tools() != null && !request.tools().isEmpty()) {
+                @SuppressWarnings("unchecked")
+                List<ChatCompletionTool> openAiTools = (List<ChatCompletionTool>) transformToolDefs(request.tools());
+                builder.tools(openAiTools);
+            }
+
             // CR-045 Phase 2-B: tool_calls 인덱스별 누적 (id/name/arguments_string)
             java.util.Map<Long, String[]> toolAcc = new java.util.LinkedHashMap<>();
             final String[] finishReasonHolder = new String[]{""};

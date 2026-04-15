@@ -241,6 +241,27 @@ public class AnthropicAdapter implements LLMAdapter {
             }
             builder.messages(userMessages);
 
+            // CR-045 Phase 2-B: 스트리밍에도 tools + tool_choice 전달 (비스트리밍 경로와 동일)
+            if (request.tools() != null && !request.tools().isEmpty()) {
+                @SuppressWarnings("unchecked")
+                List<Tool> anthropicTools = (List<Tool>) transformToolDefs(request.tools());
+                List<Tool> cachedTools = new ArrayList<>(anthropicTools);
+                if (!cachedTools.isEmpty()) {
+                    int last = cachedTools.size() - 1;
+                    cachedTools.set(last, cachedTools.get(last).toBuilder()
+                            .cacheControl(CACHE_EPHEMERAL)
+                            .build());
+                }
+                List<ToolUnion> toolUnions = cachedTools.stream()
+                        .map(t -> ToolUnion.Companion.ofTool(t))
+                        .toList();
+                builder.tools(toolUnions);
+                if (request.toolChoice() != null) {
+                    ToolChoice choice = mapToolChoice(request.toolChoice());
+                    if (choice != null) builder.toolChoice(choice);
+                }
+            }
+
             // CR-031 PRD-214: 스트리밍에도 Adaptive Thinking 3모드 적용
             com.platform.llm.model.ThinkingMode streamThinkingMode = request.config() != null
                     ? request.config().resolveThinkingMode()
@@ -288,9 +309,10 @@ public class AnthropicAdapter implements LLMAdapter {
                         (int) finalMsg.usage().inputTokens(),
                         (int) finalMsg.usage().outputTokens()
                 );
-                // CR-045 Phase 2-B: finishReason + toolUses를 완료 청크에 실어 보냄
-                String stopReason = finalMsg.stopReason() != null
-                        ? finalMsg.stopReason().toString() : "";
+                // CR-045 Phase 2-B: finishReason + toolUses를 완료 청크에 실어 보냄.
+                // Anthropic SDK의 stopReason()은 Optional<StopReason>을 반환하므로 asString() 사용.
+                String stopReason = finalMsg.stopReason()
+                        .map(StopReason::asString).orElse("end_turn");
                 LLMResponse.FinishReason fr = switch (stopReason) {
                     case "tool_use"   -> LLMResponse.FinishReason.TOOL_USE;
                     case "max_tokens" -> LLMResponse.FinishReason.MAX_TOKENS;
