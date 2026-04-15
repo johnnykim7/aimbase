@@ -73,7 +73,9 @@ export const chatApi = {
       stream: false,
     }),
 
-  /** 세션 + 메시지 번들 조회 */
+  /** 세션 + 메시지 번들 조회. 404(신규 세션)도 정상 처리. */
   getConversation: (sessionId: string) =>
-    apiClient.get<ApiResponse<ConversationBundle>>(`/conversations/${sessionId}`),
+    apiClient.get<ApiResponse<ConversationBundle>>(`/conversations/${sessionId}`, {
+      validateStatus: (s) => (s >= 200 && s < 300) || s === 404,
+    }),
 };
