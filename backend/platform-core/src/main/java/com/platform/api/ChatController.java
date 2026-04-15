@@ -110,8 +110,11 @@ public class ChatController {
                                 .data(Map.of("done", true)));
                         emitter.complete();
                     } else {
+                        // CR-045 Phase 2-A: type별 이벤트 분기
+                        // "thinking" → thinking 이벤트, 그 외(text/null) → delta 이벤트
+                        String eventName = "thinking".equals(chunk.type()) ? "thinking" : "delta";
                         emitter.send(SseEmitter.event()
-                                .name("delta")
+                                .name(eventName)
                                 .data(Map.of("delta", chunk.delta() != null ? chunk.delta() : "")));
                     }
                 } catch (IOException e) {
