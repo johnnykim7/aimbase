@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.domain.MCPServerEntity;
 import com.platform.tool.model.UnifiedToolDef;
 import com.platform.repository.MCPServerRepository;
+import com.platform.tenant.TenantDataSourceManager;
 import com.platform.tool.ToolRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,13 +33,14 @@ class MCPServerManagerTest {
     @Mock private MCPServerRepository mcpServerRepository;
     @Mock private ToolRegistry toolRegistry;
     @Mock private MCPServerClient mockClient;
+    @Mock private TenantDataSourceManager tenantDataSourceManager;
 
     private MCPServerManager manager;
     private Map<String, MCPServerClient> connections;
 
     @BeforeEach
     void setUp() throws Exception {
-        manager = new MCPServerManager(mcpServerRepository, toolRegistry, new ObjectMapper());
+        manager = new MCPServerManager(mcpServerRepository, toolRegistry, new ObjectMapper(), tenantDataSourceManager);
 
         // 리플렉션으로 connections 맵 접근
         Field connectionsField = MCPServerManager.class.getDeclaredField("connections");

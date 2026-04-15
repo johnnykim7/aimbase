@@ -1,6 +1,7 @@
 package com.platform.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.platform.config.WorkspaceProperties;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.UnifiedMessage;
 import com.platform.orchestrator.ChatRequest;
@@ -12,11 +13,13 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -28,14 +31,19 @@ import java.util.Map;
 public class ChatController {
 
     private final OrchestratorEngine orchestrator;
+    private final WorkspaceProperties workspaceProperties;
 
-    public ChatController(OrchestratorEngine orchestrator) {
+    public ChatController(OrchestratorEngine orchestrator, WorkspaceProperties workspaceProperties) {
         this.orchestrator = orchestrator;
+        this.workspaceProperties = workspaceProperties;
     }
 
     @PostMapping("/completions")
     @Operation(summary = "채팅 완성 요청", description = "LLM 모델에 메시지를 전송하고 응답을 받는다. stream=true이면 SSE로 응답.")
     public Object completions(@Valid @RequestBody ChatCompletionRequest request) {
+        // CR-045 L0: working_directory 화이트리스트 조기 차단 (400)
+        validateWorkingDirectory(request.workingDirectory());
+
         List<UnifiedMessage> messages = request.messages().stream()
                 .map(this::toUnifiedMessage)
                 .toList();
@@ -72,14 +80,23 @@ public class ChatController {
                 toolFilter,
                 request.toolChoice(),
                 responseFormat,
-                request.connectionGroupId()
+                request.connectionGroupId(),
+                request.workingDirectory()
         );
 
         if (request.stream()) {
             return streamResponse(chatRequest);
         }
-        ChatResponse response = orchestrator.chat(chatRequest);
-        return ApiResponse.ok(toChatCompletionResponse(response));
+        try {
+            ChatResponse response = orchestrator.chat(chatRequest);
+            return ApiResponse.ok(toChatCompletionResponse(response));
+        } catch (IllegalStateException e) {
+            // CR-045 BIZ-091: 세션 workspaceRef 충돌 → 409
+            if (e.getMessage() != null && e.getMessage().contains("workspaceRef 충돌")) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+            }
+            throw e;
+        }
     }
 
     private SseEmitter streamResponse(ChatRequest chatRequest) {
@@ -159,7 +176,8 @@ public class ChatController {
             @JsonProperty("connection_group_id") String connectionGroupId,
             @JsonProperty("tool_filter") ToolFilterDto toolFilter,
             @JsonProperty("tool_choice") String toolChoice,
-            @JsonProperty("response_format") ResponseFormatDto responseFormat
+            @JsonProperty("response_format") ResponseFormatDto responseFormat,
+            @JsonProperty("working_directory") String workingDirectory
     ) {}
 
     /** CR-006: 도구 필터링 DTO */
@@ -197,6 +215,24 @@ public class ChatController {
     public record ImageUrlDto(
             String url
     ) {}
+
+    // ─── CR-045 L0: 화이트리스트 조기 차단 ───
+
+    private void validateWorkingDirectory(String workingDirectory) {
+        if (workingDirectory == null || workingDirectory.isBlank()) return;
+        Path expanded = Path.of(expandHome(workingDirectory)).toAbsolutePath().normalize();
+        if (!workspaceProperties.isInsideWhitelist(expanded)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "working_directory가 화이트리스트 외부: " + workingDirectory);
+        }
+    }
+
+    private static String expandHome(String raw) {
+        if (raw.startsWith("~")) {
+            return System.getProperty("user.home") + raw.substring(1);
+        }
+        return raw;
+    }
 
     // ─── 멀티모달 변환 헬퍼 ───
 

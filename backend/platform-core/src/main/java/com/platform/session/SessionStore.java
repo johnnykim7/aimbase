@@ -194,4 +194,40 @@ public class SessionStore {
                 .map(b -> ((ContentBlock.Text) b).text())
                 .reduce("", String::concat);
     }
+
+    // ── CR-045: workspaceRef 세션 메타 접근 ──
+
+    /**
+     * 세션에 연결된 workspaceRef를 조회. 세션 미존재 시 null.
+     */
+    public String getWorkspaceRef(String sessionId) {
+        return sessionRepository.findBySessionId(sessionId)
+                .map(ConversationSessionEntity::getWorkspaceRef)
+                .orElse(null);
+    }
+
+    /**
+     * 세션에 workspaceRef를 저장. 세션 미존재 시 생성.
+     * 이미 값이 있고 다르면 IllegalStateException (BIZ-091).
+     */
+    public void setWorkspaceRefIfAbsent(String sessionId, String workspaceRef) {
+        if (workspaceRef == null || workspaceRef.isBlank()) return;
+        transactionTemplate.executeWithoutResult(status -> {
+            ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
+                    .orElseGet(() -> {
+                        ConversationSessionEntity s = new ConversationSessionEntity();
+                        s.setSessionId(sessionId);
+                        return s;
+                    });
+            String existing = session.getWorkspaceRef();
+            if (existing != null && !existing.isBlank() && !existing.equals(workspaceRef)) {
+                throw new IllegalStateException(
+                        "세션 workspaceRef 충돌: existing=" + existing + ", requested=" + workspaceRef);
+            }
+            if (existing == null || existing.isBlank()) {
+                session.setWorkspaceRef(workspaceRef);
+                sessionRepository.save(session);
+            }
+        });
+    }
 }

@@ -7,29 +7,28 @@ import com.platform.tool.builtin.ZipExtractTool;
 import com.platform.tool.nativetool.*;
 import com.platform.tool.workspace.WorkspacePolicyEngine;
 import com.platform.tool.workspace.WorkspaceResolver;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
  * CR-041: SDK 도구를 Spring Bean으로 등록하는 브릿지.
- * SDK-core 모듈에서 @Component가 제거되었으므로 여기서 명시적으로 Bean 등록.
+ * CR-045: WorkspaceProperties(단일 진실 원천) 주입. L1/L2 방어선에 화이트리스트 전달.
  * ToolRegistry의 @Lazy List&lt;ToolExecutor&gt; 자동 수집이 그대로 동작한다.
  */
 @Configuration
+@EnableConfigurationProperties(WorkspaceProperties.class)
 public class SdkToolBeanConfig {
 
-    @Value("${native-tools.workspace-base:/data/workspaces}")
-    private String workspaceBase;
-
     @Bean
-    public WorkspaceResolver workspaceResolver() {
-        return new WorkspaceResolver(workspaceBase);
+    public WorkspaceResolver workspaceResolver(WorkspaceProperties props) {
+        return new WorkspaceResolver(props.getBase(), props.whitelistPaths());
     }
 
     @Bean
-    public WorkspacePolicyEngine workspacePolicyEngine(WorkspaceResolver workspaceResolver) {
-        return new WorkspacePolicyEngine(workspaceResolver);
+    public WorkspacePolicyEngine workspacePolicyEngine(WorkspaceResolver workspaceResolver,
+                                                       WorkspaceProperties props) {
+        return new WorkspacePolicyEngine(workspaceResolver, props.whitelistPaths());
     }
 
     // ── Native Tools ──

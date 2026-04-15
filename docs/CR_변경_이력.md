@@ -38,6 +38,9 @@
 | CR-038 | 에이전트 자율성 강화 — MCP 리소스 탐색·읽기 + 이벤트 트리거 + 세션 브리핑 (PRD-245~248, FE-019) | 변경 | High | v6.4.0 | ✅ 완료 |
 | CR-039 | 고급 확장 도구 — Swarm 팀 협업 + Notebook 편집 + LSP 코드 분석 (PRD-265~268, FE-022) | 변경 | High | v6.6.0 | 🔧 진행중 |
 | CR-040 | 런타임 설정 관리 — DB 기반 설정 + 관리자 UI + 하드코딩 제거 (PRD-269~272, FE-023) | 변경 | High | v6.7.0 | 🔧 진행중 |
+| CR-043 | ClaudeCodeTool 다중계정 운영 정책 정착 — 테넌트 전용/공통 풀 페일오버 + 호출중 자동 재시도 | 변경 | Medium | v7.1.0 | 📝 등록 |
+| CR-044 | CLI 두뇌 + Aimbase 손발 — Claude CLI 네이티브 도구 봉인 + Aimbase MCP 강제 (PRD-279~282) | 변경 | High | v7.2.0 | 📝 등록 |
+| CR-045 | 대화형 채팅 UI + 워크스페이스 컨텍스트 + 실시간 도구 이벤트 (PRD-290~293, FE-030~032) | 변경 | High | v7.3.0 | 📝 등록 |
 
 ---
 
@@ -682,6 +685,104 @@
 - **영향 설계서**: T1-1, T3-1, T3-2, T3-6
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v6.7.0
 - **변경 일자**: 2026-04-09
+
+### CR-043 | ClaudeCodeTool 다중계정 운영 정책 정착 — 테넌트 전용/공통 풀 페일오버 + 호출중 자동 재시도
+- **대상 기능 ID**: TBD (PRD 별도 발번 예정), 관련 BIZ-001/CR-014
+- **변경 타입**: 변경 (운영정책 정착 + 코드 보강)
+- **변경 내용**:
+  1. **운영 정책 표준화**: `agent_accounts` + `agent_account_assignments` 테이블을 활용하여 (a) 테넌트별 전용 OAuth 토큰, (b) 공통 라운드로빈 풀 폴백, (c) 한 계정 실패 시 다음 후보 자동 사용하는 운영 패턴을 표준화한다. 현재 코드(`AgentAccountPoolManager.resolveAccount`)가 이미 specificity 정렬 + Circuit Breaker 기반 페일오버를 지원하므로 **선택 시점 페일오버는 추가 코드 불필요**.
+  2. **호출중 자동 재시도 (신규 코드)**: 현재 페일오버는 "계정 선택 시점"에만 동작. 선택 후 토큰 만료/Rate Limit/일시 장애로 호출이 실패하면 그 호출 자체는 실패 반환됨. 단일 호출 내에서도 다음 후보 계정으로 자동 재시도하는 로직을 ClaudeCodeTool에 추가한다.
+     - 실패 시 현재 계정의 GenericCircuitBreaker에 실패 기록
+     - resolveAccount 재호출 → 다음 후보(specificity 또는 round-robin 차순위) 사용
+     - 최대 재시도 횟수 설정값(기본 2회) 도달하면 최종 실패 반환
+  3. **운영 가이드 문서화**: 테넌트 6개 + 공통 풀 운영 시나리오를 `aimbase-ops-guide.md`에 추가
+- **변경 사유**:
+  - 사용자 요구사항: "테넌트별로 키값을 분리해서 사용하거나 옵션에 따라 공통 계정을 같이 사용. 각 키값을 하나가 문제생기면 다른 하나를 사용할 수 있게."
+  - 현재 인프라(테이블/Resolver/CircuitBreaker)는 95% 충족, 호출중 재시도만 미구현 → 갭 메우기
+- **영향 모듈**: ClaudeCodeTool(retry 로직), AgentAccountPoolManager(재시도 콜백 추가), 운영 가이드
+- **영향도**: Medium
+- **영향 범위**: 신규 PRD(번호 미정, 1~2개), CR-014 후속
+- **영향 설계서**: T3-1(테이블 추가 없음, 흐름도 갱신), aimbase-ops-guide.md
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v7.1.0
+- **변경 일자**: 2026-04-14
+- **상태**: 등록만(미착수). 운영 패턴은 즉시 적용 가능, 호출중 재시도 코드는 별도 스프린트.
+
+### CR-044 | CLI 두뇌 + Aimbase 손발 — Claude CLI 네이티브 도구 봉인 + Aimbase MCP 강제
+- **대상 기능 ID**: PRD-279 ~ PRD-282 (FE 없음)
+- **변경 타입**: 변경 (기존 부품 결합, 신규 도구·엔진 없음)
+- **배경**:
+  - Aimbase는 Bash/Read/Write/Edit/Grep/Glob/TodoWrite/Task/MCP 등 모든 핵심 도구를 네이티브 보유(CR-037/CR-038/CR-041). Claude Code CLI도 동일 도구를 자체 보유.
+  - ClaudeCodeTool 경로 실행 시 같은 기능이 두 갈래로 흘러 **PolicyEngine·감사 로그(BIZ-020)·WorkspaceResolver·테넌트 격리(BIZ-003)·비용 메트릭이 CLI 쪽에서는 우회**됨.
+  - API 경로는 종량제, CLI 경로는 Claude Max 정액제로 비용 차이 수십 배. CLI 경로를 버릴 수 없으므로 CLI의 "두뇌(추론)"만 쓰고 "손발(실행)"은 Aimbase에 강제 위임.
+- **변경 내용**:
+  1. **PRD-279 ClaudeCodeTool CLI 플래그 자동 주입**: CLI 서브프로세스 기동 시 `--mcp-config /tmp/aimbase-session-${sid}.json` + `--allowedTools "mcp__aimbase__*,TodoWrite,ExitPlanMode"` + `--disallowedTools "Bash,Read,Write,Edit,Grep,Glob,Task,WebFetch,WebSearch,NotebookEdit"` 플래그를 기본 주입. 네이티브 도구 봉인은 모델 규율이 아닌 하네스 차단으로 물리적 강제. TodoWrite/ExitPlanMode는 사고 구조화용 예외 허용.
+  2. **PRD-280 세션별 MCP 설정 파일 동적 생성기**: `ClaudeCodeSessionMcpConfigGenerator`(신규) 가 세션 기동 시 `aimbase-tool-sdk-mcp` 서버 엔드포인트 + 세션 스코프 인증 토큰을 담은 MCP JSON 설정 파일을 임시 경로에 생성, 세션 종료 시 정리.
+  3. **PRD-281 CLI 경로 도구 결과 축약 어댑터**: CR-031의 `ToolResultCompactor`를 `aimbase-tool-sdk-mcp` 응답 핸들러에 주입. Claude CLI가 MCP 응답 전문을 컨텍스트에 재삽입하므로 긴 grep/파일 read가 Max 플랜 rate limit을 빠르게 소진하는 문제 완화.
+  4. **PRD-282 Skill.metadata.toolBridge 필드**: `aimbase-mcp-only`(기본, 완전 봉인) / `hybrid`(일부 네이티브 허용, 실험·디버깅) / `native`(플래그 미주입, 레거시·벤치마크). SubagentRunner가 Skill 값에 따라 CLI 플래그 세트를 분기.
+- **변경 사유**:
+  - 사용자 요구사항: "claude cli tool 내부에서 자기 툴 사용하지 말고 aimbase tool 사용하도록 강제화. claude cli를 이용한 두뇌만 이용하고 싶은 거죠."
+  - API vs CLI 경로 도구 스택 일원화 → 정책·감사·격리·관측성을 두 경로에서 동일 코드 패스로 보장
+  - Claude Max 정액제 활용하면서도 Aimbase 운영 표준 미준수 우회로 차단
+- **기술적 근거**: Claude Code CLI가 공식 지원하는 `--mcp-config`/`--allowedTools`/`--disallowedTools` 플래그 사용. 비공식 해킹 아님.
+- **비용/Rate Limit 트레이드오프**:
+  - 이득: 모델 토큰(Max 정액 내 무료), 정책·감사·격리·관측성 API 경로와 100% 동일 코드 패스 공유.
+  - 주의: MCP 응답이 모델 컨텍스트에 재삽입되어 Max 플랜 시간당 rate limit 소진 속도 증가 → PRD-281 축약 어댑터로 완화. MCP JSON-RPC 왕복 레이턴시 소폭 증가(체감 미미).
+- **기존 부품 재사용**:
+  - `aimbase-tool-sdk-mcp` (CR-041), `ClaudeCodeTool` (CR-011, Docker 검증 완료), `PolicyEngine` / `WorkspaceResolver` / 감사 로그 / `ToolResultCompactor` (CR-031) 전부 그대로 재사용. 신규 도구·엔진·테이블 없음.
+- **영향 모듈**:
+  - BE: `ClaudeCodeTool`, `ClaudeCodeSessionMcpConfigGenerator`(신규 1개), `aimbase-tool-sdk-mcp` 응답 핸들러, `SkillEntity.metadata` 스키마 문서화, `SubagentRunner` 분기 로직
+  - FE: 없음 (Skill 관리 화면은 metadata 자유 편집으로 커버)
+- **영향도**: High (CLI 경로 기본 동작 변경, 단 toolBridge=native 로 롤백 가능)
+- **영향 범위**: PRD-279~282, BIZ-001(도구 루프) 동작 영역은 그대로, BIZ-020(감사 로그) CLI 경로 커버리지 신규 확보
+- **영향 설계서**: T3-6 실행지시서(ClaudeCodeTool 섹션 갱신), aimbase-ops-guide.md(toolBridge 모드 운영 가이드 추가)
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v7.2.0
+- **변경 일자**: 2026-04-14
+- **상태**: 등록만(미착수). POC(플래그 주입 + Task/Subagent 상속 검증) 선행 후 구현 착수.
+- **사전 검증 필요 항목**:
+  - Claude CLI 내부 Task 서브에이전트가 `--allowedTools` 제약을 상속하는지 — 미상속 시 Task도 disallowedTools에 추가하고 Aimbase SubagentRunner 경유로 우회
+  - `--mcp-config`로 가짜 MCP 서버 등록 후 모델이 실제로 mcp__ 호출을 선택하는지
+- **원본 요구사항**: `docs/origins/원본_요구사항_CLI_두뇌_Aimbase_손발_20260414.md`
+
+### CR-045 | 대화형 채팅 UI + 워크스페이스 컨텍스트 + 실시간 도구 이벤트
+- **대상 기능 ID**: PRD-290 ~ PRD-293, FE-030 ~ FE-032
+- **변경 타입**: 변경 (기능 추가 + 기존 Chat 파이프라인 보강)
+- **배경**:
+  - FlowGuard 시나리오 추출 벤치마크 실험(Claude Code CLI vs Aimbase Chat API) 준비 중 Aimbase 환경이 Claude Code와 비대칭임이 드러남.
+  - 내장 도구(BashTool/GrepTool/FileReadTool/GlobTool)는 `WorkspaceResolver` 기반으로 동작 준비 완료(CR-037/CR-041)이나, `OrchestratorEngine.chat()`에서 `ToolContext.workspacePath = "/"`로 **하드코딩**되어 소비앱 소스 폴더 지정 불가.
+  - `frontend/src/pages/` 아래 **채팅 UI 부재** (SessionDetail에 "대화 탭 (예정)" placeholder만 존재).
+  - SSE 이벤트 타입이 `delta`/`done` 2종뿐이어서 도구 호출/thinking이 실시간 전달되지 않음.
+- **변경 내용**:
+  1. **PRD-290 Chat API 워크스페이스 파이프라인**: `ChatRequest.workingDirectory` 필드 추가, `OrchestratorEngine.resolveWorkspace()` 헬퍼(세션 메타 > 요청값 > null 우선순위), `ToolContext.workspacePath` 하드코딩 제거, 세션 메타 `workspaceRef` 저장/복원.
+  2. **PRD-291 SSE 이벤트 타입 확장**: 스트리밍 응답을 `delta`/`thinking`/`tool_use_start`/`tool_result`/`done` 5종으로 분리 송출. `ToolCallHandler.executeTool()` 전후 옵션 콜백 훅 주입(비스트림 모드 무영향). thinking 블록 필터링 제거(OrchestratorEngine.java:471).
+  3. **PRD-292 워크스페이스 목록 API**: `GET /api/v1/workspaces` 신규. 화이트리스트 루트 하위 1단계 디렉토리 나열(name, path, modifiedAt). `WorkspaceController` 신규 클래스 ~50 LOC.
+  4. **PRD-293 WorkspacePolicy 화이트리스트 강화**: `WorkspacePolicyEngine.validatePath()`에 `$HOME/Documents/GitHub/bp-fulfillment-infra` 루트 제약 + 상대경로 탈출 차단 + `toRealPath()` 심볼릭 링크 해석. 루트는 `application.yml`의 `aimbase.workspace.whitelist-roots`로 설정값화.
+  5. **FE-030 `/chat` 페이지 라우트**: `/chat`, `/chat/:sessionId` 2개 라우트. 좌측 세션 사이드바 + 우측 대화창 레이아웃. `App.tsx` 라우트 추가, 사이드바 메뉴 "채팅" 추가.
+  6. **FE-031 새 대화 시작 모달**: 워크스페이스 드롭다운(PRD-292 API) + Connection + 모델 + 세션명 선택. 생성 시 client-side `session_id = uuid()` 발급, `/chat/:sessionId` navigate.
+  7. **FE-032 SSE 스트림 훅 + 메시지 블록 렌더러**: `useChatStream` 커스텀 훅(fetch + ReadableStream SSE 파서). `blocks/` 4종: `TextBlock`, `ThinkingBlock`(접기/펴기), `ToolUseBlock`(도구명+인자+spinner), `ToolResultBlock`(결과 요약+전문 토글). 기존 세션 로드는 `GET /api/v1/conversations/:id` 재사용.
+  - **BIZ 규칙 신규**: BIZ-090(workingDirectory는 화이트리스트 루트 하위만 허용, 위반 시 403), BIZ-091(같은 session_id 재사용 시 세션 메타 workspaceRef 우선, 요청값 충돌 시 409).
+- **변경 사유**:
+  - 벤치마크 실험 블로커 해소가 일차 동기이나, Aimbase 자체 대화형 사용성을 Claude Code 수준으로 정식 기능화.
+  - 소비앱 소스를 탐색하는 실제 작업 시나리오 지원(OMS 분석, FlowGuard 시나리오 추출 등).
+  - 도구 호출 실시간 visibility가 사용자 신뢰도/디버깅에 직결.
+- **기존 부품 재사용**:
+  - `PolicyEngine`, `AuditLogger`, `SessionStore`, `WorkspaceResolver`, `ToolCallHandler`, `ConversationController`, `WorkspacePolicyEngine` 그대로 재사용.
+  - FE: 기존 `ui/`, `common/`, `useConnections`, `useSessions` 재사용.
+  - **신규 도구·엔진·테이블 없음**. DB는 기존 `conversation_sessions.meta` JSONB에 `workspaceRef` 필드 추가만.
+- **영향 모듈**:
+  - BE: `ChatController`, `ChatRequest`, `OrchestratorEngine`, `ToolCallHandler`(훅 추가), `WorkspacePolicyEngine`(강화), `WorkspaceController`(신규), `SseEventType`(신규 enum)
+  - FE: `pages/Chat.tsx`(신규), `components/chat/*`(신규 9개), `hooks/useChatStream`·`useWorkspaces`·`useConversation`(신규 3개), `api/chat.ts`·`api/workspaces.ts`(신규), `App.tsx`·`Sidebar.tsx`(수정)
+- **영향도**: High (Chat API 기본 동작 변경 — `"/"` 하드코딩 제거가 기존 호출자에 영향 가능)
+- **영향 범위**: PRD-290~293, FE-030~032, BIZ-002(갱신), BIZ-090/091(신규)
+- **영향 설계서**: T1-1, T1-3, T3-1, T3-2, T3-3, T3-4, T3-5, T3-6
+- **Phase 분할**: Phase 1 BE 워크스페이스 파이프라인 → Phase 2 BE SSE 이벤트 확장 → Phase 3 FE 기반 구조 → Phase 4 FE 스트림+블록 렌더러
+- **리스크**:
+  - `ToolContext.workspacePath = "/"` 하드코딩 제거 시 의존 코드 존재 가능 → Phase 1 착수 전 전수 grep 필수
+  - `ToolCallHandler` 콜백 훅이 침습적 → 옵션 파라미터로 주입, 비스트림 모드 기존 동작 유지
+- **요청자**: sykim | **승인자**: - | **적용 버전**: v7.3.0
+- **변경 일자**: 2026-04-15
+- **상태**: 등록(검토 대기). 사용자 승인 후 Phase 1부터 착수.
+- **원본 요구사항**: `docs/origins/원본_요구사항_채팅UI_워크스페이스_실시간도구이벤트_20260415.md`
+- **설계서**: `docs/원본_설계_CR045_채팅UI_워크스페이스_실시간도구이벤트_20260415.md`
 
 ### CR-041 | Agent SDK 추출 + Agent Registry — 소비앱 도구 SDK 배포 + 원격 에이전트 오케스트레이션
 - **대상 기능 ID**: PRD-273 ~ PRD-278, FE-024

@@ -154,6 +154,13 @@ storage:
   local:
     base-path: ${STORAGE_BASE_PATH:/data/aimbase}
 
+# ─── CR-045: 워크스페이스 접근 제어 (L0/L1/L2 단일 진실 원천) ────────────
+aimbase:
+  workspace:
+    base: ${AIMBASE_WORKSPACE_BASE:/data/workspaces}
+    whitelist-roots:
+      - ${AIMBASE_WORKSPACE_WHITELIST:${user.home}/Documents/GitHub/bp-fulfillment-infra}
+
 logging:
   level:
     com.platform: INFO

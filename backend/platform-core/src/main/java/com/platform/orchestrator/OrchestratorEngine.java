@@ -214,10 +214,9 @@ public class OrchestratorEngine {
                 assemblyResult.trace().effectiveWindow(),
                 assemblyResult.trace().includedLayers().size());
 
-        // CR-029: ToolContext 생성 (통합용)
-        // workspacePath: 향후 세션 메타의 workspace_ref에서 가져옴.
-        // 현재는 "/" 허용 (도구 내부의 workspace policy가 세밀하게 제어)
-        String workspacePath = "/";
+        // CR-045: workspacePath — 세션 메타(workspaceRef) > 요청값 > null 우선순위.
+        // 첫 요청이면 세션 메타에 저장. 기존 메타와 다른 값 요청 시 IllegalStateException(BIZ-091) → Controller 409.
+        String workspacePath = resolveWorkspace(request, sessionId);
         ToolContext toolContext = new ToolContext(
                 tenantId, null, null, sessionId, null, null,
                 request.userId(), PermissionLevel.FULL,
@@ -658,5 +657,30 @@ public class OrchestratorEngine {
         } catch (Exception e) {
             log.warn("Failed to save usage log: {}", e.getMessage());
         }
+    }
+
+    /**
+     * CR-045: workspacePath 결정 — 세션 메타(workspaceRef) > 요청값 > null 우선순위.
+     * - 세션 메타에 값이 있으면 그것 사용 (세션 도중 변경 금지, BIZ-091)
+     * - 요청값이 있고 세션 메타가 비어있으면 메타에 저장 후 사용
+     * - 요청값이 세션 메타와 다르면 IllegalStateException → 컨트롤러 단에서 409
+     * - 둘 다 없으면 null (ToolContext.workspacePath=null → resolver 폴백)
+     */
+    private String resolveWorkspace(ChatRequest request, String sessionId) {
+        String existing = sessionId != null ? sessionStore.getWorkspaceRef(sessionId) : null;
+        String requested = request.workingDirectory();
+
+        if (existing != null && !existing.isBlank()) {
+            if (requested != null && !requested.isBlank() && !requested.equals(existing)) {
+                throw new IllegalStateException(
+                        "세션 workspaceRef 충돌: existing=" + existing + ", requested=" + requested);
+            }
+            return existing;
+        }
+        if (requested != null && !requested.isBlank() && sessionId != null) {
+            sessionStore.setWorkspaceRefIfAbsent(sessionId, requested);
+            return requested;
+        }
+        return requested;
     }
 }

@@ -8,20 +8,34 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
  * CR-029: 워크스페이스 정책 평가 엔진.
  * path traversal 방어 + 확장자 제한 + 파일 크기 제한 + 바이너리 차단 + 시크릿 탐지.
+ * CR-045: 시스템 화이트리스트 독립 방어선 추가 (L2).
  */
 public class WorkspacePolicyEngine {
 
     private static final Logger log = LoggerFactory.getLogger(WorkspacePolicyEngine.class);
 
     private final WorkspaceResolver workspaceResolver;
+    private final List<Path> whitelistRoots;
 
     public WorkspacePolicyEngine(WorkspaceResolver workspaceResolver) {
+        this(workspaceResolver, List.of());
+    }
+
+    /**
+     * CR-045: 화이트리스트 주입 생성자 (L2 독립 방어선).
+     * WorkspaceResolver와 같은 설정을 참조하되 검증 로직은 독립.
+     *
+     * @param whitelistRoots 비어있으면 기존 동작 유지 (하위 호환)
+     */
+    public WorkspacePolicyEngine(WorkspaceResolver workspaceResolver, List<Path> whitelistRoots) {
         this.workspaceResolver = workspaceResolver;
+        this.whitelistRoots = whitelistRoots != null ? List.copyOf(whitelistRoots) : List.of();
     }
 
     /**
@@ -48,6 +62,26 @@ public class WorkspacePolicyEngine {
                 candidate = candidate.normalize();
             }
             target = candidate;
+        }
+
+        // CR-045: L2 독립 방어선 — 시스템 화이트리스트 최종 게이트.
+        // resolver(L1)가 우회되거나 버그로 뚫려도 여기서 차단.
+        // target은 이미 toRealPath()로 정규화됨. 화이트리스트 루트도 같은 기준으로 비교.
+        if (!whitelistRoots.isEmpty()) {
+            final Path targetNormalized = target.toAbsolutePath().normalize();
+            boolean inside = whitelistRoots.stream().anyMatch(root -> {
+                Path rootReal;
+                try {
+                    rootReal = root.toRealPath();
+                } catch (IOException ignored) {
+                    rootReal = root.toAbsolutePath().normalize();
+                }
+                return targetNormalized.startsWith(rootReal);
+            });
+            if (!inside) {
+                return ValidationResult.fail(
+                        "화이트리스트 루트 외부 경로 접근 금지: " + path, 90);
+            }
         }
 
         // 1. Path traversal 방어
