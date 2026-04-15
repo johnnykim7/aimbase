@@ -1,5 +1,6 @@
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
+import { ToolUseBlock } from "./blocks/ToolUseBlock";
 import type { StreamMessage } from "../../hooks/useChatStream";
 
 interface MessageListProps {
@@ -19,6 +20,16 @@ export const MessageList = ({ messages, isStreaming }: MessageListProps) => {
             {m.blocks.map((b, i) => {
               if (b.kind === "text") return <TextBlock key={i} text={b.text} />;
               if (b.kind === "thinking") return <ThinkingBlock key={i} text={b.text} />;
+              if (b.kind === "tool_use")
+                return (
+                  <ToolUseBlock
+                    key={b.id || i}
+                    id={b.id}
+                    name={b.name}
+                    input={b.input}
+                    result={b.result}
+                  />
+                );
               return null;
             })}
             {m.role === "assistant" && isStreaming && m.blocks.length === 0 && (

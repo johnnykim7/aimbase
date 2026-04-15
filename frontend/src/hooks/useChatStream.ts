@@ -16,7 +16,15 @@ import { useCallback, useRef, useState } from "react";
 
 export type StreamBlock =
   | { kind: "text"; text: string }
-  | { kind: "thinking"; text: string };
+  | { kind: "thinking"; text: string }
+  | {
+      kind: "tool_use";
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+      /** tool_result 수신 시 주입 */
+      result?: { output: string; isError: boolean };
+    };
 
 export interface StreamMessage {
   id: string;
@@ -110,6 +118,44 @@ export const useChatStream = (
       });
     };
 
+    const pushToolUse = (
+      id: string,
+      name: string,
+      input: Record<string, unknown>,
+    ) => {
+      setMessages((prev) => {
+        const copy = [...prev];
+        const idx = copy.findIndex((m) => m.id === assistantId);
+        if (idx < 0) return prev;
+        const msg = { ...copy[idx], blocks: [...copy[idx].blocks] };
+        msg.blocks.push({ kind: "tool_use", id, name, input });
+        copy[idx] = msg;
+        return copy;
+      });
+    };
+
+    const setToolResult = (
+      toolUseId: string,
+      output: string,
+      isError: boolean,
+    ) => {
+      setMessages((prev) => {
+        const copy = [...prev];
+        const idx = copy.findIndex((m) => m.id === assistantId);
+        if (idx < 0) return prev;
+        const msg = { ...copy[idx], blocks: [...copy[idx].blocks] };
+        for (let i = msg.blocks.length - 1; i >= 0; i--) {
+          const b = msg.blocks[i];
+          if (b.kind === "tool_use" && b.id === toolUseId) {
+            msg.blocks[i] = { ...b, result: { output, isError } };
+            break;
+          }
+        }
+        copy[idx] = msg;
+        return copy;
+      });
+    };
+
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -160,6 +206,28 @@ export const useChatStream = (
               appendBlock(ev.event === "thinking" ? "thinking" : "text", delta);
             } catch {
               // JSON parse fail — skip
+            }
+          } else if (ev.event === "tool_use_start") {
+            try {
+              const payload = JSON.parse(ev.data);
+              pushToolUse(
+                String(payload.id ?? ""),
+                String(payload.name ?? ""),
+                (payload.input ?? {}) as Record<string, unknown>,
+              );
+            } catch {
+              // skip
+            }
+          } else if (ev.event === "tool_result") {
+            try {
+              const payload = JSON.parse(ev.data);
+              setToolResult(
+                String(payload.tool_use_id ?? ""),
+                String(payload.output ?? ""),
+                Boolean(payload.is_error),
+              );
+            } catch {
+              // skip
             }
           }
         }
