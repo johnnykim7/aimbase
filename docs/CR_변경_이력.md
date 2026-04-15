@@ -40,7 +40,7 @@
 | CR-040 | 런타임 설정 관리 — DB 기반 설정 + 관리자 UI + 하드코딩 제거 (PRD-269~272, FE-023) | 변경 | High | v6.7.0 | 🔧 진행중 |
 | CR-043 | ClaudeCodeTool 다중계정 운영 정책 정착 — 테넌트 전용/공통 풀 페일오버 + 호출중 자동 재시도 | 변경 | Medium | v7.1.0 | 📝 등록 |
 | CR-044 | CLI 두뇌 + Aimbase 손발 — Claude CLI 네이티브 도구 봉인 + Aimbase MCP 강제 (PRD-279~282) | 변경 | High | v7.2.0 | 📝 등록 |
-| CR-045 | 대화형 채팅 UI + 워크스페이스 컨텍스트 + 실시간 도구 이벤트 (PRD-290~293, FE-030~032) | 변경 | High | v7.3.0 | 📝 등록 |
+| CR-045 | 대화형 채팅 UI + 워크스페이스 컨텍스트 + 실시간 도구 이벤트 (PRD-290~293, FE-030~032) | 변경 | High | v7.3.0 | ✅ 완료 |
 
 ---
 
@@ -780,9 +780,12 @@
   - `ToolCallHandler` 콜백 훅이 침습적 → 옵션 파라미터로 주입, 비스트림 모드 기존 동작 유지
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v7.3.0
 - **변경 일자**: 2026-04-15
-- **상태**: 등록(검토 대기). 사용자 승인 후 Phase 1부터 착수.
+- **상태**: ✅ 완료 (2026-04-16). Phase 1/2-A/2-B/3-A/3-B/4-A/4-B 코드 + 실행 검증 완료. 관련 커밋 11개 (`2a7c575` ~ `00cdaf0`).
+- **E2E 검증 요약**: bp-oms 워크스페이스에서 "OrderController 포함 .java 개수" 요청 → `tool_use_start` → `tool_result` (matchCount=1) → `delta` × N → `done` 전체 5종 이벤트 수신.
+- **알려진 부수 이슈 (CR-045 외)**: SSE 완료 후 Spring Security async dispatch에서 AccessDenied 경고가 로그에 남음 (가상 스레드 SecurityContext 전파 누락, 기능 영향 없음). conversation_sessions 중복키 배치 에러(persist 로직 별건). 둘 다 별도 CR로 분리 권장.
 - **원본 요구사항**: `docs/origins/원본_요구사항_채팅UI_워크스페이스_실시간도구이벤트_20260415.md`
 - **설계서**: `docs/원본_설계_CR045_채팅UI_워크스페이스_실시간도구이벤트_20260415.md`
+- **Phase 2-B 설계 리뷰**: `docs/설계리뷰_CR045_Phase2B_도구루프스트리밍통합_20260415.md`
 
 ### CR-041 | Agent SDK 추출 + Agent Registry — 소비앱 도구 SDK 배포 + 원격 에이전트 오케스트레이션
 - **대상 기능 ID**: PRD-273 ~ PRD-278, FE-024
