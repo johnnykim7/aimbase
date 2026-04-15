@@ -76,11 +76,19 @@ public class SessionStore {
         }
 
         // Dual-write: persist to DB asynchronously via Virtual Thread
+        // CR-045: TenantContext(ThreadLocal)를 자식 가상 스레드에 수동 전파해야
+        // Hibernate DataSource 라우팅이 테넌트 DB로 감.
+        final String propagatedTenantId = com.platform.tenant.TenantContext.getTenantId();
         Thread.ofVirtual().start(() -> {
+            if (propagatedTenantId != null) {
+                com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
+            }
             try {
                 persistToDb(sessionId, messages);
             } catch (Exception e) {
                 log.warn("Failed to persist session {} to DB: {}", sessionId, e.getMessage());
+            } finally {
+                com.platform.tenant.TenantContext.clear();
             }
         });
     }

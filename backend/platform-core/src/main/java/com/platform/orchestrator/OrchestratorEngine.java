@@ -486,10 +486,13 @@ public class OrchestratorEngine {
             StringBuilder textBuf = new StringBuilder();
             final TokenUsage[] usageHolder = new TokenUsage[]{null};
             final String[] idHolder = new String[]{""};
+            // CR-045: adapter.chatStream은 fire-and-forget(가상 스레드)이므로 CountDownLatch로 완료 대기.
+            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
             adapter.chatStream(llmRequest, chunk -> {
                 if (idHolder[0].isEmpty() && chunk.id() != null) idHolder[0] = chunk.id();
                 if (chunk.done()) {
                     usageHolder[0] = chunk.usage();
+                    latch.countDown();
                     return;
                 }
                 if (chunk.delta() == null) return;
@@ -500,6 +503,11 @@ public class OrchestratorEngine {
                     streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.TextDelta(chunk.delta()));
                 }
             });
+            try {
+                latch.await(5, java.util.concurrent.TimeUnit.MINUTES);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             finalResponse = new LLMResponse(idHolder[0], resolvedModel,
                     List.of(new ContentBlock.Text(textBuf.toString())),
                     List.of(), usageHolder[0] != null ? usageHolder[0] : new TokenUsage(0, 0),

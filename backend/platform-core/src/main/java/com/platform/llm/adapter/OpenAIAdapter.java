@@ -133,7 +133,13 @@ public class OpenAIAdapter implements LLMAdapter {
 
     @Override
     public void chatStream(LLMRequest request, Consumer<LLMStreamChunk> chunkConsumer) {
+        // CR-045: TenantContext 전파
+        final String propagatedTenantId = com.platform.tenant.TenantContext.getTenantId();
         Thread.ofVirtual().start(() -> {
+            if (propagatedTenantId != null) {
+                com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
+            }
+            try {
             String modelId = extractModelId(request.model());
             String responseId = "chatcmpl_" + System.currentTimeMillis();
 
@@ -185,6 +191,9 @@ public class OpenAIAdapter implements LLMAdapter {
             } catch (Exception e) {
                 log.error("OpenAI streaming error", e);
                 chunkConsumer.accept(new LLMStreamChunk("error", request.model(), null, true, null));
+            }
+            } finally {
+                com.platform.tenant.TenantContext.clear();
             }
         });
     }

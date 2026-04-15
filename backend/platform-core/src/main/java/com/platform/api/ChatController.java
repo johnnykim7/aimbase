@@ -101,7 +101,13 @@ public class ChatController {
 
     private SseEmitter streamResponse(ChatRequest chatRequest) {
         SseEmitter emitter = new SseEmitter(300_000L);
+        // CR-045: ThreadLocal은 VT별 독립 → 부모 요청 스레드의 TenantContext를
+        // 가상 스레드에 수동 전파해야 Hibernate DataSource 라우팅이 테넌트 DB로 감.
+        final String propagatedTenantId = com.platform.tenant.TenantContext.getTenantId();
         Thread.ofVirtual().start(() -> {
+            if (propagatedTenantId != null) {
+                com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
+            }
             try {
                 orchestrator.chatStream(chatRequest, ev -> {
                     try {
@@ -138,6 +144,8 @@ public class ChatController {
                 });
             } catch (Exception e) {
                 emitter.completeWithError(e);
+            } finally {
+                com.platform.tenant.TenantContext.clear();
             }
         });
         return emitter;

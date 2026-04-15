@@ -206,7 +206,13 @@ public class AnthropicAdapter implements LLMAdapter {
 
     @Override
     public void chatStream(LLMRequest request, Consumer<LLMStreamChunk> chunkConsumer) {
+        // CR-045: TenantContext 전파 (자식 가상 스레드에 ThreadLocal 재주입)
+        final String propagatedTenantId = com.platform.tenant.TenantContext.getTenantId();
         Thread.ofVirtual().start(() -> {
+            if (propagatedTenantId != null) {
+                com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
+            }
+            try {
             long start = Instant.now().toEpochMilli();
             String modelId = extractModelId(request.model());
             String responseId = "msg_" + System.currentTimeMillis();
@@ -297,6 +303,9 @@ public class AnthropicAdapter implements LLMAdapter {
             } catch (Exception e) {
                 log.error("Anthropic streaming error", e);
                 chunkConsumer.accept(new LLMStreamChunk("error", request.model(), null, true, null));
+            }
+            } finally {
+                com.platform.tenant.TenantContext.clear();
             }
         });
     }
