@@ -838,6 +838,10 @@ public class ClaudeCodeTool implements ToolExecutor {
     /**
      * 풀 매니저를 통한 로컬 실행 시도 (CLAUDE_CONFIG_DIR로 계정 격리).
      * 가용 계정이 있으면 실행 결과 반환, 없으면 null (기본 로컬 경로 폴백).
+     *
+     * CR-043: 호출중 자동 재시도 — 특정 계정 실행이 재시도 가능한 에러로 실패하면
+     * 해당 계정을 circuit에 실패 기록하고 다른 가용 계정으로 최대 config.maxRetry 회 재시도.
+     * 비재시도 에러(사용자 오류 등)는 즉시 반환.
      */
     private String tryExecuteViaPool(Map<String, Object> input, List<String> command,
                                       String workDir, int timeoutSeconds,
@@ -845,46 +849,130 @@ public class ClaudeCodeTool implements ToolExecutor {
         String explicitAccountId = (String) input.get("_agent_account_id");
         String tenantId = TenantContext.hasTenant() ? TenantContext.getTenantId() : null;
 
-        AgentAccountEntity account;
-        if (explicitAccountId != null) {
-            account = poolManager.getAccount(explicitAccountId);
-            if (account == null) {
-                log.warn("명시된 계정 없음: {}, 로컬 폴백", explicitAccountId);
-                return null;
+        int maxRetry = config.getMaxRetry();
+        int totalAttempts = 1 + Math.max(0, maxRetry);
+        long backoffMs = config.getRetryBackoffMs();
+
+        AgentAccountPoolManager.ExecutionResult lastResult = null;
+        String lastAccountId = null;
+
+        for (int attempt = 0; attempt < totalAttempts; attempt++) {
+            AgentAccountEntity account;
+            if (explicitAccountId != null) {
+                // 명시 계정은 재시도하지 않음 — 1회만 시도하고 반환
+                if (attempt > 0) break;
+                account = poolManager.getAccount(explicitAccountId);
+                if (account == null) {
+                    log.warn("명시된 계정 없음: {}, 로컬 폴백", explicitAccountId);
+                    return null;
+                }
+            } else {
+                account = poolManager.resolveAccount("claude_code", tenantId, null);
+                if (account == null) {
+                    if (attempt == 0) {
+                        return null; // 풀 자체가 비어있음 → 로컬 폴백
+                    }
+                    log.warn("재시도 중 가용 계정 소진 (attempt={}/{})", attempt, totalAttempts);
+                    break;
+                }
             }
-        } else {
-            account = poolManager.resolveAccount("claude_code", tenantId, null);
-            if (account == null) {
-                return null; // 기본 로컬 경로 폴백
+
+            if (!poolManager.getCircuitBreaker(account.getId()).allowRequest()) {
+                log.warn("[{}] 서킷 OPEN, 다음 후보 시도 (attempt={}/{})",
+                        account.getId(), attempt + 1, totalAttempts);
+                continue;
             }
-        }
 
-        // 계정별 서킷 브레이커 체크
-        if (!poolManager.getCircuitBreaker(account.getId()).allowRequest()) {
-            log.warn("[{}] 서킷 OPEN, 다른 계정 시도 또는 로컬 폴백", account.getId());
-            return null;
-        }
+            if (attempt > 0 && backoffMs > 0) {
+                long delay = backoffMs * (1L << (attempt - 1)); // 500, 1500, ... 실제로는 500·(2^(n-1))
+                log.info("재시도 backoff {}ms (attempt={}/{})", delay, attempt + 1, totalAttempts);
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
 
-        var result = poolManager.executeLocal(account, command, workDir, timeoutSeconds, inputFile);
+            log.info("[{}] 풀 실행 시도 (attempt={}/{})", account.getId(), attempt + 1, totalAttempts);
+            var result = poolManager.executeLocal(account, command, workDir, timeoutSeconds, inputFile);
+            lastResult = result;
+            lastAccountId = account.getId();
 
-        if (result.exitCode() != 0) {
-            log.error("[{}] 실행 실패: exit={}, stderr={}", account.getId(), result.exitCode(), result.stderr());
+            if (result.exitCode() == 0) {
+                poolManager.recordSuccess(account.getId());
+                log.info("[{}] 실행 완료 (attempt={}): output_length={}",
+                        account.getId(), attempt + 1, result.stdout().length());
+                if ("json".equals(outputFormat)) {
+                    return extractResultFromJson(result.stdout());
+                }
+                if ("stream-json".equals(outputFormat)) {
+                    return extractResultFromStreamJson(result.stdout());
+                }
+                return result.stdout();
+            }
+
+            // 실패 — 재시도 여부 판별
+            String errOut = result.stderr().isBlank() ? result.stdout() : result.stderr();
+            boolean retryable = isRetryableFailure(result.exitCode(), errOut);
+            log.error("[{}] 실행 실패 (attempt={}/{}, retryable={}): exit={}, stderr={}",
+                    account.getId(), attempt + 1, totalAttempts, retryable, result.exitCode(), errOut);
             poolManager.recordFailure(account.getId());
-            handleFailure("EXIT_" + result.exitCode(), result.stderr().isBlank() ? result.stdout() : result.stderr());
-            return toError("EXIT_" + result.exitCode(), result.stderr().isBlank() ? result.stdout() : result.stderr());
+            handleFailure("EXIT_" + result.exitCode(), errOut);
+
+            if (!retryable) {
+                // 사용자 오류 등 → 즉시 반환
+                return toError("EXIT_" + result.exitCode(), errOut);
+            }
+            // 재시도 루프 계속 — 다음 iter에서 resolveAccount 재호출하면
+            // 방금 실패 기록된 계정은 GenericCircuitBreaker에 의해 자동 스킵됨
         }
 
-        poolManager.recordSuccess(account.getId());
-
-        log.info("[{}] 실행 완료: output_length={}", account.getId(), result.stdout().length());
-
-        if ("json".equals(outputFormat)) {
-            return extractResultFromJson(result.stdout());
+        // 모든 재시도 소진 — 마지막 실패 반환 (보안상 계정 ID는 감추고 audit log에만 기록)
+        if (lastResult != null) {
+            log.warn("CR-043 재시도 {}회 모두 실패, 최종 반환 (last_account={})",
+                    totalAttempts, lastAccountId);
+            String errOut = lastResult.stderr().isBlank() ? lastResult.stdout() : lastResult.stderr();
+            return toError("EXIT_" + lastResult.exitCode(),
+                    "다중 계정 시도 후 실패: " + errOut);
         }
-        if ("stream-json".equals(outputFormat)) {
-            return extractResultFromStreamJson(result.stdout());
-        }
-        return result.stdout();
+        // 한 번도 실행되지 못함 (모든 계정 서킷 OPEN 등) → 로컬 폴백
+        return null;
+    }
+
+    /**
+     * CR-043: 실패가 "다른 계정으로 재시도할 가치가 있는지" 판별.
+     * 재시도 대상:
+     *  - 인증 실패 (401/403, "unauthorized", "token expired", "authentication")
+     *  - Rate Limit (429, "rate limit", "too many requests", "quota")
+     *  - 서버 일시 장애 (5xx, "internal server error", "bad gateway", "service unavailable")
+     * 비재시도 (사용자 오류 등):
+     *  - 프롬프트/입력 오류, 도구 거부, 파일 없음 등
+     */
+    static boolean isRetryableFailure(int exitCode, String errorOutput) {
+        if (errorOutput == null) return false;
+        String lower = errorOutput.toLowerCase();
+
+        // HTTP 코드 문자열
+        if (lower.contains("401") || lower.contains("403") || lower.contains("429")) return true;
+        if (lower.contains("500") || lower.contains("502")
+                || lower.contains("503") || lower.contains("504")) return true;
+
+        // 인증
+        if (lower.contains("unauthorized") || lower.contains("authentication")
+                || lower.contains("token expired") || lower.contains("invalid api key")
+                || lower.contains("oauth")) return true;
+
+        // Rate Limit
+        if (lower.contains("rate limit") || lower.contains("too many requests")
+                || lower.contains("quota exceeded") || lower.contains("overloaded")) return true;
+
+        // 서버 일시 장애
+        if (lower.contains("internal server error") || lower.contains("bad gateway")
+                || lower.contains("service unavailable") || lower.contains("gateway timeout")
+                || lower.contains("connection reset") || lower.contains("upstream")) return true;
+
+        return false;
     }
 
     /** 마크다운 코드펜스(```json ... ```) 제거 */

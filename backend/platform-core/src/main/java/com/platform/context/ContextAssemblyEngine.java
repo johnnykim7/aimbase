@@ -12,7 +12,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * CR-029 (PRD-182): 컨텍스트 조립 엔진.
@@ -143,6 +148,8 @@ public class ContextAssemblyEngine {
     private final ContextRecipeRepository recipeRepository;
     private final com.platform.service.PromptTemplateService promptTemplateService;
     private final com.platform.tool.ToolRegistry toolRegistry;
+    /** CR-048 PRD-300: 세션별 활성 도구 — 비활성 도구는 이름+설명만 system prompt 후미에 노출 */
+    private final com.platform.tool.registry.SessionToolRegistry sessionToolRegistry;
 
     // 세션별 연속 압축 실패 카운터 (circuit breaker)
     private final Map<String, Integer> compactFailures = new HashMap<>();
@@ -151,19 +158,76 @@ public class ContextAssemblyEngine {
     // 1.0 = 보정 없음, >1.0 = char*4가 과소 추정, <1.0 = 과대 추정
     private final Map<String, Double> calibrationRatios = new ConcurrentHashMap<>();
 
+    /** CR-047 PRD-299: Memory prefetch future 캐시 (sessionId+userId 키, 단일 값) */
+    private final Map<String, CompletableFuture<List<UnifiedMessage>>> memoryPrefetchCache = new ConcurrentHashMap<>();
+    private final ExecutorService prefetchExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private static final long PREFETCH_TIMEOUT_MS = 5_000L;
+
     public ContextAssemblyEngine(
             SessionStore sessionStore,
             MemoryService memoryService,
             ContextWindowManager contextWindowManager,
             ContextRecipeRepository recipeRepository,
             com.platform.service.PromptTemplateService promptTemplateService,
-            com.platform.tool.ToolRegistry toolRegistry) {
+            com.platform.tool.ToolRegistry toolRegistry,
+            com.platform.tool.registry.SessionToolRegistry sessionToolRegistry) {
         this.sessionStore = sessionStore;
         this.memoryService = memoryService;
         this.contextWindowManager = contextWindowManager;
         this.recipeRepository = recipeRepository;
         this.promptTemplateService = promptTemplateService;
         this.toolRegistry = toolRegistry;
+        this.sessionToolRegistry = sessionToolRegistry;
+    }
+
+    /**
+     * CR-047 PRD-299: Memory 컨텍스트를 백그라운드 prefetch.
+     * OrchestratorEngine.chat() 진입 직후 호출하면 LLM 호출과 병렬로 진행되며,
+     * assemble() 호출 시점까지 이미 완료될 가능성이 높아 체감 지연이 감소한다.
+     *
+     * 실패 시 빈 리스트로 폴백하여 LLM 호출을 차단하지 않는다.
+     */
+    public void prefetchMemory(String sessionId, String userId) {
+        if (sessionId == null) return;
+        String key = prefetchKey(sessionId, userId);
+        String tenantId = com.platform.tenant.TenantContext.getTenantId();
+        CompletableFuture<List<UnifiedMessage>> future = CompletableFuture.supplyAsync(() -> {
+            try {
+                if (tenantId != null) com.platform.tenant.TenantContext.setTenantId(tenantId);
+                return memoryService.buildMemoryContext(sessionId, userId);
+            } catch (Exception e) {
+                log.warn("Memory prefetch failed for session={}: {}", sessionId, e.getMessage());
+                return List.of();
+            } finally {
+                com.platform.tenant.TenantContext.clear();
+            }
+        }, prefetchExecutor);
+        memoryPrefetchCache.put(key, future);
+    }
+
+    /**
+     * Prefetch 결과를 합류한다. 캐시에 없거나 타임아웃 시 빈 컨텍스트 폴백.
+     * Prefetch 결과는 일회용 — 합류 후 캐시에서 제거된다.
+     */
+    private List<UnifiedMessage> joinMemoryPrefetch(String sessionId, String userId) {
+        String key = prefetchKey(sessionId, userId);
+        CompletableFuture<List<UnifiedMessage>> future = memoryPrefetchCache.remove(key);
+        if (future == null) {
+            return memoryService.buildMemoryContext(sessionId, userId);
+        }
+        try {
+            return future.get(PREFETCH_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException te) {
+            log.warn("Memory prefetch timeout for session={} after {}ms — empty fallback", sessionId, PREFETCH_TIMEOUT_MS);
+            return List.of();
+        } catch (Exception e) {
+            log.warn("Memory prefetch join failed for session={}: {} — empty fallback", sessionId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    private String prefetchKey(String sessionId, String userId) {
+        return sessionId + ":" + (userId != null ? userId : "");
     }
 
     /**
@@ -198,14 +262,13 @@ public class ContextAssemblyEngine {
      */
     private AssemblyResult assembleDefault(String sessionId, ChatRequest request,
                                             long start, String resolveReason) {
-        // 기존 로직: memoryContext + history + request + trim
-        List<UnifiedMessage> memoryContext = memoryService.buildMemoryContext(
-                sessionId, request.userId());
+        // CR-047 PRD-299: prefetch 결과 합류 (캐시 미스 시 동기 호출 폴백)
+        List<UnifiedMessage> memoryContext = joinMemoryPrefetch(sessionId, request.userId());
         List<UnifiedMessage> history = sessionStore.getMessages(sessionId);
 
         List<UnifiedMessage> allMessages = new ArrayList<>();
         // CR-036: OpenClaude 수준 시스템 프롬프트 조립 (core + tool descriptions)
-        allMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, assembleSystemPrompt()));
+        allMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, assembleSystemPrompt(sessionId)));
         allMessages.addAll(memoryContext);
         allMessages.addAll(history);
         if (request.messages() != null) {
@@ -314,7 +377,7 @@ public class ContextAssemblyEngine {
             case "system_policy" -> {
                 List<UnifiedMessage> policyMessages = new ArrayList<>();
                 // CR-036: OpenClaude 수준 시스템 프롬프트 조립
-                policyMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, assembleSystemPrompt()));
+                policyMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, assembleSystemPrompt(sessionId)));
                 policyMessages.addAll(memoryService.buildMemoryContext(sessionId, request.userId()));
                 yield policyMessages;
             }
@@ -343,7 +406,7 @@ public class ContextAssemblyEngine {
      * DB에 있으면 DB값, 없으면 resources/prompts/*.txt 파일 폴백.
      * 기존 TOOL_USAGE_PROMPT는 최종 폴백으로 유지.
      */
-    private String assembleSystemPrompt() {
+    private String assembleSystemPrompt(String sessionId) {
         // core 섹션 키 (OpenClaude prompts.ts 순서와 동일)
         String[] coreSections = {
                 "core.system.prefix",
@@ -384,6 +447,15 @@ public class ContextAssemblyEngine {
             sb.append(toolPrompts);
         }
 
+        // CR-048 PRD-300: 비활성 도구 이름+설명을 system prompt 후미에 텍스트로 노출
+        // (Anthropic cache_control prefix는 위쪽 core 섹션 기준으로 고정되므로 cache hit 영향 최소화)
+        String deferredSection = buildDeferredToolsSection(sessionId);
+        if (!deferredSection.isEmpty()) {
+            if (!sb.isEmpty()) sb.append("\n\n");
+            sb.append(deferredSection);
+            anyFound = true;
+        }
+
         // core 프롬프트가 하나라도 있으면 조립 결과 사용, 없으면 기존 TOOL_USAGE_PROMPT 폴백
         if (anyFound) {
             return sb.toString();
@@ -391,6 +463,44 @@ public class ContextAssemblyEngine {
 
         // 최종 폴백: 기존 하드코딩 프롬프트
         return promptTemplateService.getTemplateOrFallback("context.tool_usage.system", TOOL_USAGE_PROMPT);
+    }
+
+    /**
+     * CR-048 PRD-300: 현재 세션에서 비활성 상태인 도구를 이름+설명만 텍스트로 나열.
+     * 모델이 ToolSearch로 검색해야 스키마가 주입된다는 안내 포함.
+     */
+    private String buildDeferredToolsSection(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return "";
+        try {
+            java.util.Set<String> active = sessionToolRegistry.getActive(sessionId);
+            var allDefs = toolRegistry.getToolDefs();
+            if (allDefs == null || allDefs.isEmpty()) return "";
+
+            StringBuilder sb = new StringBuilder();
+            int count = 0;
+            for (var def : allDefs) {
+                if (def == null || def.name() == null) continue;
+                if (active.contains(def.name())) continue;
+                if (count == 0) {
+                    sb.append("# Available (deferred) tools\n");
+                    sb.append("The following tools exist but are not loaded in this turn. ")
+                      .append("Use `tool_search` to activate them; their schemas will be injected in the next turn.\n\n");
+                }
+                sb.append("- `").append(def.name()).append("`");
+                String desc = def.description();
+                if (desc != null && !desc.isBlank()) {
+                    String first = desc.split("\\R", 2)[0];
+                    if (first.length() > 120) first = first.substring(0, 117) + "...";
+                    sb.append(" — ").append(first);
+                }
+                sb.append('\n');
+                count++;
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("Failed to build deferred tools section for session={}: {}", sessionId, e.getMessage());
+            return "";
+        }
     }
 
     /** 등록된 도구 이름 집합 */

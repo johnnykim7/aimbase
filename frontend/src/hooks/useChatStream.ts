@@ -50,7 +50,8 @@ function parseSseChunk(
   buffer: string,
 ): { events: { event: string; data: string }[]; rest: string } {
   const events: { event: string; data: string }[] = [];
-  const parts = buffer.split("\n\n");
+  const normalized = buffer.replace(/\r\n/g, "\n");
+  const parts = normalized.split("\n\n");
   const rest = parts.pop() ?? "";
   for (const raw of parts) {
     if (!raw.trim()) continue;
@@ -70,11 +71,14 @@ export const useChatStream = (
 ): StreamState & {
   send: (p: SendParams) => Promise<void>;
   reset: (msgs?: StreamMessage[]) => void;
+  /** CR-046: 진행 중인 스트림 중지 (BE /abort 호출 + FE fetch 취소) */
+  abort: () => Promise<void>;
 } => {
   const [messages, setMessages] = useState<StreamMessage[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const currentSessionIdRef = useRef<string | null>(null);
 
   const reset = useCallback((msgs: StreamMessage[] = []) => {
     abortRef.current?.abort();
@@ -83,7 +87,33 @@ export const useChatStream = (
     setError(null);
   }, []);
 
+  const abort = useCallback(async () => {
+    const sid = currentSessionIdRef.current;
+    // BE 중지 먼저 호출 — 404(활성 스트림 없음)는 무시.
+    if (sid) {
+      try {
+        const token = localStorage.getItem("access_token") ?? "";
+        const tenantId = localStorage.getItem("tenant_id") ?? "";
+        await fetch(`/api/v1/chat/${sid}/abort`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-Tenant-Id": tenantId,
+          },
+        });
+      } catch {
+        // ignore
+      }
+    }
+    // FE fetch 취소
+    abortRef.current?.abort();
+  }, []);
+
   const send = useCallback(async (p: SendParams) => {
+    // CR-046 옵션 B: 이미 스트림 중이면 FE도 이전 fetch 끊고 새 요청 보냄.
+    // (BE도 register()에서 이전 토큰을 자동 cancel 처리함)
+    abortRef.current?.abort();
+    currentSessionIdRef.current = p.sessionId;
     setError(null);
     setIsStreaming(true);
 
@@ -189,8 +219,9 @@ export const useChatStream = (
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let streamDone = false;
 
-      while (true) {
+      while (!streamDone) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -198,7 +229,8 @@ export const useChatStream = (
         buffer = parsed.rest;
         for (const ev of parsed.events) {
           if (ev.event === "done") {
-            // 종료 이벤트
+            streamDone = true;
+            break;
           } else if (ev.event === "delta" || ev.event === "thinking") {
             try {
               const payload = JSON.parse(ev.data);
@@ -232,6 +264,10 @@ export const useChatStream = (
           }
         }
       }
+
+      if (streamDone) {
+        await reader.cancel().catch(() => undefined);
+      }
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
         setError((e as Error).message);
@@ -242,5 +278,5 @@ export const useChatStream = (
     }
   }, []);
 
-  return { messages, isStreaming, error, send, reset };
+  return { messages, isStreaming, error, send, reset, abort };
 };

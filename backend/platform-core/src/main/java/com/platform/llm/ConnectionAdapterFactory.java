@@ -39,14 +39,18 @@ public class ConnectionAdapterFactory {
 
     private final ConnectionRepository connectionRepository;
     private final int defaultMaxTokens;
+    /** CR-048 PRD-302: Anthropic 어댑터 생성 시 주입 */
+    private final com.platform.llm.thinking.AdaptiveThinkingPolicy adaptiveThinkingPolicy;
 
     // connectionId → LLMAdapter (캐시: 동일 연결은 클라이언트 재사용)
     private final Map<String, LLMAdapter> cache = new ConcurrentHashMap<>();
 
     public ConnectionAdapterFactory(ConnectionRepository connectionRepository,
-                                    @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens) {
+                                    @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens,
+                                    com.platform.llm.thinking.AdaptiveThinkingPolicy adaptiveThinkingPolicy) {
         this.connectionRepository = connectionRepository;
         this.defaultMaxTokens = defaultMaxTokens;
+        this.adaptiveThinkingPolicy = adaptiveThinkingPolicy;
     }
 
     /**
@@ -221,7 +225,7 @@ public class ConnectionAdapterFactory {
                 AnthropicClient client = AnthropicOkHttpClient.builder()
                         .apiKey(apiKey)
                         .build();
-                yield new AnthropicAdapter(client, defaultMaxTokens);
+                yield new AnthropicAdapter(client, defaultMaxTokens, adaptiveThinkingPolicy);
             }
             case "openai" -> {
                 OpenAIClient client = OpenAIOkHttpClient.builder()

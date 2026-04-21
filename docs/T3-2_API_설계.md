@@ -35,6 +35,33 @@
 | 메서드 | 경로 | 설명 | 인증 |
 |--------|------|------|------|
 | POST | `/chat/completions` | LLM 채팅 완료 (동기/SSE 스트리밍, 구조화 출력) | 🔒 |
+| POST | `/chat/{sessionId}/abort` | 진행 중인 스트림 중지 (CR-046) | 🔒 |
+
+### 스트림 중지 (Abort) [v4.4, CR-046]
+
+`POST /api/v1/chat/{sessionId}/abort`
+
+진행 중인 SSE 스트림을 즉시 중지한다.
+
+**동작**:
+1. `CancellationRegistry`에서 sessionId의 `AtomicBoolean` 토큰을 true로 설정
+2. `OrchestratorEngine.chatStream()` / `ToolCallHandler.executeLoopStream()` 매 iteration이 토큰을 체크하여 break
+3. 어댑터 HTTP 스트림 close (Anthropic SDK는 AbortSignal 미지원이므로 커넥션 종료로 처리)
+4. partial 메시지를 `[중단됨] {지금까지 받은 텍스트}` 형식으로 DB 저장
+5. 중지 시점까지의 토큰만 `usage_logs` 기록
+6. SSE 스트림에 `done` 이벤트 송출 (`{"reason": "aborted"}`)
+
+**응답**:
+```json
+{ "success": true, "data": { "session_id": "sess-001", "aborted": true } }
+```
+
+**에러**:
+- 404: 활성 스트림 없음
+- 403: 본인 세션 아님
+
+**동시성 정책 (옵션 B 자동 abort)**:
+동일 sessionId로 새 `POST /chat/completions` 요청이 들어오면 서버가 자동으로 이전 스트림을 abort 후 새 요청을 처리한다(ChatGPT/Claude.ai 표준). FE는 `/abort`를 명시 호출하지 않아도 끼어들기가 자연스럽게 동작한다.
 
 ### 구조화된 출력 요청 (v2.5, CR-007)
 
@@ -960,9 +987,28 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 |--------|------|------|------|
 | GET | `/conversations` | 대화 세션 목록 조회 (페이징, 검색) | 🔒 |
 | GET | `/conversations/{sessionId}` | 대화 상세 (메시지 포함) | 🔒 |
-| DELETE | `/conversations/{sessionId}` | 대화 삭제 (Redis + DB) | 🔒 |
+| DELETE | `/conversations/{sessionId}` | 대화 삭제 (Soft Delete + Redis 정리) [v4.4, CR-046] | 🔒 |
 | GET | `/conversations/{sessionId}/meta` | 세션 메타데이터 조회 [v4.0, CR-029] | 🔒 |
 | PUT | `/conversations/{sessionId}/meta` | 세션 메타데이터 수정 [v4.0, CR-029] | 🔒 |
+
+### 대화 삭제 (Soft Delete) [v4.4, CR-046]
+
+`DELETE /api/v1/conversations/{sessionId}`
+
+**동작**:
+1. 권한 체크: `conversation_sessions.user_id`가 호출자와 일치해야 함 (불일치 시 403)
+2. `UPDATE conversation_sessions SET deleted_at = NOW() WHERE session_id = ?`
+3. `UPDATE conversation_messages SET deleted_at = NOW() WHERE session_id = ?` (cascade)
+4. 활성 스트림 존재 시 자동 abort (CancellationRegistry 연동)
+5. Redis 세션 캐시 evict
+6. 모든 목록/조회 API는 `deleted_at IS NULL` 필터 적용
+
+**응답**:
+```json
+{ "success": true, "data": { "session_id": "sess-001", "deleted_at": "2026-04-16T12:00:00Z" } }
+```
+
+**감사·과금 로그 (`tool_execution_log`/`usage_logs`/`audit_logs`/`traces`/`session_briefs`)는 보존**된다 (FK 미연결, 의도적). 휴지통 UI / 복구(restore) 엔드포인트 / 벌크 삭제 / 관리자 강제 삭제는 본 CR 범위 밖.
 
 ### 세션 메타데이터 조회 [v4.0, CR-029]
 
@@ -2308,6 +2354,255 @@ GET은 캐시 우선 조회 (BIZ-068 TTL 1시간). POST는 캐시 무시하고 �
   "created_at": "2026-04-07T11:00:00Z"
 }
 ```
+
+---
+
+## 컨텍스트·토큰 효율 — Tool 스키마 및 API [v7.6, CR-048]
+
+### Tool: ToolSearch (기존 도구 의미 확장) [PRD-300]
+
+기존 `ToolSearch`는 도구 검색 결과를 텍스트로 반환만 했으나, CR-048부터 **검색 결과를 세션의 활성 도구 레지스트리(SessionToolRegistry)에 추가**하여 다음 턴부터 해당 도구 스키마가 LLM 요청에 자동 포함된다.
+
+**입력 스키마** (변경 없음)
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": { "type": "string", "description": "도구 검색어 (키워드/의미)" },
+    "limit": { "type": "integer", "default": 5 }
+  },
+  "required": ["query"]
+}
+```
+
+**출력 변경**
+```json
+{
+  "matched": [
+    { "name": "WebFetch", "description": "URL 콘텐츠 조회" },
+    { "name": "TaskCreate", "description": "서브태스크 생성" }
+  ],
+  "activated": ["WebFetch", "TaskCreate"],
+  "note": "이 도구들은 다음 턴부터 스키마가 주입됩니다."
+}
+```
+
+**기본 활성 도구 세트** (세션 초기값): `Read`, `Edit`, `Grep`, `Bash`, `TodoWrite`, `ToolSearch` (6종)
+**비활성 도구 노출**: 이름 + 1줄 설명만 system prompt 후미에 텍스트로 삽입 (ToolSearch 유도)
+**캐시 정책**: Anthropic `cache_control` prefix 고정 유지. 활성 도구 변경은 prompt 뒷부분에만 영향 → cache hit 유지.
+
+---
+
+### Tool: ReadToolResult [PRD-301]
+
+대형 Tool Result가 외부 저장소(`tool_result_storage` 테이블)에 저장되고 체인에는 ref stub(`{type:"tool_result_ref", id:"res_xxx", summary:"..."}`)만 주입되므로, 모델이 원본 내용을 필요로 할 때 이 도구로 복구한다.
+
+**입력 스키마**
+```json
+{
+  "type": "object",
+  "properties": {
+    "result_id": {
+      "type": "string",
+      "pattern": "^res_[A-Za-z0-9]{8,}$",
+      "description": "ref stub에 포함된 result_id"
+    }
+  },
+  "required": ["result_id"]
+}
+```
+
+**출력 스키마**
+```json
+{
+  "result_id": "res_a1b2c3d4",
+  "tool_name": "Grep",
+  "full_content": "<원본 Tool Result 본문>",
+  "size_bytes": 125440,
+  "created_at": "2026-04-16T10:23:15Z"
+}
+```
+
+**권한/검증**
+- 현재 세션의 result_id만 접근 가능. `session_id` 불일치 시 `403 FORBIDDEN`
+- 만료(`expires_at < NOW()`) 시 `410 GONE` + `"expired": true`
+- 모든 호출은 audit_logs에 기록 (사유: `TOOL_RESULT_READ`)
+
+**에러 코드**
+| HTTP | code | 설명 |
+|------|------|------|
+| 403 | `TOOL_RESULT_FORBIDDEN` | 타 세션의 result_id 접근 시도 |
+| 404 | `TOOL_RESULT_NOT_FOUND` | 존재하지 않는 result_id |
+| 410 | `TOOL_RESULT_EXPIRED` | TTL(24h) 초과 |
+
+---
+
+### Adaptive Thinking 동적 조정 [PRD-302]
+
+외부 노출 API는 없다. `AnthropicAdapter.resolveThinkingMode()`가 ADAPTIVE 모드일 때 `AdaptiveThinkingPolicy`를 내부 호출해 런타임 budget을 계산한다.
+
+**공식 (초안)**
+```
+budget = 4000 (base)
+  * (last_turn_tool_calls >= 3 ? 1.5 : 1.0)
+  * (last_turn_had_errors   ? 2.0 : 1.0)
+  * (user_question_length > 500 ? 1.3 : 1.0)
+cap 32000
+```
+
+**입력 지표** (세션 메타/대화 히스토리에서 추출)
+- 직전 턴 `tool_use` 횟수
+- 직전 턴 도구 에러/재시도 발생 여부
+- 현재 사용자 질문 문자 수
+
+**로깅**: 산정된 budget과 최종 응답 품질(재시도/정정 발생 여부)을 session_metadata에 기록. A/B 튜닝 데이터로 사용.
+
+**설정 키** (runtime-config, CR-040 연계)
+- `adaptive_thinking.base_budget` (default 4000)
+- `adaptive_thinking.tool_calls_multiplier` (default 1.5)
+- `adaptive_thinking.error_multiplier` (default 2.0)
+- `adaptive_thinking.long_question_multiplier` (default 1.3)
+- `adaptive_thinking.cap` (default 32000)
+
+---
+
+## 세션 복원·지침 체계 [v7.7, CR-049]
+
+### Session Resume API [PRD-303]
+
+#### POST `/api/v1/sessions/{sessionId}/resume` 🔒
+**설명**: 가장 최근 COMPACT_BOUNDARY 이후 메시지 체인 + 보존 context를 반환하여 장기 세션을 무손실 재개한다.
+
+**Path 파라미터**:
+- `sessionId` (string, required)
+
+**Request Body**: 없음
+
+**Response 200**:
+```json
+{
+  "session_id": "sess_xxx",
+  "resumed_at": "2026-04-16T10:00:00Z",
+  "boundary": {
+    "summary": "사용자 요청으로 인증 모듈 리팩터링 진행 중...",
+    "compacted_count": 42,
+    "tokens_saved": 18420,
+    "boundary_at": "2026-04-16T09:30:00Z"
+  },
+  "messages": [
+    { "id": "msg_1", "role": "assistant", "content": "...", "created_at": "..." }
+  ],
+  "preserved_context": {
+    "memory": { "...": "..." },
+    "active_tools": ["Read", "Edit", "Grep"]
+  }
+}
+```
+
+**Response 404**: 세션 없음 또는 24h TTL 초과 (만료 세션은 archived 별도 조회 — 본 CR 범위 밖)
+**Response 409**: 세션이 진행 중(streaming) — 중지 후 재개 권장
+
+**제약**:
+- 24h TTL 이내 active 세션만 (BIZ-002)
+- 본인(user_id 일치)만 호출 가능
+- COMPACT_BOUNDARY가 없는 세션이면 전체 메시지 반환
+
+---
+
+### 테넌트/프로젝트 커스텀 지침 API [PRD-305]
+
+#### GET `/api/v1/prompt-templates?scope=TENANT|PROJECT&projectId=...` 🔒
+**설명**: 스코프별 프롬프트 템플릿 조회. tenant DB라 tenant_id는 자동 스코프됨.
+
+**Query 파라미터**:
+- `scope` (string, optional): GLOBAL/TENANT/PROJECT (미지정 시 전체)
+- `projectId` (string, optional): scope=PROJECT 필수
+- `category` (string, optional): core/system 등
+- `is_active` (boolean, optional)
+
+**Response 200**:
+```json
+{
+  "templates": [
+    {
+      "key": "core.system.prefix",
+      "version": 3,
+      "scope": "TENANT",
+      "project_id": null,
+      "template": "당신은 본 테넌트의 산업 특화 어시스턴트입니다...",
+      "is_active": true,
+      "updated_at": "2026-04-16T10:00:00Z"
+    }
+  ]
+}
+```
+
+#### PUT `/api/v1/prompt-templates` 🔒
+**설명**: 프롬프트 템플릿 생성/수정 (upsert by key+version+scope+project_id).
+
+**Request Body**:
+```json
+{
+  "key": "core.system.prefix",
+  "scope": "TENANT",
+  "project_id": null,
+  "category": "core",
+  "name": "Tenant System Prefix",
+  "template": "...",
+  "language": "ko",
+  "is_active": true
+}
+```
+
+**Response 200**: 저장된 템플릿 (version 자동 증가)
+**Response 400**: scope=PROJECT인데 projectId 누락, 합산 길이 8KB 초과(경고만 — 저장은 진행)
+**Response 403**: 권한 부족 (슈퍼어드민=GLOBAL, 테넌트 관리자=TENANT/PROJECT)
+
+**감사**: secret 패턴(API_KEY=, sk-, ghp_ 등) 감지 시 audit log 기록 + FE 경고 표시
+
+#### GET `/api/v1/projects/{projectId}/instructions` 🔒
+**설명**: 특정 프로젝트의 시스템 지침 조회 (편의 엔드포인트, scope=PROJECT 필터 자동 적용).
+
+**Response 200**:
+```json
+{
+  "project_id": "proj_xxx",
+  "templates": [
+    { "key": "core.system.prefix", "template": "...", "version": 2 }
+  ]
+}
+```
+
+#### PUT `/api/v1/projects/{projectId}/instructions` 🔒
+**설명**: 프로젝트 시스템 지침 편집 (scope=PROJECT 자동 설정).
+
+**Request Body**:
+```json
+{
+  "key": "core.system.prefix",
+  "template": "이 프로젝트는 결제 도메인입니다. PCI-DSS 준수 필수...",
+  "is_active": true
+}
+```
+
+**Response 200**: 저장된 템플릿
+
+#### GET `/api/v1/prompt-templates/preview?tenantId=...&projectId=...` 🔒
+**설명**: cascade 병합된 최종 system prompt 미리보기. FE 미리보기 패널용.
+
+**Response 200**:
+```json
+{
+  "global": "...",
+  "tenant": "...",
+  "project": "...",
+  "merged": "GLOBAL\n\nTENANT\n\nPROJECT",
+  "total_length_bytes": 4521,
+  "warning": null
+}
+```
+
+**제약**: total_length_bytes > 8192 시 `warning: "합산 길이 8KB 초과"` 반환.
 
 ---
 

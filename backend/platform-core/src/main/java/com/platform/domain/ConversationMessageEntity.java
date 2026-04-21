@@ -32,6 +32,10 @@ public class ConversationMessageEntity {
     @Column(name = "created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
+    // CR-046: Soft Delete
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
+
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
     public String getSessionId() { return sessionId; }
@@ -45,4 +49,6 @@ public class ConversationMessageEntity {
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
+    public OffsetDateTime getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(OffsetDateTime deletedAt) { this.deletedAt = deletedAt; }
 }

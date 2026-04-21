@@ -20,6 +20,17 @@ export const useSessions = (params?: { scope_type?: string; runtime_kind?: strin
     retry: false,
   });
 
+/** CR-046: 대화 세션 Soft Delete + 목록 invalidate */
+export const useDeleteSession = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => sessionsApi.delete(sessionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+};
+
 export const useSessionMeta = (sessionId: string) =>
   useQuery({
     queryKey: ["sessions", sessionId, "meta"],

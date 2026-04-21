@@ -78,4 +78,14 @@ export const chatApi = {
     apiClient.get<ApiResponse<ConversationBundle>>(`/conversations/${sessionId}`, {
       validateStatus: (s) => (s >= 200 && s < 300) || s === 404,
     }),
+
+  /** CR-046: 진행 중 스트림 중지. 활성 스트림 없으면 404. */
+  abort: (sessionId: string) =>
+    apiClient.post<ApiResponse<{ session_id: string; aborted: boolean }>>(
+      `/chat/${sessionId}/abort`,
+      {},
+      {
+        validateStatus: (s) => (s >= 200 && s < 300) || s === 404,
+      },
+    ),
 };

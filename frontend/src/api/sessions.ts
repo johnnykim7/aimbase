@@ -62,6 +62,18 @@ export const sessionsApi = {
   updateMeta: (sessionId: string, body: Partial<SessionMeta>) =>
     apiClient.put<ApiResponse<SessionMeta>>(`/conversations/${sessionId}/meta`, body),
 
+  /** CR-045 follow-up: 빈 세션 사전 생성 (NewChatModal에서 호출) */
+  create: (body: { sessionId: string; title?: string; workspaceRef?: string; scopeType?: string }) =>
+    apiClient.post<ApiResponse<{ sessionId: string; created: boolean }>>("/conversations", body),
+
+  /** CR-045 follow-up: 세션 삭제 */
+  delete: (sessionId: string) =>
+    apiClient.delete<void>(`/conversations/${sessionId}`),
+
+  /** CR-045 follow-up: 제목 변경 (updateMeta의 편의 래퍼) */
+  updateTitle: (sessionId: string, title: string) =>
+    apiClient.put<ApiResponse<{ updated: string }>>(`/conversations/${sessionId}/meta`, { title }),
+
   getLineage: (sessionId: string) =>
     apiClient.get<ApiResponse<ToolExecution[]>>("/tool-executions", { params: { session_id: sessionId } }),
 

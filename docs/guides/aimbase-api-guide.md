@@ -494,6 +494,105 @@ curl -X POST /api/v1/tools/{toolName}/validate \
   -d '{ "input": { "query": "검색어" } }'
 ```
 
+### 7-5. 컨텍스트·토큰 효율 [CR-048]
+
+Aimbase는 토큰 비용 절감을 위해 세 가지 최적화를 자동 적용합니다. **소비앱 코드 변경 불필요**, 동작 변화만 인지하면 됩니다.
+
+- **Deferred Tool 스키마 주입**: 세션 초기에는 기본 도구 6종(Read/Edit/Grep/Bash/TodoWrite/ToolSearch)만 LLM tool defs에 포함. 나머지 도구는 모델이 `ToolSearch`로 검색하면 다음 턴부터 자동 활성화.
+- **Tool Result Storage**: 81920B 초과 tool result는 내부 저장소에 원본 보관. 체인에는 `{type:"tool_result_ref", id, summary}` stub만 주입되어 토큰 소모 감소. 모델이 원본이 필요하면 내부 `ReadToolResult` 도구로 자율 복구. TTL 24h.
+- **Adaptive Thinking**: Connection의 thinking 모드가 ADAPTIVE일 때 budget을 턴별 복잡도(직전 턴 tool_use 수, 에러 발생, 질문 길이)에 따라 자동 조정.
+
+소비앱이 tool result 이력을 전수 저장할 필요가 있다면 `/api/v1/tool-executions` 대신 평상시 응답을 그대로 사용해도 됩니다 — ref stub도 JSON으로 그대로 내려갑니다.
+
+### 7-6. HTTP 요청 도구 (`http_request`) [CR-054]
+
+Aimbase 에이전트/워크플로우가 임의의 외부 REST API를 호출할 때 사용하는 범용 Tool. 기존 `connections` 테이블에 `type="HTTP"` 레코드를 등록한 뒤 `connection_id`로 참조한다. 인증 헤더는 Connection 메타에서 자동 주입되며 4xx/5xx 응답도 예외가 아닌 status 코드로 반환되어 워크플로우 CONDITION 분기가 동작한다.
+
+**Connection 등록 (type=HTTP)**
+
+```bash
+curl -X POST /api/v1/connections \
+  -H "X-API-Key: ..." \
+  -d '{
+    "id": "external-api",
+    "name": "External API",
+    "adapter": "http",
+    "type": "HTTP",
+    "config": {
+      "baseUrl": "https://example.com",
+      "auth": {
+        "type": "API_KEY",
+        "in": "header",
+        "name": "X-Api-Key",
+        "value_env": "EXTERNAL_API_KEY"
+      },
+      "readTimeoutMs": 30000
+    }
+  }'
+```
+
+인증 타입: `API_KEY`(header), `BEARER`, `BASIC`, `NONE`. 시크릿은 `value_env`(환경변수 참조)를 권장하고 평문 `value`는 개발 환경 한정.
+
+**도구 실행 예시**
+
+```bash
+curl -X POST /api/v1/tools/http_request/execute \
+  -H "X-API-Key: ..." \
+  -d '{
+    "input": {
+      "connection_id": "external-api",
+      "method": "POST",
+      "path": "/v1/items",
+      "query": {"tenant": "acme"},
+      "headers": {"X-Trace": "abc"},
+      "body": {"name": "widget"},
+      "timeout_ms": 10000
+    }
+  }'
+```
+
+**응답 구조**
+
+```json
+{
+  "status": 201,
+  "headers": {"content-type": "application/json"},
+  "body": {"id": "...", "...": "..."},
+  "bodyRaw": false,
+  "duration_ms": 42,
+  "error": null
+}
+```
+
+- `status`: HTTP 상태 코드. 네트워크 실패(connect/read timeout, DNS)는 `null`이며 `error.kind` = `timeout` 또는 `io_error`
+- `bodyRaw`: `application/json`이 아니면 `true` (body는 원본 문자열)
+- `duration_ms`: 실제 요청 소요 시간
+
+**워크플로우 사용 패턴 (TOOL_CALL 스텝)**
+
+```json
+{
+  "id": "call_external",
+  "type": "TOOL_CALL",
+  "config": {
+    "tool": "http_request",
+    "input": {
+      "connection_id": "external-api",
+      "method": "GET",
+      "path": "/status",
+      "query": {"id": "{{input.targetId}}"}
+    }
+  }
+}
+```
+
+이후 CONDITION 스텝에서 `{{call_external.structured_data.status}} equals 200`으로 분기 가능.
+
+**주의**
+- 기본 타임아웃 30초, 최대 120초. 더 긴 호출은 별도 Tool(SDK) 사용 권장
+- 인증 헤더/`Authorization`/`X-Api-Key`/`Cookie`는 감사 로그에 `***`로 마스킹되어 남음
+- 워크플로우 레벨 재시도(`WorkflowStep.retry`)만 사용 — Tool 내부 재시도 없음
+
 ---
 
 ## 8. 세션 메타 [CR-029]
@@ -766,6 +865,8 @@ GET /api/v1/agents/active
 |--------|------|------|
 | POST | `/chat` | LLM 대화 (정책 적용, 도구 호출 포함) |
 | POST | `/chat/stream` | 스트리밍 대화 |
+| POST | `/chat/{sessionId}/abort` | 진행 중 스트림 즉시 중지 [CR-046] |
+| DELETE | `/conversations/{sessionId}` | 대화방 Soft Delete (본인만, deleted_at 마킹) [CR-046] |
 
 ### 도구 관리 (확장) [v4.0, CR-029]
 
@@ -921,10 +1022,110 @@ POST /api/v1/agents/{id}/heartbeat
 
 ---
 
+## 15. 세션 복원 [CR-049]
+
+장기 대화 세션이 자동 압축으로 잘려나간 뒤에도 무손실 재개가 가능하다. 압축 시점에 `COMPACT_BOUNDARY` 메시지 마커가 자동 삽입되며, 소비앱은 Resume API로 압축 경계 이후 메시지 + 보존 컨텍스트를 한 번에 가져온다.
+
+### 15-1. 세션 재개
+
+```
+POST /api/v1/sessions/{sessionId}/resume
+```
+
+**Response (200)**:
+```json
+{
+  "session_id": "sess_xxx",
+  "resumed_at": "2026-04-16T10:00:00Z",
+  "boundary": {
+    "summary": "사용자 요청으로 인증 모듈 리팩터링 진행 중...",
+    "compacted_count": 42,
+    "tokens_saved": 18420,
+    "boundary_at": "2026-04-16T09:30:00Z"
+  },
+  "messages": [
+    { "id": "msg_1", "role": "assistant", "content": "...", "created_at": "..." }
+  ],
+  "preserved_context": {
+    "memory": {},
+    "active_tools": ["Read", "Edit", "Grep"]
+  }
+}
+```
+
+**제약**:
+- 24h TTL 이내 active 세션만 (BIZ-002). 만료 세션은 향후 archived 조회 API로 분리.
+- 본인(user_id 일치)만 호출 가능 → 그 외 403.
+- 진행 중(streaming) 세션은 409 — 중지 후 재개 권장.
+- COMPACT_BOUNDARY가 없는 세션이면 전체 메시지가 반환됨.
+
+---
+
+## 16. 테넌트/프로젝트 시스템 지침 [CR-049]
+
+테넌트별 톤·금지사항·산업 특화 지침을 코드 배포 없이 DB에서 편집할 수 있다. 우선순위는 PROJECT > TENANT > GLOBAL이며 **cascade append**로 병합된다(replace 아닌 누적, BIZ-098).
+
+### 16-1. 프롬프트 템플릿 조회
+
+```
+GET /api/v1/prompt-templates?scope=TENANT|PROJECT&projectId=...&category=core&is_active=true
+```
+
+### 16-2. 프롬프트 템플릿 저장 (upsert)
+
+```
+PUT /api/v1/prompt-templates
+```
+
+**Body**:
+```json
+{
+  "key": "core.system.prefix",
+  "scope": "TENANT",
+  "project_id": null,
+  "category": "core",
+  "name": "Tenant System Prefix",
+  "template": "당신은 본 테넌트의 산업 특화 어시스턴트입니다...",
+  "language": "ko",
+  "is_active": true
+}
+```
+
+**Response 400**: scope=PROJECT인데 projectId 누락
+**Response 403**: 권한 부족 (슈퍼어드민=GLOBAL, 테넌트 관리자=TENANT/PROJECT)
+
+### 16-3. 프로젝트 지침 (편의 엔드포인트)
+
+```
+GET  /api/v1/projects/{projectId}/instructions
+PUT  /api/v1/projects/{projectId}/instructions
+```
+
+scope=PROJECT 자동 설정.
+
+### 16-4. 미리보기 (cascade 병합 결과)
+
+```
+GET /api/v1/prompt-templates/preview?tenantId=...&projectId=...
+```
+
+**Response**: GLOBAL/TENANT/PROJECT 각 본문 + merged 결과 + total_length_bytes. 8KB 초과 시 `warning` 필드 포함.
+
+### 16-5. 권한·감사
+
+- secret 패턴(API_KEY=, sk-, ghp_ 등) 감지 시 audit_log 기록 + Response 헤더 `X-Secret-Warning` 반환. 저장은 진행됨.
+- 버저닝은 기존 `prompt_templates.version` 컬럼 재사용 (편집 이력 보관).
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.4.0 | 2026-04-22 | CR-054 범용 HTTP 요청 도구(`http_request`) 추가 — Connection `type=HTTP` 등록 + 에이전트/워크플로우에서 임의 REST API 호출 지원. 인증 4종(API_KEY/BEARER/BASIC/NONE), 4xx/5xx status 반환, 감사 로그 헤더 마스킹(§ 7-6) |
+| v2.3.0 | 2026-04-16 | CR-049 세션 복원·지침 체계 추가 — `POST /sessions/{id}/resume`(§ 15), 프롬프트 템플릿 scope/project_id 확장 + cascade append + 미리보기 API(§ 16) |
+| v2.2.0 | 2026-04-16 | CR-048 컨텍스트·토큰 효율 안내(§ 7-5) 추가 — Deferred Tool 스키마 / Tool Result Storage / Adaptive Thinking (소비앱 코드 변경 불필요) |
+| v2.1.0 | 2026-04-16 | CR-046 Chat 실시간 제어 — `POST /chat/{sessionId}/abort` 추가, `DELETE /conversations/{sessionId}` Soft Delete + 본인 권한 체크로 변경. 동시 요청 시 자동 이전 abort(옵션 B) |
 | v2.0.0 | 2026-04-10 | CR-041 Agent Registry API 4개 엔드포인트 추가 (§ 14) |
 | v1.9.1 | 2026-04-08 | 워크플로우 수정(PUT) 예시에 필수 `id` 필드 누락 수정. 필수/선택 필드 테이블에 `id` 추가 |
 | v1.9.0 | 2026-04-08 | 에이전트 자율성 도구 4종 추가: list_mcp_resources, read_mcp_resource, remote_trigger, brief. 세션 브리핑 REST API 2개 추가 (CR-038) |

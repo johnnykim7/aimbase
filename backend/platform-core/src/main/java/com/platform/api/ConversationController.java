@@ -4,15 +4,19 @@ import com.platform.domain.ConversationMessageEntity;
 import com.platform.domain.ConversationSessionEntity;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
+import com.platform.session.CancellationRegistry;
 import com.platform.session.SessionStore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -24,13 +28,16 @@ public class ConversationController {
     private final ConversationSessionRepository sessionRepository;
     private final ConversationMessageRepository messageRepository;
     private final SessionStore sessionStore;
+    private final CancellationRegistry cancellationRegistry;
 
     public ConversationController(ConversationSessionRepository sessionRepository,
                                    ConversationMessageRepository messageRepository,
-                                   SessionStore sessionStore) {
+                                   SessionStore sessionStore,
+                                   CancellationRegistry cancellationRegistry) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.sessionStore = sessionStore;
+        this.cancellationRegistry = cancellationRegistry;
     }
 
     @GetMapping
@@ -61,14 +68,43 @@ public class ConversationController {
         ));
     }
 
+    /**
+     * CR-046: Soft Delete + 본인 권한 체크 + 활성 스트림 자동 abort.
+     * deleted_at 컬럼만 마킹하므로 DB 데이터는 보존되며 감사·과금 로그도 그대로 남는다.
+     */
     @DeleteMapping("/{sessionId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Transactional
-    @Operation(summary = "대화 세션 삭제")
+    @Operation(summary = "대화 세션 Soft Delete (본인만 가능)")
     public void delete(@PathVariable String sessionId) {
-        messageRepository.deleteBySessionId(sessionId);
-        sessionRepository.deleteBySessionId(sessionId);
+        ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Conversation session not found: " + sessionId));
+
+        // 본인 권한 체크: 세션 user_id가 비어있으면(레거시) 통과, 있으면 일치 필요.
+        String currentUser = currentUserId();
+        if (session.getUserId() != null && !session.getUserId().isBlank()
+                && currentUser != null && !session.getUserId().equals(currentUser)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "본인 세션만 삭제 가능: " + sessionId);
+        }
+
+        // 활성 스트림 abort
+        cancellationRegistry.cancel(sessionId);
+
+        OffsetDateTime now = OffsetDateTime.now();
+        session.setDeletedAt(now);
+        sessionRepository.save(session);
+        messageRepository.softDeleteBySessionId(sessionId, now);
         sessionStore.clearSession(sessionId);
+    }
+
+    private String currentUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) return null;
+        Object principal = auth.getPrincipal();
+        if (principal instanceof com.platform.auth.UserPrincipal up) return up.getUsername();
+        return auth.getName();
     }
 
     /** CR-029: 세션 메타 조회 */
@@ -110,8 +146,36 @@ public class ConversationController {
         if (body.containsKey("appId")) session.setAppId((String) body.get("appId"));
         if (body.containsKey("projectId")) session.setProjectId((String) body.get("projectId"));
         if (body.containsKey("parentSessionId")) session.setParentSessionId((String) body.get("parentSessionId"));
+        // CR-045 follow-up: FE 세션 목록에서 제목 편집 지원
+        if (body.containsKey("title")) session.setTitle((String) body.get("title"));
 
         sessionRepository.save(session);
         return ApiResponse.ok(Map.of("updated", sessionId));
+    }
+
+    /**
+     * CR-045 follow-up: FE의 NewChatModal이 세션 생성 즉시 사이드바에 표시되도록
+     * 빈 세션을 pre-create. 첫 메시지 전송 전에도 conversation_sessions row가 존재.
+     */
+    @PostMapping
+    @Transactional
+    @Operation(summary = "빈 대화 세션 사전 생성 (FE 새 대화 모달에서 호출)")
+    public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
+        String sessionId = (String) body.get("sessionId");
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId is required");
+        }
+        ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
+                .orElseGet(() -> {
+                    ConversationSessionEntity s = new ConversationSessionEntity();
+                    s.setSessionId(sessionId);
+                    return s;
+                });
+        if (body.containsKey("title")) session.setTitle((String) body.get("title"));
+        if (body.containsKey("workspaceRef")) session.setWorkspaceRef((String) body.get("workspaceRef"));
+        if (body.containsKey("scopeType")) session.setScopeType((String) body.get("scopeType"));
+        if (session.getScopeType() == null) session.setScopeType("chat");
+        sessionRepository.save(session);
+        return ApiResponse.ok(Map.of("sessionId", sessionId, "created", true));
     }
 }

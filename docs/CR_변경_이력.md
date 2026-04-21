@@ -38,9 +38,18 @@
 | CR-038 | 에이전트 자율성 강화 — MCP 리소스 탐색·읽기 + 이벤트 트리거 + 세션 브리핑 (PRD-245~248, FE-019) | 변경 | High | v6.4.0 | ✅ 완료 |
 | CR-039 | 고급 확장 도구 — Swarm 팀 협업 + Notebook 편집 + LSP 코드 분석 (PRD-265~268, FE-022) | 변경 | High | v6.6.0 | 🔧 진행중 |
 | CR-040 | 런타임 설정 관리 — DB 기반 설정 + 관리자 UI + 하드코딩 제거 (PRD-269~272, FE-023) | 변경 | High | v6.7.0 | 🔧 진행중 |
-| CR-043 | ClaudeCodeTool 다중계정 운영 정책 정착 — 테넌트 전용/공통 풀 페일오버 + 호출중 자동 재시도 | 변경 | Medium | v7.1.0 | 📝 등록 |
+| CR-043 | ClaudeCodeTool 다중계정 운영 정책 정착 — 테넌트 전용/공통 풀 페일오버 + 호출중 자동 재시도 | 변경 | Medium | v7.1.0 | ✅ 완료 |
 | CR-044 | CLI 두뇌 + Aimbase 손발 — Claude CLI 네이티브 도구 봉인 + Aimbase MCP 강제 (PRD-279~282) | 변경 | High | v7.2.0 | 📝 등록 |
 | CR-045 | 대화형 채팅 UI + 워크스페이스 컨텍스트 + 실시간 도구 이벤트 (PRD-290~293, FE-030~032) | 변경 | High | v7.3.0 | ✅ 완료 |
+| CR-046 | Chat 실시간 제어·대화방 관리 — 중지(abort) + 자동끼어들기 + Soft Delete (PRD-294~297, FE-033) | 변경 | High | v7.4.0 | 🔧 진행중 |
+| CR-047 | 런타임 성능 최적화 — 병렬 도구 실행 + Prefetch + Cache TTL 분기 + Hook 비동기 (PRD-298~301) | 변경 | High | v7.5.0 | 📝 등록 |
+| CR-048 | 컨텍스트·토큰 효율 — Deferred Tool 스키마 런타임 주입 + Tool Result Storage + Adaptive Thinking 동적 조정 (PRD-300~302) | 변경 | High | v7.6.0 | 📝 등록 |
+| CR-049 | 세션 복원·지침 체계 — Session Resume + Compact Boundary + 테넌트/프로젝트 커스텀 지침 (PRD-303~305, FE-034) | 변경 | High | v7.7.0 | 📝 등록 |
+| CR-050 | Claude CLI → LLM 어댑터 승격 — Worker Pool + fork-session 병렬 브랜치 + Max 구독 정액제 활용 (PRD-306~309) | 변경 | High | v7.8.0 | 📝 등록 |
+| CR-051 | SSE 스트림 가상 스레드 SecurityContext 전파 — AccessDenied 로그 해소 | 버그수정 | Low | v7.3.1 | ✅ 완료 |
+| CR-052 | SessionStore append-only persist — conversation_sessions 중복키 근본 해소 | 버그수정 | Medium | v7.3.1 | ✅ 완료 |
+| CR-053 | 서브에이전트 UX 완성 — Built-in Agent 프롬프트 고도화 + SSE 라이프사이클 이벤트 + FE Task 블록 렌더 (PRD-310~312, FE-035) | 변경 | Medium | v7.8.0 | 📝 등록 |
+| CR-054 | Aimbase 플랫폼 공통 HttpRequestTool — 범용 REST 호출 Tool + Connection REST_API 타입 + DomainFilterPolicy 통합 | 신규 | High | v7.9.0 | 📝 등록 |
 
 ---
 
@@ -705,7 +714,15 @@
 - **영향 설계서**: T3-1(테이블 추가 없음, 흐름도 갱신), aimbase-ops-guide.md
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v7.1.0
 - **변경 일자**: 2026-04-14
-- **상태**: 등록만(미착수). 운영 패턴은 즉시 적용 가능, 호출중 재시도 코드는 별도 스프린트.
+- **상태**: ✅ 완료 (2026-04-16)
+- **구현 요약**:
+  - `ClaudeCodeToolConfig`에 `maxRetry`(기본 2), `retryBackoffMs`(기본 500ms) 설정 추가
+  - `ClaudeCodeTool.tryExecuteViaPool` — 단일 계정 1회 실행 → 재시도 루프로 전환. 매 시도마다 `resolveAccount` 재호출하여 실패 계정은 GenericCircuitBreaker로 자동 스킵
+  - `isRetryableFailure()` 헬퍼 추가 — stderr 키워드 기반으로 401/403/429/5xx · 인증만료 · Rate Limit · 5xx · Overloaded를 재시도 대상으로, 그 외 사용자 오류는 비재시도로 분류
+  - exponential backoff (500ms → 1500ms → 3500ms …), 명시 계정(`_agent_account_id`) 지정 시 재시도 안 함
+  - 사용자 노출 메시지: 보안상 계정 ID 숨김, audit log에만 기록
+  - 테스트: `ClaudeCodeToolRetryTest` 5 케이스(인증/레이트리밋/5xx/사용자 오류/빈 출력) 전부 PASS
+  - 운영 가이드 § 4 시나리오 J 추가, `aimbase-ops-guide.md` v1.9.0
 
 ### CR-044 | CLI 두뇌 + Aimbase 손발 — Claude CLI 네이티브 도구 봉인 + Aimbase MCP 강제
 - **대상 기능 ID**: PRD-279 ~ PRD-282 (FE 없음)
@@ -787,6 +804,109 @@
 - **설계서**: `docs/원본_설계_CR045_채팅UI_워크스페이스_실시간도구이벤트_20260415.md`
 - **Phase 2-B 설계 리뷰**: `docs/설계리뷰_CR045_Phase2B_도구루프스트리밍통합_20260415.md`
 
+### CR-046 | Chat 실시간 제어·대화방 관리 — 중지·자동끼어들기·Soft Delete
+- **대상 기능 ID**: PRD-294 ~ PRD-297, FE-033
+- **변경 타입**: 변경 (실전 결함 수정 + UX 보강)
+- **배경**:
+  - CR-045 완료 후 코드 검증에서 **사용자 노출 UX 결함 3종** 확인:
+    1. **중지 허위 구현** — FE AbortController로 fetch만 끊고 BE Virtual Thread는 계속 실행 (LLM 토큰·도구 비용 지속 발생). `useChatStream.ts:78` AbortController 있으나 BE `/abort` 엔드포인트 없음, `OrchestratorEngine.chatStream():430-525`/`ToolCallHandler.executeLoopStream():324-451`에 cancellation token 부재.
+    2. **동시성 Race** — 동일 sessionId 동시 요청 시 BE sessionLock 부재로 병렬 실행, 마지막 writer wins. FE 가드(`Chat.tsx:66`)만으로는 curl/멀티탭 우회 가능. (DB 중복키는 별도로 SessionStore append-only 전환으로 해소됨)
+    3. **대화방 삭제 UI 부재** — BE `DELETE /api/v1/conversations/{id}`(`ConversationController.java:64-72`) + FE API 클라이언트(`sessions.ts:70-71`)는 있으나 **UI 버튼 없음**. 게다가 hard delete + 권한 체크 없음 + 5개 테이블 고아 로그 발생(`tool_execution_log`/`usage_logs`/`audit_logs`/`traces`/`session_briefs`).
+- **변경 내용**:
+  1. **PRD-294 BE 중지(Abort) 인프라**: `POST /api/v1/chat/{sessionId}/abort` 엔드포인트 신규. `CancellationRegistry`(`ConcurrentHashMap<String, AtomicBoolean>`) 도입, `OrchestratorEngine.chatStream()`/`ToolCallHandler.executeLoopStream()` 매 iteration `if(cancelled.get()) break;` 체크. 어댑터 스트림은 HTTP 커넥션 close로 중단(Anthropic SDK AbortSignal 미지원). 부분 메시지는 `[중단됨]` 마커 + partial 토큰 DB 저장. 중지 시점까지만 `usage_logs` 기록.
+  2. **PRD-295 BE 동시성 (옵션 B 자동 abort)**: `ConcurrentHashMap<String, ReentrantLock> sessionLocks`. `ChatController.completions()` 진입 시 이미 스트림 중이면 **이전 스트림 자동 abort → 새 요청 처리** (ChatGPT/Claude.ai 표준). 옵션 A(409)/C(큐잉)은 채택 안 함.
+  3. **PRD-296 BE 대화방 Soft Delete**: Flyway V47 `ALTER TABLE conversation_sessions ADD COLUMN deleted_at TIMESTAMPTZ`, `conversation_messages` 동일 추가. 모든 목록/조회 쿼리에 `WHERE deleted_at IS NULL` 추가. `ConversationController.delete()` hard → soft 변경. **본인 권한 체크**(세션 user_id 일치) 필수. 삭제 시 active 스트림 자동 abort(PRD-294 연동). 휴지통/복구 UI·벌크 삭제·관리자 강제 삭제는 **본 CR 제외**(필요 시 후속 CR).
+  4. **PRD-297 고아 로그 정책**: FK 추가하지 않음 — `tool_execution_log`/`usage_logs`/`audit_logs`/`traces`/`session_briefs`는 감사·과금 목적 보존. soft delete 채택으로 자연스럽게 부모 레코드 유지됨.
+  5. **FE-033 채팅 제어 UX**:
+     - 중지 버튼: 현재 fetch abort만 → BE `/abort` API 호출 보강(`useChatStream.ts:80`).
+     - 끼어들기: 스트림 중에도 입력창 활성화, 전송 시 자동 이전 abort + 새 메시지 처리(옵션 B).
+     - 대화방 사이드바: 호버 시 휴지통 아이콘 노출 + 확인 모달.
+     - `useMutation` + 쿼리 invalidate로 목록 즉시 갱신.
+  - **BIZ 규칙 신규**: BIZ-092(중지 시 partial 메시지에 `[중단됨]` 마커 저장 + 중지 시점까지의 토큰만 과금), BIZ-093(동일 sessionId 동시 요청 시 자동 이전 abort), BIZ-094(대화방 삭제는 본인만 가능, soft delete로 deleted_at 기록).
+- **변경 사유**:
+  - 중지 허위 구현은 토큰 비용 지속 발생 → **즉시 수정 필요**.
+  - 동시성 Race는 메시지 순서 비결정 → 사용자 신뢰 직결.
+  - 삭제 UI 부재는 UX 미완성, 권한 부재는 보안 결함.
+- **기존 부품 재사용**:
+  - `OrchestratorEngine`/`ToolCallHandler`/`SessionStore`/`ConversationController` 그대로 활용, abort 훅과 권한 체크만 주입.
+  - SSE 스트림 `done` 이벤트 재사용(중단 시 `reason=aborted` 추가).
+  - FE: 기존 `useChatStream`/`Sessions` 컴포넌트에 액션 추가만.
+- **영향 모듈**:
+  - BE 신규: `CancellationRegistry`, `SessionConcurrencyManager`
+  - BE 수정: `ChatController`, `ConversationController`, `OrchestratorEngine`, `ToolCallHandler`, `ConversationSessionEntity`, `ConversationMessageEntity`, `ConversationRepository`, `ConversationMessageRepository`
+  - DB: Flyway V47 (`deleted_at` 컬럼 2개)
+  - FE 수정: `useChatStream.ts`, `Chat.tsx`, `ChatInput.tsx`, `api/sessions.ts`, (신규) 대화방 목록 사이드바 컴포넌트
+- **영향도**: High (Chat 핵심 파이프라인 + 삭제 의미론 변경)
+- **영향 범위**: PRD-294~297, FE-033, BIZ-092/093/094(신규)
+- **영향 설계서**: T3-1(deleted_at 컬럼), T3-2(abort/delete API), T3-3(채팅 화면), aimbase-api-guide.md, aimbase-ops-guide.md
+- **Phase 분할**: Phase 1 BE 중지 → Phase 2 BE 동시성(옵션 B) → Phase 3 BE Soft Delete → Phase 4 FE 통합
+- **제외 (본 CR 범위 밖)**: 휴지통 UI, 복구(restore) 엔드포인트, 벌크 삭제, 관리자 강제 삭제, FK 추가
+- **사전 해소 항목 (CR-045 잔여 중)**: ✅ conversation_sessions 중복키 배치 에러는 SessionStore append-only 전환으로 본 CR 착수 전 해소됨. 🟡 SSE 완료 후 AccessDenied 경고는 a19b7e2(SecurityContext 전파 fix)로 부분 해소 추정 — 본 CR 착수 후 로그 재현으로 잔존 여부 확인.
+- **리스크**:
+  - 어댑터 스트림 강제 종료 시 LLM 측 미과금 토큰 처리 정확성 — Anthropic/OpenAI 응답 partial usage 검증 필수.
+  - 자동 abort 옵션 B에서 partial 메시지 저장이 사용자 혼란 야기 가능 — `[중단됨]` 명확 표기 + FE에 시각적 구분(회색 처리) 필수.
+  - Soft delete 전환 후 기존 hard delete API 호출자 영향 — 외부 의존 없음 확인 후 진행.
+- **요청자**: sykim | **승인자**: sykim (2026-04-16) | **적용 버전**: v7.4.0
+- **변경 일자**: 2026-04-16
+- **상태**: 🔧 진행중 (2026-04-16 등록). § 4 결정 7개 사용자 승인 완료(옵션 B / soft delete YES / 휴지통 제외 / 벌크 제외 / 본인만 / `[중단됨]` 마커 / Phase 5 대부분 해소).
+- **원본 요구사항**: `docs/origins/원본_요구사항_SSE_SecurityContext_전파_20260416.md`, `docs/origins/원본_요구사항_SessionStore_중복키_20260416.md`
+- **이관 인계서**: `docs/origins/CR046_이관인계서_20260416.md`
+
+### CR-047 | 런타임 성능 최적화 — 병렬 도구 실행 + Prefetch + Cache TTL 분기 + Hook 비동기
+- **대상 기능 ID**: PRD-298 ~ PRD-301 (FE 없음)
+- **변경 타입**: 변경 (체감 지연·비용 직결 최적화, 기능 변경 없음)
+- **배경**:
+  - OpenClaude 소스 전수 대조 결과 Aimbase는 핵심 하네스 기능은 갖췄으나 **런타임 성능 레이어 4가지 누락/부분 구현** 확인.
+  - 1) 병렬 도구 실행: `ToolCallHandler.java:264-285`에서 safeCalls/unsafeCalls 분류만 하고 **둘 다 순차 for-loop**. 코드 주석에 "향후 CompletableFuture로 전환" 명시. OpenClaude `StreamingToolExecutor.ts:76-150`은 실제 병렬 디스패치.
+  - 2) Memory/Skill Prefetch: `ContextAssemblyEngine.assemble():177-192` 완전 동기. `OrchestratorEngine.chat():208` 동기 assembly 후 LLM 호출. OpenClaude `query.ts:299`/`329`는 LLM 스트리밍과 병렬 prefetch.
+  - 3) Prompt Cache TTL: `AnthropicAdapter.java:66-67,117-126,179-185,238-252` 모든 cache_control 포인트에 단일 `CACHE_EPHEMERAL` 5분 TTL 적용. 소스별 분기 없음.
+  - 4) Hook 백그라운드 실행: `HookDispatcher.java:75-100 executeAndAggregate()` 완전 동기 for-loop. `@Async` / `fireAndForget` 0건. 모든 hook이 턴 지연에 직접 가산.
+- **변경 내용**:
+  1. **PRD-298 병렬 도구 실행**: `ToolCallHandler.executeLoop():264-285` 리팩터링. `safeCalls`는 `CompletableFuture.allOf(...)` + Virtual Threads(`Executors.newVirtualThreadPerTaskExecutor()`) 병렬 디스패치. `unsafeCalls`는 기존 순차 유지. 예외 격리(`exceptionally()`) + 원래 tool_use 순서 재정렬. **동시 실행 상한 기본 10개** (`aimbase.tool.parallel-max` 설정값, BIZ-095).
+  2. **PRD-299 Memory/Skill Prefetch**: `OrchestratorEngine.chat()` 진입 직후 `CompletableFuture<MemoryContext>`/`CompletableFuture<List<Skill>>` kick-off. `ContextAssemblyEngine`에서 `.get()` 합류. Prefetch 실패 시 **빈 컨텍스트 폴백**(LLM 호출 차단 금지). 스트리밍 경로도 동일 적용.
+  3. **PRD-300 Prompt Cache TTL 소스별 분기**: `CacheControlStrategy` 인터페이스 신설. System prompt → **1h TTL**(long-lived), Tool schemas → **5m TTL**(tool 추가/제거 시 invalidation), Recent messages → **cache 미적용**. Anthropic 응답의 `cache_creation_input_tokens`/`cache_read_input_tokens`를 `UsageLog`에 기록하여 hit율 추적.
+  4. **PRD-301 Hook 백그라운드 실행**: `HookEvent` enum에 `synchronous: boolean` 속성 추가. **게이팅 hook**(PRE_TOOL_USE, PERMISSION_REQUEST, STOP_HOOK, USER_PROMPT_SUBMIT 등 결정권 있는 것) → 동기 유지. **로그성 hook**(POST_TOOL_USE, SESSION_END, POST_COMPACT 등 26종 중 나머지) → `CompletableFuture.runAsync(..., virtualExecutor)` 비동기. 비동기 hook 실패는 로그만 남기고 메인 플로우 차단 금지. (BIZ-096)
+  - **BIZ 규칙 신규**: BIZ-095(병렬 도구 동시 실행 상한 10개, `aimbase.tool.parallel-max` 설정값으로 조정 가능), BIZ-096(Hook은 게이팅/로그성으로 분류. 게이팅은 동기, 로그성은 비동기 실행).
+- **변경 사유**:
+  - 사용자 체감 지연(TTFT) · 턴 총 소요시간 · 토큰 비용 직결. 모든 대화·도구 호출에 누적 영향.
+  - OpenClaude는 동일 모델(Sonnet 4.6) 기준 이미 적용된 최적화로, Aimbase 벤치마크에서 비용 우위가 이 갭을 메우면 더 벌어짐.
+  - 기능 변경이 아닌 최적화이므로 사용자 시나리오·API 스펙 영향 없음.
+- **기존 부품 재사용**:
+  - `ToolCallHandler`, `OrchestratorEngine`, `ContextAssemblyEngine`, `AnthropicAdapter`, `HookDispatcher` 전부 유지. 실행 방식만 동기→병렬/비동기로 전환.
+  - Virtual Threads(이미 활성화), `CompletableFuture`(표준 라이브러리), 기존 `CACHE_EPHEMERAL` 인프라 전부 재사용.
+  - **신규 도구·엔진·테이블 없음**. 설정값 추가(`aimbase.tool.parallel-max`, `aimbase.cache.ttl.system`, `aimbase.cache.ttl.tools`).
+- **영향 모듈**:
+  - BE 수정: `ToolCallHandler`, `OrchestratorEngine`, `ContextAssemblyEngine`, `AnthropicAdapter`, `HookDispatcher`, `HookEvent`, `UsageLog`(cache hit 필드 추가)
+  - BE 신규: `CacheControlStrategy` 인터페이스 + 구현체 3종(SystemPrompt/ToolSchema/Message)
+  - FE: 없음
+  - DB: 없음 (UsageLog가 기존 JSONB meta 사용 시 스키마 변경 불필요, 별도 컬럼 추가 시 Flyway V48)
+- **영향도**: High (핵심 파이프라인 실행 방식 변경. 기능 스펙 무변경이나 타이밍·순서 관찰 테스트 영향 가능)
+- **영향 범위**: PRD-298~301, BIZ-095/096(신규)
+- **영향 설계서**: T1-1(PRD 4개 추가), T1-3(BIZ-095/096), T3-6(실행 방식 기술)
+- **Phase 분할**:
+  - Phase 0: KPI baseline 측정(TTFT, 병렬 처리 시간, cache hit율, 턴 총 지연)
+  - Phase 1: PRD-298 병렬 도구 실행 (가장 체감 큰 영역)
+  - Phase 2: PRD-299 Memory/Skill Prefetch
+  - Phase 3: PRD-300 Cache TTL 소스별 분기
+  - Phase 4: PRD-301 Hook 비동기
+  - Phase 5: KPI 재측정 + 회귀 검증
+- **제외 (본 CR 범위 밖)**: 어댑터 레벨 스트리밍 최적화(별도 CR), LLM 응답 캐시(의미론 다름), 도구 결과 캐시(CR-031에서 별도).
+- **리스크**:
+  - 병렬 도구 실행 시 도구간 암묵적 의존성(같은 파일 동시 Read는 안전, 동시 Write는 위험) → `isConcurrencySafe` 플래그 재검토 필수. Bash/Write/Edit는 unsafeCalls로 확실히 분류.
+  - Prefetch가 tenant-scoped 리소스를 건드리므로 `TenantContext` 전파 필수 (가상 스레드에서). CR-045 SSE TenantContext fix와 동일 주의.
+  - Cache TTL 1h가 시스템 프롬프트 변경 직후 반영 지연 유발 가능 → 프롬프트 수정 시 수동 invalidation API 제공 또는 버전 해시 기반 키 운영.
+  - Hook 비동기화 시 실행 순서 보장이 사라짐 → 로그성 hook이 순서에 의존하지 않음을 각 hook별 리뷰로 확인.
+- **의존성**: CR-043(다중계정 재시도) 선행 완료됨 — ClaudeCodeTool 재시도와 병렬 도구 실행 로직 충돌 없음 확인 필요. CR-046(Chat 실시간 제어)와 독립적이나 cancellation token이 병렬 실행 중인 도구에도 전달되도록 Phase 1 설계 시 연계 고려.
+- **KPI (Phase 0/5에서 측정)**:
+  - TTFT (prefetch 전/후)
+  - N개 safeCalls 동시 실행 시간 / 순차 실행 시간 비율 (목표: N=3일 때 50% 이하)
+  - Cache hit 비율 (system/tools/messages 소스별)
+  - 턴 총 지연 시간 (hook 비동기 전/후)
+- **요청자**: sykim | **승인자**: sykim (2026-04-16) | **적용 버전**: v7.5.0
+- **변경 일자**: 2026-04-16
+- **상태**: 📝 등록 완료, 구현 착수 대기. § 5 결정 4개 사용자 승인 완료(병렬 상한 10개 / TTL system 1h·tools 5m·messages 미적용 / Hook 게이팅-동기·로그성-비동기 / Prefetch 실패 시 빈 컨텍스트 폴백).
+- **이관 인계서**: `docs/origins/CR047_이관인계서_20260416.md`
+
 ### CR-041 | Agent SDK 추출 + Agent Registry — 소비앱 도구 SDK 배포 + 원격 에이전트 오케스트레이션
 - **대상 기능 ID**: PRD-273 ~ PRD-278, FE-024
 - **변경 타입**: 신규
@@ -805,6 +925,278 @@
 - **영향 설계서**: T1-1, T2-1, T3-1, T3-2, T3-6
 - **요청자**: sykim | **승인자**: - | **적용 버전**: v7.0.0
 - **변경 일자**: 2026-04-09
+
+### CR-048 | 컨텍스트·토큰 효율 — Deferred Tool 스키마 런타임 주입 + Tool Result Storage + Adaptive Thinking 동적 조정
+- **대상 기능 ID**: PRD-300 ~ PRD-302
+- **변경 타입**: 변경
+- **변경 내용**: OpenClaude 전수 대조 결과 누락된 토큰·컨텍스트 최적화 3종을 Aimbase에 이식.
+  - **PRD-300 Deferred Tool 스키마 런타임 주입**: `SessionToolRegistry` 신설 (sessionId별 활성 도구 목록 관리). 초기 세트 Read/Edit/Grep/Bash/TodoWrite/ToolSearch 6종만 스키마 포함, 나머지는 이름+1줄 설명만 system prompt 뒤쪽에 텍스트로 노출. `ToolSearchTool` 호출 시 결과를 레지스트리에 add → 다음 턴부터 해당 도구 스키마 주입. `ContextAssemblyEngine`이 레지스트리를 조회해 tool defs 조립. Anthropic cache_control prefix는 고정 유지, 활성 도구 변경은 뒷부분에만 영향.
+  - **PRD-301 Tool Result Storage 치환**: `tool_result_storage` 테이블(Postgres) 신설. `ToolCallHandler`가 임계치(81920B) 초과 시 원본을 저장하고 체인에는 `{type:"tool_result_ref", id:"res_xxx", summary:"..."}` stub 주입. `ReadToolResult` 신규 도구로 모델이 원본 복구 가능. TTL 24h(세션 TTL과 일치), 본인 세션 result_id만 접근.
+  - **PRD-302 Adaptive Thinking 동적 조정**: `AdaptiveThinkingPolicy` 인터페이스 신설. `AnthropicAdapter.resolveThinkingMode()`가 ADAPTIVE 모드일 때 policy 호출해 런타임 budget 계산. 공식: base 4000 × (tool_calls≥3 → 1.5) × (직전 턴 에러 → 2.0) × (질문 길이>500 → 1.3), cap 32000. budget vs 재시도/품질 로깅으로 A/B 튜닝.
+- **변경 사유**: MCP 도구 수백 개 보유 테넌트에서 매 턴 5k~10k 토큰 낭비(도구 스키마 전량 포함), 대형 tool result가 인라인 truncate로 소실되어 복구 불가, Extended Thinking budget이 정적이라 복잡도 반영 안 됨. 토큰 비용 직접 절감 + 복구성 향상 + 품질 안정.
+- **영향 모듈**: Tool(SessionToolRegistry, ReadToolResultTool 신규 / ToolSearchTool, ToolCallHandler 수정), Storage(ToolResultStorageService 신규 + tool_result_storage 테이블), Context(ContextAssemblyEngine 수정), LLM(AdaptiveThinkingPolicy 신규 / AnthropicAdapter 수정)
+- **영향도**: High
+- **영향 범위**: PRD-300 ~ PRD-302
+- **영향 설계서**: T3-1(tool_result_storage 추가), T3-2(ReadToolResult 스펙), T3-6(3개 흐름도), aimbase-ops-guide.md(TTL 운영, SessionToolRegistry)
+- **결정사항 (설계 확정, 2026-04-16)**:
+  1. Deferred Tool 기본 활성 세트: **Read/Edit/Grep/Bash/TodoWrite/ToolSearch 6종**
+  2. Tool Result Storage: **Postgres** (용량·압축·감사 유리, 세션 TTL 24h라 Redis 속도 이점 작음)
+  3. Storage TTL: **24h** (세션 TTL과 일치)
+  4. Adaptive Thinking 공식: **×1.5 (tool≥3) / ×2.0 (직전 에러) / ×1.3 (질문>500자), cap 32000** — 초안 수용, 로깅 기반 튜닝
+  5. 비활성 도구 노출 방식: **이름+1줄 설명을 system prompt 후미에 텍스트로 노출** (ToolSearch로 검색 유도)
+- **제외 (본 CR 범위 밖)**:
+  - 어댑터(Bedrock/Vertex)의 thinking budget 변환 정합성 — CR-032 후속으로 분리
+  - tool_result_storage 원본 압축(gzip) — 1차 반영 후 사용량 보고 결정
+  - FE 변경 없음 (백엔드 내부 최적화)
+- **리스크**:
+  - SessionToolRegistry 변경이 Anthropic cache prefix를 깨뜨리면 토큰 절감이 오히려 cache miss로 상쇄 → prefix 고정/가변 경계 테스트 필수
+  - ReadToolResult 권한 검증 누락 시 타 세션 result 노출 가능 → sessionId 일치 검증 + 감사 로깅
+  - Adaptive 공식이 특정 워크로드에서 thinking budget을 과도하게 늘리면 비용 증가 → cap 32000 + 일일 budget 상한 모니터링
+  - tool_result_storage TTL 처리 누락 시 테이블 비대화 → 일일 스케줄러로 만료 레코드 삭제 + 크기 알림
+- **의존성**: CR-046(Chat 실시간 제어) 선행 권장 — 세션 동시성 제어가 SessionToolRegistry 설계에 영향. CR-047과는 독립 병렬 가능.
+- **KPI**:
+  - 턴당 평균 input token 감소율 (Deferred Tool 전/후)
+  - Anthropic cache hit 비율 변화 (prefix 고정 효과)
+  - tool_result_storage 평균 사이즈 / 만료 처리 지연
+  - Adaptive thinking budget 분포 + 재시도/실패율 상관
+- **요청자**: sykim | **승인자**: sykim (2026-04-16) | **적용 버전**: v7.6.0
+- **변경 일자**: 2026-04-16
+- **상태**: 📝 등록 완료, 설계 캐스케이드 완료. 구현 착수 대기 (사용자 별도 승인 필요).
+- **이관 인계서**: `docs/origins/CR048_이관인계서_20260416.md`
+
+### CR-049 | 세션 복원·지침 체계 — Session Resume + Compact Boundary + 테넌트/프로젝트 커스텀 지침
+- **대상 기능 ID**: PRD-303 ~ PRD-305, FE-034
+- **변경 타입**: 변경 (장기 세션 UX + 테넌트 관리자 기능)
+- **배경**:
+  - OpenClaude 전수 대조 결과 Aimbase는 **장기 세션 복원** 메커니즘과 **테넌트/프로젝트 커스텀 지침 주입** 메커니즘이 부재함.
+  - 1) Session Resume: grep 결과 `resume`, `CompactBoundary`, `compact_boundary` 전체 Java 소스 0건. `/sessions/{id}/resume` 엔드포인트 없음. `SystemCompactBoundaryMessage` 같은 메시지 타입 마커 없음. ContextWindowManager는 circuit breaker 카운터만 있고 메시지 레벨 마커 부재. OpenClaude는 `sessionStorage.ts` JSONL + `--resume` + `SystemCompactBoundaryMessage` 타입 보유.
+  - 2) Stop Hooks 재시도 강제: `HookDispatcher.java:75-100` BLOCK/APPROVE/PASSTHROUGH 집계만 있고 `ToolCallHandler` iteration(:219-234)은 finishReason만 체크. STOP 이벤트는 발행되나 루프 재진입 강제 없음.
+  - 3) 테넌트/프로젝트 지침: `prompt_templates`(CR-036) 글로벌만, `scope`/`project_id` 컬럼 없음. `TenantEntity`/`ProjectEntity`에 `custom_instructions` 필드 없음. `ContextAssemblyEngine.assembleSystemPrompt():346-394`가 글로벌 key만 조회 — 테넌트 필터 0. CR-036 설계 시 스코프 누락 확정.
+- **변경 내용**:
+  1. **PRD-303 Session Resume + Compact Boundary**:
+     - `ConversationMessageEntity.message_type` enum에 `COMPACT_BOUNDARY` 추가 (USER/ASSISTANT/TOOL_USE/TOOL_RESULT 외).
+     - `ContextWindowManager.trimWithState():86-150`에서 압축 수행 시 압축된 메시지 그룹 뒤에 `[COMPACT_BOUNDARY {summary, compacted_count, tokens_saved}]` 메시지 append.
+     - `POST /api/v1/sessions/{sessionId}/resume` 신규 — 압축 경계 이후 메시지 체인 + 보존 context 반환. 24h TTL 이내 active 세션만 (만료는 archived 별도 조회).
+     - FE: 대화방 목록 "재개" 버튼 + 압축 경계 UI 표시(접을 수 있는 구분선).
+  2. **PRD-304 Stop Hooks 재시도 강제**:
+     - `HookEvent.STOP` 결과가 BLOCK이면 BLOCK 사유를 새 user 메시지로 주입하고 `ToolCallHandler.executeLoop()` 루프 재진입.
+     - 무한루프 방지: 동일 BLOCK 사유 **3회 초과** 시 강제 종료 + 사용자 알림. (BIZ-097)
+     - 사용 사례: TodoWrite 미완료, 테스트 FAIL, 사용자 정의 검증.
+  3. **PRD-305 테넌트/프로젝트 커스텀 지침**:
+     - DB: `prompt_templates` 테이블 확장 (Flyway V48) — `scope VARCHAR(20) NOT NULL DEFAULT 'GLOBAL'`, `project_id VARCHAR(100) NULL`. scope: `GLOBAL | TENANT | PROJECT`. tenant DB라 tenant_id는 자동 스코프됨. 인덱스 `idx_prompt_templates_scope(scope, project_id)`.
+     - `PromptTemplateService.getTemplate(key, tenantId, projectId)` 확장. 우선순위 PROJECT → TENANT → GLOBAL **폴백 + append**(cascade 병합, BIZ-098).
+     - `ContextAssemblyEngine.assembleSystemPrompt()` 수정: GLOBAL `core.system.prefix` 로드 후 TENANT override append, PROJECT override append. 최종 = GLOBAL + TENANT + PROJECT.
+     - API 신설:
+       - `GET /api/v1/prompt-templates?scope=TENANT|PROJECT&projectId=...`
+       - `PUT /api/v1/prompt-templates` (관리자)
+       - `GET/PUT /api/v1/projects/{id}/instructions`
+     - FE-034: 테넌트 설정 "시스템 지침" 탭(monaco editor), 프로젝트 상세 "프로젝트 지침" 탭, "최종 system prompt = GLOBAL + TENANT + PROJECT" 미리보기.
+     - 권한: 슈퍼어드민=GLOBAL, 테넌트 관리자=TENANT/PROJECT.
+     - 버저닝: 기존 `prompt_templates.version` 컬럼 재사용 (편집 이력 보관).
+  - **BIZ 규칙 신규**: BIZ-097(Stop Hook BLOCK 재진입은 동일 사유 3회 초과 시 강제 종료), BIZ-098(시스템 지침 스코프 우선순위는 PROJECT > TENANT > GLOBAL이며 cascade append 방식으로 병합).
+- **변경 사유**:
+  - 장기 세션이 압축으로 잘려나가면 사용자가 이전 맥락을 잃어 같은 작업을 재설명해야 함 → Resume + Compact Boundary로 무손실 재개 보장.
+  - Stop Hook이 단순 발행만 하면 검증 hook(TodoWrite 미완료 차단 등)이 실효성 없음 → 재진입 강제로 사용자 정의 품질 게이트 작동.
+  - SaaS 멀티테넌트에서 테넌트별 톤·금지사항·산업 특화 지침을 코드 배포 없이 주입할 수 있어야 함. CR-036 글로벌 스코프만으로는 부족.
+- **기존 부품 재사용**:
+  - `prompt_templates` 테이블 확장(신규 테이블 아님), `PromptTemplateService` 시그니처 확장.
+  - `HookEvent.STOP` 이미 존재(처리만 강화), `HookDispatcher` 결정 집계 로직 그대로.
+  - `ConversationMessageEntity` 메시지 타입만 확장.
+  - 신규: `SessionResumeController`, `TenantInstructionsController`, `ProjectInstructionsController`.
+- **영향 모듈**:
+  - BE 수정: `ConversationMessageEntity`, `ContextWindowManager`, `ContextAssemblyEngine`, `PromptTemplateService`, `PromptTemplateEntity`, `HookDispatcher`, `ToolCallHandler`
+  - BE 신규: `SessionResumeController`, `TenantInstructionsController`, `ProjectInstructionsController`
+  - Flyway: V48 (prompt_templates scope 확장, tenant DB), V49 (conversation_messages.message_type COMPACT_BOUNDARY 추가, tenant DB)
+  - FE 신규: 테넌트 설정 "시스템 지침" 탭, 프로젝트 상세 "프로젝트 지침" 탭, 대화방 목록 "재개" 버튼, 압축 경계 UI 컴포넌트 (FE-034)
+- **영향도**: High
+- **영향 범위**: PRD-303 ~ PRD-305, FE-034, BIZ-097, BIZ-098
+- **영향 설계서**: T1-1(PRD 3개), T1-3(BIZ-097/098), T3-1(prompt_templates/conversation_messages 스키마), T3-2(API 5종 신규), T3-3(화면 컴포넌트 4종), T3-6(Sprint 52 6 Phase), aimbase-api-guide.md, aimbase-ops-guide.md
+- **결정사항 (설계 확정, 2026-04-16)**:
+  1. Resume 동작 범위: **24h TTL 이내 active 세션만** (만료 세션은 archived 별도 조회로 분리)
+  2. Compact Boundary UI: **표시(접을 수 있는 구분선)** — 사용자가 압축 사실 인지 가능
+  3. Stop Hook BLOCK 표현: **새 user 메시지 주입** (시스템 reminder 아님 — 모델이 자연스럽게 응답)
+  4. Stop Hook 무한루프 방지: **동일 BLOCK 사유 3회 초과 시 강제 종료** + 사용자 알림
+  5. 지침 스코프 병합: **append (cascade)** — GLOBAL → TENANT → PROJECT 순서로 누적
+  6. 지침 버저닝: **기존 prompt_templates.version 재사용** (편집 이력 보관)
+  7. 지침 권한: **슈퍼어드민=GLOBAL, 테넌트 관리자=TENANT/PROJECT**
+- **Phase 분할**:
+  - Phase 0: 결정 포인트 7개 사용자 최종 승인
+  - Phase 1: PRD-305 (테넌트/프로젝트 지침) BE — 스키마/Service/Engine
+  - Phase 2: PRD-305 API + FE-034 (사용자 체감 가장 큰 영역)
+  - Phase 3: PRD-303 Compact Boundary 메시지 마커 + Resume API
+  - Phase 4: PRD-303 FE Resume UI + 압축 경계 컴포넌트
+  - Phase 5: PRD-304 Stop Hook 재진입 + 무한루프 방지
+  - Phase 6: 통합 검증 + 가이드 갱신
+- **제외 (본 CR 범위 밖)**:
+  - 만료 세션(24h 초과) 아카이브 조회 — 별도 CR
+  - JSONL 파일 export(OpenClaude식) — DB 기반이므로 불필요
+  - 지침 템플릿 마켓플레이스(공유/가져오기) — 별도 CR
+- **리스크**:
+  - 압축 경계 메시지가 LLM context에 노이즈로 작용 가능 → tool/system 메시지로 분류해 모델에 전달 시 메타데이터로만 (본문 X)
+  - Stop Hook 무한루프 방지 임계값 3회가 과소/과대 가능 → BIZ-097로 명시 + 운영 모니터링 후 조정
+  - 테넌트 지침에 민감 정보(API 키 등) 입력 시 system prompt 노출 → FE에서 secret 입력 경고 + audit log
+  - cascade append로 system prompt 길이 폭증 → 합산 길이 상한(예: 8KB) 검증 + 초과 시 경고
+- **의존성**: CR-046(Chat 실시간 제어) 완료 권장 — Resume이 대화방 목록 UI와 통합. CR-036(프롬프트 외부화) 선행 완료 — prompt_templates 테이블 확장 기반. CR-047/CR-048 독립적.
+- **KPI**:
+  - Resume 사용률 (TTL 이내 세션 중 재개 호출 비율)
+  - Stop Hook BLOCK 재진입 후 PASS 전환율 (검증 hook 효과)
+  - 테넌트 지침 활성화 테넌트 수 + 평균 길이
+  - cascade append 최종 system prompt 길이 분포
+- **요청자**: sykim | **승인자**: sykim (2026-04-16) | **적용 버전**: v7.7.0
+- **변경 일자**: 2026-04-16
+- **상태**: 📝 등록 완료, 설계 캐스케이드 진행 중. 구현 착수 대기 (사용자 별도 승인 필요).
+- **이관 인계서**: `docs/origins/CR049_이관인계서_20260416.md`
+
+### CR-050 | Claude CLI → LLM 어댑터 승격 — Worker Pool + fork-session 병렬 브랜치 + Max 구독 정액제 활용
+- **대상 기능 ID**: PRD-306 ~ PRD-309
+- **변경 타입**: 변경 (LLM 경로 신규 어댑터 추가)
+- **배경**:
+  - 현재 LLM_CALL 경로는 `AnthropicAdapter`(API Key, 토큰 과금) 단일. Claude Max/Pro 구독자는 정액제 자산을 워크플로우 LLM_CALL에서 활용할 수 없음.
+  - `ClaudeCodeTool`은 Tool 경로로 존재하나 호출마다 Node.js 기동 500ms+ 오버헤드, LLM 어댑터 인터페이스(`LLMAdapter`)를 구현하지 않아 `LLM_CALL` Step에서 선택 불가.
+  - 2026-04-14~16 세션 3개에 걸쳐 설계 완료했으나 CR 번호 미발번으로 이력에 누락 → 2026-04-16 복원 등록.
+- **변경 내용**:
+  1. **PRD-306 ClaudeCliWorker (단일 프로세스 래퍼)**:
+     - `backend/platform-core/src/main/java/com/platform/llm/claudecli/ClaudeCliWorker.java` 신규.
+     - ProcessBuilder로 `claude -p --input-format stream-json --output-format stream-json --tools ""` 기동.
+     - stdin NDJSON 주입 / stdout 라인 단위 파싱 / **stderr drain 스레드 필수**(버퍼 차면 멈춤).
+     - 한 턴 송수신 API `ChatResponse turn(List<UnifiedMessage>)` — 내부 뮤텍스로 동시 호출 직렬화.
+     - 프로세스 생존 확인, 크래시 감지, 세션 파일 경로 추적(fork-session용).
+  2. **PRD-307 ClaudeCliWorkerPool (Run 단위 풀 + fork-session)**:
+     - `llm/claudecli/ClaudeCliWorkerPool.java` 신규. `ConcurrentHashMap<String, RunWorkers>` (key: workflowRunId).
+     - `getOrCreateMain(runId)` lazy spawn, `spawnForkedWorker(runId, parentSessionId)` — `--resume <sid> --fork-session`으로 새 프로세스 분기(캐시 재사용).
+     - `shutdownForRun(runId)` 모든 워커 프로세스 종료. 워커 크래시 시 재기동 + 현재 run 실패 처리.
+     - `ParallelStepExecutor` 수정 — 병렬 브랜치 시작 시 `spawnForkedWorker`, 종료 시 `releaseForkedWorker`.
+  3. **PRD-308 ClaudeCliLlmAdapter (LLMAdapter 구현) + Factory 통합**:
+     - `llm/adapter/ClaudeCliLlmAdapter.java` 신규 — `LLMAdapter` 인터페이스 구현.
+     - `chat()`: workerPool에서 워커 획득 → turn 실행 → UnifiedResponse 변환.
+     - **첫 턴**: 전체 messages NDJSON 주입. **이후 턴**: 마지막 user 메시지만 주입(CLI가 맥락 기억).
+     - `transformToolDefs()`: 빈 구현(도구 미지원, `--tools ""` 봉인).
+     - `chatStream()`: stdout 이벤트를 StreamEvent로 변환.
+     - `ConnectionAdapterFactory` 수정 — `normalizeAdapterType()`에 `"anthropic-cli"` 매핑, `createAdapter()`에 `case "anthropic-cli"` 추가.
+     - `llm/claudecli/ClaudeCliAdapterConfig.java` 신규 — `platform.llm.anthropic-cli` 섹션(enabled/timeout/max-workers-per-run/cli-binary-path/allowed-tenants 피처 플래그).
+  4. **PRD-309 WorkflowEngine 수명 훅 + 병렬 브랜치 통합**:
+     - `workflow/WorkflowEngine.java` 수정 — Run 종료(정상/예외 모두) 시 try/finally로 `claudeCliWorkerPool.shutdownForRun(runId)` 호출.
+     - `workflow/step/ParallelStepExecutor.java` 수정 — 병렬 브랜치 시작 시 fork 워커 확보, 종료 시 해제.
+     - 프로세스 누수 방지가 핵심(CLI는 무거운 자원).
+  - **BIZ 규칙 신규**: BIZ-099(Claude CLI 어댑터는 테넌트 피처 플래그 허용 시에만 활성화되며, 상용 외부 테넌트는 ToS 경계상 비활성 유지). BIZ-100(run당 CLI 워커는 기본 5개 상한, 초과 시 큐잉 또는 실패).
+- **변경 사유**:
+  - Max/Pro 구독 정액제를 LLM_CALL 경로에서 소진 → 토큰 과금 대비 비용 절감.
+  - Node.js 기동 오버헤드 500ms×N → 500ms×1(run 단위 상주)로 감소. 10 LLM_CALL 워크플로우 5초→0.5초 실측.
+  - 병렬 브랜치 `--fork-session`으로 prompt prefix 캐시 재사용 → T4 검증 기준 $0.07→$0.007 (10배 절감).
+- **기존 부품 재사용**:
+  - `LLMAdapter` 인터페이스 그대로 구현(신규 어댑터 추가만). 기존 `AnthropicAdapter`는 API Key 경로로 존속.
+  - `ConnectionAdapterFactory` 매핑 확장(신규 분기 추가). `Connection` 엔티티 그대로.
+  - `AgentAccountPoolManager`(CLAUDE_CONFIG_DIR 격리) 재사용 — OAuth 계정 풀 + 설정 디렉토리 격리 로직 그대로 유용.
+  - `ClaudeCodeTool` 그대로 존속(에이전트 자율 작업용 — 어댑터와 용도 분리).
+- **영향 모듈**:
+  - BE 신규(4개 클래스): `ClaudeCliWorker`, `ClaudeCliWorkerPool`, `ClaudeCliLlmAdapter`, `ClaudeCliAdapterConfig`.
+  - BE 수정(3개 클래스): `ConnectionAdapterFactory`(매핑), `WorkflowEngine`(run 종료 훅), `ParallelStepExecutor`(fork 워커).
+  - 설정: `application.yml`에 `platform.llm.anthropic-cli` 섹션 추가.
+  - 테스트: `ClaudeCliWorkerTest`(프로세스 기동/종료/stdin/stdout), `ClaudeCliWorkerPoolTest`(동시성/lazy spawn/shutdown), `ClaudeCliLlmAdapterIT`(실제 CLI, CI skip), E2E 4시나리오.
+- **영향도**: High
+- **영향 범위**: PRD-306 ~ PRD-309, BIZ-099, BIZ-100
+- **영향 설계서**: T1-1(PRD 4개), T1-3(BIZ-099/100), T2-1(기술스택 CLI 의존성 추가), T3-2(Connection 타입 `anthropic-cli` 확장), T3-6(Sprint N 4 Phase 실행 지시), aimbase-api-guide.md(Connection 타입), aimbase-ops-guide.md(CLI 바이너리 설치/버전 관리).
+- **결정 필요 (Phase 0 착수 전 사용자 승인 7종)**:
+  1. run당 최대 워커 수 기본값(초안 5개) — 적정 여부.
+  2. Usage 추출 방식 — stream-json 이벤트 파싱 vs Redis 감사 로그만.
+  3. CI 통합 테스트 — 실제 CLI 실행 vs 모킹.
+  4. 테넌트 피처 플래그 위치 — `application.yml allowed-tenants` vs `global_config` 키 vs Connection 플래그.
+  5. 첫 턴/이후 턴 구분 상태 위치 — Adapter 내부 vs Worker 내부.
+  6. `--model` 전달 — Connection config의 모델 ID 그대로 CLI 인자 매핑.
+  7. 타임아웃 실패 처리 — 워커 강제 종료 + run 실패 vs 워커 재기동 후 재시도.
+- **Phase 분할**:
+  - Phase 0: 결정 포인트 7종 사용자 승인 + 설계서 캐스케이드(T2-1/T3-2/T3-6).
+  - Phase 1: PRD-306 ClaudeCliWorker + 단위 테스트.
+  - Phase 2: PRD-307 ClaudeCliWorkerPool + fork-session + ParallelStepExecutor 통합.
+  - Phase 3: PRD-308 Adapter + Factory + Config + 피처 플래그.
+  - Phase 4: PRD-309 WorkflowEngine 수명 훅 + 누수 방지 검증.
+  - Phase 5: E2E(단일 턴/멀티 턴/병렬 브랜치/Run 종료 정리) + KPI 측정(오버헤드 감소율/캐시 hit).
+  - Phase 6: 가이드 갱신(api/ops) + Flyway 불요(DB 스키마 변경 없음).
+- **제외 (본 CR 범위 밖)**:
+  - `ClaudeCodeTool` 재구성 — CR-043/044 소관.
+  - 외부 상용 테넌트 활성화 — Anthropic 공식 허가 전까지 비활성 유지(ToS 경계).
+  - CLI 사이드카 HTTP gateway화 — 별도 검토.
+- **리스크**:
+  - ToS 경계: Max 구독을 자동화 파이프라인에서 대량 호출 시 Anthropic 정책 위반 소지 → **개인/내부 테넌트 한정** 피처 플래그로 제한. 외부 재판매 금지.
+  - stderr drain 누락 시 프로세스 hang → 워커 기동 직후 별도 스레드 필수.
+  - fork-session 미지원 CLI 버전 → `cli-binary-path` + 버전 체크 + 기동 실패 시 명시적 에러.
+  - Run 종료 누락 시 프로세스 누수 → try/finally + `SubagentLifecycleManager` 유형의 고아 프로세스 스캔 추가 검토.
+  - Usage 정확도: stream-json 이벤트가 토큰 정보를 제공하지 않으면 과금/한도 추적 불가 → 구현 단계 실측 후 폴백 경로 결정.
+- **의존성**: 없음 — 즉시 착수 가능. `AgentAccountPoolManager`(CR-043) 재활용 가능.
+- **KPI**:
+  - LLM_CALL 오버헤드: 500ms × N → 500ms × 1 (측정 방법: 동일 워크플로우 구 경로/신 경로 실행 시간 차).
+  - 10 LLM_CALL 워크플로우 총 시간 감소율.
+  - 병렬 브랜치 캐시 hit율 — 첫 브랜치 대비 이후 브랜치 토큰 과금.
+  - Max 플랜 5시간 윈도우 내 호출 가능 수.
+  - 워커 크래시 빈도(run 대비 %).
+- **요청자**: sykim | **승인자**: sykim (2026-04-16) | **적용 버전**: v7.8.0
+- **변경 일자**: 2026-04-16
+- **상태**: 📝 등록 완료. 결정 포인트 7종 사용자 승인 후 Phase 1 구현 착수 예정.
+- **이관 인계서**: `docs/origins/CR050_이관인계서_20260416.md`
+
+### CR-051 | SSE 스트림 가상 스레드 SecurityContext 전파 — AccessDenied 로그 해소
+- **변경 타입**: 버그수정
+- **배경**: CR-045 Phase 2-B E2E 검증 중 SSE 스트림이 정상 완료됨에도 매 요청마다 `AuthorizationDeniedException` 스택이 2회 로그에 남음. 원인은 `ChatController.streamResponse()`가 `Thread.ofVirtual()`로 스트림을 처리할 때 부모 요청 스레드의 `SecurityContextHolder`(ThreadLocal)가 자식 가상 스레드에 전파되지 않아, async dispatch 재처리 시 `AuthorizationFilter`가 익명 사용자로 판단.
+- **변경 내용**: `ChatController.streamResponse()` 진입부에서 `SecurityContextHolder.getContext()`를 캡처, 가상 스레드 시작 직후 `setContext(...)`, `finally`에서 `clearContext()`. 기존 TenantContext 전파 패턴과 동형.
+- **변경 사유**: 기능 영향은 없으나 운영 로그 노이즈 + 보안 필터 정합성 착시. 벤치마크/모니터링 전에 제거 필요.
+- **영향 모듈**: `ChatController`
+- **영향도**: Low
+- **영향 범위**: 관측성 (운영 로그)
+- **영향 설계서**: 없음
+- **요청자**: sykim | **승인자**: sykim (2026-04-16) | **적용 버전**: v7.3.1
+- **변경 일자**: 2026-04-16
+- **상태**: ✅ 완료 (2026-04-16). 빌드 검증 완료 — 런타임 로그 재현은 다음 SSE 호출 시 확인.
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR051_SSE_SecurityContext_전파_20260416.md`
+
+### CR-052 | SessionStore append-only persist — conversation_sessions 중복키 근본 해소
+- **변경 타입**: 버그수정
+- **배경**: 매 `appendMessage` 호출마다 전체 세션을 재저장하는 기존 `persistToDb` 구조(`findBySessionId` 후 `save` + `deleteBySessionId` + 전체 메시지 재저장)가 두 개의 가상 스레드에서 동시에 실행되면 둘 다 빈 결과를 보고 새 엔티티 INSERT → `conversation_sessions_session_id_key` UNIQUE 제약 충돌. 기능에는 영향 없으나 매 메시지마다 ERROR 스택 + 배치 롤백 부하.
+- **변경 내용**:
+  1. `persistToDb`를 `upsertSession` + `appendNewMessages` 두 트랜잭션으로 분리.
+  2. 세션 INSERT 경쟁은 `DataIntegrityViolationException` 1회 재시도 래퍼로 흡수 (재시도 시 재조회 → UPDATE 경로).
+  3. 메시지는 `countBySessionId`로 DB 기존 개수 조회 후 **신규분만 INSERT** (`deleteBySessionId` + 전체 재저장 제거). N개 메시지 기준 O(N²) → O(신규).
+  4. DB count > memory 시 경고 로그만 남기고 건너뜀 (수동 삭제 등 예외 상황 방어).
+  5. `ConversationMessageRepository.countBySessionId` 신규 메서드 추가.
+- **변경 사유**: CR-045 잔여 이슈의 근본 해소. append-only 구조로 전환해 동시성·I/O·로그 노이즈를 동시에 개선. 단기 retry만으로는 불필요한 트랜잭션 충돌·롤백 부하가 지속됨.
+- **기존 부품 재사용**: `TransactionTemplate`, 기존 repository. 호출부(`appendMessage`, `OrchestratorEngine`) 변경 없음.
+- **영향 모듈**: `SessionStore`, `ConversationMessageRepository`
+- **영향도**: Medium (persist 시맨틱 변경 — 메시지 편집/삭제 경로는 현재 없음)
+- **영향 범위**: BIZ-002(세션 메시지 영속)
+- **영향 설계서**: 없음 (persist 구조만 내부 최적화)
+- **요청자**: sykim | **승인자**: sykim (2026-04-16) | **적용 버전**: v7.3.1
+- **변경 일자**: 2026-04-16
+- **상태**: ✅ 완료 (2026-04-16). 빌드 통과. CR-046(Chat 실시간 제어) Phase 3 Soft Delete와 동거 확인 — `findBySessionIdIncludingDeleted` 경로는 CR-046 주석 유지.
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR052_SessionStore_중복키_20260416.md`
+
+### CR-054 | Aimbase 플랫폼 공통 HttpRequestTool — 범용 REST 호출 Tool
+- **대상 기능 ID**: PRD-313 (신규 — http_request Tool), BIZ-006(도구 호출 루프) 영향 없음
+- **변경 타입**: 신규
+- **배경**: Aimbase는 임의의 REST API를 호출할 수 있는 **범용 HTTP Tool이 없다**. 외부 시스템 연동이 필요하면 `ClaudeCodeTool`로 Claude CLI를 돌려 우회하거나 도메인 특화 Tool(예: `WebSearchTool`)을 개별 개발해왔는데, 이는 결정론적 호출에 Claude CLI 비용을 지불하는 구조적 결함이다. 직접 계기는 **FlowGuard L2 시나리오 자동 등록 워크플로우(CR-055 예정)** — FG는 순수 REST(+ API Key) 인터페이스만 제공하므로 이를 호출할 공통 수단이 필요. 다만 이 수단은 FG 전용이 아니라 플랫폼 공통 자산으로 설계해야 재사용성이 확보된다.
+- **변경 내용**:
+  1. **HttpRequestTool 신규** (`tool/builtin/HttpRequestTool.java`): GET/POST/PUT/PATCH/DELETE 지원, query/headers/body/timeout_ms 파라미터, Java 21 HttpClient 기반 가상 스레드 실행.
+  2. **Connection `REST_API` 타입 추가**: `connections.type` enum에 REST_API 확장. config JSONB에 `baseUrl`, `auth.{type,in,name,value_env,value}`, `healthPath`, `connectTimeoutMs`, `readTimeoutMs`.
+  3. **인증 타입 4종**: `API_KEY`(header/query), `BEARER`, `BASIC`, `NONE`. 시크릿은 `value_env`(환경변수 참조) 권장, 평문 `value`는 dev 전용.
+  4. **응답 정규화**: 4xx/5xx도 예외가 아닌 `{status, headers, body, bodyRaw, duration_ms, error}` 정상 반환 — 워크플로우 CONDITION 분기 동작을 위해 필수. JSON 자동 파싱, 비-JSON은 `bodyRaw: true`.
+  5. **DomainFilterPolicy(CR-035) 통합**: 요청 직전 Connection baseUrl의 host를 정책 엔진에 전달. 초기 deny-all, 운영자가 Connection 등록 시 허용 host 추가.
+  6. **감사 로깅**: 기존 `ToolCallAuditLogger` 체인 경유. body는 요약 1KB, `Authorization`/`X-Api-Key`/`Cookie` 헤더는 `***` 마스킹.
+  7. **재시도**: Tool 내부 재시도 없음 — 워크플로우 `WorkflowStep.retry` 레벨에서 처리.
+  8. **단위 테스트 13 케이스**(`HttpRequestToolTest.java`): WireMock으로 200/404/5xx/timeout/인증주입/마스킹/정책거부 검증. 커버리지 80%+.
+  9. **가이드 문서 갱신**: `api-guide.md`에 http_request Tool 섹션, `ops-guide.md`에 REST_API Connection 등록 + DomainFilter 운영 절차.
+- **변경 사유**:
+  - 결정론적 REST 호출을 Claude CLI로 우회하는 비용 낭비 제거 (벤치마크 1/3 비용 이점 활용 불가 영역이었음)
+  - FG L2 자동 등록(CR-055) 선행 조건 — MCP는 과설계(LLM 판단 불필요), 결정론적 DAG에 적합한 Tool 필요
+  - 플랫폼 자산 확충: OMS/WMS/bp-auth 내부 소비앱, 외부 SaaS(Slack/Jira/Notion) 등 모든 REST 연동 기반
+- **기존 부품 재사용**: `ConnectionRepository`, `DomainFilterPolicy`(CR-035), `ToolCallAuditLogger`, `Tool` 인터페이스, `ToolRegistry`, Java 21 `HttpClient` (외부 라이브러리 불필요).
+- **영향 모듈**: `tool/builtin/HttpRequestTool`, `tool/ToolRegistry`, `policy/DomainFilterPolicy`, `repository/ConnectionRepository`(읽기만), `db/migration/master`(connections.type enum 확장)
+- **영향도**: High (신규 플랫폼 공통 Tool, 보안 경계 설정)
+- **영향 범위**: 도구 레지스트리 (BIZ-006 루프 제한은 무영향), 정책 엔진 (DOMAIN_FILTER), 감사 로깅
+- **영향 설계서**: T3-1(데이터 모델 — connections.type enum), T3-2(API 설계 — 신규 Tool), T1-3(비즈니스 규칙 — 필요 시 HTTP 호출 제약 추가)
+- **범위 경계**: FG Connection seed / FG L2 워크플로우 / LLM 프롬프트 / FG 전용 규칙은 **본 CR에서 다루지 않음** → CR-055에서 담당
+- **요청자**: sykim | **승인자**: sykim (2026-04-22) | **적용 버전**: v7.9.0
+- **변경 일자**: 2026-04-22
+- **상태**: 📝 등록 (2026-04-22). Plan 승인 완료, 구현 착수 대기. 후속 CR-055는 본 CR 완료를 선행 조건으로 함.
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR054_HttpRequestTool_20260422.md`
+- **Plan 파일**: `~/.claude/plans/l2-radiant-bachman.md`
 
 ---
 

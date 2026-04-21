@@ -74,6 +74,18 @@ public class ClaudeCodeToolConfig {
      */
     private String mcpServerJar;
 
+    /**
+     * CR-043: 풀 실행 실패 시 다른 계정으로 재시도할 최대 횟수 (기본: 2).
+     * 첫 시도 포함이 아니라 "추가 재시도" 횟수. 총 시도 = 1 + maxRetry.
+     */
+    private int maxRetry = 2;
+
+    /**
+     * CR-043: 재시도 간 초기 backoff(ms). exponential — 0ms, 500ms, 1500ms ...
+     * 0이면 즉시 재시도.
+     */
+    private long retryBackoffMs = 500;
+
     // ── Getters & Setters ──
 
     public boolean isEnabled() { return enabled; }
@@ -105,4 +117,10 @@ public class ClaudeCodeToolConfig {
 
     public String getMcpServerJar() { return mcpServerJar; }
     public void setMcpServerJar(String mcpServerJar) { this.mcpServerJar = mcpServerJar; }
+
+    public int getMaxRetry() { return maxRetry; }
+    public void setMaxRetry(int maxRetry) { this.maxRetry = maxRetry; }
+
+    public long getRetryBackoffMs() { return retryBackoffMs; }
+    public void setRetryBackoffMs(long retryBackoffMs) { this.retryBackoffMs = retryBackoffMs; }
 }

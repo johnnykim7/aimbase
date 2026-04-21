@@ -25,6 +25,7 @@ import com.platform.rag.RAGService;
 import com.platform.repository.UsageLogRepository;
 import com.platform.schema.SchemaRegistry;
 import com.platform.schema.SchemaValidator;
+import com.platform.session.CancellationRegistry;
 import com.platform.session.ContextWindowManager;
 import com.platform.session.MemoryAutoExtractService;
 import com.platform.session.MemoryService;
@@ -50,6 +51,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -96,6 +98,7 @@ public class OrchestratorEngine {
     private final RuntimeRegistry runtimeRegistry;
     private final HookDispatcher hookDispatcher;
     private final MemoryAutoExtractService memoryAutoExtractService;
+    private final CancellationRegistry cancellationRegistry;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -125,7 +128,8 @@ public class OrchestratorEngine {
             ContextAssemblyEngine contextAssemblyEngine,
             RuntimeRegistry runtimeRegistry,
             HookDispatcher hookDispatcher,
-            MemoryAutoExtractService memoryAutoExtractService
+            MemoryAutoExtractService memoryAutoExtractService,
+            CancellationRegistry cancellationRegistry
     ) {
         this.modelRouter = modelRouter;
         this.fallbackChainExecutor = fallbackChainExecutor;
@@ -153,6 +157,7 @@ public class OrchestratorEngine {
         this.runtimeRegistry = runtimeRegistry;
         this.hookDispatcher = hookDispatcher;
         this.memoryAutoExtractService = memoryAutoExtractService;
+        this.cancellationRegistry = cancellationRegistry;
     }
 
     /**
@@ -162,6 +167,9 @@ public class OrchestratorEngine {
         String sessionId = request.sessionId() != null
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
+
+        // CR-047 PRD-299: Memory prefetch — assemble() 합류 전까지 백그라운드 진행
+        contextAssemblyEngine.prefetchMemory(sessionId, request.userId());
 
         // 0. CR-013: LLM 토큰 쿼터 체크 (월간 한도 초과 시 즉시 거부)
         String tenantId = TenantContext.getTenantId();
@@ -433,6 +441,13 @@ public class OrchestratorEngine {
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
 
+        // CR-047 PRD-299: Memory prefetch — assemble() 합류 전까지 백그라운드 진행
+        contextAssemblyEngine.prefetchMemory(sessionId, request.userId());
+
+        // CR-046 Phase 2: 동일 sessionId 활성 스트림이 있으면 자동 abort 후 새 요청 처리(옵션 B).
+        // register 시 이전 토큰을 cancel 처리하여 끼어들기 자동 동작.
+        AtomicBoolean cancelled = cancellationRegistry.register(sessionId);
+
         // CR-013: LLM 토큰 쿼터 체크
         String streamTenantId = TenantContext.getTenantId();
         if (streamTenantId != null) {
@@ -472,55 +487,74 @@ public class OrchestratorEngine {
 
         // CR-045 Phase 2-B: 도구 루프 통합 스트리밍
         LLMResponse finalResponse;
-        if (request.actionsEnabled() && toolRegistry.hasTools()) {
-            finalResponse = toolCallHandler.executeLoopStream(
-                    adapter, resolvedModel, trimmedMessages,
-                    streamModelConfig, sessionId, toolRegistry,
-                    request.toolFilter(), request.toolChoice(), toolContext,
-                    streamSink);
-        } else {
-            // 도구 비활성/없음 → 단순 스트리밍
-            LLMRequest llmRequest = new LLMRequest(
-                    resolvedModel, trimmedMessages, null,
-                    streamModelConfig, true, sessionId);
-            StringBuilder textBuf = new StringBuilder();
-            final TokenUsage[] usageHolder = new TokenUsage[]{null};
-            final String[] idHolder = new String[]{""};
-            // CR-045: adapter.chatStream은 fire-and-forget(가상 스레드)이므로 CountDownLatch로 완료 대기.
-            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
-            adapter.chatStream(llmRequest, chunk -> {
-                if (idHolder[0].isEmpty() && chunk.id() != null) idHolder[0] = chunk.id();
-                if (chunk.done()) {
-                    usageHolder[0] = chunk.usage();
-                    latch.countDown();
-                    return;
+        try {
+            if (request.actionsEnabled() && toolRegistry.hasTools()) {
+                finalResponse = toolCallHandler.executeLoopStream(
+                        adapter, resolvedModel, trimmedMessages,
+                        streamModelConfig, sessionId, toolRegistry,
+                        request.toolFilter(), request.toolChoice(), toolContext,
+                        streamSink, cancelled);
+            } else {
+                // 도구 비활성/없음 → 단순 스트리밍
+                LLMRequest llmRequest = new LLMRequest(
+                        resolvedModel, trimmedMessages, null,
+                        streamModelConfig, true, sessionId);
+                StringBuilder textBuf = new StringBuilder();
+                final TokenUsage[] usageHolder = new TokenUsage[]{null};
+                final String[] idHolder = new String[]{""};
+                // CR-045: adapter.chatStream은 fire-and-forget(가상 스레드)이므로 CountDownLatch로 완료 대기.
+                java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                adapter.chatStream(llmRequest, chunk -> {
+                    // CR-046: 중지 요청 시 즉시 람다 종료 (이후 chunk는 무시)
+                    if (cancelled.get()) {
+                        if (latch.getCount() > 0) latch.countDown();
+                        return;
+                    }
+                    if (idHolder[0].isEmpty() && chunk.id() != null) idHolder[0] = chunk.id();
+                    if (chunk.done()) {
+                        usageHolder[0] = chunk.usage();
+                        latch.countDown();
+                        return;
+                    }
+                    if (chunk.delta() == null) return;
+                    if ("thinking".equals(chunk.type())) {
+                        streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.ThinkingDelta(chunk.delta()));
+                    } else {
+                        textBuf.append(chunk.delta());
+                        streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.TextDelta(chunk.delta()));
+                    }
+                });
+                try {
+                    latch.await(5, java.util.concurrent.TimeUnit.MINUTES);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
-                if (chunk.delta() == null) return;
-                if ("thinking".equals(chunk.type())) {
-                    streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.ThinkingDelta(chunk.delta()));
-                } else {
-                    textBuf.append(chunk.delta());
-                    streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.TextDelta(chunk.delta()));
+                String finalText = textBuf.toString();
+                if (cancelled.get()) {
+                    finalText = "[중단됨] " + finalText;
                 }
-            });
-            try {
-                latch.await(5, java.util.concurrent.TimeUnit.MINUTES);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                finalResponse = new LLMResponse(idHolder[0], resolvedModel,
+                        List.of(new ContentBlock.Text(finalText)),
+                        List.of(), usageHolder[0] != null ? usageHolder[0] : new TokenUsage(0, 0),
+                        LLMResponse.FinishReason.END, 0, 0);
+                streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.Done(usageHolder[0]));
             }
-            finalResponse = new LLMResponse(idHolder[0], resolvedModel,
-                    List.of(new ContentBlock.Text(textBuf.toString())),
-                    List.of(), usageHolder[0] != null ? usageHolder[0] : new TokenUsage(0, 0),
-                    LLMResponse.FinishReason.END, 0, 0);
-            streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.Done(usageHolder[0]));
-        }
 
-        // 세션 저장 + 사용량 로그
-        request.messages().forEach(m -> sessionStore.appendMessage(sessionId, m));
-        sessionStore.appendMessage(sessionId,
-                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, finalResponse.textContent()));
-        if (finalResponse.usage() != null) {
-            saveUsageLog(request.userId(), sessionId, resolvedModel, finalResponse);
+            // 세션 저장 + 사용량 로그
+            boolean wasCancelled = cancelled.get();
+            request.messages().forEach(m -> sessionStore.appendMessage(sessionId, m));
+            String assistantText = finalResponse.textContent() != null ? finalResponse.textContent() : "";
+            // 도구 루프 경로의 partial은 Handler가 텍스트만 반환 → 여기서 prefix 부착
+            if (wasCancelled && !assistantText.startsWith("[중단됨]")) {
+                assistantText = "[중단됨] " + assistantText;
+            }
+            sessionStore.appendMessage(sessionId,
+                    UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, assistantText));
+            if (finalResponse.usage() != null) {
+                saveUsageLog(request.userId(), sessionId, resolvedModel, finalResponse);
+            }
+        } finally {
+            cancellationRegistry.clear(sessionId);
         }
     }
 

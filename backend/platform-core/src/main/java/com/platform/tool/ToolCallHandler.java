@@ -21,6 +21,10 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -47,6 +51,14 @@ public class ToolCallHandler {
     private final com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry;
     private final RedisTemplate<String, String> redisTemplate;
     private final com.platform.config.PlatformSettingsService platformSettings;
+    /** CR-048 PRD-300: 세션별 활성 도구 필터링 */
+    private final com.platform.tool.registry.SessionToolRegistry sessionToolRegistry;
+    /** CR-048 PRD-301: 대형 tool result 외부 저장 */
+    private final com.platform.tool.storage.ToolResultStorageService toolResultStorage;
+
+    /** CR-047 PRD-298: safeCalls 병렬 실행용 Virtual Thread executor */
+    private final ExecutorService parallelToolExecutor =
+            Executors.newVirtualThreadPerTaskExecutor();
 
     /** CR-033: Plan Mode 읽기전용 검사에서 허용하는 도구 (Plan Mode 자체 제어용) */
     private static final java.util.Set<String> PLAN_MODE_ALLOWED_WRITES =
@@ -58,7 +70,9 @@ public class ToolCallHandler {
                            com.platform.tool.compact.ToolResultCompactorRegistry compactorRegistry,
                            RedisTemplate<String, String> redisTemplate,
                            @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.max-tool-iterations:30}") int maxIterations,
-                           com.platform.config.PlatformSettingsService platformSettings) {
+                           com.platform.config.PlatformSettingsService platformSettings,
+                           com.platform.tool.registry.SessionToolRegistry sessionToolRegistry,
+                           com.platform.tool.storage.ToolResultStorageService toolResultStorage) {
         this.executionLogRepository = executionLogRepository;
         this.hookDispatcher = hookDispatcher;
         this.permissionClassifier = permissionClassifier;
@@ -66,6 +80,8 @@ public class ToolCallHandler {
         this.redisTemplate = redisTemplate;
         this.maxIterations = maxIterations;
         this.platformSettings = platformSettings;
+        this.sessionToolRegistry = sessionToolRegistry;
+        this.toolResultStorage = toolResultStorage;
     }
 
     /**
@@ -96,7 +112,8 @@ public class ToolCallHandler {
         LLMResponse response = null;
 
         // 필터링된 도구 목록 (루프 전체에서 동일하게 사용)
-        List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
+        List<UnifiedToolDef> filteredTools =
+                sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter));
 
         if (filteredTools.isEmpty()) {
             log.debug("No tools available after filtering, executing without tools");
@@ -203,7 +220,8 @@ public class ToolCallHandler {
 
         List<UnifiedMessage> mutableMessages = new ArrayList<>(messages);
         LLMResponse response = null;
-        List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
+        List<UnifiedToolDef> filteredTools =
+                sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter));
 
         if (filteredTools.isEmpty()) {
             log.debug("No tools available after filtering, executing without tools");
@@ -272,17 +290,10 @@ public class ToolCallHandler {
                 }
             }
 
-            // 안전한 도구는 병렬 실행 가능 (현재는 순차지만 향후 CompletableFuture로 전환)
-            List<ContentBlock.ToolResult> results = new ArrayList<>();
-
-            // 1) concurrencySafe 도구들
-            for (ToolCall tc : safeCalls) {
-                results.add(executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement()));
-            }
-            // 2) unsafe 도구들 (순차)
-            for (ToolCall tc : unsafeCalls) {
-                results.add(executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement()));
-            }
+            // CR-047 PRD-298: safeCalls 병렬 실행 (Virtual Threads + Semaphore 상한)
+            // unsafeCalls는 순차 유지. 결과는 원래 tool_use 순서대로 재정렬.
+            List<ContentBlock.ToolResult> results =
+                    runToolsPartitioned(safeCalls, unsafeCalls, effectiveContext, toolRegistry, turnNum, seq, null);
 
             // A2 + CR-031 PRD-215 + CR-040: per-message budget + 도구별 지능형 축약 (런타임 설정)
             int compactionThreshold = platformSettings.getInt("orchestrator.tool-result-compaction-threshold", 81920);
@@ -301,8 +312,19 @@ public class ToolCallHandler {
                         // CR-031: 도구별 지능형 축약 적용
                         String compacted = compactorRegistry.compact(
                                 r.toolUseId(), r.content(), Math.min(2000, remaining));
-                        budgeted.add(new ContentBlock.ToolResult(r.toolUseId(), compacted));
-                        remaining -= compacted.length();
+                        // CR-048 PRD-301: 원본을 외부 저장소에 보관하고 체인에는 ref stub 주입
+                        String stub = compacted;
+                        try {
+                            String resultId = toolResultStorage.store(
+                                    sessionId, r.toolUseId(), r.content(), compacted);
+                            stub = "[tool_result_ref id=" + resultId
+                                    + " size=" + r.content().length() + "B]\n" + compacted
+                                    + "\n(원본 복구: read_tool_result(result_id=\"" + resultId + "\"))";
+                        } catch (Exception ex) {
+                            log.warn("Failed to store tool result to tool_result_storage: {}", ex.getMessage());
+                        }
+                        budgeted.add(new ContentBlock.ToolResult(r.toolUseId(), stub));
+                        remaining -= stub.length();
                     }
                 }
                 results = budgeted;
@@ -332,30 +354,57 @@ public class ToolCallHandler {
             String toolChoice,
             ToolContext toolContext,
             java.util.function.Consumer<StreamEvent> streamSink) {
+        return executeLoopStream(adapter, resolvedModel, messages, config, sessionId,
+                toolRegistry, toolFilter, toolChoice, toolContext, streamSink,
+                new java.util.concurrent.atomic.AtomicBoolean(false));
+    }
+
+    /**
+     * CR-046: 중지(abort) 토큰을 받는 스트리밍 도구 루프.
+     * 매 iteration 시작 시 토큰을 체크하고, 도구 호출 사이에도 체크하여 즉시 break 한다.
+     */
+    public LLMResponse executeLoopStream(
+            LLMAdapter adapter,
+            String resolvedModel,
+            List<UnifiedMessage> messages,
+            ModelConfig config,
+            String sessionId,
+            ToolRegistry toolRegistry,
+            ToolFilterContext toolFilter,
+            String toolChoice,
+            ToolContext toolContext,
+            java.util.function.Consumer<StreamEvent> streamSink,
+            java.util.concurrent.atomic.AtomicBoolean cancelled) {
 
         List<UnifiedMessage> mutableMessages = new ArrayList<>(messages);
         LLMResponse response = null;
-        List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
+        List<UnifiedToolDef> filteredTools =
+                sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter));
 
         // 도구 없음 → 단순 스트리밍 한 번
         if (filteredTools.isEmpty()) {
             LLMRequest request = new LLMRequest(
                     resolvedModel, mutableMessages, null, config, true, sessionId, null);
-            StreamingAccumulator acc = new StreamingAccumulator(streamSink);
+            StreamingAccumulator acc = new StreamingAccumulator(streamSink, cancelled);
             adapter.chatStream(request, acc::accept);
             acc.await();
+            String text = cancelled.get() ? "[중단됨] " + acc.text() : acc.text();
+            streamSink.accept(new StreamEvent.Done(acc.usage()));
             return new LLMResponse(acc.id(), resolvedModel,
-                    List.of(new ContentBlock.Text(acc.text())),
+                    List.of(new ContentBlock.Text(text)),
                     List.of(), acc.usage() != null ? acc.usage() : new TokenUsage(0, 0),
                     LLMResponse.FinishReason.END, 0, 0);
         }
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
+            // CR-046: 중지 체크포인트
+            if (cancelled.get()) break;
+
             LLMRequest request = new LLMRequest(
                     resolvedModel, mutableMessages, filteredTools,
                     config, true, sessionId, toolChoice);
 
-            StreamingAccumulator acc = new StreamingAccumulator(streamSink);
+            StreamingAccumulator acc = new StreamingAccumulator(streamSink, cancelled);
             adapter.chatStream(request, acc::accept);
             acc.await();
 
@@ -405,19 +454,23 @@ public class ToolCallHandler {
                 else unsafeCalls.add(tc);
             }
 
-            List<ContentBlock.ToolResult> results = new ArrayList<>();
-            for (ToolCall tc : safeCalls) {
+            // CR-047 PRD-298: safeCalls 병렬 실행 + 스트림 이벤트는 순서대로 발행
+            // streamSink는 thread-unsafe 가정 — 병렬 실행은 백그라운드, sink 호출은 메인 스레드에서만.
+            List<ContentBlock.ToolResult> results = runToolsPartitioned(
+                    safeCalls, unsafeCalls, effectiveContext, toolRegistry, turnNum, seq, cancelled);
+
+            // 결과를 streamSink로 순서대로 발행 (toolCalls 원래 순서)
+            java.util.Map<String, ContentBlock.ToolResult> resultById = new java.util.HashMap<>();
+            for (ContentBlock.ToolResult r : results) resultById.put(r.toolUseId(), r);
+            for (ToolCall tc : toolCalls) {
+                if (cancelled.get()) break;
                 streamSink.accept(new StreamEvent.ToolUseStart(tc.id(), tc.name(), tc.input()));
-                ContentBlock.ToolResult r = executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement());
-                results.add(r);
-                streamSink.accept(new StreamEvent.ToolResultEvent(r.toolUseId(), r.content(), false));
+                ContentBlock.ToolResult r = resultById.get(tc.id());
+                if (r != null) {
+                    streamSink.accept(new StreamEvent.ToolResultEvent(r.toolUseId(), r.content(), false));
+                }
             }
-            for (ToolCall tc : unsafeCalls) {
-                streamSink.accept(new StreamEvent.ToolUseStart(tc.id(), tc.name(), tc.input()));
-                ContentBlock.ToolResult r = executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement());
-                results.add(r);
-                streamSink.accept(new StreamEvent.ToolResultEvent(r.toolUseId(), r.content(), false));
-            }
+            if (cancelled.get()) break;  // CR-046: 도구 결과 후 다음 LLM 호출 전 중지
 
             // 4. 축약 (비스트리밍 경로와 동일)
             int compactionThreshold = platformSettings.getInt("orchestrator.tool-result-compaction-threshold", 81920);
@@ -444,6 +497,27 @@ public class ToolCallHandler {
             mutableMessages.add(UnifiedMessage.ofToolResults(results));
         }
 
+        // CR-046: 중지된 경우 ensureTextResponse 호출 건너뛰고 partial 텍스트에 마커 부착
+        if (cancelled.get()) {
+            if (response != null) {
+                String partialText = response.content().stream()
+                        .filter(b -> b instanceof ContentBlock.Text)
+                        .map(b -> ((ContentBlock.Text) b).text())
+                        .reduce("", String::concat);
+                response = new LLMResponse(response.id(), resolvedModel,
+                        List.of(new ContentBlock.Text("[중단됨] " + partialText)),
+                        List.of(), response.usage() != null ? response.usage() : new TokenUsage(0, 0),
+                        LLMResponse.FinishReason.END, 0, 0);
+            } else {
+                response = new LLMResponse("", resolvedModel,
+                        List.of(new ContentBlock.Text("[중단됨] ")),
+                        List.of(), new TokenUsage(0, 0),
+                        LLMResponse.FinishReason.END, 0, 0);
+            }
+            streamSink.accept(new StreamEvent.Done(response.usage()));
+            return response;
+        }
+
         // 5. 마지막 응답에 텍스트가 없다면 비스트리밍 한 번 더 (ensureTextResponse 재사용)
         response = ensureTextResponse(response, adapter, resolvedModel, mutableMessages, config, sessionId);
         streamSink.accept(new StreamEvent.Done(response != null ? response.usage() : null));
@@ -455,6 +529,7 @@ public class ToolCallHandler {
      */
     private static final class StreamingAccumulator {
         private final java.util.function.Consumer<StreamEvent> sink;
+        private final java.util.concurrent.atomic.AtomicBoolean cancelled;
         private final StringBuilder text = new StringBuilder();
         private volatile String id;
         private volatile TokenUsage usage;
@@ -462,11 +537,18 @@ public class ToolCallHandler {
         private volatile List<ToolCall> toolUses;
         private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
-        StreamingAccumulator(java.util.function.Consumer<StreamEvent> sink) {
+        StreamingAccumulator(java.util.function.Consumer<StreamEvent> sink,
+                             java.util.concurrent.atomic.AtomicBoolean cancelled) {
             this.sink = sink;
+            this.cancelled = cancelled;
         }
 
         void accept(LLMStreamChunk chunk) {
+            // CR-046: 중지 시 즉시 종료 (이후 chunk는 무시)
+            if (cancelled.get()) {
+                if (latch.getCount() > 0) latch.countDown();
+                return;
+            }
             if (id == null) id = chunk.id();
             if (chunk.done()) {
                 usage = chunk.usage();
@@ -568,6 +650,91 @@ public class ToolCallHandler {
             log.error("Final text summary call failed", e);
             return response;
         }
+    }
+
+    /**
+     * CR-047 PRD-298: safeCalls 병렬 + unsafeCalls 순차 실행 헬퍼.
+     *
+     * - safeCalls: Virtual Threads + Semaphore(parallelMax) 병렬 디스패치, 예외 격리.
+     * - unsafeCalls: 순차 유지 (Bash/Write/Edit 등 부수효과 있는 도구).
+     * - 결과는 입력 순서를 보존하여 반환.
+     * - cancelled가 비-null이면 매 호출 전 체크.
+     */
+    private List<ContentBlock.ToolResult> runToolsPartitioned(
+            List<ToolCall> safeCalls,
+            List<ToolCall> unsafeCalls,
+            ToolContext effectiveContext,
+            ToolRegistry toolRegistry,
+            int turnNum,
+            AtomicInteger seq,
+            java.util.concurrent.atomic.AtomicBoolean cancelled) {
+
+        int parallelMax = Math.max(1, platformSettings.getInt("tool.parallel-max", 10));
+        Semaphore semaphore = new Semaphore(parallelMax);
+        String tenantId = TenantContext.getTenantId();
+
+        // 1) safeCalls 병렬 디스패치
+        List<CompletableFuture<ContentBlock.ToolResult>> safeFutures = new ArrayList<>(safeCalls.size());
+        for (ToolCall tc : safeCalls) {
+            int seqNum = seq.getAndIncrement();
+            CompletableFuture<ContentBlock.ToolResult> f = CompletableFuture.supplyAsync(() -> {
+                if (cancelled != null && cancelled.get()) {
+                    return new ContentBlock.ToolResult(tc.id(), "[중단됨] tool execution cancelled");
+                }
+                try {
+                    semaphore.acquire();
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return new ContentBlock.ToolResult(tc.id(), "Error: interrupted while acquiring semaphore");
+                }
+                try {
+                    if (tenantId != null) TenantContext.setTenantId(tenantId);
+                    return executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seqNum);
+                } catch (Exception e) {
+                    log.warn("Parallel tool {} failed: {}", tc.name(), e.getMessage());
+                    return new ContentBlock.ToolResult(tc.id(), "Error: " + e.getMessage());
+                } finally {
+                    TenantContext.clear();
+                    semaphore.release();
+                }
+            }, parallelToolExecutor).exceptionally(ex -> {
+                log.warn("Parallel tool {} exception: {}", tc.name(), ex.getMessage());
+                return new ContentBlock.ToolResult(tc.id(), "Error: " + ex.getMessage());
+            });
+            safeFutures.add(f);
+        }
+
+        // safeCalls 합류
+        java.util.Map<String, ContentBlock.ToolResult> byId = new java.util.HashMap<>();
+        for (int i = 0; i < safeCalls.size(); i++) {
+            ContentBlock.ToolResult r;
+            try {
+                r = safeFutures.get(i).join();
+            } catch (Exception e) {
+                ToolCall tc = safeCalls.get(i);
+                r = new ContentBlock.ToolResult(tc.id(), "Error: " + e.getMessage());
+            }
+            byId.put(safeCalls.get(i).id(), r);
+        }
+
+        // 2) unsafeCalls 순차 실행
+        for (ToolCall tc : unsafeCalls) {
+            if (cancelled != null && cancelled.get()) {
+                byId.put(tc.id(), new ContentBlock.ToolResult(tc.id(), "[중단됨] tool execution cancelled"));
+                continue;
+            }
+            try {
+                byId.put(tc.id(), executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement()));
+            } catch (Exception e) {
+                byId.put(tc.id(), new ContentBlock.ToolResult(tc.id(), "Error: " + e.getMessage()));
+            }
+        }
+
+        // 3) 입력 순서대로 재정렬 (safe + unsafe 합쳐서)
+        List<ContentBlock.ToolResult> ordered = new ArrayList<>(safeCalls.size() + unsafeCalls.size());
+        for (ToolCall tc : safeCalls) ordered.add(byId.get(tc.id()));
+        for (ToolCall tc : unsafeCalls) ordered.add(byId.get(tc.id()));
+        return ordered;
     }
 
     /**

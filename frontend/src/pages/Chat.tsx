@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useConversation } from "../hooks/useConversation";
 import { useChatStream, type StreamMessage } from "../hooks/useChatStream";
+import { useConnections } from "../hooks/useConnections";
 import { ChatSidebar } from "../components/chat/ChatSidebar";
 import { ChatHeader } from "../components/chat/ChatHeader";
 import { ChatInput } from "../components/chat/ChatInput";
@@ -45,18 +46,25 @@ export default function Chat() {
     }));
   }, [conversation]);
 
-  const { messages, isStreaming, error, send, reset } = useChatStream();
+  const { messages, isStreaming, error, send, reset, abort } = useChatStream();
 
   // 세션 전환 시 메시지 초기화
   useEffect(() => {
     reset(initialMessages);
   }, [sessionId, initialMessages, reset]);
 
+  // 기존 세션 재방문 시 sessionStorage init이 없음 → 활성 Anthropic connection 첫 번째로 fallback
+  const { data: connections = [] } = useConnections();
+  const fallbackConnection = connections.find(
+    (c) => c.status === "connected" && /anthropic|claude/i.test(c.adapter ?? ""),
+  ) ?? connections[0];
+
   const workspaceRef = conversation?.session.workspaceRef ?? init?.workspace;
-  const connectionId = init?.connectionId;
+  const connectionId = init?.connectionId ?? fallbackConnection?.id;
   const model = init?.model ?? "claude-sonnet-4-5";
 
-  const canSend = !!sessionId && !!connectionId && !isStreaming;
+  // CR-046: 스트림 중에도 전송 허용(끼어들기). BE가 이전 스트림을 자동 abort한다.
+  const canSend = !!sessionId && !!connectionId;
 
   const handleSend = (text: string) => {
     if (!canSend) return;
@@ -100,14 +108,16 @@ export default function Chat() {
 
         <ChatInput
           disabled={!canSend}
+          isStreaming={isStreaming}
           onSend={canSend ? handleSend : undefined}
+          onAbort={abort}
           placeholder={
             !sessionId
               ? "새 대화를 먼저 시작하세요"
               : !connectionId
               ? "이 세션은 새 창에서 열린 세션이 아닙니다 (초기값 없음)"
               : isStreaming
-              ? "응답 중…"
+              ? "응답 중… (끼어들어 새 메시지 전송 가능)"
               : "메시지 입력 (Cmd+Enter 전송)"
           }
         />

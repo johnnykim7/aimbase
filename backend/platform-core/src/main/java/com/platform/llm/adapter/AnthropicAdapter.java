@@ -54,6 +54,8 @@ public class AnthropicAdapter implements LLMAdapter {
 
     private final AnthropicClient client;
     private final int defaultMaxTokens;
+    /** CR-048 PRD-302: Adaptive Thinking budget 동적 계산 */
+    private final com.platform.llm.thinking.AdaptiveThinkingPolicy adaptiveThinkingPolicy;
 
     // [input$/MTok, output$/MTok, cacheWrite$/MTok, cacheRead$/MTok]
     private static final Map<String, double[]> COSTS = Map.of(
@@ -63,13 +65,16 @@ public class AnthropicAdapter implements LLMAdapter {
             "claude-haiku-4-5-20251001", new double[]{ 0.25,  1.25, 0.30, 0.03}
     );
 
-    private static final CacheControlEphemeral CACHE_EPHEMERAL =
-            CacheControlEphemeral.builder().build();
+    /** CR-047 PRD-300: cache_control 소스별 TTL 분기 (system 1h / tools 5m / messages 미적용) */
+    private static final CacheControlEphemeral CACHE_SYSTEM = CacheControlStrategy.SYSTEM_PROMPT.resolve();
+    private static final CacheControlEphemeral CACHE_TOOLS  = CacheControlStrategy.TOOL_SCHEMA.resolve();
 
     public AnthropicAdapter(AnthropicClient client,
-                           @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens) {
+                           @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens,
+                           com.platform.llm.thinking.AdaptiveThinkingPolicy adaptiveThinkingPolicy) {
         this.client = client;
         this.defaultMaxTokens = defaultMaxTokens;
+        this.adaptiveThinkingPolicy = adaptiveThinkingPolicy;
     }
 
     @Override
@@ -114,13 +119,12 @@ public class AnthropicAdapter implements LLMAdapter {
                     log.warn("Failed to serialize schema for Anthropic prompt injection: {}", e.getMessage());
                 }
             }
-            // Prompt Cache: system prompt를 TextBlockParam 목록으로 전달하고 마지막 블록에 cache_control 적용
-            // 5분 ephemeral 캐시 → 반복 호출 시 cache_read 요금(0.1x)만 과금
+            // CR-047 PRD-300: System prompt → 1h TTL (long-lived)
             if (!systemText.isEmpty()) {
                 builder.systemOfTextBlockParams(List.of(
                         TextBlockParam.builder()
                                 .text(systemText.toString())
-                                .cacheControl(CACHE_EPHEMERAL)
+                                .cacheControl(CACHE_SYSTEM)
                                 .build()
                 ));
             }
@@ -132,21 +136,16 @@ public class AnthropicAdapter implements LLMAdapter {
                     : com.platform.llm.model.ThinkingMode.DISABLED;
 
             if (thinkingMode == com.platform.llm.model.ThinkingMode.ADAPTIVE) {
-                // ADAPTIVE: 모델이 자동으로 budget 결정
-                // Claude 4.6+ 모델에서만 지원. 미지원 시 ENABLED로 폴백.
-                String reqModel = request.model() != null ? request.model() : "";
-                if (reqModel.contains("opus-4-6") || reqModel.contains("sonnet-4-6")) {
-                    builder.enabledThinking(0); // budget=0 → API가 adaptive로 처리
-                } else {
-                    // 미지원 모델 → ENABLED 폴백 (기본 budget 10000)
-                    int budget = request.config().thinkingBudgetTokens() != null
-                            ? request.config().thinkingBudgetTokens() : 10000;
-                    int maxTok = request.config().maxTokens() != null
-                            ? request.config().maxTokens() : 16000;
-                    budget = Math.max(1024, Math.min(budget, maxTok - 1));
-                    builder.enabledThinking(budget);
-                    log.debug("ADAPTIVE thinking 미지원 모델 '{}' → ENABLED 폴백 (budget={})", modelId, budget);
-                }
+                // CR-048 PRD-302: 직전 턴 지표 기반 동적 budget 계산
+                com.platform.llm.thinking.AdaptiveThinkingInputs inputs = collectAdaptiveInputs(request);
+                int dynamicBudget = adaptiveThinkingPolicy.calculate(inputs);
+                int maxTok = request.config() != null && request.config().maxTokens() != null
+                        ? request.config().maxTokens() : defaultMaxTokens;
+                int budget = Math.max(1024, Math.min(dynamicBudget, maxTok - 1));
+                builder.enabledThinking(budget);
+                log.debug("ADAPTIVE thinking budget={} (toolCalls={}, errors={}, qLen={})",
+                        budget, inputs.lastTurnToolCalls(), inputs.lastTurnHadErrors(),
+                        inputs.userQuestionLength());
             } else if (thinkingMode == com.platform.llm.model.ThinkingMode.ENABLED) {
                 int budget = request.config().thinkingBudgetTokens() != null
                         ? request.config().thinkingBudgetTokens() : 10000;
@@ -176,12 +175,12 @@ public class AnthropicAdapter implements LLMAdapter {
             } else if (request.tools() != null && !request.tools().isEmpty()) {
                 @SuppressWarnings("unchecked")
                 List<Tool> anthropicTools = (List<Tool>) transformToolDefs(request.tools());
-                // Prompt Cache: 마지막 도구 정의에 cache_control 적용 (도구 목록 전체 캐시)
+                // CR-047 PRD-300: Tool schemas → 5m TTL (도구 추가/제거 시 자연스러운 invalidation)
                 List<Tool> cachedTools = new ArrayList<>(anthropicTools);
                 if (!cachedTools.isEmpty()) {
                     int last = cachedTools.size() - 1;
                     cachedTools.set(last, cachedTools.get(last).toBuilder()
-                            .cacheControl(CACHE_EPHEMERAL)
+                            .cacheControl(CACHE_TOOLS)
                             .build());
                 }
                 List<ToolUnion> toolUnions = cachedTools.stream()
@@ -235,7 +234,7 @@ public class AnthropicAdapter implements LLMAdapter {
                 builder.systemOfTextBlockParams(List.of(
                         TextBlockParam.builder()
                                 .text(streamSystemText.toString())
-                                .cacheControl(CACHE_EPHEMERAL)
+                                .cacheControl(CACHE_SYSTEM)
                                 .build()
                 ));
             }
@@ -249,7 +248,7 @@ public class AnthropicAdapter implements LLMAdapter {
                 if (!cachedTools.isEmpty()) {
                     int last = cachedTools.size() - 1;
                     cachedTools.set(last, cachedTools.get(last).toBuilder()
-                            .cacheControl(CACHE_EPHEMERAL)
+                            .cacheControl(CACHE_TOOLS)
                             .build());
                 }
                 List<ToolUnion> toolUnions = cachedTools.stream()
@@ -579,5 +578,51 @@ public class AnthropicAdapter implements LLMAdapter {
         } catch (Exception e) {
             return Map.of();
         }
+    }
+
+    /**
+     * CR-048 PRD-302: Adaptive Thinking 입력 지표 수집.
+     * messages 리스트를 뒤에서부터 훑어 직전 턴 tool_use 수, 에러 발생, 현재 사용자 질문 길이를 추출.
+     */
+    private com.platform.llm.thinking.AdaptiveThinkingInputs collectAdaptiveInputs(LLMRequest request) {
+        List<UnifiedMessage> msgs = request.messages();
+        if (msgs == null || msgs.isEmpty()) {
+            return com.platform.llm.thinking.AdaptiveThinkingInputs.empty();
+        }
+
+        int userQuestionLength = 0;
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            UnifiedMessage m = msgs.get(i);
+            if (m.role() == UnifiedMessage.Role.USER) {
+                String text = extractText(m);
+                userQuestionLength = text != null ? text.length() : 0;
+                break;
+            }
+        }
+
+        int toolCalls = 0;
+        boolean hadErrors = false;
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            UnifiedMessage m = msgs.get(i);
+            if (m.content() == null) continue;
+            for (com.platform.llm.model.ContentBlock block : m.content()) {
+                if (block instanceof com.platform.llm.model.ContentBlock.ToolUse) {
+                    toolCalls++;
+                } else if (block instanceof com.platform.llm.model.ContentBlock.ToolResult tr) {
+                    String c = tr.content();
+                    if (c != null && (c.startsWith("Error:")
+                            || c.contains("TOOL_RESULT_FORBIDDEN")
+                            || c.contains("TOOL_RESULT_NOT_FOUND")
+                            || c.contains("blocked by policy hook"))) {
+                        hadErrors = true;
+                    }
+                }
+            }
+            // 현재 턴(마지막 assistant tool_use + 그 직전 tool_result 블록)까지만 집계
+            if (m.role() == UnifiedMessage.Role.USER && i < msgs.size() - 1) break;
+        }
+
+        return new com.platform.llm.thinking.AdaptiveThinkingInputs(
+                toolCalls, hadErrors, userQuestionLength);
     }
 }

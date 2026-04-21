@@ -77,6 +77,10 @@ public class ConversationSessionEntity {
     @Column(name = "parent_session_id", length = 100)
     private String parentSessionId;
 
+    // CR-046: Soft Delete
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
+
     @PreUpdate
     protected void onUpdate() {
         updatedAt = OffsetDateTime.now();
@@ -125,4 +129,6 @@ public class ConversationSessionEntity {
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getParentSessionId() { return parentSessionId; }
     public void setParentSessionId(String parentSessionId) { this.parentSessionId = parentSessionId; }
+    public OffsetDateTime getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(OffsetDateTime deletedAt) { this.deletedAt = deletedAt; }
 }

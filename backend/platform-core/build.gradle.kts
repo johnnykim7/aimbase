@@ -61,6 +61,7 @@ dependencies {
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("com.redis:testcontainers-redis:2.2.2")
+    testImplementation("org.wiremock:wiremock-jetty12:3.9.2") // CR-054: HttpRequestTool unit tests (Jetty 12 server factory)
 }
 
 dependencyManagement {

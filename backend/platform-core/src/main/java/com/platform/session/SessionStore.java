@@ -165,12 +165,23 @@ public class SessionStore {
      * 세션이 없으면 생성, 있으면 메시지 카운트/토큰 업데이트.
      */
     private void persistToDb(String sessionId, List<UnifiedMessage> messages) {
+        // CR-052: 세션 upsert는 경쟁 1회 재시도, 메시지는 append-only로 신규분만 insert.
+        try {
+            upsertSession(sessionId, messages);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            log.debug("Session {} insert race detected, retrying as update", sessionId);
+            upsertSession(sessionId, messages);
+        }
+        appendNewMessages(sessionId, messages);
+    }
+
+    private void upsertSession(String sessionId, List<UnifiedMessage> messages) {
         transactionTemplate.executeWithoutResult(status -> {
-            ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
+            // CR-046: 영속 시 soft-deleted row를 발견하면 그 row를 그대로 사용해야 UNIQUE 충돌 회피.
+            ConversationSessionEntity session = sessionRepository.findBySessionIdIncludingDeleted(sessionId)
                     .orElseGet(() -> {
                         ConversationSessionEntity newSession = new ConversationSessionEntity();
                         newSession.setSessionId(sessionId);
-                        // 첫 사용자 메시지로 제목 설정
                         messages.stream()
                                 .filter(m -> m.role() == UnifiedMessage.Role.USER)
                                 .findFirst()
@@ -180,13 +191,23 @@ public class SessionStore {
                                 });
                         return newSession;
                     });
-
             session.setMessageCount(messages.size());
             sessionRepository.save(session);
+        });
+    }
 
-            // 기존 메시지를 삭제하고 전체 재저장 (append 전략 대비 단순하고 안전)
-            messageRepository.deleteBySessionId(sessionId);
-            for (UnifiedMessage msg : messages) {
+    private void appendNewMessages(String sessionId, List<UnifiedMessage> messages) {
+        transactionTemplate.executeWithoutResult(status -> {
+            long existing = messageRepository.countBySessionId(sessionId);
+            if (existing >= messages.size()) {
+                if (existing > messages.size()) {
+                    log.warn("Session {} DB has {} messages but memory has {} — skipping append",
+                            sessionId, existing, messages.size());
+                }
+                return;
+            }
+            for (int i = (int) existing; i < messages.size(); i++) {
+                UnifiedMessage msg = messages.get(i);
                 ConversationMessageEntity entity = new ConversationMessageEntity();
                 entity.setSessionId(sessionId);
                 entity.setRole(msg.role().name().toLowerCase());
@@ -221,7 +242,8 @@ public class SessionStore {
     public void setWorkspaceRefIfAbsent(String sessionId, String workspaceRef) {
         if (workspaceRef == null || workspaceRef.isBlank()) return;
         transactionTemplate.executeWithoutResult(status -> {
-            ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
+            // CR-046: soft-deleted row 포함 조회로 UNIQUE 충돌 회피.
+            ConversationSessionEntity session = sessionRepository.findBySessionIdIncludingDeleted(sessionId)
                     .orElseGet(() -> {
                         ConversationSessionEntity s = new ConversationSessionEntity();
                         s.setSessionId(sessionId);

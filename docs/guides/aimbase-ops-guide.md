@@ -131,9 +131,9 @@ Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 
 테넌트 관리자가 Aimbase UI에서 수행하는 설정 작업입니다.
 
-### 3-1. Connection (LLM 연결) 관리
+### 3-1. Connection (LLM·HTTP 연결) 관리
 
-LLM 프로바이더(Anthropic, OpenAI, Ollama 등) 및 외부 어댑터 연결을 등록합니다.
+LLM 프로바이더(Anthropic, OpenAI, Ollama 등) 및 외부 어댑터(HTTP, SEARCH 등) 연결을 등록합니다. `type` 컬럼으로 구분되며 자유 문자열(e.g., `LLM`, `HTTP`, `SEARCH`).
 
 **UI 경로**: Connections
 
@@ -162,6 +162,40 @@ LLM 프로바이더(Anthropic, OpenAI, Ollama 등) 및 외부 어댑터 연결�
 ```
 
 > **권장**: Connection 생성 후 반드시 `test` API로 연결 상태를 확인하세요.
+
+**HTTP Connection 생성 예시** [CR-054]:
+
+범용 HTTP 요청 도구(`http_request`)가 참조하는 Connection. 외부 REST API(FlowGuard, 소비앱 내부 API, 외부 SaaS 등) 호출 시 공통 자격 보관소로 사용됩니다.
+
+```json
+{
+  "id": "flowguard-local",
+  "name": "FlowGuard Local",
+  "adapter": "http",
+  "type": "HTTP",
+  "config": {
+    "baseUrl": "http://localhost:8180",
+    "auth": {
+      "type": "API_KEY",
+      "in": "header",
+      "name": "X-Api-Key",
+      "value_env": "FLOWGUARD_API_KEY"
+    },
+    "healthPath": "/actuator/health",
+    "readTimeoutMs": 30000
+  }
+}
+```
+
+- **인증 타입**: `API_KEY`(header 권장), `BEARER`, `BASIC`, `NONE`
+- **시크릿 저장**: 운영환경은 반드시 `value_env`(환경변수 참조). 평문 `value`는 개발환경 전용
+- **감사**: 실행 시 `Authorization`/`X-Api-Key`/`Cookie` 헤더는 `***`로 마스킹되어 `tool_executions`에 기록
+- **정책 연계**: 외부 호출 범위는 `DomainFilterPolicy`(CR-035)로 통제 — 허용 host 화이트리스트 기반으로 운영
+
+**운영 체크리스트**:
+1. `healthPath` 지정 후 Connection 생성 → `POST /connections/{id}/test`로 연결 확인
+2. 허용할 외부 도메인(host)을 `DomainFilterPolicy`에 등록 (초기 deny-all 권장)
+3. 시크릿 회전 시 Connection `config.auth.value_env` 참조만 유지하고 환경변수 재배포
 
 ### 3-2. 정책 (Policy) 관리
 
@@ -724,6 +758,32 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 - 같은 주소:포트로 재등록 시 기존 등록 갱신
 - STALE 에이전트가 하트비트 재개하면 자동 ACTIVE 복구
 
+### 시나리오 I: 채팅 세션 운영 — 중지·끼어들기·삭제 [CR-046]
+
+**상황**: 사용자가 채팅 중 잘못된 질문을 했거나, 응답이 너무 길어지거나, 대화방을 정리하려는 경우.
+
+**중지 (Abort)**:
+1. FE 채팅창에서 [중지] 버튼 클릭
+2. `POST /api/v1/chat/{sessionId}/abort` 호출 → BE가 즉시 LLM 스트림 + 도구 루프 중단
+3. 부분 메시지는 `[중단됨] {지금까지 받은 텍스트}`로 DB 저장. 중지 시점까지의 토큰만 과금.
+4. 운영 영향: LLM 토큰·도구 비용이 즉시 끊김 (이전엔 BE 가상 스레드가 계속 돌며 과금됨).
+
+**자동 끼어들기 (옵션 B)**:
+- 사용자가 응답 도중 새 메시지 전송 시 BE가 자동으로 이전 스트림 abort 후 새 요청 처리 (ChatGPT 표준).
+- 별도 조작 없이 자연스럽게 동작.
+
+**대화방 삭제 (Soft Delete)**:
+1. 좌측 사이드바 대화방 호버 → 휴지통 아이콘 → 확인 모달 → DELETE 호출
+2. `deleted_at` 컬럼만 마킹 (실제 데이터 보존). 모든 목록/조회는 `deleted_at IS NULL` 필터.
+3. 권한: **본인 세션만 삭제 가능**. 관리자 강제 삭제 미제공.
+4. 활성 스트림 존재 시 자동 abort.
+5. 감사·과금 로그(`tool_execution_log`/`usage_logs`/`audit_logs`/`traces`/`session_briefs`)는 보존 (FK 미연결 의도적).
+6. **휴지통/복구 UI 미제공** — DB 직접 `UPDATE deleted_at = NULL`로만 복구 가능 (DBA 권한).
+
+**모니터링**:
+- `usage_logs.metadata->>'aborted'`가 `true`인 비율로 사용자 중지 빈도 추적
+- `conversation_sessions WHERE deleted_at IS NOT NULL` 카운트로 삭제 추세 확인
+
 ### 시나리오 H: 독립 실행형 Agent 설치/운영 [CR-042]
 
 **시나리오**: 코드 작성 없이 `aimbase-agent` 설치 패키지(dmg/msi)를 고객 PC에 설치하여 Aimbase 원격 도구 에이전트로 활용한다.
@@ -765,6 +825,49 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 **업그레이드:**
 - 새 설치 패키지를 덮어 설치. 사용자 설정(`~/.aimbase-agent/config/`)은 유지됨
 
+### 시나리오 J: ClaudeCodeTool 다중계정 운영 [CR-043]
+
+**목적**: 여러 OAuth/API Key 계정을 풀로 등록해 (1) 테넌트별 격리, (2) 공용 라운드로빈, (3) 계정 실패 시 자동 페일오버를 제공.
+
+**등록 플로우**:
+1. 계정 등록 — `agent_accounts` 테이블에 레코드 삽입 (또는 Admin API 사용)
+   - `auth_type`: `oauth_token` 또는 `api_key`
+   - `auth_token`: OAuth 토큰 또는 Anthropic API Key
+   - `agent_type`: `claude_code`
+   - `priority`: 선택 우선순위 (높을수록 먼저)
+   - `max_concurrent`: 계정당 동시 실행 한도
+2. 할당 매핑 — `agent_account_assignments`로 (테넌트, 앱)↔계정 연결
+   - 테넌트별 전용: `tenant_id=<uuid>, app_id=null`
+   - 공용 라운드로빈: `assignment_type='round_robin'` (테넌트/앱 비움)
+3. 토큰 배포 — `POST /api/v1/platform/agent-accounts/{id}/deploy-token`
+4. 헬스체크 — 60초 주기 자동 실행, `GET /api/v1/platform/agent-accounts/pool-status`로 상태 확인
+
+**호출중 자동 재시도 (CR-043 핵심)**:
+- 특정 계정으로 실행 중 인증 실패(401/403) · Rate Limit(429) · 5xx 서버 장애 발생 시,
+  해당 계정은 GenericCircuitBreaker에 실패 기록 → 다음 후보 계정으로 자동 재시도
+- 최대 재시도 횟수는 `claude-code.max-retry` (기본 2회)
+- 재시도 간 backoff는 `claude-code.retry-backoff-ms` (기본 500ms, exponential: 500/1500/3500…)
+- 비재시도 에러(프롬프트 오류, 파일 없음, 도구 거부 등)는 즉시 실패 반환
+- 사용자 노출 메시지: `"다중 계정 시도 후 실패: <마지막 에러>"` — 계정 ID는 audit log에만 기록
+
+**설정 예시 (`application.yml`)**:
+```yaml
+claude-code:
+  enabled: true
+  max-retry: 2           # 추가 재시도 횟수 (총 시도 = 1 + max-retry)
+  retry-backoff-ms: 500  # 0이면 즉시 재시도
+```
+
+**Circuit Breaker 튜닝**:
+- 기본 임계값: 연속 실패 3회 시 OPEN, 5분간 차단 후 HALF_OPEN 전환
+- 수동 리셋: `POST /api/v1/platform/agent-accounts/{id}/circuit-reset`
+
+**장애 대응 runbook**:
+1. `pool-status` 조회 → `circuitState=OPEN` 계정 확인
+2. 해당 계정 토큰 만료 여부 점검 (`extract-and-save-token` 후 재발급)
+3. 재발급된 토큰으로 `deploy-token` → `circuit-reset`
+4. 이후 테스트 요청으로 `healthy` 상태 확인
+
 ---
 
 ## 5. 운영 주의사항
@@ -789,12 +892,120 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 - 첫 DENY 또는 REQUIRE_APPROVAL 매칭 시 평가 중단
 - 정책 변경 후 `simulate`로 반드시 검증
 
+### 컨텍스트·토큰 효율 운영 (CR-048)
+
+**SessionToolRegistry (Deferred Tool 스키마 런타임 주입)**
+- 세션 초기 활성 도구: `Read`, `Edit`, `Grep`, `Bash`, `TodoWrite`, `ToolSearch`, `ReadToolResult` (기본값)
+- 그 외 도구는 이름+1줄 설명만 system prompt 후미 텍스트 블록에 노출됨. 모델이 `ToolSearch`로 검색해야 스키마 주입됨
+- 기본 활성 세트 변경은 PlatformSettings `deferred_tool.default_active` 수정 (CR-040)
+- 세션 종료(24h TTL) 시 레지스트리 엔트리 자동 삭제. Redis 백업 사용 시 `SESSION_TOOL_REG:{sessionId}` 키 확인 가능
+
+**Tool Result Storage (TTL 24h)**
+- 81920B 초과 tool result는 `tool_result_storage` 테이블에 원본 저장 + 체인에는 요약 stub 주입
+- `expires_at < NOW()` 레코드는 일일 스케줄러로 삭제. 수동 삭제 시 `DELETE FROM tool_result_storage WHERE expires_at < NOW()`
+- 모니터링: `aimbase.tool_result_storage.size_bytes` Micrometer gauge. 급증 시 임계치(기본 81920B) 조정 검토
+- 트러블슈팅:
+  - 모델이 "이전 결과가 보이지 않음" 보고 → 해당 result_id 만료 또는 타 세션 이관 확인
+  - `ReadToolResult` 403 → 감사 로그(`TOOL_RESULT_READ`)에서 session_id 불일치 사례 확인
+  - 테이블 비대화 → 임계치 상향 또는 TTL 단축(세션 TTL 범위 내)
+
+**Adaptive Thinking 동적 조정**
+- ADAPTIVE 모드 커넥션만 동적 budget 적용. DISABLED/ENABLED는 기존 동작 유지
+- 공식 설정 키 5종은 PlatformSettings에서 런타임 조정 가능:
+  - `adaptive_thinking.base_budget` (4000)
+  - `adaptive_thinking.tool_calls_multiplier` (1.5)
+  - `adaptive_thinking.error_multiplier` (2.0)
+  - `adaptive_thinking.long_question_multiplier` (1.3)
+  - `adaptive_thinking.cap` (32000)
+- A/B 튜닝: `session_metadata.thinking_budget` + 당 턴의 재시도/에러 발생 여부를 주기 집계하여 공식 조정
+- 비용 모니터링: 특정 테넌트의 thinking_budget 평균이 지속 상승하면 cap 하향 또는 공식 완화 검토
+
+---
+
+### 시나리오 K: 테넌트/프로젝트 시스템 지침 운영 [CR-049]
+
+테넌트 관리자가 코드 배포 없이 자신의 테넌트(또는 특정 프로젝트)에 대해 시스템 지침을 편집할 수 있다. 우선순위는 PROJECT > TENANT > GLOBAL이며 cascade append로 병합된다(BIZ-098).
+
+**적용 단계**:
+1. **테넌트 관리자 로그인** → 좌측 메뉴 "설정" → "시스템 지침" 탭 진입
+2. monaco editor에서 지침 본문 작성 (markdown). 예: "본 테넌트는 결제 도메인이며 PCI-DSS 준수를 항상 명시할 것"
+3. 우측 미리보기 패널에서 `GLOBAL + TENANT + PROJECT` 합산 결과 확인
+4. 길이 진행 바가 노란색(8KB 초과) 경고 시 압축 또는 분리
+5. "저장" 클릭 → version 자동 증가 + audit_log 기록
+
+**프로젝트 단위 지침**:
+- 프로젝트 상세 페이지 → "프로젝트 지침" 탭에서 동일 절차
+- 프로젝트 지침은 해당 프로젝트 컨텍스트에서만 cascade 마지막 단계로 append됨
+
+**권한 규칙**:
+- 슈퍼어드민: GLOBAL 편집 가능 (`/platform/prompt-templates`)
+- 테넌트 관리자: TENANT/PROJECT 편집 가능
+- 일반 사용자: 메뉴 노출 안 됨
+
+**운영 주의**:
+- secret 패턴(API_KEY=, sk-, ghp_ 등) 입력 시 인라인 경고 + audit_log 기록. 저장은 진행되지만 시스템 프롬프트로 그대로 노출되므로 별도 비밀 저장소(Connection 환경변수 등)로 옮기기 권장
+- cascade 합산 길이 8KB 초과는 경고만 발행하고 잘라내지 않는다 — 토큰 비용 직결이므로 주기적으로 정리
+- 버저닝은 prompt_templates.version 컬럼 재사용 — 이전 버전 비교는 DB 직접 조회 또는 향후 별도 UI
+
+---
+
+### 시나리오 L: 장기 세션 재개 + 압축 경계 [CR-049]
+
+자동 압축으로 잘려나간 장기 대화를 사용자가 무손실 재개할 수 있다.
+
+**자동 동작**:
+- ContextWindowManager가 토큰 임계 초과를 감지해 압축 수행 시, 압축된 메시지 그룹 뒤에 `COMPACT_BOUNDARY` 메시지를 자동 INSERT
+- boundary_meta JSONB에 `{summary, compacted_count, tokens_saved}` 저장
+- LLM 컨텍스트 직렬화 시 본문은 전달되지 않고 메타데이터로만 전달
+
+**사용자 동작**:
+1. Chat 페이지 좌측 대화방 목록에서 압축 경계가 있는 세션은 "재개" 버튼 노출
+2. 클릭 시 `POST /sessions/{id}/resume` 호출 → 가장 최근 boundary 이후 메시지 + preserved_context 반환
+3. MessageList에 `CompactBoundaryDivider` 컴포넌트가 표시됨 (접기/펼치기 가능, summary + "N개 메시지 / Xk 토큰 절약" 메타)
+4. 위쪽 압축 메시지는 기본 접힘 — 펼치면 이전 맥락 표시(보존된 부분만)
+
+**제약**:
+- 24h TTL 이내 active 세션만 (BIZ-002). 만료 세션은 향후 archived 별도 조회로 분리
+- 본인(user_id 일치)만 재개 가능
+- 진행 중(streaming) 세션은 409 — 중지(abort, CR-046) 후 재개
+
+**운영 모니터링**:
+- Resume 사용률(=호출 수 / boundary 보유 세션 수)
+- boundary 평균 tokens_saved
+- 압축 빈도 비정상 증가 시 컨텍스트 임계값 검토
+
+---
+
+### 시나리오 M: Stop Hook 검증 게이트 운영 [CR-049]
+
+사용자 정의 검증 hook(예: TodoWrite 미완료 차단, 테스트 FAIL 차단)이 실효성을 갖도록 STOP hook BLOCK 시 루프 재진입이 강제된다.
+
+**동작 흐름**:
+1. 도구 루프 종료 직전 STOP hook이 동기 호출됨 (BIZ-096 게이팅 hook)
+2. hook 결과가 BLOCK이면 BLOCK reason을 새 user 메시지로 주입하고 루프 재진입
+3. 모델은 reason을 보고 보완 작업 수행 → 다시 종료 시도
+4. 동일 BLOCK reason이 한 턴 내 3회 초과 누적되면 강제 종료 + 사용자에게 시스템 메시지로 알림 (BIZ-097)
+
+**Hook 등록 예 (관리자)**:
+- 정책 페이지에서 STOP hook 등록 → script로 TodoWrite 상태 검사
+- 미완료 todo 존재 시 `{ decision: 'BLOCK', reason: 'TODO 미완료: 인증 모듈 테스트' }` 반환
+
+**운영 모니터링**:
+- BLOCK → 재진입 → PASS 전환율(검증 hook 효과 지표)
+- 동일 reason 3회 초과 강제 종료 발생률 — 임계값 조정 후보
+- max_iterations 우선 종료 vs BIZ-097 강제 종료 비율
+
 ---
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.2.0 | 2026-04-22 | CR-054 HTTP Connection 등록 절차 § 3-1 보강 — `type=HTTP` 신설, 인증 4종(API_KEY/BEARER/BASIC/NONE), `value_env` 환경변수 참조 권장, DomainFilterPolicy 연계 체크리스트 |
+| v2.1.0 | 2026-04-16 | CR-049 세션 복원·지침 체계 운영 시나리오 K(테넌트/프로젝트 지침)·L(세션 재개 + Compact Boundary)·M(Stop Hook 검증 게이트) 추가 |
+| v2.0.0 | 2026-04-16 | CR-048 컨텍스트·토큰 효율 운영 항목 추가 — SessionToolRegistry / Tool Result Storage TTL / Adaptive Thinking 설정 |
+| v1.9.0 | 2026-04-16 | CR-043 ClaudeCodeTool 다중계정 운영 시나리오 J 추가 — 호출중 자동 재시도·페일오버·runbook |
+| v1.8.0 | 2026-04-16 | CR-046 채팅 세션 운영 시나리오 I 추가 — 중지·자동 끼어들기·Soft Delete |
 | v1.7.0 | 2026-04-10 | CR-042 독립 실행형 Agent 시나리오 H 추가 (§ 4) |
 | v1.6.0 | 2026-04-10 | CR-041 원격 에이전트 관리 시나리오 G 추가 (§ 4) |
 | v1.5.0 | 2026-04-08 | 에이전트 자율성 도구 4종 추가: ListMcpResourcesTool, ReadMcpResourceTool, RemoteTriggerTool, BriefTool. 세션 브리핑 패널 추가 (CR-038) |

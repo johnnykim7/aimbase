@@ -7,6 +7,7 @@ import com.platform.llm.model.UnifiedMessage;
 import com.platform.orchestrator.ChatRequest;
 import com.platform.orchestrator.ChatResponse;
 import com.platform.orchestrator.OrchestratorEngine;
+import com.platform.session.CancellationRegistry;
 import com.platform.tool.ToolFilterContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,10 +33,28 @@ public class ChatController {
 
     private final OrchestratorEngine orchestrator;
     private final WorkspaceProperties workspaceProperties;
+    private final CancellationRegistry cancellationRegistry;
 
-    public ChatController(OrchestratorEngine orchestrator, WorkspaceProperties workspaceProperties) {
+    public ChatController(OrchestratorEngine orchestrator,
+                          WorkspaceProperties workspaceProperties,
+                          CancellationRegistry cancellationRegistry) {
         this.orchestrator = orchestrator;
         this.workspaceProperties = workspaceProperties;
+        this.cancellationRegistry = cancellationRegistry;
+    }
+
+    /**
+     * CR-046: 진행 중 스트림 중지.
+     * 활성 토큰이 있으면 cancel 플래그를 set → OrchestratorEngine/ToolCallHandler가 다음 체크포인트에서 break.
+     */
+    @PostMapping("/{sessionId}/abort")
+    @Operation(summary = "스트림 중지", description = "진행 중인 SSE 스트림을 즉시 중지한다.")
+    public ApiResponse<Map<String, Object>> abort(@PathVariable String sessionId) {
+        boolean cancelled = cancellationRegistry.cancel(sessionId);
+        if (!cancelled) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "활성 스트림 없음: " + sessionId);
+        }
+        return ApiResponse.ok(Map.of("session_id", sessionId, "aborted", true));
     }
 
     @PostMapping("/completions")
@@ -104,10 +123,13 @@ public class ChatController {
         // CR-045: ThreadLocal은 VT별 독립 → 부모 요청 스레드의 TenantContext를
         // 가상 스레드에 수동 전파해야 Hibernate DataSource 라우팅이 테넌트 DB로 감.
         final String propagatedTenantId = com.platform.tenant.TenantContext.getTenantId();
+        final org.springframework.security.core.context.SecurityContext propagatedSecurityContext =
+                org.springframework.security.core.context.SecurityContextHolder.getContext();
         Thread.ofVirtual().start(() -> {
             if (propagatedTenantId != null) {
                 com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
             }
+            org.springframework.security.core.context.SecurityContextHolder.setContext(propagatedSecurityContext);
             try {
                 orchestrator.chatStream(chatRequest, ev -> {
                     try {
@@ -146,6 +168,7 @@ public class ChatController {
                 emitter.completeWithError(e);
             } finally {
                 com.platform.tenant.TenantContext.clear();
+                org.springframework.security.core.context.SecurityContextHolder.clearContext();
             }
         });
         return emitter;
