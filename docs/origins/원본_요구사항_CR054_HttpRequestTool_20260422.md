@@ -1,7 +1,7 @@
 # 원본 요구사항 — CR-054: Aimbase 플랫폼 공통 HttpRequestTool
 
 **대화 일자**: 2026-04-22
-**관련 CR**: CR-054 (HttpRequestTool), 후속 CR-055 (FlowGuard L2 자동 등록)
+**관련 CR**: CR-054 (Aimbase HttpRequestTool) — 후속 FG L2 자동 등록 워크플로우는 **FlowGuard 레포에서 별도 CR로** 진행 (소비앱 책임)
 **Plan 파일**: `~/.claude/plans/l2-radiant-bachman.md`
 
 ---
@@ -104,8 +104,10 @@ Claude가 "FlowGuard MCP 서버 등록"을 "Aimbase 내부에 FG 전용 MCP 구�
 > **사용자**: 지금 2가지가 섞여 있는데 우선 http client 툴은 별도의 CR로 빼줄수 있나요?
 
 **분리 결과**
-- **CR-054**: Aimbase 플랫폼 공통 HttpRequestTool (본 Plan)
-- **CR-055**: FlowGuard L2 시나리오 자동 등록 워크플로우 (후속)
+- **CR-054** (Aimbase): 플랫폼 공통 HttpRequestTool (본 Plan) — ✅ 완료
+- **FlowGuard 레포 측 별도 CR**: L2 시나리오 자동 등록 워크플로우 — 워크플로우 JSON + 프롬프트는 소비앱(FG) 책임, Aimbase는 인프라만 제공
+
+> **설계 수정 (2026-04-22)**: 초기에는 CR-055로 Aimbase에 FG 워크플로우 seed를 넣으려 했으나, 플랫폼 책임 경계 재검토 결과 워크플로우/프롬프트는 소비앱 영역. Aimbase는 HttpRequestTool + Connection 관리 + `/api/v1/workflows` API만 제공하고, FG는 자기 레포에서 워크플로우 JSON을 관리하며 배포 시 Aimbase API로 등록한다.
 
 CR 번호는 `docs/CR_변경_이력.md` 기준 최신 CR-053 다음으로 발번.
 
@@ -124,7 +126,7 @@ CR 번호는 `docs/CR_변경_이력.md` 기준 최신 CR-053 다음으로 발번
 | 정책 | DomainFilterPolicy 초기 deny-all |
 | 감사 | ToolCallAuditLogger + 헤더 마스킹 |
 | 재시도 | Tool 내부 없음 — 워크플로우 retry 레벨 |
-| 범위 경계 | FG Connection seed는 CR-055에서 |
+| 범위 경계 | FG Connection 실제 등록 / 워크플로우 JSON / 프롬프트는 FlowGuard 레포 별도 CR에서 |
 
 ---
 
@@ -132,12 +134,12 @@ CR 번호는 `docs/CR_변경_이력.md` 기준 최신 CR-053 다음으로 발번
 
 - **feedback_cr_origins** (전역 CLAUDE.md): CR 등록 시 docs/origins/에 대화 원본 저장 → 본 파일
 - **feedback_design_cascade_first**: 기능 추가 전 규모 판단 + CR 확인 → Plan 모드에서 2차례 설계 전환 후 CR-054/055 분리
-- **feedback_proactive_ux_suggestion**: 본 CR은 BE Tool 단독 (FE 영향 없음), 후속 CR-055에서 UI 고려
+- **feedback_proactive_ux_suggestion**: 본 CR은 BE Tool 단독 (FE 영향 없음). FG 워크플로우 실행 UI는 FG 레포에서 관리
 
 ---
 
 ## 후속 작업
 
-1. `docs/CR_변경_이력.md`에 CR-054 등재
-2. HttpRequestTool 구현 착수 (별도 사용자 승인 후)
-3. CR-055 Plan 작성 (다음 세션)
+1. ~~`docs/CR_변경_이력.md`에 CR-054 등재~~ — 완료
+2. ~~HttpRequestTool 구현~~ — 완료 (커밋 6b12dce)
+3. **FlowGuard 레포에서 별도 CR 작성** — L2 자동 등록 워크플로우 JSON + 프롬프트 + Aimbase API 호출 스크립트. Aimbase CR 번호 사용 안 함.

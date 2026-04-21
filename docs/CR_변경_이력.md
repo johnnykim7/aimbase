@@ -49,7 +49,7 @@
 | CR-051 | SSE 스트림 가상 스레드 SecurityContext 전파 — AccessDenied 로그 해소 | 버그수정 | Low | v7.3.1 | ✅ 완료 |
 | CR-052 | SessionStore append-only persist — conversation_sessions 중복키 근본 해소 | 버그수정 | Medium | v7.3.1 | ✅ 완료 |
 | CR-053 | 서브에이전트 UX 완성 — Built-in Agent 프롬프트 고도화 + SSE 라이프사이클 이벤트 + FE Task 블록 렌더 (PRD-310~312, FE-035) | 변경 | Medium | v7.8.0 | 📝 등록 |
-| CR-054 | Aimbase 플랫폼 공통 HttpRequestTool — 범용 REST 호출 Tool + Connection REST_API 타입 + DomainFilterPolicy 통합 | 신규 | High | v7.9.0 | 📝 등록 |
+| CR-054 | Aimbase 플랫폼 공통 HttpRequestTool — 범용 REST 호출 Tool + Connection type=HTTP + 가이드 문서 | 신규 | High | v7.9.0 | ✅ 완료 |
 
 ---
 
@@ -1171,7 +1171,7 @@
 ### CR-054 | Aimbase 플랫폼 공통 HttpRequestTool — 범용 REST 호출 Tool
 - **대상 기능 ID**: PRD-313 (신규 — http_request Tool), BIZ-006(도구 호출 루프) 영향 없음
 - **변경 타입**: 신규
-- **배경**: Aimbase는 임의의 REST API를 호출할 수 있는 **범용 HTTP Tool이 없다**. 외부 시스템 연동이 필요하면 `ClaudeCodeTool`로 Claude CLI를 돌려 우회하거나 도메인 특화 Tool(예: `WebSearchTool`)을 개별 개발해왔는데, 이는 결정론적 호출에 Claude CLI 비용을 지불하는 구조적 결함이다. 직접 계기는 **FlowGuard L2 시나리오 자동 등록 워크플로우(CR-055 예정)** — FG는 순수 REST(+ API Key) 인터페이스만 제공하므로 이를 호출할 공통 수단이 필요. 다만 이 수단은 FG 전용이 아니라 플랫폼 공통 자산으로 설계해야 재사용성이 확보된다.
+- **배경**: Aimbase는 임의의 REST API를 호출할 수 있는 **범용 HTTP Tool이 없다**. 외부 시스템 연동이 필요하면 `ClaudeCodeTool`로 Claude CLI를 돌려 우회하거나 도메인 특화 Tool(예: `WebSearchTool`)을 개별 개발해왔는데, 이는 결정론적 호출에 Claude CLI 비용을 지불하는 구조적 결함이다. 직접 계기는 **FlowGuard 쪽 L2 시나리오 자동 등록 워크플로우**(FG 레포에서 별도 CR로 추진) — FG는 순수 REST(+ API Key) 인터페이스만 제공하므로 이를 호출할 공통 수단이 필요. 다만 이 수단은 FG 전용이 아니라 플랫폼 공통 자산으로 설계해야 재사용성이 확보된다.
 - **변경 내용**:
   1. **HttpRequestTool 신규** (`tool/builtin/HttpRequestTool.java`): GET/POST/PUT/PATCH/DELETE 지원, query/headers/body/timeout_ms 파라미터, Java 21 HttpClient 기반 가상 스레드 실행.
   2. **Connection `REST_API` 타입 추가**: `connections.type` enum에 REST_API 확장. config JSONB에 `baseUrl`, `auth.{type,in,name,value_env,value}`, `healthPath`, `connectTimeoutMs`, `readTimeoutMs`.
@@ -1184,17 +1184,17 @@
   9. **가이드 문서 갱신**: `api-guide.md`에 http_request Tool 섹션, `ops-guide.md`에 REST_API Connection 등록 + DomainFilter 운영 절차.
 - **변경 사유**:
   - 결정론적 REST 호출을 Claude CLI로 우회하는 비용 낭비 제거 (벤치마크 1/3 비용 이점 활용 불가 영역이었음)
-  - FG L2 자동 등록(CR-055) 선행 조건 — MCP는 과설계(LLM 판단 불필요), 결정론적 DAG에 적합한 Tool 필요
+  - FG 레포 측 L2 자동 등록 워크플로우의 선행 조건 — MCP는 과설계(LLM 판단 불필요), 결정론적 DAG에 적합한 Tool 필요. 워크플로우 JSON/프롬프트는 소비앱(FG) 책임, Aimbase는 인프라 제공만.
   - 플랫폼 자산 확충: OMS/WMS/bp-auth 내부 소비앱, 외부 SaaS(Slack/Jira/Notion) 등 모든 REST 연동 기반
 - **기존 부품 재사용**: `ConnectionRepository`, `DomainFilterPolicy`(CR-035), `ToolCallAuditLogger`, `Tool` 인터페이스, `ToolRegistry`, Java 21 `HttpClient` (외부 라이브러리 불필요).
 - **영향 모듈**: `tool/builtin/HttpRequestTool`, `tool/ToolRegistry`, `policy/DomainFilterPolicy`, `repository/ConnectionRepository`(읽기만), `db/migration/master`(connections.type enum 확장)
 - **영향도**: High (신규 플랫폼 공통 Tool, 보안 경계 설정)
 - **영향 범위**: 도구 레지스트리 (BIZ-006 루프 제한은 무영향), 정책 엔진 (DOMAIN_FILTER), 감사 로깅
 - **영향 설계서**: T3-1(데이터 모델 — connections.type enum), T3-2(API 설계 — 신규 Tool), T1-3(비즈니스 규칙 — 필요 시 HTTP 호출 제약 추가)
-- **범위 경계**: FG Connection seed / FG L2 워크플로우 / LLM 프롬프트 / FG 전용 규칙은 **본 CR에서 다루지 않음** → CR-055에서 담당
+- **범위 경계**: FG Connection 실제 등록(운영 데이터) / FG L2 워크플로우 JSON / LLM 프롬프트 / FG 전용 규칙은 **Aimbase에서 다루지 않음** — 소비앱(FlowGuard) 레포에서 별도 CR로 작성하고 Aimbase 기존 API(`/api/v1/workflows`, `/api/v1/connections`, `/api/v1/prompt-templates`)로 등록
 - **요청자**: sykim | **승인자**: sykim (2026-04-22) | **적용 버전**: v7.9.0
 - **변경 일자**: 2026-04-22
-- **상태**: 📝 등록 (2026-04-22). Plan 승인 완료, 구현 착수 대기. 후속 CR-055는 본 CR 완료를 선행 조건으로 함.
+- **상태**: ✅ 완료 (2026-04-22). HttpRequestTool + WireMock 테스트 13 PASS + 가이드 문서 갱신 커밋(6b12dce). 후속 FG 측 L2 자동 등록 워크플로우는 FlowGuard 레포에서 별도 CR로 진행.
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR054_HttpRequestTool_20260422.md`
 - **Plan 파일**: `~/.claude/plans/l2-radiant-bachman.md`
 
