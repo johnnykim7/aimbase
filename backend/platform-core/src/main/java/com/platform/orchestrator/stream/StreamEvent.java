@@ -2,6 +2,7 @@ package com.platform.orchestrator.stream;
 
 import com.platform.llm.model.TokenUsage;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -23,6 +24,16 @@ public sealed interface StreamEvent {
     /** 도구 실행 완료. output은 CR-031 축약 적용 후. */
     record ToolResultEvent(String toolUseId, String output, boolean isError) implements StreamEvent {}
 
-    /** 최종 완료 (usage 포함, null 가능). */
-    record Done(TokenUsage usage) implements StreamEvent {}
+    /**
+     * 최종 완료 (usage 포함, null 가능).
+     * CR-058: citations + ragUsed 확장 — 위젯이 SSE done 이벤트 payload 로 렌더.
+     */
+    record Done(TokenUsage usage,
+                List<Map<String, Object>> citations,
+                Boolean ragUsed) implements StreamEvent {
+        /** 하위 호환 생성자: citations 없이 사용. */
+        public Done(TokenUsage usage) {
+            this(usage, null, null);
+        }
+    }
 }

@@ -231,6 +231,9 @@ public class OrchestratorEngine {
                 ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
 
         // 3-1. RAG 컨텍스트 주입 (Phase 3: ragSourceId 지정 시)
+        // CR-058: buildContextWithCitations 사용 — 위젯 UI에 표시할 citations 메타데이터 동반.
+        List<Map<String, Object>> ragCitations = null;
+        boolean ragUsed = false;
         if (request.ragSourceId() != null && !request.ragSourceId().isBlank()) {
             String userQuery = request.messages().stream()
                     .filter(m -> m.role() == UnifiedMessage.Role.USER)
@@ -241,10 +244,19 @@ public class OrchestratorEngine {
                             .reduce("", String::concat))
                     .orElse("");
             if (!userQuery.isBlank()) {
-                String ragContext = ragService.buildContext(userQuery, request.ragSourceId(), 5);
+                Map<String, Object> ragResult = ragService.buildContextWithCitations(
+                        userQuery, request.ragSourceId(), 5);
+                String ragContext = (String) ragResult.getOrDefault("context", "");
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> citations =
+                        (List<Map<String, Object>>) ragResult.getOrDefault("citations", List.of());
                 if (!ragContext.isBlank()) {
                     trimmedMessages.add(0,
                             UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, ragContext));
+                    ragUsed = true;
+                    if (!citations.isEmpty()) {
+                        ragCitations = citations;
+                    }
                 }
             }
         }
@@ -426,7 +438,9 @@ public class OrchestratorEngine {
                 List.of(),  // actions_executed
                 llmResponse.usage(),
                 llmResponse.costUsd(),
-                guardrailResult
+                guardrailResult,
+                ragCitations,
+                ragUsed ? Boolean.TRUE : null  // ragUsed=false 일 때는 JSON에서 생략
         );
     }
 
@@ -458,6 +472,54 @@ public class OrchestratorEngine {
         List<UnifiedMessage> allMessages = new ArrayList<>(history);
         allMessages.addAll(request.messages());
         List<UnifiedMessage> trimmedMessages = contextWindowManager.trim(allMessages);
+
+        // CR-058: RAG 주입 — 비스트림 경로와 동일 정책. citations 는 Done 이벤트에 실어 전달.
+        final List<Map<String, Object>> streamRagCitations;
+        final boolean streamRagUsed;
+        if (request.ragSourceId() != null && !request.ragSourceId().isBlank()) {
+            String userQuery = request.messages().stream()
+                    .filter(m -> m.role() == UnifiedMessage.Role.USER)
+                    .reduce((first, second) -> second)
+                    .map(m -> m.content().stream()
+                            .filter(b -> b instanceof ContentBlock.Text)
+                            .map(b -> ((ContentBlock.Text) b).text())
+                            .reduce("", String::concat))
+                    .orElse("");
+            if (!userQuery.isBlank()) {
+                Map<String, Object> ragResult = ragService.buildContextWithCitations(
+                        userQuery, request.ragSourceId(), 5);
+                String ragContext = (String) ragResult.getOrDefault("context", "");
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> citations =
+                        (List<Map<String, Object>>) ragResult.getOrDefault("citations", List.of());
+                if (!ragContext.isBlank()) {
+                    trimmedMessages = new ArrayList<>(trimmedMessages);
+                    trimmedMessages.add(0,
+                            UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, ragContext));
+                    streamRagUsed = true;
+                    streamRagCitations = citations.isEmpty() ? null : citations;
+                } else {
+                    streamRagUsed = false;
+                    streamRagCitations = null;
+                }
+            } else {
+                streamRagUsed = false;
+                streamRagCitations = null;
+            }
+        } else {
+            streamRagUsed = false;
+            streamRagCitations = null;
+        }
+
+        // CR-058: Done 이벤트에 citations 를 합쳐 내보내는 decorator.
+        Consumer<com.platform.orchestrator.stream.StreamEvent> streamSinkWithCitations = ev -> {
+            if (ev instanceof com.platform.orchestrator.stream.StreamEvent.Done d) {
+                streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.Done(
+                        d.usage(), streamRagCitations, streamRagUsed ? Boolean.TRUE : null));
+            } else {
+                streamSink.accept(ev);
+            }
+        };
 
         // CR-045: workspacePath 결정 (비스트리밍 경로와 동일)
         String tenantId = TenantContext.getTenantId();
@@ -493,7 +555,7 @@ public class OrchestratorEngine {
                         adapter, resolvedModel, trimmedMessages,
                         streamModelConfig, sessionId, toolRegistry,
                         request.toolFilter(), request.toolChoice(), toolContext,
-                        streamSink, cancelled);
+                        streamSinkWithCitations, cancelled);
             } else {
                 // 도구 비활성/없음 → 단순 스트리밍
                 LLMRequest llmRequest = new LLMRequest(
@@ -518,10 +580,10 @@ public class OrchestratorEngine {
                     }
                     if (chunk.delta() == null) return;
                     if ("thinking".equals(chunk.type())) {
-                        streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.ThinkingDelta(chunk.delta()));
+                        streamSinkWithCitations.accept(new com.platform.orchestrator.stream.StreamEvent.ThinkingDelta(chunk.delta()));
                     } else {
                         textBuf.append(chunk.delta());
-                        streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.TextDelta(chunk.delta()));
+                        streamSinkWithCitations.accept(new com.platform.orchestrator.stream.StreamEvent.TextDelta(chunk.delta()));
                     }
                 });
                 try {
@@ -537,7 +599,7 @@ public class OrchestratorEngine {
                         List.of(new ContentBlock.Text(finalText)),
                         List.of(), usageHolder[0] != null ? usageHolder[0] : new TokenUsage(0, 0),
                         LLMResponse.FinishReason.END, 0, 0);
-                streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.Done(usageHolder[0]));
+                streamSinkWithCitations.accept(new com.platform.orchestrator.stream.StreamEvent.Done(usageHolder[0]));
             }
 
             // 세션 저장 + 사용량 로그

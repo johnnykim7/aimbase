@@ -82,6 +82,7 @@ public class VectorSearcher {
 
             return results.stream()
                     .map(r -> new RetrievedChunk(
+                            extractChunkId(r),
                             (String) r.getOrDefault("content", ""),
                             r.containsKey("score") ? ((Number) r.get("score")).doubleValue() : 0.0,
                             r.get("metadata") instanceof Map ? (Map<String, Object>) r.get("metadata") : Map.of(),
@@ -103,9 +104,31 @@ public class VectorSearcher {
                     Map<String, Object> meta = entity.getMetadata();
                     double score = meta != null && meta.containsKey("_score")
                             ? ((Number) meta.get("_score")).doubleValue() : 0.0;
-                    return new RetrievedChunk(entity.getContent(), score, meta, entity.getSourceId());
+                    return new RetrievedChunk(
+                            entity.getId() != null ? entity.getId().toString() : null,
+                            entity.getContent(), score, meta, entity.getSourceId());
                 })
                 .toList();
+    }
+
+    /**
+     * CR-058: MCP 결과 맵에서 chunkId(=embedding row id) 후보를 뽑는다.
+     * 사이드카 응답에 chunk_id / id / _id 중 하나가 있을 것으로 기대.
+     */
+    @SuppressWarnings("unchecked")
+    private static String extractChunkId(Map<String, Object> r) {
+        for (String key : new String[]{"chunk_id", "id", "_id"}) {
+            Object v = r.get(key);
+            if (v != null) return v.toString();
+        }
+        Object meta = r.get("metadata");
+        if (meta instanceof Map<?, ?> m) {
+            for (String key : new String[]{"chunk_id", "id"}) {
+                Object v = ((Map<String, Object>) m).get(key);
+                if (v != null) return v.toString();
+            }
+        }
+        return null;
     }
 
     /**
@@ -146,7 +169,7 @@ public class VectorSearcher {
                                     : 0.0;
                     Map<String, Object> meta = r.get("metadata") instanceof Map
                             ? (Map<String, Object>) r.get("metadata") : Map.of();
-                    return new RetrievedChunk(content, score, meta, sourceId);
+                    return new RetrievedChunk(extractChunkId(r), content, score, meta, sourceId);
                 })
                 .toList();
     }
@@ -171,6 +194,7 @@ public class VectorSearcher {
                             ? ((Number) meta.get("_score")).doubleValue()
                             : 0.0;
                     return new RetrievedChunk(
+                            entity.getId() != null ? entity.getId().toString() : null,
                             entity.getContent(),
                             score,
                             meta,

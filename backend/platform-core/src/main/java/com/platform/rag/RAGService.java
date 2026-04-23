@@ -1,7 +1,9 @@
 package com.platform.rag;
 
+import com.platform.domain.KnowledgeSourceEntity;
 import com.platform.domain.RetrievalConfigEntity;
 import com.platform.rag.model.RetrievedChunk;
+import com.platform.repository.KnowledgeSourceRepository;
 import com.platform.repository.RetrievalConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,15 +28,18 @@ public class RAGService {
     private final RetrievalConfigRepository retrievalConfigRepository;
     private final MCPRagClient mcpRagClient;
     private final com.platform.service.PromptTemplateService promptTemplateService;
+    private final KnowledgeSourceRepository knowledgeSourceRepository;
 
     public RAGService(VectorSearcher vectorSearcher,
                       RetrievalConfigRepository retrievalConfigRepository,
                       MCPRagClient mcpRagClient,
-                      com.platform.service.PromptTemplateService promptTemplateService) {
+                      com.platform.service.PromptTemplateService promptTemplateService,
+                      KnowledgeSourceRepository knowledgeSourceRepository) {
         this.vectorSearcher = vectorSearcher;
         this.retrievalConfigRepository = retrievalConfigRepository;
         this.mcpRagClient = mcpRagClient;
         this.promptTemplateService = promptTemplateService;
+        this.knowledgeSourceRepository = knowledgeSourceRepository;
     }
 
     /**
@@ -211,31 +216,107 @@ public class RAGService {
     }
 
     /**
-     * PRD-125: 인용 번호 포함 컨텍스트 빌드.
-     * [1][2] 형태의 인라인 인용과 citations 메타데이터를 함께 반환.
+     * PRD-125 / CR-058: 인용 번호 포함 컨텍스트 빌드.
      *
-     * @return {context: String, citations: List<Map>}
+     * <p>검색된 청크를 직접 사용해 {@code context} 문자열(LLM system prompt용)과
+     * {@code citations} 메타데이터(UI용)를 함께 반환한다. 기존 시그니처는 유지하며
+     * 포맷만 CR-058 위젯 스펙({@code chunk_id, document_name, score, content_preview,
+     * page_number}) 으로 확장했다.
+     *
+     * @return {context: String, citations: List&lt;Map&gt;}
      */
     public Map<String, Object> buildContextWithCitations(String query, String sourceId, int topK) {
-        String context = buildContext(query, sourceId, topK);
+        // 1) 검색 (buildContext 와 동일한 설정 해석 + 검색 로직을 최소 재사용)
+        RetrievalConfigEntity config = resolveConfig(sourceId);
+        int k;
+        java.math.BigDecimal threshold = DEFAULT_SIMILARITY_THRESHOLD;
+        if (config != null) {
+            k = config.getTopK();
+            if (config.getSimilarityThreshold() != null) threshold = config.getSimilarityThreshold();
+        } else {
+            k = topK > 0 ? topK : DEFAULT_TOP_K;
+        }
 
-        // citations 메타데이터 구성 (BIZ-028)
-        List<Map<String, Object>> citations = new ArrayList<>();
-        // 기존 buildContext가 [1] [2] 형식으로 포함하므로 파싱
-        String[] lines = context.split("\n");
-        int citationIndex = 0;
-        for (String line : lines) {
-            if (line.startsWith("[") && line.contains("]")) {
-                citationIndex++;
-                citations.add(Map.of(
-                        "index", citationIndex,
-                        "source_id", sourceId,
-                        "excerpt", line.length() > 100 ? line.substring(0, 100) + "..." : line
-                ));
+        String searchType = config != null ? config.getSearchType() : null;
+        List<RetrievedChunk> chunks = "parent_child".equals(searchType)
+                ? vectorSearcher.searchParentChild(query, sourceId, k)
+                : vectorSearcher.search(query, sourceId, k);
+
+        if (threshold.compareTo(java.math.BigDecimal.ZERO) > 0) {
+            java.math.BigDecimal t = threshold;
+            chunks = chunks.stream()
+                    .filter(c -> java.math.BigDecimal.valueOf(c.score()).compareTo(t) >= 0)
+                    .toList();
+        }
+
+        // 2) 문서명 단일 조회 (sourceId → name). 존재하지 않으면 sourceId 자체를 fallback.
+        String safeSourceId = sourceId != null ? sourceId : "";
+        String documentName = knowledgeSourceRepository != null && !safeSourceId.isEmpty()
+                ? knowledgeSourceRepository.findById(safeSourceId)
+                    .map(KnowledgeSourceEntity::getName)
+                    .orElse(safeSourceId)
+                : safeSourceId;
+
+        // 3) LLM 시스템 프롬프트용 컨텍스트 문자열 조립
+        StringBuilder sb = new StringBuilder();
+        if (!chunks.isEmpty()) {
+            String contextTemplate = config != null ? config.getContextTemplate() : null;
+            if (contextTemplate != null && !contextTemplate.isBlank()) {
+                sb.append(contextTemplate).append("\n\n");
+            } else {
+                String ragDefault = promptTemplateService.getTemplate("rag.default.system");
+                if (ragDefault != null) {
+                    sb.append(ragDefault).append("\n\n");
+                }
             }
+            sb.append("## 참고 문서\n\n");
+            for (int i = 0; i < chunks.size(); i++) {
+                RetrievedChunk c = chunks.get(i);
+                sb.append("[").append(i + 1).append("] ")
+                  .append(c.content())
+                  .append("\n(출처: ").append(c.sourceId())
+                  .append(String.format(", 유사도: %.3f)", c.score()))
+                  .append("\n\n");
+            }
+        }
+        String context = sb.toString().strip();
+
+        // 4) citations 메타데이터 (위젯 렌더 입력)
+        List<Map<String, Object>> citations = new ArrayList<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            RetrievedChunk c = chunks.get(i);
+            Map<String, Object> cit = new LinkedHashMap<>();
+            cit.put("index", i + 1);
+            cit.put("chunk_id", c.chunkId());
+            cit.put("source_id", c.sourceId());
+            cit.put("document_name", documentName);
+            cit.put("score", c.score());
+            cit.put("content_preview", preview(c.content(), 200));
+            Integer page = extractPageNumber(c.metadata());
+            if (page != null) cit.put("page_number", page);
+            citations.add(cit);
         }
 
         return Map.of("context", context, "citations", citations);
+    }
+
+    private static String preview(String content, int max) {
+        if (content == null) return "";
+        String normalized = content.strip().replaceAll("\\s+", " ");
+        if (normalized.length() <= max) return normalized;
+        return normalized.substring(0, max) + "…";
+    }
+
+    private static Integer extractPageNumber(Map<String, Object> metadata) {
+        if (metadata == null) return null;
+        for (String key : new String[]{"page_number", "page", "pageNo"}) {
+            Object v = metadata.get(key);
+            if (v instanceof Number n) return n.intValue();
+            if (v instanceof String s) {
+                try { return Integer.parseInt(s.trim()); } catch (NumberFormatException ignored) {}
+            }
+        }
+        return null;
     }
 
     /**

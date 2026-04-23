@@ -122,6 +122,41 @@ public class EmbeddingRepository {
     }
 
     /**
+     * CR-058: 단일 청크 조회 (위젯 원문 미리보기).
+     * sourceId 와 함께 조회하여 테넌트·소스 교차 접근을 방지한다.
+     * parent_id 가 있으면 parent 의 content 도 함께 포함해 반환한다.
+     */
+    public java.util.Optional<ChunkDetail> findChunkDetail(String sourceId, UUID chunkId) {
+        List<ChunkDetail> results = jdbc.query(
+                """
+                SELECT c.id, c.source_id, c.document_id, c.chunk_index,
+                       c.content, c.metadata, c.parent_id,
+                       p.content AS parent_content
+                FROM embeddings c
+                LEFT JOIN embeddings p ON p.id::text = c.parent_id
+                WHERE c.source_id = ? AND c.id = ?
+                """,
+                (rs, rn) -> new ChunkDetail(
+                        UUID.fromString(rs.getString("id")),
+                        rs.getString("source_id"),
+                        rs.getString("document_id"),
+                        rs.getInt("chunk_index"),
+                        rs.getString("content"),
+                        fromJson(rs.getString("metadata")),
+                        rs.getString("parent_id"),
+                        rs.getString("parent_content")
+                ),
+                sourceId, chunkId
+        );
+        return results.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(results.get(0));
+    }
+
+    /** CR-058: 단일 청크 조회 결과. */
+    public record ChunkDetail(UUID id, String sourceId, String documentId, Integer chunkIndex,
+                              String content, Map<String, Object> metadata,
+                              String parentId, String parentContent) {}
+
+    /**
      * Parent-Child 검색: child 청크로 유사도 검색 후, 매칭된 child의 parent 전체 내용 반환.
      * child(parent_id IS NOT NULL)에서 유사도 매칭 → parent(parent_id IS NULL) content를 JOIN.
      */

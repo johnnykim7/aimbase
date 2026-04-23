@@ -18,6 +18,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -359,6 +360,54 @@ public class KnowledgeController {
             String sourceId,
             Integer topK
     ) {}
+
+    /**
+     * CR-058: 단일 청크 원문 조회 — 위젯 citation 원문 미리보기.
+     * sourceId 와 함께 조회하므로 타 소스의 청크 ID 를 넣어도 404.
+     * 테넌트 격리는 TenantContext → DataSource 라우팅으로 자동.
+     */
+    @GetMapping("/{sourceId}/chunks/{chunkId}")
+    @PreAuthorize("hasAuthority('SCOPE_rag:read') or isAuthenticated()")
+    @Operation(summary = "청크 원문 조회", description = "RAG citation 의 원문 + 메타데이터 + (존재 시) parent 청크 내용 반환.")
+    public ApiResponse<Map<String, Object>> getChunk(
+            @PathVariable String sourceId,
+            @PathVariable String chunkId
+    ) {
+        java.util.UUID chunkUuid;
+        try {
+            chunkUuid = java.util.UUID.fromString(chunkId);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "chunkId 는 UUID 여야 합니다: " + chunkId);
+        }
+
+        var source = knowledgeSourceRepository.findById(sourceId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Source not found: " + sourceId));
+
+        var detail = embeddingRepository.findChunkDetail(sourceId, chunkUuid)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Chunk not found in source '" + sourceId + "': " + chunkId));
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("chunk_id", detail.id().toString());
+        body.put("source_id", detail.sourceId());
+        body.put("document_id", detail.documentId());
+        body.put("document_name", source.getName());
+        body.put("chunk_index", detail.chunkIndex());
+        body.put("content", detail.content());
+        body.put("metadata", detail.metadata());
+        if (detail.parentId() != null) {
+            body.put("parent_id", detail.parentId());
+            body.put("parent_content", detail.parentContent());
+        }
+        // 메타데이터에 page_number 가 담겨 있으면 최상위 필드로도 노출 (위젯 편의)
+        Object page = detail.metadata() != null ? detail.metadata().get("page_number") : null;
+        if (page == null && detail.metadata() != null) page = detail.metadata().get("page");
+        if (page != null) body.put("page_number", page);
+
+        return ApiResponse.ok(body);
+    }
 
     /** CR-022: SecurityContext에서 현재 사용자 ID 추출. API Key 인증(system-*)은 users FK 없으므로 null 반환 */
     private String currentUserId() {
