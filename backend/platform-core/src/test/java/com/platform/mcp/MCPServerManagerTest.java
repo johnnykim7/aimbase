@@ -16,8 +16,6 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -51,9 +49,23 @@ class MCPServerManagerTest {
     }
 
     // ── connectAutoStartServers ─────────────────────────────
+    // 구현은 tenantDataSourceManager.getAllCachedDataSources() 로 tenant 목록을 순회한 후
+    // 각 tenant context 에서 mcpServerRepository.findAll() 을 호출한다.
+
+    @Test
+    void connectAutoStartServers_noTenants_shouldBeNoop() {
+        when(tenantDataSourceManager.getAllCachedDataSources()).thenReturn(Map.of());
+
+        manager.connectAutoStartServers();
+
+        // 활성 tenant 가 없으면 repository 접근도 없어야 함
+        verify(mcpServerRepository, never()).findAll();
+    }
 
     @Test
     void connectAutoStartServers_noServers_shouldLogAndReturn() {
+        when(tenantDataSourceManager.getAllCachedDataSources())
+                .thenReturn(Map.of("tenant-1", mock(com.zaxxer.hikari.HikariDataSource.class)));
         when(mcpServerRepository.findAll()).thenReturn(List.of());
 
         manager.connectAutoStartServers();
@@ -64,10 +76,14 @@ class MCPServerManagerTest {
 
     @Test
     void connectAutoStartServers_dbException_shouldNotCrash() {
+        when(tenantDataSourceManager.getAllCachedDataSources())
+                .thenReturn(Map.of("tenant-1", mock(com.zaxxer.hikari.HikariDataSource.class)));
         when(mcpServerRepository.findAll()).thenThrow(new RuntimeException("DB not ready"));
 
-        // 앱 시작 시 실패해도 non-fatal
+        // 앱 시작 시 실패해도 non-fatal — tenant 루프 내에서 예외 포획
         manager.connectAutoStartServers();
+
+        verify(mcpServerRepository).findAll();
     }
 
     // ── discover ────────────────────────────────────────────
