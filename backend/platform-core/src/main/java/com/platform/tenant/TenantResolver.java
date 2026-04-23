@@ -117,9 +117,15 @@ public class TenantResolver implements Filter {
             return queryTenantId.trim();
         }
 
+        // /api/v1/auth/login은 이메일로 tenant를 자동 resolve하므로
+        // 서브도메인 fallback을 적용하면 안 됨 (예: IP 접속 시 '59.8.160.12' → '59'로 오판)
+        if ("/api/v1/auth/login".equals(request.getRequestURI())) {
+            return null;
+        }
+
         // 3. 서브도메인 (예: acme.platform.com)
         String host = request.getServerName();
-        if (host != null && host.contains(".")) {
+        if (host != null && host.contains(".") && !isIpAddress(host)) {
             String subdomain = host.split("\\.")[0];
             if (!subdomain.equals("localhost") && !subdomain.equals("www") && !subdomain.equals("api")) {
                 return subdomain;
@@ -131,5 +137,11 @@ public class TenantResolver implements Filter {
         // if (authHeader != null && authHeader.startsWith("Bearer ")) { ... }
 
         return null;
+    }
+
+    private static final Pattern IPV4_PATTERN = Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
+
+    private boolean isIpAddress(String host) {
+        return IPV4_PATTERN.matcher(host).matches();
     }
 }

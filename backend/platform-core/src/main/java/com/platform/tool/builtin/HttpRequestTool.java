@@ -51,9 +51,15 @@ public class HttpRequestTool implements EnhancedToolExecutor {
     private static final int MAX_TIMEOUT_MS = 120_000;
     private static final int AUDIT_BODY_SUMMARY_LIMIT = 1024;
 
-    private final ConnectionRepository connectionRepository;
-    private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private ConnectionRepository connectionRepository;
+    private ObjectMapper objectMapper;
+    private HttpClient httpClient;
+
+    protected HttpRequestTool() {
+        this.connectionRepository = null;
+        this.objectMapper = null;
+        this.httpClient = null;
+    }
 
     public HttpRequestTool(ConnectionRepository connectionRepository, ObjectMapper objectMapper) {
         this(connectionRepository, objectMapper, HttpClient.newBuilder()
