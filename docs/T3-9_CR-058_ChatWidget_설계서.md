@@ -3,7 +3,7 @@
 **문서 번호**: T3-9
 **관련 CR**: CR-058
 **작성일**: 2026-04-24
-**상태**: Sprint 52 완료 (서버 Phase 1~3 + E2E 수동 검증 + 델타 5건 § 9 에 반영). Sprint 53 (프론트) 대기.
+**상태**: ✅ Sprint 52 + Sprint 53 완료 (2026-04-24). 서버 3 Phase + 프론트 축소 MVP(Web Component + UMD 번들 17KB) + 샘플 BFF + 샘플 consumer HTML. 후속 CR-059~062 로 분리.
 **원본 요구사항**: [docs/origins/원본_요구사항_CR058_ChatWidget_20260424.md](origins/원본_요구사항_CR058_ChatWidget_20260424.md)
 
 ---
