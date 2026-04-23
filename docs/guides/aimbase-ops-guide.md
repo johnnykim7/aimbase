@@ -148,18 +148,23 @@ CR-058 Sprint 52 는 `db/migration/tenant/V54__cr058_workflow_parent_run.sql` �
 psql -U platform -h <master-host> -p 5432 aimbase_master \
   -tAc "SELECT id, db_name FROM tenants WHERE status='active';"
 
-# 각 테넌트 DB 에 V54 적용
+# 각 테넌트 DB 에 V54 적용 (SQL 본문은 IF NOT EXISTS 가 걸려 있어 재실행 안전)
 for TENANT_DB in aimbase_tenant_dev aimbase_tenant_<other>; do
   psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" \
     < backend/platform-core/src/main/resources/db/migration/tenant/V54__cr058_workflow_parent_run.sql
-  # flyway 이력에도 반영
+  # flyway 이력 반영 — 동일 version 중복 INSERT 방지
   psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" -c "
     INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)
     SELECT COALESCE(MAX(installed_rank),0)+1, '54', 'cr058 workflow parent run', 'SQL',
            'V54__cr058_workflow_parent_run.sql', 0, 'ops-deploy', 0, true
-    FROM flyway_schema_history;"
+    FROM flyway_schema_history
+    WHERE NOT EXISTS (SELECT 1 FROM flyway_schema_history WHERE version='54');"
 done
 ```
+
+> **중요**: `flyway_schema_history` 에는 version 유니크 제약이 없어 동일 version 을
+> 두 번 INSERT 하면 중복 row 가 생긴다. 위 WHERE NOT EXISTS 가드는 필수다. 재실행
+> 안전성을 기대한다면 `psql -f` 와 조합한 스크립트로 감싸 한 번에 처리할 것을 권장.
 
 > 신규 온보딩하는 테넌트에는 `TenantOnboardingService` 가 자동으로 최신까지 migrate 하므로 별도 조치 불필요. 구조적 개선(기동 시점 자동 재migrate) 은 별도 CR 후보.
 
