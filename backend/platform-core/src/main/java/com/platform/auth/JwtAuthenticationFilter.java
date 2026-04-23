@@ -4,6 +4,7 @@ import com.platform.domain.RoleEntity;
 import com.platform.domain.UserEntity;
 import com.platform.repository.RoleRepository;
 import com.platform.repository.UserRepository;
+import com.platform.tenant.TenantContext;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -12,11 +13,15 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -46,12 +51,29 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
 
         String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith(BEARER_PREFIX)) {
+        String token = null;
+        if (header != null && header.startsWith(BEARER_PREFIX)) {
+            token = header.substring(BEARER_PREFIX.length());
+        } else {
+            // CR-058: EventSource 는 커스텀 헤더 불가 → ?access_token= 쿼리 폴백.
+            // 단, access 토큰은 로그 유출 리스크로 헤더 전용 유지 — widget 토큰만 허용.
+            String queryToken = request.getParameter("access_token");
+            if (queryToken != null && jwtProvider.validateToken(queryToken)) {
+                try {
+                    Claims probe = jwtProvider.extractClaims(queryToken);
+                    if ("widget".equals(probe.get("type", String.class))) {
+                        token = queryToken;
+                    }
+                } catch (Exception ignored) {
+                    // fall through
+                }
+            }
+        }
+
+        if (token == null) {
             filterChain.doFilter(request, response);
             return;
         }
-
-        String token = header.substring(BEARER_PREFIX.length());
         if (!jwtProvider.validateToken(token)) {
             filterChain.doFilter(request, response);
             return;
@@ -60,6 +82,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             Claims claims = jwtProvider.extractClaims(token);
             String tokenType = claims.get("type", String.class);
+
+            // CR-058: widget 토큰 분기
+            if ("widget".equals(tokenType)) {
+                authenticateWidget(claims, request, response);
+                filterChain.doFilter(request, response);
+                return;
+            }
+
             if (!"access".equals(tokenType)) {
                 filterChain.doFilter(request, response);
                 return;
@@ -104,5 +134,47 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * CR-058: 위젯 토큰 인증.
+     * - origin claim 과 요청 Origin 헤더 대조 (헤더 없으면 통과 — 서버간 테스트 허용)
+     * - scopes claim 을 GrantedAuthority("SCOPE_*") 로 매핑
+     * - TenantContext 설정 (TenantResolver 가 설정 못 했을 경우 대비)
+     */
+    private void authenticateWidget(Claims claims,
+                                    HttpServletRequest request,
+                                    HttpServletResponse response) {
+        String originClaim = claims.get("origin", String.class);
+        String requestOrigin = request.getHeader("Origin");
+        if (requestOrigin != null && originClaim != null && !requestOrigin.equals(originClaim)) {
+            log.warn("Widget token origin mismatch — claim='{}', request='{}'", originClaim, requestOrigin);
+            return;
+        }
+
+        String tenantId = claims.get("tenant_id", String.class);
+        if (tenantId != null && !TenantContext.hasTenant()) {
+            TenantContext.setTenantId(tenantId);
+        }
+
+        @SuppressWarnings("unchecked")
+        List<String> scopes = claims.get("scopes", List.class);
+        List<GrantedAuthority> authorities = new ArrayList<>();
+        if (scopes != null) {
+            for (String s : scopes) {
+                authorities.add(new SimpleGrantedAuthority("SCOPE_" + s));
+            }
+        }
+
+        String userRef = claims.get("user_ref", String.class);
+        String subject = claims.getSubject();
+        String principalId = userRef != null ? userRef : (subject != null ? subject : "widget");
+        UserPrincipal principal = new UserPrincipal(
+                principalId, principalId, tenantId, "WIDGET", Map.of());
+
+        var authentication = new UsernamePasswordAuthenticationToken(
+                principal, null, authorities);
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
     }
 }

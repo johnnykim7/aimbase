@@ -15,6 +15,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -48,6 +49,7 @@ public class ChatController {
      * 활성 토큰이 있으면 cancel 플래그를 set → OrchestratorEngine/ToolCallHandler가 다음 체크포인트에서 break.
      */
     @PostMapping("/{sessionId}/abort")
+    @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     @Operation(summary = "스트림 중지", description = "진행 중인 SSE 스트림을 즉시 중지한다.")
     public ApiResponse<Map<String, Object>> abort(@PathVariable String sessionId) {
         boolean cancelled = cancellationRegistry.cancel(sessionId);
@@ -58,6 +60,7 @@ public class ChatController {
     }
 
     @PostMapping("/completions")
+    @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     @Operation(summary = "채팅 완성 요청", description = "LLM 모델에 메시지를 전송하고 응답을 받는다. stream=true이면 SSE로 응답.")
     public Object completions(@Valid @RequestBody ChatCompletionRequest request) {
         // CR-045 L0: working_directory 화이트리스트 조기 차단 (400)
@@ -154,9 +157,18 @@ public class ChatController {
                                                 "output", r.output() != null ? r.output() : "",
                                                 "is_error", r.isError())));
                             case com.platform.orchestrator.stream.StreamEvent.Done d -> {
+                                // CR-058: citations + rag_used 를 done payload 에 병합.
+                                Map<String, Object> donePayload = new HashMap<>();
+                                donePayload.put("done", true);
+                                if (d.citations() != null && !d.citations().isEmpty()) {
+                                    donePayload.put("citations", d.citations());
+                                }
+                                if (Boolean.TRUE.equals(d.ragUsed())) {
+                                    donePayload.put("rag_used", true);
+                                }
                                 emitter.send(SseEmitter.event()
                                         .name("done")
-                                        .data(Map.of("done", true)));
+                                        .data(donePayload));
                                 emitter.complete();
                             }
                         }

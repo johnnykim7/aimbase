@@ -23,7 +23,7 @@ public class PlatformSettingsService {
     private static final Logger log = LoggerFactory.getLogger(PlatformSettingsService.class);
     private static final long CACHE_TTL_MS = 5 * 60 * 1000L; // 5분
 
-    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction");
+    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget");
 
     private final GlobalConfigRepository configRepository;
     private final AuditLogger auditLogger;
@@ -84,6 +84,20 @@ public class PlatformSettingsService {
             log.warn("Invalid double for key '{}': '{}', using default {}", key, value, defaultValue);
             return defaultValue;
         }
+    }
+
+    /**
+     * CSV 리스트 설정값 조회. 공백은 trim, 빈 항목은 제외.
+     */
+    public List<String> getStringList(String key, List<String> defaultValue) {
+        String value = getString(key, null);
+        if (value == null || value.isBlank()) return defaultValue;
+        List<String> result = new ArrayList<>();
+        for (String part : value.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) result.add(trimmed);
+        }
+        return result.isEmpty() ? defaultValue : result;
     }
 
     /**

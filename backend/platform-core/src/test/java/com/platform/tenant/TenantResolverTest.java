@@ -157,4 +157,35 @@ class TenantResolverTest {
         // finally에서 반드시 clear
         assertThat(TenantContext.getTenantId()).isNull();
     }
+
+    /**
+     * CR-058: CORS preflight(OPTIONS) 는 커스텀 헤더(X-Tenant-Id)를 포함하지 않는다.
+     * Tenant 헤더 강제 검사를 건너뛰고 즉시 체인 위임해야 Spring CORS 가 동작한다.
+     */
+    @Test
+    void doFilter_optionsRequest_shouldBypassTenantCheck() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setMethod("OPTIONS");
+        request.setRequestURI("/api/v1/chat/completions");
+        // X-Tenant-Id 헤더 없음 — 기존 로직이면 400, OPTIONS 분기로 통과해야 한다
+
+        resolver.doFilter(request, response, chain);
+
+        // 체인 전파 + 에러 응답 없음
+        verify(chain).doFilter(request, response);
+        assertThat(response.getStatus()).isEqualTo(200); // MockHttpServletResponse 기본값
+        assertThat(TenantContext.getTenantId()).isNull();
+    }
+
+    @Test
+    void doFilter_optionsRequestOnTenantRequiredPath_shouldNotReturn400() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setMethod("OPTIONS");
+        request.setRequestURI("/api/v1/workflows/runs/abc/subscribe");
+
+        resolver.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        assertThat(response.getStatus()).isNotEqualTo(400);
+    }
 }

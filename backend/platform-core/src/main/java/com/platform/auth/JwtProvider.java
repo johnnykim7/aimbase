@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -46,6 +48,30 @@ public class JwtProvider {
                 ))
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + accessExpirationMs))
+                .signWith(key)
+                .compact();
+    }
+
+    /**
+     * CR-058: 위젯 임베드용 단기 토큰.
+     * type=widget 으로 access 토큰과 구분된다. 서명 시크릿은 동일.
+     * scope 는 JwtAuthenticationFilter 가 GrantedAuthority("SCOPE_*") 로 매핑한다.
+     */
+    public String generateWidgetToken(String tenantId, String projectId, String userRef,
+                                      List<String> scopes, String origin, long ttlSeconds) {
+        Date now = new Date();
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("tenant_id", tenantId);
+        if (projectId != null) claims.put("project_id", projectId);
+        if (userRef != null) claims.put("user_ref", userRef);
+        claims.put("scopes", scopes);
+        if (origin != null) claims.put("origin", origin);
+        claims.put("type", "widget");
+        return Jwts.builder()
+                .subject(userRef != null ? userRef : "widget")
+                .claims(claims)
+                .issuedAt(now)
+                .expiration(new Date(now.getTime() + ttlSeconds * 1000L))
                 .signWith(key)
                 .compact();
     }

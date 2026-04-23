@@ -48,6 +48,13 @@ public class TenantResolver implements Filter {
         HttpServletResponse httpResponse = (HttpServletResponse) response;
         String path = httpRequest.getRequestURI();
 
+        // CR-058: CORS preflight(OPTIONS)는 커스텀 헤더를 가지지 않는다.
+        // Tenant 헤더 검사 전에 Spring CORS 처리로 위임한다.
+        if ("OPTIONS".equalsIgnoreCase(httpRequest.getMethod())) {
+            chain.doFilter(request, response);
+            return;
+        }
+
         try {
             if (path.startsWith(PLATFORM_API_PREFIX)) {
                 // 슈퍼어드민 API → Master DB만 사용
