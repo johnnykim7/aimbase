@@ -2,6 +2,8 @@
 
 Aimbase Chat Widget — **Web Component** 형태로 소비앱 브라우저에 채팅 + 워크플로우 실행 가시화 + RAG 출처 카드를 한 줄 삽입.
 
+> 📖 **소비앱 개발자는 먼저 [통합 가이드](../../docs/guides/embed-chat-widget.md)(또는 공개 URL `https://aimbase.../widget/v1/`)를 읽으세요.** 관리자 세팅 → BFF 구현 → 브라우저 삽입 → 트러블슈팅이 한 문서에 순서대로 있습니다. 이 README 는 위젯 패키지 자체의 개발자(기여자) 문서입니다.
+
 ## 설치
 
 ### CDN / `<script>` 방식 (가장 간단)

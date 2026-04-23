@@ -1289,6 +1289,8 @@
 - **상태**: ✅ **완료 (Sprint 52 + Sprint 53, 2026-04-24)**.
   - **Sprint 52 (서버)**: Phase 1~3 구현 + 신규 파일 17개(프로덕션 10 + 테스트 7) + Flyway 2개(V17 master, V54 tenant) + 신규 엔드포인트 3개. 단위 테스트 50건 추가. MCPServerManagerTest 사전 실패 2건 동시 해소하여 **회귀 497/497 PASS**. curl E2E 8시나리오 전체 PASS.
   - **Sprint 53 (프론트 축소 MVP)**: `packages/chat-widget-embed/` 신규 — Web Component `<aimbase-chat>` + UMD/ESM 듀얼 번들. token-store (만료 자동 갱신) + sse-parser (fetch 기반) + chat/workflow client + Shadow DOM 렌더러 (3 display mode: bubble/inline/panel) + Citation 원문 패널 + 워크플로우 진행 트리. 빌드 산출물: UMD **17KB** minified / ESM 25KB / .d.ts 4KB. 샘플 BFF (Node 내장 http, 외부 의존 0) + 샘플 consumer HTML 포함.
+  - **소비앱 공개 배포 경로**: Aimbase 서버가 `/widget/v1/*` 경로를 **인증 없이 정적 서빙** (SecurityConfig permitAll + WebMvcConfigurer 매핑 + 30일 캐시 + Gradle copyWidgetBundle 태스크). 소비앱은 `<script src="https://aimbase.../widget/v1/aimbase-chat.umd.global.js">` 로 CDN 처럼 직접 참조하거나 `curl -O` 로 다운받아 자체 호스팅 가능. 공개 리소스 5종(UMD/ESM/.d.ts/index.html/sample-bff/server.js).
+  - **통합 가이드 신규**: `docs/guides/embed-chat-widget.md` — 관리자 세팅 → BFF 구현 → 브라우저 삽입 → 트러블슈팅을 한 문서에 담은 소비앱 개발자 진입점. 같은 내용을 HTML 로 변환한 `widget/v1/index.html` 도 공개 서빙.
   - 델타 5건은 T3-9 § 9 에 기록(S3-2 스킵 / snake_case 바인딩 / OPTIONS preflight / Tenant Flyway 자동 적용 부재 / scope gate 느슨함).
   - 후속 분리: CR-059(Vue/Svelte 래퍼), CR-060(STT), CR-061(파일 업로드), CR-062(CDN 배포 인프라).
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR058_ChatWidget_20260424.md`

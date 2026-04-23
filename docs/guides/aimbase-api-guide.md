@@ -1120,6 +1120,15 @@ GET /api/v1/prompt-templates/preview?tenantId=...&projectId=...
 
 ## 17. 임베드 위젯 (Chat Widget) [CR-058]
 
+> 📖 **소비앱 개발자는 먼저 [통합 가이드](embed-chat-widget.md) (또는 공개 URL `https://aimbase.../widget/v1/`)를 읽으세요.** 이 절은 API 엔드포인트 레퍼런스입니다.
+>
+> **공개 서빙 리소스** (인증 없이 접근 가능):
+> - `/widget/v1/aimbase-chat.umd.global.js` — UMD 번들 (&lt;script&gt; 로드용, ~17KB)
+> - `/widget/v1/aimbase-chat.esm.js` — ESM (번들러용, ~25KB)
+> - `/widget/v1/aimbase-chat.d.ts` — TypeScript 타입
+> - `/widget/v1/index.html` (또는 `/widget/v1/`) — HTML 렌더링된 통합 가이드
+> - `/widget/v1/sample-bff/server.js` — Node 샘플 BFF (외부 의존 0)
+
 소비앱(OMS/WMS/OpenMall/Rescue 등, 모두 Aimbase와 다른 도메인) 브라우저에 채팅 + 워크플로우 실행 가시화 + RAG 출처 카드를 얹기 위한 3-Tier 임베드 경로. **브라우저에 테넌트 API Key 노출 금지 원칙** 에 따라 소비앱 BFF 가 API Key 로 서버간 호출하여 단기 JWT(`type=widget`) 를 대리 발급받고 브라우저로 전달한다.
 
 ### 17-1. 전제 조건 (관리자 세팅)
@@ -1324,6 +1333,7 @@ await fetch(`${baseUrl}/api/v1/knowledge-sources/${sourceId}/chunks/${chunkId}`,
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.5.1 | 2026-04-24 | CR-058 Sprint 53 공개 리소스 — `/widget/v1/*` 정적 서빙(인증 없이): UMD/ESM 번들, 통합 가이드 HTML, 샘플 BFF 코드. 소비앱이 CDN 처럼 직접 참조하거나 curl 로 다운받아 자체 호스팅 가능 (§ 17 헤더) |
 | v2.5.0 | 2026-04-24 | CR-058 Chat Widget SDK 서버 엔드포인트 3종 추가 — `POST /sessions/issue-widget-token` (단기 JWT 발급, API Key 인증), `GET /knowledge-sources/{sid}/chunks/{cid}` (RAG 원문 조회), `GET /workflows/runs/{id}/subscribe` (SSE 구독). 기존 Chat API 응답/ SSE `done` payload 에 `citations` + `rag_used` 필드 추가. SSE 는 `?access_token=` 쿼리 전달 허용(widget 토큰만) (§ 17) |
 | v2.4.0 | 2026-04-22 | CR-054 범용 HTTP 요청 도구(`http_request`) 추가 — Connection `type=HTTP` 등록 + 에이전트/워크플로우에서 임의 REST API 호출 지원. 인증 4종(API_KEY/BEARER/BASIC/NONE), 4xx/5xx status 반환, 감사 로그 헤더 마스킹(§ 7-6) |
 | v2.3.0 | 2026-04-16 | CR-049 세션 복원·지침 체계 추가 — `POST /sessions/{id}/resume`(§ 15), 프롬프트 템플릿 scope/project_id 확장 + cascade append + 미리보기 API(§ 16) |
