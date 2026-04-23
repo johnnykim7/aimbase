@@ -51,6 +51,7 @@
 | CR-053 | 서브에이전트 UX 완성 — Built-in Agent 프롬프트 고도화 + SSE 라이프사이클 이벤트 + FE Task 블록 렌더 (PRD-310~312, FE-035) | 변경 | Medium | v7.8.0 | 📝 등록 |
 | CR-054 | Aimbase 플랫폼 공통 HttpRequestTool — 범용 REST 호출 Tool + Connection type=HTTP + 가이드 문서 | 신규 | High | v7.9.0 | ✅ 완료 |
 | CR-055 | Evaluator-Optimizer 워크플로우 노드 — EVALUATOR_LOOP StepType 신설 (generator + evaluator + max_iterations + pass_criteria), Anthropic 6패턴 커버리지 완성 | 신규 | Medium | v7.10.0 | ✅ 설계 완료 |
+| CR-058 | Aimbase Chat Widget SDK — 소비앱 임베드용 채팅 + 워크플로우 실행 가시화 + RAG 출처 카드 (CORS + 단기 위젯 토큰 + 워크플로우 SSE + React/WebComponent) | 신규 | High | v8.0.0 | 🔧 Sprint 52 완료, Sprint 53 대기 |
 
 ---
 
@@ -1229,6 +1230,66 @@
 - **상태**: ✅ 설계 완료 (2026-04-23) — Sprint 52 구현 착수 대기. Q1 Evaluator 재시도 1회 + Q2 iterations[] JSONB 유지 2가지 미결 항목 사용자 승인 완료.
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR055_EvaluatorOptimizer_20260423.md`
 - **T3 설계서**: `docs/T3-7_CR-055_EvaluatorOptimizer_설계서.md`
+
+### CR-058 | Aimbase Chat Widget SDK — 소비앱 임베드용 채팅 + 워크플로우 + RAG 위젯
+- **대상 기능 ID**: PRD-315 (신규 — 임베드 위젯 SDK), PRD-316 (신규 — 단기 위젯 토큰), PRD-317 (신규 — 워크플로우 SSE 구독), PRD-318 (신규 — RAG Citations 활성화)
+- **변경 타입**: 신규
+- **배경**: Aimbase를 소비하는 앱(OMS/WMS/OpenMall/Rescue/Notification 등, 모두 타 도메인)이 5개 이상으로 늘면서 **채팅 UI를 각자 구현하는 중복 비용**이 누적. Aimbase는 Chat SSE API(5 이벤트)와 세션 관리는 완성돼 있으나, **타 도메인 임베드에 필수인 인프라 4종이 누락**: (1) CORS 설정 자체 없음(Spring Boot 기본값으로 모든 오리진 거부), (2) 단기 위젯 토큰 API 없음(브라우저에 API Key 노출 금지 원칙), (3) 워크플로우 실행 이벤트가 REST 폴링만 지원(SSE 스트리밍 0% 구현), (4) RAG Citations가 `buildContextWithCitations()` 메서드 구현은 되어 있으나 호출되지 않아 ChatResponse에 citations 필드 미노출. 이 네 가지를 해소하고 위젯 SDK를 3채널(npm/UMD CDN/소스)로 배포해 소비앱이 한 줄 삽입으로 채팅 + 워크플로우 진행 가시화 + RAG 출처 카드를 얹을 수 있게 한다.
+- **변경 내용**:
+
+  **서버 (Sprint 52, 10MD)** — Phase 1~3:
+  1. **CORS 동적 화이트리스트**(`CorsConfig.java` 신규 + `SecurityConfig.securityFilterChain()`에 `.cors()` 추가): `platform_settings.widget.allowed_origins` (CR-040 재사용) + 테넌트별 origin 화이트리스트 합집합으로 요청별 검증. `/api/v1/chat/**`, `/workflows/**`, `/conversations/**`, `/knowledge-sources/**`, `/sessions/issue-widget-token` 범위에만 적용 (관리 API 영향 없음).
+  2. **단기 위젯 토큰 발급 API**(`POST /api/v1/sessions/issue-widget-token`, `WidgetTokenController.java` 신규): 인증은 API Key 전용(JWT로 발급 불가). TTL 기본 30분, 하드캡 1시간. scope 화이트리스트 `[chat:stream, workflow:subscribe, rag:read]` 교집합만 부여. origin 검증.
+  3. **JwtProvider.generateWidgetToken()** 오버로드 + **JwtAuthenticationFilter 분기**: `type=widget` claim으로 access 토큰과 구분, scope→GrantedAuthority 매핑, origin 헤더와 claim 대조(403), `TenantContext` + `SecurityContext` 자동 설정.
+  4. **SSE 쿼리 토큰 폴백**: `EventSource`는 커스텀 헤더 설정 불가 → `?access_token=` 쿼리 허용하되 **위젯 토큰만** 허용(access 토큰은 액세스 로그 유출 리스크로 헤더 전용 유지).
+  5. **엔드포인트 scope 게이트**(`@EnableMethodSecurity` + `@PreAuthorize`): chat/conversations → `chat:stream`, `/workflows/runs/{id}/subscribe` → `workflow:subscribe`, `/knowledge-sources/{sid}/chunks/{cid}` → `rag:read`. 관리 API는 무매핑=기본 거부.
+  6. **RAG Citations 활성화**(`OrchestratorEngine.java:244` — `buildContext()` → `buildContextWithCitations()` 교체 1줄): 이미 구현되어 있던 메서드를 호출 경로에 연결. `RetrievedChunk`에 `chunkId` 필드 추가. `Citation` DTO 포맷 `{chunk_id, source_id, document_name, score, content_preview(200자), page_number, metadata}`. `ChatResponse.citations` + `ragUsed` 필드 추가 + SSE `done` 이벤트 payload에 포함.
+  7. **청크 원문 조회 API**(`GET /api/v1/knowledge-sources/{sourceId}/chunks/{chunkId}`): 위젯 원문 미리보기 패널용. EmbeddingEntity 조회 + 테넌트 격리 자동 보장 + `rag:read` scope 게이트. Parent-Child RAG 사용 시 parent_content 병행 반환.
+  8. **워크플로우 `parent_run_id` 컬럼 추가**(Flyway `tenant/V{next}__add_parent_run_to_workflow_runs.sql` + `WorkflowRunEntity`): `parent_run_id UUID`, `parent_step_id VARCHAR(255)` + 인덱스. `SubWorkflowStepExecutor.java:94-100` 수정 — 서브워크플로우마다 별도 `WorkflowRunEntity` 생성 + parent 필드 설정. FE에서 부모→자식 트리 렌더 가능.
+  9. **WorkflowEventPublisher 신규**(`com/platform/workflow/event/`): Spring `ApplicationEventPublisher` 래퍼. 이벤트 3종 `StepStatusChangedEvent`, `ApprovalRequiredEvent`, `RunCompletedEvent`. `WorkflowEngine.java` 5곳(288/299/312/341/323행)에 publish 주입. Virtual Thread SecurityContext 전파는 `ChatController.streamResponse:122-173` 패턴(CR-051) 100% 차용.
+  10. **워크플로우 SSE 구독 엔드포인트**(`GET /api/v1/workflows/runs/{runId}/subscribe`, `WorkflowController`): SseEmitter + `@EventListener`. 필터링 규칙 — `runId` 일치 + `parent_run_id == runId` 자식 이벤트 포함(서브워크플로우 실시간 펼침). 30분 타임아웃, 15초 heartbeat comment. 이벤트 4종 — `workflow.snapshot`(구독 시점 초기 상태), `workflow.step`, `workflow.approval`, `workflow.done`.
+
+  **프론트 (Sprint 53, 10MD)** — Phase 4~6:
+
+  11. **pnpm workspace 전환**: 기존 `frontend/` → `apps/console/`, 신규 `packages/chat-widget/`(React 패키지 — ESM+CJS+`.d.ts`), `packages/chat-widget-embed/`(UMD + Web Component).
+  12. **React 패키지 `@aimbase/chat-widget`**: 공개 API `initAimbaseChat(options)` + React 컴포넌트 `<AimbaseChat />`. 옵션 — `baseUrl`, `authResolver`, `contextProvider`, `display: 'bubble'|'inline'|'panel'`, `workflow.allowApproval(기본 false)`, `rag.previewMode`, `theme`, 이벤트 핸들러 5종(onMessage/onWorkflowStep/onApprovalRequired/onError/onTokenExpiring).
+  13. **SSE 이중 핸들러**: `useChatStream`(chat 5 이벤트 파싱 + reconnect 3회 backoff), `useWorkflowStream`(workflow 4 이벤트 + EventSource 자동 재연결).
+  14. **토큰 자동 갱신**: `exp - 5min` 시점 `onTokenExpiring` 콜백 → `authResolver()` 재호출 → 진행 중 SSE 유지, 다음 요청부터 신규 토큰.
+  15. **마크다운 렌더**: `react-markdown` + `rehype-sanitize` (XSS 방지 필수). HTML raw 차단.
+  16. **UMD + Web Component**: `<aimbase-chat base-url token-endpoint display theme-mode>` 속성형. Shadow DOM 스타일 격리. React 내부화된 UMD 번들로 Vue/바닐라/레거시 HTML 페이지 커버.
+  17. **배포 채널 2종**: (A) npm `@aimbase/chat-widget` (React), (B) Aimbase 서버 정적 서빙 `/widget/v1/aimbase-chat.umd.js` (CDN 대체). 공개 npm/사내 CDN/GitHub Releases는 CR-062(후속)에서 결정.
+  18. **소비앱 통합 가이드**(`docs/guides/embed-chat-widget.md`): BFF 샘플 3종(Node/Spring/FastAPI), 소비앱 샘플 3종(React/Vue/Vanilla), 보안 체크리스트, 트러블슈팅.
+  19. **샘플 소비앱 + E2E 9 시나리오**(`tools/sample-consumer-app/` localhost:3999): CORS 차단/통과, 토큰 발급/만료 갱신, Scope gate, 채팅 스트림 + citations, 워크플로우 승인 이벤트 외부 처리, RAG 원문 패널, abort.
+
+- **변경 사유**:
+  - 소비앱 5개+ 확산에 따른 채팅 UI 중복 구현 비용 제거 — Intercom/Drift 스타일 임베드 SDK로 업계 표준 대응
+  - 브라우저에 API Key 노출하는 안티패턴 차단 — BFF 프록시 + 단기 scope 토큰 체계 확립
+  - 워크플로우 실행 가시화의 UX 공백 해소 — 현재 REST 폴링 방식은 대기 중 UX가 0
+  - `buildContextWithCitations()` 메서드가 구현만 되고 미호출 상태인 기술 부채 해소
+  - `parent_run_id` 컬럼 부재로 서브워크플로우 실행 트레이싱이 어렵던 문제 해결 (서버/FE 공통 혜택)
+- **검토한 대안(기각)**:
+  - (A) iframe 임베드만 — 1~2일 만에 MVP 가능하나 소비앱 화면 컨텍스트 주입(orderId 등)이 postMessage 브리지로 복잡, 모바일 UX 제약, 디자인 통합도 낮음. 소비앱 3개 이상에서는 SDK 방식이 장기 TCO 우위.
+  - (B) React 전용 — 공수 절반이지만 Vue/레거시 HTML 소비앱 커버 불가. Web Component 병행으로 40% 공수 증가 감수하고 전체 커버리지 확보.
+  - (C) 위젯 내 승인 UI 포함 — UX 균일하나 소비앱별 결재 체계(OMS 주문 승인, Rescue 반품 결재, 위임/다단계)와 충돌. 이벤트만 발행하고 소비앱 자체 플로우 재사용으로 결정.
+- **기존 부품 재사용**:
+  - `RAGService.buildContextWithCitations()` (이미 구현, 호출만 활성화)
+  - `JwtProvider` 서명 로직 (동일 시크릿, `type` claim으로 구분)
+  - `ChatController.streamResponse:122-173` Virtual Thread + SecurityContext 전파 패턴 (CR-051)
+  - `TenantResolver:115-118` 쿼리 파라미터 폴백
+  - `PlatformSettingsService` (CR-040) — `widget.allowed_origins` 저장 + 관리자 UI
+  - `ChatController` SSE 5 이벤트 (CR-045) — 위젯이 그대로 소비
+  - `/chat/{sessionId}/abort` (CR-046) — 위젯 중단 버튼
+- **영향 모듈**: `config/SecurityConfig`, `config/CorsConfig`(신규), `auth/JwtProvider`, `auth/JwtAuthenticationFilter`, `api/WidgetTokenController`(신규), `api/ChatController`, `api/KnowledgeController`, `api/WorkflowController`, `orchestrator/OrchestratorEngine`, `orchestrator/ChatResponse`, `rag/RAGService`, `rag/model/RetrievedChunk`, `rag/model/Citation`(신규), `workflow/WorkflowEngine`, `workflow/event/WorkflowEventPublisher`(신규), `workflow/step/SubWorkflowStepExecutor`, `domain/WorkflowRunEntity`, `db/migration/tenant`(parent_run_id 추가), `db/migration/master`(widget settings seed), `packages/chat-widget`(신규), `packages/chat-widget-embed`(신규)
+- **영향도**: High (SecurityConfig/CORS/토큰 체계 신규 + 워크플로우 엔진 이벤트 발행 주입 + 프론트 모노레포 전환 + 신규 패키지 2종 + 배포 채널 확장)
+- **영향 범위**: 인증·인가 경계(위젯 토큰 + scope gate), 멀티테넌시(origin 검증 + 테넌트별 allowed_origins), 워크플로우 엔진(이벤트 publish, DAG 엔진 로직 불변), RAG 응답 포맷(하위 호환 — 기존 필드 유지 + 신규 필드 추가), Chat SSE done 이벤트(payload 확장), 프론트엔드 모노레포 구조
+- **영향 설계서**: T3-1(데이터 모델 — workflow_runs.parent_run_id 컬럼 추가), T3-2(API 설계 — 신규 엔드포인트 3종: issue-widget-token / runs/{id}/subscribe / chunks/{id}), T3-3(화면 컴포넌트 — 신규 위젯 패키지 2종 구조), T1-3(비즈니스 규칙 — 위젯 토큰 TTL·scope 제약 BIZ 신규 후보)
+- **범위 경계**: CDN 배포 인프라 결정(공개 npm/사내 registry/자체 CDN) / Vue·Svelte 전용 래퍼 / 음성 입력(STT) UI / 파일 업로드 / `allowApproval: true` 모드 위젯 내 승인 UI 완전 구현은 **본 CR 범위 제외** — CR-059~062 후속 CR 후보로 식별됨
+- **요청자**: sykim | **승인자**: sykim (2026-04-24) | **적용 버전**: v8.0.0 (예정)
+- **변경 일자**: 2026-04-24
+- **상태**: 🔧 **Sprint 52 완료 (2026-04-24)** — 서버 Phase 1~3 구현 + 신규 파일 17개(프로덕션 10 + 테스트 7) + Flyway 2개(V17 master, V54 tenant) + 신규 엔드포인트 3개. 단위 테스트 50건(Phase 1:21 / Phase 2:9 / Phase 3:17 / snake_case+OPTIONS:3) 추가, 전체 회귀 494/496 PASS (2건 `MCPServerManagerTest` 사전 존재 실패 — CR-058 무관). curl 기반 E2E 8시나리오 전체 PASS (토큰 발급/CORS preflight/scope/SSE). Sprint 52 구현 중 발견된 델타 5건은 T3-9 § 9 에 기록(S3-2 스킵, snake_case 바인딩, OPTIONS preflight, Tenant Flyway 자동 적용 부재, scope gate 느슨함). **Sprint 53 (프론트 10MD) 대기**. CR-062(CDN 배포 인프라) 분리.
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR058_ChatWidget_20260424.md`
+- **T3 설계서**: `docs/T3-9_CR-058_ChatWidget_설계서.md` (§ 9 Sprint 52 델타 포함)
+- **Plan 파일**: `~/.claude/plans/joyful-petting-pond.md`
 
 ---
 

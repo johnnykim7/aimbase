@@ -125,6 +125,69 @@ Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 
 > **주의**: 발급 시 반환되는 `apiKey` 값은 최초 1회만 조회 가능합니다. 즉시 안전한 곳에 저장하세요.
 
+### 2-5. 임베드 위젯(Chat Widget) 운영 [CR-058]
+
+소비앱 브라우저에 채팅 + 워크플로우 + RAG 출처 카드를 얹기 위한 전역 설정. 소비앱 BFF 가 API Key 로 Aimbase 의 `POST /api/v1/sessions/issue-widget-token` 을 호출해 단기 JWT 를 대리 발급받고 브라우저로 전달하는 구조이므로, 아래 설정이 비어 있으면 CORS 미허용 또는 발급 거부로 위젯이 붙지 않는다.
+
+**UI 경로**: Platform > Runtime Settings (CR-040) → `widget.*` 카테고리
+**저장소**: Master DB `global_config` 테이블. `PlatformSettingsService` 5분 캐시 적용. 수정 시 감사 로그 기록.
+
+| 설정 키 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `widget.allowed-origins` | CSV | *(빈 문자열)* | 위젯 임베드를 허용할 전역 Origin. 비어 있으면 위젯 호출이 전부 CORS 거부된다. 예: `https://oms.company.com,https://rescue.company.com` |
+| `widget.allowed-scopes` | CSV | `chat:stream,workflow:subscribe,rag:read` | 위젯 토큰에 부여 가능한 scope 화이트리스트. 발급 요청 scope 와 교집합만 적용 |
+| `widget.token-ttl-seconds` | int | `1800` | 위젯 토큰 기본 TTL (초) |
+| `widget.token-max-ttl-seconds` | int | `3600` | 위젯 토큰 최대 TTL 하드캡. 요청 TTL 이 이를 초과하면 cap 적용 + 로그 |
+
+**Tenant Flyway 마이그레이션 수동 적용 (중요)**:
+
+CR-058 Sprint 52 는 `db/migration/tenant/V54__cr058_workflow_parent_run.sql` 을 포함한다. **현재 Aimbase 의 Tenant Flyway 는 기존 활성 테넌트에 대해 기동 시점에 자동으로 재실행되지 않는다** — `LocalDevInitializer` 는 `@Profile("local")` 한정이고, `TenantOnboardingService` 는 신규 테넌트 등록 시점에만 호출된다. 따라서 CR-058 이후 버전 배포 시 각 기존 테넌트 DB 에 수동으로 한 번 적용해야 한다.
+
+```bash
+# 각 활성 테넌트 DB 목록 (master 에서 조회)
+psql -U platform -h <master-host> -p 5432 aimbase_master \
+  -tAc "SELECT id, db_name FROM tenants WHERE status='active';"
+
+# 각 테넌트 DB 에 V54 적용
+for TENANT_DB in aimbase_tenant_dev aimbase_tenant_<other>; do
+  psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" \
+    < backend/platform-core/src/main/resources/db/migration/tenant/V54__cr058_workflow_parent_run.sql
+  # flyway 이력에도 반영
+  psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" -c "
+    INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)
+    SELECT COALESCE(MAX(installed_rank),0)+1, '54', 'cr058 workflow parent run', 'SQL',
+           'V54__cr058_workflow_parent_run.sql', 0, 'ops-deploy', 0, true
+    FROM flyway_schema_history;"
+done
+```
+
+> 신규 온보딩하는 테넌트에는 `TenantOnboardingService` 가 자동으로 최신까지 migrate 하므로 별도 조치 불필요. 구조적 개선(기동 시점 자동 재migrate) 은 별도 CR 후보.
+
+**관리자 수정 절차 (psql 직접)**:
+```bash
+psql -U platform -h localhost -p 5432 aimbase_master
+# 전역 허용 Origin 추가 (CSV 교체)
+UPDATE global_config SET config_value='https://oms.company.com,https://rescue.company.com',
+    updated_by='ops', updated_at=NOW()
+  WHERE config_key='widget.allowed-origins';
+```
+> `PlatformSettingsService` 캐시가 최대 5분 유지되므로 즉시 반영이 필요하면 Runtime Settings UI 에서 "캐시 비우기" 를 실행하거나 서버 재시작.
+
+**등록 체크리스트 (신규 소비앱 온보딩)**:
+- [ ] 소비앱 origin 을 `widget.allowed-origins` 에 추가
+- [ ] 소비앱 BFF 가 보관할 API Key 를 § 2-4 절차로 발급
+- [ ] 소비앱 BFF 가 `/api/v1/sessions/issue-widget-token` 호출 테스트 → JWT 수신 확인
+- [ ] 브라우저에서 `Origin` 헤더가 whitelist 에 있는지 확인 (서버 로그 `Widget token denied — origin '...' not in whitelist` 검색으로 확인)
+
+**공통 실수**:
+- CORS 가 안 된다고 `allowed-origins` 에 `*` 를 넣으면 동작하지 않는다 — 목록에 있는 구체 origin 문자열과 정확히 일치해야 한다 (프로토콜 + 도메인 + 포트)
+- `scopes` 를 전부 제거하면 모든 발급이 400. 최소 `chat:stream` 은 남긴다
+- `widget.token-max-ttl-seconds` 를 1시간 이상으로 늘리지 않는다. 브라우저 유출 시 피해 시간을 제한하는 핵심 안전장치
+
+**로그/감사**:
+- `widget.*` 설정 변경은 `audit_logs` 에 `platform_setting_change` 이벤트로 기록
+- 위젯 토큰 발급 성공/실패는 `WidgetTokenController` 로거 경유 (origin, scope 교집합, TTL cap 여부)
+
 ---
 
 ## 3. 테넌트 관리 (ADMIN)
@@ -1021,12 +1084,55 @@ claude-code:
 - 동일 reason 3회 초과 강제 종료 발생률 — 임계값 조정 후보
 - max_iterations 우선 종료 vs BIZ-097 강제 종료 비율
 
+### 시나리오 N: 임베드 위젯 SDK 온보딩 [CR-058]
+
+새 소비앱(예: OMS / Rescue) 이 채팅 + 워크플로우 진행 가시화 + RAG 출처 카드를 자기 UI 에 얹을 때의 표준 절차.
+
+**1) Aimbase 관리자 작업 (운영자)**
+```bash
+# ① 소비앱 전용 API Key 발급 (§ 2-4 참조)
+curl -X POST $AIMBASE/api/v1/platform/api-keys \
+  -H "Authorization: Bearer $SUPER_ADMIN_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"OMS 위젯 BFF", "domainApp":"oms", "tenantId":"rescue_prod"}'
+# → apiKey 는 BFF env 에만 저장, 브라우저 번들 금지
+
+# ② 소비앱 origin 을 화이트리스트에 추가
+psql -U platform -h localhost -p 5432 aimbase_master \
+  -c "UPDATE global_config SET config_value='https://oms.company.com',
+      updated_by='ops', updated_at=NOW()
+      WHERE config_key='widget.allowed-origins';"
+```
+
+**2) 소비앱 BFF 구현 (소비앱 개발자)**
+- `/my-bff/aimbase-token` 엔드포인트 신설 — 인증된 사용자 요청에 한해 Aimbase 로 프록시
+- API Key 는 서버 환경변수 (`AIMBASE_API_KEY`) 로만 보관
+- 요청 시 `user_ref`, `project_id`, `origin`(고정) 을 첨부하여 Aimbase 에 단기 JWT 요청
+
+**3) 소비앱 브라우저 통합 (프론트엔드)**
+- 위젯 마운트 시 `authResolver()` 로 BFF 호출 → 토큰 수신
+- `/api/v1/chat/completions` 는 `Authorization: Bearer` 헤더, SSE 구독은 `?access_token=` 쿼리
+- `refresh_after` 초 경과 시 BFF 재호출로 토큰 갱신
+
+**4) 검증 체크리스트**
+- [ ] 소비앱에서 `OPTIONS /api/v1/chat/completions` 프리플라이트 200 확인
+- [ ] `issue-widget-token` 성공 응답의 `scopes` 가 기대값과 일치
+- [ ] 채팅 SSE `done` 이벤트 payload 에 `citations` 가 포함 (`rag_source_id` 지정 시)
+- [ ] 워크플로우 실행 후 `GET /workflows/runs/{runId}/subscribe` 구독 → `workflow.snapshot` + `workflow.step` + `workflow.done` 순 수신
+
+**문제 해결**:
+- CORS 거부 → `widget.allowed-origins` 에 origin 이 빠졌거나 프로토콜/포트 불일치. 캐시 5분 TTL 대기 또는 재시작
+- 401 "API Key is required to issue widget token" → BFF 가 JWT 로 호출함. 반드시 `X-API-Key` 헤더로
+- 400 "origin is not allowed" → 토큰 발급 시 바디의 `origin` 과 화이트리스트 불일치
+- SSE 연결은 되는데 아무 이벤트도 안 옴 → 런이 이미 종료됨(완료/실패) 가능. `GET /workflows/{id}/runs/{runId}` 로 상태 선확인
+
 ---
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.4.0 | 2026-04-24 | CR-058 임베드 위젯(Chat Widget) 운영 — § 2-5 `widget.*` 설정 4종(allowed-origins/allowed-scopes/token-ttl-seconds/token-max-ttl-seconds), § 4 시나리오 N(위젯 SDK 온보딩 — API Key 발급 + Origin 화이트리스트 + 검증 체크리스트) |
 | v2.3.0 | 2026-04-24 | CR-055 평가-최적화 루프 노드 (§ 3-5) — `EVALUATOR_LOOP` StepType, pass_criteria 3종(SCORE_THRESHOLD/JSONPATH_MATCH/LLM_JUDGE), evaluator 프롬프트 seed 3종, `{{loop.*}}` 변수 규약 |
 | v2.2.0 | 2026-04-22 | CR-054 HTTP Connection 등록 절차 § 3-1 보강 — `type=HTTP` 신설, 인증 4종(API_KEY/BEARER/BASIC/NONE), `value_env` 환경변수 참조 권장, DomainFilterPolicy 연계 체크리스트 |
 | v2.1.0 | 2026-04-16 | CR-049 세션 복원·지침 체계 운영 시나리오 K(테넌트/프로젝트 지침)·L(세션 재개 + Compact Boundary)·M(Stop Hook 검증 게이트) 추가 |

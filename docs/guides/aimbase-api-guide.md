@@ -1118,10 +1118,213 @@ GET /api/v1/prompt-templates/preview?tenantId=...&projectId=...
 
 ---
 
+## 17. 임베드 위젯 (Chat Widget) [CR-058]
+
+소비앱(OMS/WMS/OpenMall/Rescue 등, 모두 Aimbase와 다른 도메인) 브라우저에 채팅 + 워크플로우 실행 가시화 + RAG 출처 카드를 얹기 위한 3-Tier 임베드 경로. **브라우저에 테넌트 API Key 노출 금지 원칙** 에 따라 소비앱 BFF 가 API Key 로 서버간 호출하여 단기 JWT(`type=widget`) 를 대리 발급받고 브라우저로 전달한다.
+
+### 17-1. 전제 조건 (관리자 세팅)
+
+운영자가 `global_config` 의 다음 키를 채워야 위젯 발급/CORS 가 동작한다. 빈 값 상태에서는 CORS 미허용으로 위젯이 붙지 않는다.
+
+| 설정 키 | 형식 | 예시 |
+|---------|------|------|
+| `widget.allowed-origins` | CSV | `https://oms.company.com,https://rescue.company.com` |
+| `widget.allowed-scopes` | CSV | `chat:stream,workflow:subscribe,rag:read` (기본) |
+| `widget.token-ttl-seconds` | int | `1800` (기본 30분) |
+| `widget.token-max-ttl-seconds` | int | `3600` (하드캡 1시간) |
+
+관리 방법은 운용 가이드 § 위젯 운영 참조.
+
+### 17-2. 단기 위젯 토큰 발급 — `POST /api/v1/sessions/issue-widget-token`
+
+**인증**: `X-API-Key` 헤더 **필수** (JWT 로는 불가 — 브라우저가 직접 발급받는 경로 차단).
+
+**요청**:
+```bash
+curl -X POST $AIMBASE/api/v1/sessions/issue-widget-token \
+  -H "X-API-Key: $MY_TENANT_API_KEY" \
+  -H "X-Tenant-Id: $MY_TENANT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "project_id": "rescue",
+        "user_ref": "user_123",
+        "session_hint": "order_detail_page",
+        "ttl_seconds": 1800,
+        "origin": "https://oms.company.com",
+        "scopes": ["chat:stream", "workflow:subscribe", "rag:read"]
+      }'
+```
+
+**응답**:
+```json
+{
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiJ9...",
+    "expires_at": "2026-04-24T11:30:00Z",
+    "refresh_after": 1500,
+    "scopes": ["chat:stream", "workflow:subscribe", "rag:read"]
+  }
+}
+```
+
+**검증 로직**:
+- `ttl_seconds > widget.token-max-ttl-seconds` 이면 max 로 cap + 로그
+- `scopes ∩ widget.allowed-scopes` 만 부여 (교집합 비어 있으면 400)
+- `origin` 이 `widget.allowed-origins` 화이트리스트에 없으면 400
+- `TenantContext` 가 설정되지 않은 호출은 401
+
+**JWT claims**: `sub=user_ref`, `tenant_id`, `project_id`, `user_ref`, `scopes[]`, `origin`, `type: "widget"`, `exp`.
+
+### 17-3. 위젯 토큰으로 Aimbase API 호출
+
+브라우저는 `Authorization: Bearer <token>` 헤더, SSE 는 `?access_token=<token>` 쿼리로 전달 (EventSource 가 커스텀 헤더를 못 다루므로). **access 토큰은 쿼리 전달 금지**(로그 유출 리스크) — 위젯 토큰만 쿼리 파라미터를 수용한다.
+
+### 17-4. 채팅 + RAG Citations — `POST /api/v1/chat/completions`
+
+기존 엔드포인트 그대로. CR-058 에서 **응답에 `citations` / `rag_used` 필드** 가 추가되었다 (`rag_source_id` 지정 + 검색 결과 존재 시에만 포함).
+
+**Citation 객체 포맷** (`List<Map>`):
+```json
+{
+  "index": 1,
+  "chunk_id": "a7c9f3b0-...",
+  "source_id": "kb_rescue",
+  "document_name": "반품정책.pdf",
+  "score": 0.87,
+  "content_preview": "반품 접수 후 7일 이내 처리합니다.",
+  "page_number": 4
+}
+```
+
+**비스트림**: `ChatResponse` 바디에 `citations: [...]`, `rag_used: true` 포함.
+
+**스트림 (`stream=true`)**: 기존 5개 SSE 이벤트(`delta` / `thinking` / `tool_use_start` / `tool_result` / `done`) 중 **`done` payload 가 확장**되었다:
+```
+event: done
+data: {"done": true, "citations": [...], "rag_used": true}
+```
+citations 가 비어 있거나 RAG 미사용 시 해당 필드는 생략(JSON_INCLUDE_NON_NULL).
+
+### 17-5. 청크 원문 조회 — `GET /api/v1/knowledge-sources/{sourceId}/chunks/{chunkId}`
+
+citation 클릭 시 위젯이 원문 미리보기 패널을 렌더하기 위해 호출.
+
+**Scope**: `rag:read` (위젯 토큰) 또는 기본 인증.
+
+```bash
+curl "$AIMBASE/api/v1/knowledge-sources/kb_rescue/chunks/a7c9f3b0-... " \
+  -H "Authorization: Bearer $WIDGET_TOKEN"
+```
+
+**응답**:
+```json
+{
+  "data": {
+    "chunk_id": "a7c9f3b0-...",
+    "source_id": "kb_rescue",
+    "document_name": "반품정책.pdf",
+    "document_id": "doc-123",
+    "chunk_index": 5,
+    "content": "전문 원문…",
+    "metadata": {"page_number": 4, "...": "..."},
+    "page_number": 4,
+    "parent_id": "uuid-...",       // Parent-Child RAG 사용 시
+    "parent_content": "부모 청크 …"
+  }
+}
+```
+
+**에러**:
+- `400 Bad Request` — chunkId 가 UUID 포맷 아님
+- `404 Not Found` — 소스 없음 또는 해당 소스에 속한 청크 없음 (타 소스 청크 ID 를 섞어 넣어도 404)
+
+### 17-6. 워크플로우 실행 SSE — `GET /api/v1/workflows/runs/{runId}/subscribe`
+
+위젯이 워크플로우 실행 진행 상황 / 승인 대기 / 종료를 실시간 표시하기 위해 구독한다.
+
+**Scope**: `workflow:subscribe` (위젯 토큰) 또는 기본 인증.
+
+```bash
+curl -N "$AIMBASE/api/v1/workflows/runs/$RUN_ID/subscribe?access_token=$WIDGET_TOKEN"
+```
+
+- 타임아웃 30분
+- 연결 직후 `workflow.snapshot` 이벤트 1 회 (현재 DB 상태)
+- 이미 종료된 런이면 `workflow.snapshot` + `workflow.done` 즉시 발행 후 close
+- 실행 중에는 `WorkflowEventPublisher` 가 발행하는 이벤트를 매칭해 브라우저로 forward
+
+**이벤트 4 종 payload 스펙**:
+
+```
+event: workflow.snapshot
+data: {"run_id":"...","workflow_id":"wf-1","session_id":"sess-1","status":"running",
+       "current_step":"step_a","step_results":{...},"started_at":"..."}
+
+event: workflow.step
+data: {"run_id":"...","step_id":"fetch_order","status":"running",
+       "started_at":"2026-04-24T10:00:00Z"}
+
+// 완료 시 (+ sub_workflow_id / output_preview)
+event: workflow.step
+data: {"run_id":"...","step_id":"fetch_order","status":"completed",
+       "started_at":"...","completed_at":"...","duration_ms":1420,
+       "sub_workflow_id":"platform:file-analysis",
+       "output_preview":{"records":12,"status":"ok"}}
+
+event: workflow.approval
+data: {"run_id":"...","step_id":"confirm_refund","policy_id":"confirm_refund",
+       "reason":"10만원 초과","approvers":["manager@company.com"],"timeout_at":"..."}
+
+event: workflow.done
+data: {"run_id":"...","status":"completed","duration_ms":3420}
+```
+
+**부모-자식 라우팅**: 서브워크플로우 자식 이벤트(`parent_run_id != null`)는 자식 구독자와 부모 구독자 모두에게 fan-out. 부모 위젯이 서브워크플로우를 트리로 표시할 수 있게 한다.
+
+### 17-7. 위젯 통합 체크리스트 (소비앱 측)
+
+- [ ] 소비앱 BFF 에 `/my-bff/aimbase-token` 프록시 엔드포인트 구현 (API Key 는 서버 env 에만 보관)
+- [ ] 브라우저는 `Authorization: Bearer` 헤더 + SSE 는 `?access_token=` 쿼리로 전송
+- [ ] 토큰 만료 5 분 전(`refresh_after` 필드) 에 `/my-bff/aimbase-token` 재호출 → 신규 토큰 교체 (진행 중 SSE 는 유지)
+- [ ] 운영자가 `widget.allowed-origins` 에 소비앱 도메인 추가했는지 확인
+- [ ] `allowApproval: false` 기본 — `workflow.approval` 이벤트는 소비앱 자체 결재 플로우로 전달
+
+### 17-8. 클라이언트 측 단순 예시 (React)
+
+```tsx
+// BFF 토큰 발급 (자기 서버로 프록시)
+async function fetchWidgetToken() {
+  const res = await fetch('/my-bff/aimbase-token', { method: 'POST' });
+  return res.json();  // { token, expires_at, refresh_after }
+}
+
+// 채팅 스트림
+const { token } = await fetchWidgetToken();
+const resp = await fetch(`${baseUrl}/api/v1/chat/completions`, {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ stream: true, session_id, messages, rag_source_id: 'kb_rescue' }),
+});
+// resp.body 를 ReadableStream → SSE 파싱 (delta / thinking / tool_use_start / tool_result / done)
+
+// 워크플로우 구독
+const es = new EventSource(`${baseUrl}/api/v1/workflows/runs/${runId}/subscribe?access_token=${token}`);
+es.addEventListener('workflow.step', (ev) => { const data = JSON.parse(ev.data); ... });
+es.addEventListener('workflow.approval', (ev) => { /* 소비앱 결재 플로우 트리거 */ });
+es.addEventListener('workflow.done', () => es.close());
+
+// 원문 조회
+await fetch(`${baseUrl}/api/v1/knowledge-sources/${sourceId}/chunks/${chunkId}`,
+  { headers: { 'Authorization': `Bearer ${token}` } });
+```
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.5.0 | 2026-04-24 | CR-058 Chat Widget SDK 서버 엔드포인트 3종 추가 — `POST /sessions/issue-widget-token` (단기 JWT 발급, API Key 인증), `GET /knowledge-sources/{sid}/chunks/{cid}` (RAG 원문 조회), `GET /workflows/runs/{id}/subscribe` (SSE 구독). 기존 Chat API 응답/ SSE `done` payload 에 `citations` + `rag_used` 필드 추가. SSE 는 `?access_token=` 쿼리 전달 허용(widget 토큰만) (§ 17) |
 | v2.4.0 | 2026-04-22 | CR-054 범용 HTTP 요청 도구(`http_request`) 추가 — Connection `type=HTTP` 등록 + 에이전트/워크플로우에서 임의 REST API 호출 지원. 인증 4종(API_KEY/BEARER/BASIC/NONE), 4xx/5xx status 반환, 감사 로그 헤더 마스킹(§ 7-6) |
 | v2.3.0 | 2026-04-16 | CR-049 세션 복원·지침 체계 추가 — `POST /sessions/{id}/resume`(§ 15), 프롬프트 템플릿 scope/project_id 확장 + cascade append + 미리보기 API(§ 16) |
 | v2.2.0 | 2026-04-16 | CR-048 컨텍스트·토큰 효율 안내(§ 7-5) 추가 — Deferred Tool 스키마 / Tool Result Storage / Adaptive Thinking (소비앱 코드 변경 불필요) |
