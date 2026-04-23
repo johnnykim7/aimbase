@@ -10,6 +10,7 @@ const TYPE_MAP: Record<string, string> = {
   approval: "HUMAN_INPUT",
   action: "ACTION",
   agent: "AGENT_CALL",
+  evaluator_loop: "EVALUATOR_LOOP",
 };
 
 /**

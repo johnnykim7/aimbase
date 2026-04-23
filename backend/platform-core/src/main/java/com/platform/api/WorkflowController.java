@@ -5,6 +5,7 @@ import com.platform.domain.WorkflowRunEntity;
 import com.platform.repository.WorkflowRepository;
 import com.platform.repository.WorkflowRunRepository;
 import com.platform.workflow.WorkflowEngine;
+import com.platform.workflow.WorkflowValidator;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,13 +28,16 @@ public class WorkflowController {
     private final WorkflowRepository workflowRepository;
     private final WorkflowRunRepository workflowRunRepository;
     private final WorkflowEngine workflowEngine;
+    private final WorkflowValidator workflowValidator;
 
     public WorkflowController(WorkflowRepository workflowRepository,
                                WorkflowRunRepository workflowRunRepository,
-                               WorkflowEngine workflowEngine) {
+                               WorkflowEngine workflowEngine,
+                               WorkflowValidator workflowValidator) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.workflowEngine = workflowEngine;
+        this.workflowValidator = workflowValidator;
     }
 
     @GetMapping
@@ -54,6 +58,7 @@ public class WorkflowController {
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "워크플로우 생성")
     public ApiResponse<WorkflowEntity> create(@Valid @RequestBody WorkflowRequest request) {
+        workflowValidator.validate(request.steps());
         WorkflowEntity entity = new WorkflowEntity();
         entity.setId(request.id());
         entity.setName(request.name());
@@ -80,6 +85,7 @@ public class WorkflowController {
     @Operation(summary = "워크플로우 수정")
     public ApiResponse<WorkflowEntity> update(@PathVariable String id,
                                                @Valid @RequestBody WorkflowRequest request) {
+        workflowValidator.validate(request.steps());
         WorkflowEntity entity = workflowRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Workflow not found: " + id));

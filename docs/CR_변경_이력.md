@@ -50,6 +50,7 @@
 | CR-052 | SessionStore append-only persist — conversation_sessions 중복키 근본 해소 | 버그수정 | Medium | v7.3.1 | ✅ 완료 |
 | CR-053 | 서브에이전트 UX 완성 — Built-in Agent 프롬프트 고도화 + SSE 라이프사이클 이벤트 + FE Task 블록 렌더 (PRD-310~312, FE-035) | 변경 | Medium | v7.8.0 | 📝 등록 |
 | CR-054 | Aimbase 플랫폼 공통 HttpRequestTool — 범용 REST 호출 Tool + Connection type=HTTP + 가이드 문서 | 신규 | High | v7.9.0 | ✅ 완료 |
+| CR-055 | Evaluator-Optimizer 워크플로우 노드 — EVALUATOR_LOOP StepType 신설 (generator + evaluator + max_iterations + pass_criteria), Anthropic 6패턴 커버리지 완성 | 신규 | Medium | v7.10.0 | ✅ 설계 완료 |
 
 ---
 
@@ -1197,6 +1198,37 @@
 - **상태**: ✅ 완료 (2026-04-22). HttpRequestTool + WireMock 테스트 13 PASS + 가이드 문서 갱신 커밋(6b12dce). 후속 FG 측 L2 자동 등록 워크플로우는 FlowGuard 레포에서 별도 CR로 진행.
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR054_HttpRequestTool_20260422.md`
 - **Plan 파일**: `~/.claude/plans/l2-radiant-bachman.md`
+
+### CR-055 | Evaluator-Optimizer 워크플로우 노드 — Anthropic 6패턴 커버리지 완성
+- **대상 기능 ID**: PRD-314 (신규 — EVALUATOR_LOOP StepType), BIZ-009(워크플로우 DAG) 불변식 보존
+- **변경 타입**: 신규
+- **배경**: Anthropic "Building Effective Agents" 6가지 패턴(Prompt Chaining / Routing / Parallelization / Orchestrator-Workers / Evaluator-Optimizer / Autonomous Agent) 대비 Aimbase 커버리지 점검 결과, **5번 Evaluator-Optimizer만 유일하게 미구현**. CR-016 LLM Judge는 정책 평가용(DENY/REQUIRE_APPROVAL)으로 워크플로우 노드에 연결되지 않았고, `PlanService.verify()`도 상태 전이만 수행하여 "생성 → 평가 → 재생성" 루프가 워크플로우에서 표현 불가. 문학 번역, 마케팅 카피, 코드 리뷰 대응 등 품질 기준은 명확하지만 한 번에 도달하기 어려운 시나리오를 시각적으로 설계할 수단이 없음.
+- **변경 내용**:
+  1. **`EVALUATOR_LOOP` StepType 신설**(`WorkflowStep.StepType` enum 확장, 총 9종): 노드 내부에 generator + evaluator + max_iterations + pass_criteria를 캡슐화.
+  2. **노드 내부 구성**(`workflow_steps.config` JSONB): `{generator: {prompt, model, response_format}, evaluator: {prompt, model, criteria_schema}, max_iterations: 3, pass_criteria: {type, ...}}`.
+  3. **종료 조건**: `max_iterations` 상한 10(BIZ-XXX로 신규 정의), `pass_criteria.type`은 `SCORE_THRESHOLD`(Judge 점수) / `JSONPATH_MATCH` / `LLM_JUDGE`(별도 프롬프트) 3종.
+  4. **반복 컨텍스트 주입**: 직전 iteration 출력과 평가 피드백을 다음 generator에 `{{loop.previous_output}}`, `{{loop.feedback}}`, `{{loop.iteration}}`로 노출.
+  5. **WorkflowEngine 확장**: 기존 Kahn 위상 정렬 불변. 루프는 노드 내부에서 완결되므로 DAG 외부는 여전히 단일 노드로 처리. 루프 결과는 `steps.<stepKey>.output` + `steps.<stepKey>.iterations[]` 메타로 노출.
+  6. **중단/실패 정책**: max_iterations 도달 시 마지막 출력 반환 + `loop_exhausted: true` 플래그. 평가 단계 실패는 iteration 실패로 간주하고 재시도.
+  7. **감사 로깅**: 각 iteration의 generator/evaluator 입출력을 `workflow_run_steps` 테이블에 개별 row로 기록(parent_step_id + iteration_index). 추적성 확보.
+  8. **FE WorkflowStudio 확장**: 노드 팔레트에 EVALUATOR_LOOP 1종 추가, 속성 패널에서 generator/evaluator 프롬프트 편집 + criteria 선택 + max_iterations 슬라이더.
+  9. **기본 프롬프트 템플릿**(CR-036 prompt_templates seed): `evaluator_literary_critic`, `evaluator_code_reviewer`, `evaluator_persona_copy` 3종 — 영문/한국어. 비대칭성(Generator ≠ Evaluator 관점) 원칙 반영.
+- **변경 사유**:
+  - Anthropic 6패턴 커버리지 100% 달성 — "워크플로우로 그리는 패턴(1·3·5)"의 표현력 완성
+  - 품질 기준이 명확한 시나리오(번역/카피/리뷰 대응)에서 한 번의 LLM_CALL로 도달 못 하는 문제를 사용자가 정책적으로 해결 가능
+  - 생성자/평가자 비대칭 구조를 플랫폼이 기본 템플릿으로 제공 → 사용자가 "같은 LLM 자가 평가"의 함정에 빠지지 않도록 유도
+- **검토한 대안(기각)**: 옵션 B — `EVALUATOR` 노드 + `LOOP_BACK` 엣지로 임의 노드 회귀를 허용. DAG → 일반 그래프 전환 필요(사이클 허용, 방문 카운터, max_hops, validate 로직 전량 재작성). Anthropic 원문 패턴은 "닫힌 2-노드 루프"이므로 A로 충분. 다단계 루프가 필요하면 `SUB_WORKFLOW` + `EVALUATOR_LOOP` 조합으로 커버 가능. 실사용에서 표현 못 하는 케이스가 3건 이상 쌓이면 별도 CR로 B 확장.
+- **기존 부품 재사용**: `WorkflowEngine`, `StepContext`(변수 치환), `LLM` 어댑터(CR-032 멀티 프로바이더), `prompt_templates`(CR-036), `workflow_run_steps` 테이블, React Flow WorkflowStudio.
+- **영향 모듈**: `workflow/model/WorkflowStep`, `workflow/engine/WorkflowEngine`, `workflow/engine/steps/EvaluatorLoopStepExecutor`(신규), `db/migration/tenant`(workflow_run_steps에 parent_step_id/iteration_index 컬럼), `frontend/src/pages/WorkflowStudio`, `frontend/src/components/workflow/nodes/EvaluatorLoopNode`(신규)
+- **영향도**: Medium (신규 노드 타입 1종 + FE 팔레트 + 기본 템플릿, 기존 DAG 엔진 불변식 보존)
+- **영향 범위**: 워크플로우 엔진 (BIZ-009 보존), 감사 로깅, 프롬프트 템플릿 시드
+- **영향 설계서**: T3-2(API 설계 — StepType enum 확장), T3-1(데이터 모델 — workflow_run_steps 컬럼 추가), T1-3(비즈니스 규칙 — max_iterations 상한 BIZ 신규)
+- **범위 경계**: 일반화된 LOOP_BACK 엣지 / DAG 사이클 허용 / 런타임 max_hops 감지는 **본 CR 범위 제외** — 필요 시 별도 CR로 후속
+- **요청자**: sykim | **승인자**: (대기) | **적용 버전**: v7.10.0 (예정)
+- **변경 일자**: 2026-04-23
+- **상태**: ✅ 설계 완료 (2026-04-23) — Sprint 52 구현 착수 대기. Q1 Evaluator 재시도 1회 + Q2 iterations[] JSONB 유지 2가지 미결 항목 사용자 승인 완료.
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR055_EvaluatorOptimizer_20260423.md`
+- **T3 설계서**: `docs/T3-7_CR-055_EvaluatorOptimizer_설계서.md`
 
 ---
 

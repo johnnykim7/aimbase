@@ -35,6 +35,169 @@ const STEP_TYPE_ICONS: Record<string, string> = {
 };
 
 /* ------------------------------------------------------------------ */
+/*  EvaluatorLoopDetail — CR-055 EVALUATOR_LOOP 결과 전용 뷰            */
+/* ------------------------------------------------------------------ */
+
+function EvaluatorLoopDetail({ data }: { data: Record<string, unknown> }) {
+  const iterations = (data.iterations as Record<string, unknown>[]) ?? [];
+  const [openIter, setOpenIter] = useState<number | null>(null);
+  const finalIter = data.final_iteration as number | undefined;
+  const exhausted = data.loop_exhausted === true;
+  const criteriaType = data.pass_criteria_type as string | undefined;
+  const totalMs = data.total_duration_ms as number | undefined;
+  const totalIn = data.total_input_tokens as number | undefined;
+  const totalOut = data.total_output_tokens as number | undefined;
+  const finalVerdict = data.final_verdict as Record<string, unknown> | undefined;
+
+  const summary = exhausted
+    ? `총 ${iterations.length}회 반복 후 종료 (max_iterations 소진)`
+    : typeof finalIter === "number"
+      ? `총 ${iterations.length}회 중 ${finalIter + 1}회차에 통과`
+      : `${iterations.length}회 반복`;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* 요약 배지 */}
+      <div className="flex flex-wrap gap-2 text-[11px]">
+        <span
+          className="px-2 py-0.5 rounded-md font-semibold"
+          style={{
+            background: exhausted ? "#fef3c7" : "#d1fae5",
+            color: exhausted ? "#92400e" : "#065f46",
+          }}
+        >
+          {summary}
+        </span>
+        {criteriaType && (
+          <span className="px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-mono">
+            {criteriaType}
+          </span>
+        )}
+        {totalMs != null && (
+          <span className="px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-mono">
+            {totalMs >= 1000 ? `${(totalMs / 1000).toFixed(1)}s` : `${totalMs}ms`}
+          </span>
+        )}
+        {totalIn != null && totalOut != null && (
+          <span className="px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-mono">
+            tokens: {totalIn}in / {totalOut}out
+          </span>
+        )}
+      </div>
+
+      {/* 최종 출력 */}
+      {data.output != null && (
+        <details open>
+          <summary className="cursor-pointer font-semibold text-foreground py-1">최종 출력</summary>
+          <div
+            className="mt-1 p-2 bg-background rounded-md border border-border whitespace-pre-wrap break-all"
+            style={{ maxHeight: 300, overflow: "auto" }}
+          >
+            {String(data.output)}
+          </div>
+        </details>
+      )}
+
+      {/* 최종 verdict */}
+      {finalVerdict && (
+        <details>
+          <summary className="cursor-pointer font-semibold text-foreground py-1">최종 평가 (verdict)</summary>
+          <pre className="mt-1 p-2 bg-background rounded-md border border-border whitespace-pre-wrap break-all">
+            {JSON.stringify(finalVerdict, null, 2)}
+          </pre>
+        </details>
+      )}
+
+      {/* 반복 이력 */}
+      <div className="mt-1">
+        <div className="text-foreground font-semibold py-1">반복 이력 ({iterations.length})</div>
+        <div className="flex flex-col gap-1">
+          {iterations.map((it, i) => {
+            const verdict = it.evaluator_verdict as Record<string, unknown> | undefined;
+            const score = verdict?.score as number | undefined;
+            const passed = verdict?.passed as boolean | undefined;
+            const genMs = it.generator_ms as number | undefined;
+            const evalMs = it.evaluator_ms as number | undefined;
+            const retried = it.evaluator_retried === true;
+            const isOpen = openIter === i;
+            return (
+              <div key={i} className="border border-border rounded-md overflow-hidden">
+                <button
+                  onClick={() => setOpenIter(isOpen ? null : i)}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 bg-background hover:bg-muted/50 cursor-pointer text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">#{i + 1}</span>
+                    {score != null && (
+                      <span
+                        className="px-1.5 py-0.5 rounded text-[10px] font-mono"
+                        style={{
+                          background: passed ? "#d1fae5" : "#fee2e2",
+                          color: passed ? "#065f46" : "#991b1b",
+                        }}
+                      >
+                        score {score}
+                      </span>
+                    )}
+                    {passed && (
+                      <span className="text-[10px] font-semibold text-success">✓ passed</span>
+                    )}
+                    {retried && (
+                      <span className="text-[10px] text-warning">⚠ evaluator retried</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    {genMs != null && <span className="font-mono text-[10px]">gen {genMs}ms</span>}
+                    {evalMs != null && <span className="font-mono text-[10px]">eval {evalMs}ms</span>}
+                    <span>{isOpen ? "▲" : "▼"}</span>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="px-2.5 py-2 bg-muted/30 border-t border-border flex flex-col gap-2">
+                    {it.generator_output != null && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">
+                          Generator 출력
+                        </div>
+                        <div
+                          className="p-1.5 bg-background rounded border border-border whitespace-pre-wrap break-all"
+                          style={{ maxHeight: 200, overflow: "auto" }}
+                        >
+                          {String(it.generator_output)}
+                        </div>
+                      </div>
+                    )}
+                    {verdict && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">
+                          Evaluator verdict
+                        </div>
+                        <pre
+                          className="p-1.5 bg-background rounded border border-border whitespace-pre-wrap break-all"
+                          style={{ maxHeight: 200, overflow: "auto" }}
+                        >
+                          {JSON.stringify(verdict, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    {(Boolean(it.generator_error) || Boolean(it.evaluator_error)) && (
+                      <div className="text-destructive text-[11px]">
+                        {it.generator_error ? `generator error: ${String(it.generator_error)}` : null}
+                        {it.evaluator_error ? `evaluator error: ${String(it.evaluator_error)}` : null}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  RunDetailPanel — 실행 상세 (단계별 카드 클릭 → 상세 펼침)            */
 /* ------------------------------------------------------------------ */
 
@@ -141,7 +304,7 @@ function RunDetailPanel({ selectedRun }: { selectedRun: WorkflowRun | null }) {
 
                   {isExpanded && (
                     <div
-                      className="font-mono text-[11px] text-foreground leading-relaxed whitespace-pre-wrap break-all"
+                      className="font-mono text-[11px] text-foreground leading-relaxed"
                       style={{
                         padding: 14,
                         borderRadius: "0 0 8px 8px",
@@ -150,7 +313,13 @@ function RunDetailPanel({ selectedRun }: { selectedRun: WorkflowRun | null }) {
                         background: "hsl(var(--background))",
                       }}
                     >
-                      {JSON.stringify(detailData, null, 2)}
+                      {Array.isArray(detailData.iterations) ? (
+                        <EvaluatorLoopDetail data={detailData} />
+                      ) : (
+                        <div className="whitespace-pre-wrap break-all">
+                          {JSON.stringify(detailData, null, 2)}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

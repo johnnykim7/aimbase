@@ -174,7 +174,7 @@ LLM 프로바이더(Anthropic, OpenAI, Ollama 등) 및 외부 어댑터(HTTP, SE
   "adapter": "http",
   "type": "HTTP",
   "config": {
-    "baseUrl": "http://localhost:8180",
+    "baseUrl": "http://59.8.160.12:8180",
     "auth": {
       "type": "API_KEY",
       "in": "header",
@@ -277,6 +277,32 @@ DAG 기반 워크플로우를 설계하고 실행합니다. Workflow Studio(비�
 | 실행 | `POST /workflows/{id}/run` | 수동 실행 |
 | 실행 이력 | `GET /workflows/{id}/runs` | 실행 이력 목록 |
 | 실행 결과 | `GET /workflows/{id}/runs/{runId}` | 개별 실행 결과 |
+
+**노드 타입** (Studio 팔레트):
+- `LLM_CALL` / `TOOL_CALL` / `CONDITION` / `PARALLEL` / `HUMAN_INPUT` / `ACTION` / `AGENT_CALL` — 기존
+- `EVALUATOR_LOOP` (v7.10, CR-055) — 아래 별도 설명
+
+**EVALUATOR_LOOP (평가-최적화 루프)** [CR-055]
+
+한 노드 내부에서 생성 → 평가 → 재생성 루프를 반복. Anthropic "Evaluator-Optimizer" 패턴.
+
+사용처 예: 문학 번역 품질 개선, 마케팅 카피 페르소나 평가, 코드 리뷰 대응.
+
+- **팔레트**: 🔁 "평가-최적화 루프" (보라색)
+- **속성 편집**: `max_iterations` (1-10, 기본 3) + `generator`/`evaluator`/`pass_criteria` 3개 JSON 블록
+- **Evaluator 프롬프트**: 기본 템플릿 3종 제공 (`evaluator.literary_critic`, `evaluator.code_reviewer`, `evaluator.persona_copy` — 영문. 한국어/커스터마이징은 prompt_templates 테이블에 `version=2`로 추가)
+- **통과 조건 3종**:
+  - `SCORE_THRESHOLD` (권장 기본) — evaluator 응답의 `score` 필드를 threshold와 비교
+  - `JSONPATH_MATCH` — 단순 dot-path (`$.passed`) 기반 매칭
+  - `LLM_JUDGE` — evaluator 응답의 `passed` 필드 그대로 사용
+- **실행 결과 뷰**: WorkflowDetail 페이지에서 iteration별 아코디언으로 전개 (score 배지, gen/eval 소요시간, 에러/재시도 표시)
+- **비대칭성 원칙**: generator와 evaluator에 **다른 역할 프롬프트**를 사용해야 개선폭이 큼. 같은 모델로 자가 평가 시 WARN 로그
+
+**FE JSON 편집 힌트** (`{{loop.*}}` 변수):
+- `{{loop.iteration}}` — 0부터 시작하는 현재 반복 인덱스
+- `{{loop.previous_output}}` — 직전 generator 출력
+- `{{loop.feedback}}` — 직전 evaluator feedback
+- `{{loop.generator_output}}` — (evaluator 시점) 현재 iteration의 generator 출력
 
 ### 3-6. 지식소스 (Knowledge Source) 관리
 
@@ -1001,6 +1027,7 @@ claude-code:
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.3.0 | 2026-04-24 | CR-055 평가-최적화 루프 노드 (§ 3-5) — `EVALUATOR_LOOP` StepType, pass_criteria 3종(SCORE_THRESHOLD/JSONPATH_MATCH/LLM_JUDGE), evaluator 프롬프트 seed 3종, `{{loop.*}}` 변수 규약 |
 | v2.2.0 | 2026-04-22 | CR-054 HTTP Connection 등록 절차 § 3-1 보강 — `type=HTTP` 신설, 인증 4종(API_KEY/BEARER/BASIC/NONE), `value_env` 환경변수 참조 권장, DomainFilterPolicy 연계 체크리스트 |
 | v2.1.0 | 2026-04-16 | CR-049 세션 복원·지침 체계 운영 시나리오 K(테넌트/프로젝트 지침)·L(세션 재개 + Compact Boundary)·M(Stop Hook 검증 게이트) 추가 |
 | v2.0.0 | 2026-04-16 | CR-048 컨텍스트·토큰 효율 운영 항목 추가 — SessionToolRegistry / Tool Result Storage TTL / Adaptive Thinking 설정 |

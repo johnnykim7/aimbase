@@ -18,6 +18,8 @@ const TYPE_STYLES: Record<string, { color: string; icon: string }> = {
   ACTION: { color: "#6366f1", icon: "▶" },
   agent: { color: "#0891b2", icon: "🧬" },
   AGENT_CALL: { color: "#0891b2", icon: "🧬" },
+  evaluator_loop: { color: "#8b5cf6", icon: "🔁" },
+  EVALUATOR_LOOP: { color: "#8b5cf6", icon: "🔁" },
 };
 
 const STATUS_COLORS: Record<string, string> = {

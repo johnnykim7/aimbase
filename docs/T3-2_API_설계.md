@@ -563,6 +563,76 @@
 }
 ```
 
+### EVALUATOR_LOOP 스텝 예시 (v7.10, CR-055)
+
+생성-평가-재생성 루프를 한 노드 내부에 캡슐화하는 스텝 타입. Anthropic Evaluator-Optimizer 패턴.
+
+```json
+{
+  "id": "refine-translation",
+  "name": "번역 개선 루프",
+  "type": "EVALUATOR_LOOP",
+  "dependsOn": ["extract-source-text"],
+  "config": {
+    "max_iterations": 3,
+    "generator": {
+      "model": "auto",
+      "system": "한-영 문학 번역가",
+      "prompt": "원문:\n{{extract-source-text.output}}\n{{#if loop.iteration}}\n\n직전 번역:\n{{loop.previous_output}}\n\n평론가 피드백:\n{{loop.feedback}}\n\n위 피드백을 반영해 다시 번역하세요.{{/if}}",
+      "max_tokens": 4096
+    },
+    "evaluator": {
+      "model": "auto",
+      "prompt_template_key": "evaluator.literary_critic",
+      "response_format": {
+        "type": "json_schema",
+        "schema": {
+          "type": "object",
+          "required": ["score", "passed", "feedback"],
+          "properties": {
+            "score":   { "type": "number" },
+            "passed":  { "type": "boolean" },
+            "feedback":{ "type": "string" }
+          }
+        }
+      }
+    },
+    "pass_criteria": {
+      "type": "SCORE_THRESHOLD",
+      "field": "score",
+      "threshold": 8.5,
+      "operator": "GTE"
+    }
+  }
+}
+```
+
+**검증 규칙 (저장 시 400 BAD_REQUEST)**
+- `max_iterations`: 1 ≤ N ≤ 10
+- `generator.prompt` 비어있지 않음
+- `evaluator.prompt_template_key` XOR `evaluator.prompt` (정확히 하나)
+- `evaluator.response_format.type = "json_schema"`
+- `pass_criteria.type ∈ {SCORE_THRESHOLD, JSONPATH_MATCH, LLM_JUDGE}`
+- SCORE_THRESHOLD: `field` + `threshold`(number) 필수, `operator ∈ {GTE, GT, LTE, LT, EQ}`
+- JSONPATH_MATCH: `jsonpath` 필수 (단순 dot-path 지원, 복합 JSONPath는 후속 CR)
+
+**실행 결과** (`workflow_runs.step_results[<stepId>]`):
+```json
+{
+  "output": "최종 generator 출력",
+  "iterations": [
+    { "index": 0, "generator_output": "...", "evaluator_verdict": {"score": 7.2, "passed": false, ...}, "generator_ms": 3240, "evaluator_ms": 1180 },
+    { "index": 1, "generator_output": "...", "evaluator_verdict": {"score": 8.9, "passed": true,  ...}, "generator_ms": 3510, "evaluator_ms": 1050 }
+  ],
+  "final_iteration": 1,
+  "loop_exhausted": false,
+  "pass_criteria_type": "SCORE_THRESHOLD",
+  "total_duration_ms": 9080,
+  "total_input_tokens": 1136,
+  "total_output_tokens": 652
+}
+```
+
 ### 워크플로우 승인 요청
 
 `POST /workflows/runs/{runId}/approve`

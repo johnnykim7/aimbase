@@ -130,7 +130,8 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
 
   const stepType = (node.data.type as string) ?? "action";
 
-  const JSON_CONFIG_KEYS = ["response_schema", "input"];
+  // CR-055: EVALUATOR_LOOP의 generator/evaluator/pass_criteria는 중첩 객체로 저장되어야 함
+  const JSON_CONFIG_KEYS = ["response_schema", "input", "generator", "evaluator", "pass_criteria"];
 
   const handleSave = () => {
     const parsed: Record<string, unknown> = { ...config };
@@ -484,6 +485,36 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
         { key: "adapter", label: "어댑터", placeholder: "postgresql" },
         { key: "destination", label: "대상 (테이블/채널)", placeholder: "results" },
         { key: "payload", label: "페이로드 (JSON)", placeholder: '{"data": {"key": "{{step1.output}}"}}', multiline: true },
+      ];
+    case "EVALUATOR_LOOP":
+    case "evaluator_loop":
+      return [
+        {
+          key: "max_iterations",
+          label: "최대 반복 횟수 (1-10)",
+          placeholder: "3 (기본)",
+        },
+        {
+          key: "generator",
+          label: "Generator (JSON)",
+          placeholder:
+            '{\n  "model": "auto",\n  "system": "...",\n  "prompt": "원문: {{input.text}}\\n{{#if loop.iteration}}피드백: {{loop.feedback}}{{/if}}",\n  "max_tokens": 4096\n}',
+          multiline: true,
+        },
+        {
+          key: "evaluator",
+          label: "Evaluator (JSON)",
+          placeholder:
+            '{\n  "model": "auto",\n  "prompt_template_key": "evaluator.literary_critic",\n  "response_format": {\n    "type": "json_schema",\n    "schema": { "type": "object", "required": ["score","passed","feedback"], "properties": {"score":{"type":"number"},"passed":{"type":"boolean"},"feedback":{"type":"string"}} }\n  }\n}',
+          multiline: true,
+        },
+        {
+          key: "pass_criteria",
+          label: "통과 조건 (JSON)",
+          placeholder:
+            '{\n  "type": "SCORE_THRESHOLD",\n  "field": "score",\n  "threshold": 8.5,\n  "operator": "GTE"\n}',
+          multiline: true,
+        },
       ];
     case "AGENT_CALL":
     case "agent":

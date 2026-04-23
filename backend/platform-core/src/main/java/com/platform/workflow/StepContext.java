@@ -17,11 +17,18 @@ public record StepContext(
         String workflowId,
         String sessionId,
         Map<String, Object> inputData,
-        Map<String, Object> stepResults  // {"stepId": {"output": ..., ...}}
+        Map<String, Object> stepResults,  // {"stepId": {"output": ..., ...}}
+        Map<String, Object> loopData      // CR-055: EVALUATOR_LOOP iteration 변수 ({{loop.*}} 참조용)
 ) {
 
     private static final Logger log = LoggerFactory.getLogger(StepContext.class);
     private static final Pattern TEMPLATE_PATTERN = Pattern.compile("\\{\\{([^}]+)}}");
+
+    /** 기존 호출부 호환용 5-arg 생성자 — loopData=null로 처리 (루프 외부 컨텍스트). */
+    public StepContext(String workflowRunId, String workflowId, String sessionId,
+                       Map<String, Object> inputData, Map<String, Object> stepResults) {
+        this(workflowRunId, workflowId, sessionId, inputData, stepResults, null);
+    }
 
     /**
      * 템플릿 문자열에서 {{...}} 변수를 실제 값으로 치환.
@@ -99,6 +106,14 @@ public record StepContext(
             return val != null ? val.toString() : "";
         }
 
+        // CR-055: {{loop.*}} — EVALUATOR_LOOP iteration 내부 변수
+        // 루프 외부에서 참조 시 loopData=null이므로 빈 문자열 반환 (기존 누락 변수 처리와 동일)
+        if ("loop".equals(namespace)) {
+            if (loopData == null) return "";
+            Object val = loopData.get(key);
+            return val != null ? val.toString() : "";
+        }
+
         // stepId.field 참조
         Object stepResult = stepResults != null ? stepResults.get(namespace) : null;
         if (stepResult instanceof Map stepMap) {
@@ -113,6 +128,15 @@ public record StepContext(
     public StepContext withStepResult(String stepId, Map<String, Object> result) {
         Map<String, Object> newResults = new LinkedHashMap<>(stepResults != null ? stepResults : Map.of());
         newResults.put(stepId, result);
-        return new StepContext(workflowRunId, workflowId, sessionId, inputData, newResults);
+        return new StepContext(workflowRunId, workflowId, sessionId, inputData, newResults, loopData);
+    }
+
+    /**
+     * CR-055: EVALUATOR_LOOP iteration 진입 시 loopData를 주입한 새 컨텍스트 반환.
+     * iteration/previous_output/feedback/generator_output 등 루프 내부 변수를 generator/evaluator 프롬프트에서
+     * {{loop.iteration}}, {{loop.previous_output}} 형태로 참조 가능하게 한다.
+     */
+    public StepContext withLoopVars(Map<String, Object> loopVars) {
+        return new StepContext(workflowRunId, workflowId, sessionId, inputData, stepResults, loopVars);
     }
 }
