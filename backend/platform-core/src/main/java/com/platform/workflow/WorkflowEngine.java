@@ -43,13 +43,16 @@ public class WorkflowEngine {
     private final ObjectMapper objectMapper;
     private final Map<WorkflowStep.StepType, StepExecutor> executors;
     private final PlatformMetrics platformMetrics;
+    /** CR-058: 스텝/런 상태 전이 이벤트 브로드캐스터. null 이면 발행 스킵(테스트 편의). */
+    private final com.platform.workflow.event.WorkflowEventPublisher eventPublisher;
 
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
                           PendingApprovalRepository pendingApprovalRepository,
                           ObjectMapper objectMapper,
                           List<StepExecutor> stepExecutors,
-                          PlatformMetrics platformMetrics) {
+                          PlatformMetrics platformMetrics,
+                          com.platform.workflow.event.WorkflowEventPublisher eventPublisher) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -57,6 +60,7 @@ public class WorkflowEngine {
         this.executors = stepExecutors.stream()
                 .collect(Collectors.toMap(StepExecutor::supports, e -> e));
         this.platformMetrics = platformMetrics;
+        this.eventPublisher = eventPublisher;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
@@ -287,13 +291,20 @@ public class WorkflowEngine {
 
                 try {
                     long stepStart = System.currentTimeMillis();
+                    Instant startedAt = Instant.ofEpochMilli(stepStart);
+                    // CR-058: 스텝 시작 이벤트.
+                    if (eventPublisher != null) {
+                        eventPublisher.stepRunning(run.getId(), run.getParentRunId(), step.id(), startedAt);
+                    }
+
                     Map<String, Object> result = executeWithRetry(step, context, errorHandling);
                     long stepEnd = System.currentTimeMillis();
+                    Instant completedAt = Instant.ofEpochMilli(stepEnd);
 
                     // 타이밍 메타데이터 추가
                     Map<String, Object> enriched = new LinkedHashMap<>(result);
-                    enriched.put("_startedAt", Instant.ofEpochMilli(stepStart).toString());
-                    enriched.put("_completedAt", Instant.ofEpochMilli(stepEnd).toString());
+                    enriched.put("_startedAt", startedAt.toString());
+                    enriched.put("_completedAt", completedAt.toString());
                     enriched.put("_durationMs", stepEnd - stepStart);
 
                     context = context.withStepResult(step.id(), enriched);
@@ -304,6 +315,17 @@ public class WorkflowEngine {
 
                     log.debug("Run '{}': step '{}' succeeded ({}ms)", run.getId(), step.id(), stepEnd - stepStart);
 
+                    // CR-058: 스텝 완료 이벤트. subWorkflowId 는 SUB_WORKFLOW 스텝 결과에서 추출.
+                    if (eventPublisher != null) {
+                        Object subRef = step.type() == WorkflowStep.StepType.SUB_WORKFLOW
+                                ? result.get("sub_workflow_id") : null;
+                        eventPublisher.stepCompleted(
+                                run.getId(), run.getParentRunId(), step.id(),
+                                startedAt, completedAt,
+                                subRef != null ? subRef.toString() : null,
+                                previewOutput(result));
+                    }
+
                     // CONDITION 분기 처리
                     if (step.type() == WorkflowStep.StepType.CONDITION) {
                         applyConditionSkips(step, result, stepMap, skippedSteps);
@@ -311,11 +333,20 @@ public class WorkflowEngine {
 
                 } catch (Exception e) {
                     log.error("Run '{}': step '{}' failed permanently: {}", run.getId(), step.id(), e.getMessage());
+                    long failedAtMs = System.currentTimeMillis();
                     run.setStatus("failed");
                     run.setError(Map.of("step", step.id(), "error", e.getMessage()));
                     run.setCompletedAt(OffsetDateTime.now());
                     workflowRunRepository.saveAndFlush(run);
                     platformMetrics.recordWorkflowExecution("failed");
+                    // CR-058: 스텝 실패 + 런 종료 이벤트.
+                    if (eventPublisher != null) {
+                        eventPublisher.stepFailed(run.getId(), run.getParentRunId(), step.id(),
+                                null, Instant.ofEpochMilli(failedAtMs), e.getMessage());
+                        long durationMs = run.getStartedAt() != null
+                                ? failedAtMs - run.getStartedAt().toInstant().toEpochMilli() : 0L;
+                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", durationMs);
+                    }
                     return;
                 }
             }
@@ -326,6 +357,13 @@ public class WorkflowEngine {
             run.setStepResults(new LinkedHashMap<>(context.stepResults()));
             workflowRunRepository.saveAndFlush(run);
             platformMetrics.recordWorkflowExecution("completed");
+            // CR-058: 런 종료 이벤트.
+            if (eventPublisher != null) {
+                long durationMs = run.getCompletedAt() != null && run.getStartedAt() != null
+                        ? run.getCompletedAt().toInstant().toEpochMilli() - run.getStartedAt().toInstant().toEpochMilli()
+                        : 0L;
+                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "completed", durationMs);
+            }
             log.info("Run '{}' (workflow='{}') completed: {} step results",
                     run.getId(), workflowEntity.getId(), context.stepResults().size());
 
@@ -335,6 +373,12 @@ public class WorkflowEngine {
             run.setError(Map.of("error", e.getMessage()));
             run.setCompletedAt(OffsetDateTime.now());
             workflowRunRepository.saveAndFlush(run);
+            if (eventPublisher != null) {
+                long durationMs = run.getCompletedAt() != null && run.getStartedAt() != null
+                        ? run.getCompletedAt().toInstant().toEpochMilli() - run.getStartedAt().toInstant().toEpochMilli()
+                        : 0L;
+                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", durationMs);
+            }
         }
     }
 
@@ -346,8 +390,10 @@ public class WorkflowEngine {
         approval.setPolicyId(step.id());         // 대기 중인 스텝 ID 기록
         approval.setApprovalChannel("workflow");
 
-        if (step.config() != null && step.config().get("approvers") instanceof List<?> approvers) {
-            approval.setApprovers(approvers.stream().map(Object::toString).toList());
+        List<String> approvers = List.of();
+        if (step.config() != null && step.config().get("approvers") instanceof List<?> rawApprovers) {
+            approvers = rawApprovers.stream().map(Object::toString).toList();
+            approval.setApprovers(approvers);
         }
 
         if (step.timeoutMs() != null && step.timeoutMs() > 0) {
@@ -360,6 +406,39 @@ public class WorkflowEngine {
         run.setStatus("pending_approval");
         run.setStepResults(new LinkedHashMap<>(context.stepResults()));
         workflowRunRepository.save(run);
+
+        // CR-058: 위젯이 소비앱 결재 플로우를 트리거할 수 있도록 approval 이벤트 발행.
+        if (eventPublisher != null) {
+            String reason = null;
+            if (step.config() != null && step.config().get("reason") instanceof String r) reason = r;
+            eventPublisher.approvalRequired(
+                    run.getId(), run.getParentRunId(), step.id(),
+                    step.id(),  // policyId 대용 (HUMAN_INPUT 은 스텝 자체가 정책)
+                    reason,
+                    approvers,
+                    approval.getTimeoutAt() != null ? approval.getTimeoutAt().toInstant() : null);
+        }
+    }
+
+    /**
+     * CR-058: 스텝 결과에서 위젯 표시용 미리보기만 추출 (outputPreview).
+     * 큰 필드/내부 타이밍 메타는 제외하여 SSE payload 크기를 제한한다.
+     */
+    private Map<String, Object> previewOutput(Map<String, Object> result) {
+        if (result == null || result.isEmpty()) return null;
+        Map<String, Object> preview = new LinkedHashMap<>();
+        int count = 0;
+        for (Map.Entry<String, Object> e : result.entrySet()) {
+            if (e.getKey().startsWith("_")) continue;        // 타이밍 메타 제외
+            if (count++ >= 5) break;                          // 상위 5필드만
+            Object v = e.getValue();
+            if (v instanceof String s && s.length() > 200) {
+                preview.put(e.getKey(), s.substring(0, 200) + "…");
+            } else {
+                preview.put(e.getKey(), v);
+            }
+        }
+        return preview.isEmpty() ? null : preview;
     }
 
     private Map<String, Object> executeWithRetry(WorkflowStep step, StepContext context, ErrorHandling errorHandling) {

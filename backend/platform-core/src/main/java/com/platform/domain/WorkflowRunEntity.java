@@ -46,7 +46,17 @@ public class WorkflowRunEntity {
     @Column(name = "completed_at")
     private OffsetDateTime completedAt;
 
+    /** CR-058: 서브워크플로우 실행 시 부모 run 참조. NULL = 최상위. */
+    @Column(name = "parent_run_id")
+    private UUID parentRunId;
+
+    /** CR-058: 부모 런에서 이 자식을 트리거한 스텝 ID. */
+    @Column(name = "parent_step_id", length = 255)
+    private String parentStepId;
+
     public UUID getId() { return id; }
+    /** CR-058: 테스트/SubWorkflowStepExecutor 용 setter — JPA 가 UUID 자동 발급을 지원하나 명시 설정이 필요한 경우 대비. */
+    public void setId(UUID id) { this.id = id; }
     public String getWorkflowId() { return workflowId; }
     public void setWorkflowId(String workflowId) { this.workflowId = workflowId; }
     public String getSessionId() { return sessionId; }
@@ -62,6 +72,11 @@ public class WorkflowRunEntity {
     public Map<String, Object> getError() { return error; }
     public void setError(Map<String, Object> error) { this.error = error; }
     public OffsetDateTime getStartedAt() { return startedAt; }
+    public void setStartedAt(OffsetDateTime startedAt) { this.startedAt = startedAt; }
     public OffsetDateTime getCompletedAt() { return completedAt; }
     public void setCompletedAt(OffsetDateTime completedAt) { this.completedAt = completedAt; }
+    public UUID getParentRunId() { return parentRunId; }
+    public void setParentRunId(UUID parentRunId) { this.parentRunId = parentRunId; }
+    public String getParentStepId() { return parentStepId; }
+    public void setParentStepId(String parentStepId) { this.parentStepId = parentStepId; }
 }

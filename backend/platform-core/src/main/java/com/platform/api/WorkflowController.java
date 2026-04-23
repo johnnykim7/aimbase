@@ -6,6 +6,7 @@ import com.platform.repository.WorkflowRepository;
 import com.platform.repository.WorkflowRunRepository;
 import com.platform.workflow.WorkflowEngine;
 import com.platform.workflow.WorkflowValidator;
+import com.platform.workflow.event.WorkflowRunSubscriberRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -13,9 +14,14 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -29,15 +35,18 @@ public class WorkflowController {
     private final WorkflowRunRepository workflowRunRepository;
     private final WorkflowEngine workflowEngine;
     private final WorkflowValidator workflowValidator;
+    private final WorkflowRunSubscriberRegistry subscriberRegistry;
 
     public WorkflowController(WorkflowRepository workflowRepository,
                                WorkflowRunRepository workflowRunRepository,
                                WorkflowEngine workflowEngine,
-                               WorkflowValidator workflowValidator) {
+                               WorkflowValidator workflowValidator,
+                               WorkflowRunSubscriberRegistry subscriberRegistry) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.workflowEngine = workflowEngine;
         this.workflowValidator = workflowValidator;
+        this.subscriberRegistry = subscriberRegistry;
     }
 
     @GetMapping
@@ -153,6 +162,62 @@ public class WorkflowController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Run does not belong to workflow");
         }
         return ApiResponse.ok(run);
+    }
+
+    /**
+     * CR-058: 워크플로우 실행 이벤트 SSE 구독.
+     * 이벤트 4종 — workflow.snapshot / workflow.step / workflow.approval / workflow.done.
+     */
+    @GetMapping(value = "/runs/{runId}/subscribe", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasAuthority('SCOPE_workflow:subscribe') or isAuthenticated()")
+    @Operation(summary = "워크플로우 실행 SSE 구독",
+            description = "스텝 상태 전이 / 승인 대기 / 런 종료 이벤트를 실시간 스트리밍. 타임아웃 30분, 15초 heartbeat.")
+    public SseEmitter subscribeRun(@PathVariable UUID runId) {
+        WorkflowRunEntity run = workflowRunRepository.findById(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Workflow run not found: " + runId));
+
+        SseEmitter emitter = new SseEmitter(30L * 60L * 1000L); // 30분
+
+        // 1) 연결 직후 현재 상태를 snapshot 으로 1회 전송.
+        try {
+            Map<String, Object> snapshot = new LinkedHashMap<>();
+            snapshot.put("run_id", run.getId().toString());
+            snapshot.put("workflow_id", run.getWorkflowId());
+            snapshot.put("session_id", run.getSessionId());
+            snapshot.put("status", run.getStatus());
+            snapshot.put("current_step", run.getCurrentStep());
+            if (run.getParentRunId() != null) snapshot.put("parent_run_id", run.getParentRunId().toString());
+            if (run.getParentStepId() != null) snapshot.put("parent_step_id", run.getParentStepId());
+            if (run.getStepResults() != null) snapshot.put("step_results", run.getStepResults());
+            if (run.getStartedAt() != null) snapshot.put("started_at", run.getStartedAt().toString());
+            if (run.getCompletedAt() != null) snapshot.put("completed_at", run.getCompletedAt().toString());
+            emitter.send(SseEmitter.event().name("workflow.snapshot").data(snapshot));
+        } catch (IOException e) {
+            emitter.completeWithError(e);
+            return emitter;
+        }
+
+        // 2) 런이 이미 종료 상태면 snapshot 만 보내고 바로 close.
+        String status = run.getStatus();
+        if ("completed".equals(status) || "failed".equals(status) || "cancelled".equals(status)) {
+            try {
+                emitter.send(SseEmitter.event().name("workflow.done")
+                        .data(Map.of(
+                                "run_id", run.getId().toString(),
+                                "status", status,
+                                "duration_ms", run.getCompletedAt() != null && run.getStartedAt() != null
+                                        ? run.getCompletedAt().toInstant().toEpochMilli()
+                                          - run.getStartedAt().toInstant().toEpochMilli()
+                                        : 0L)));
+            } catch (IOException ignored) {}
+            emitter.complete();
+            return emitter;
+        }
+
+        // 3) 이벤트 스트림 구독자로 등록.
+        subscriberRegistry.register(run.getId(), emitter);
+        return emitter;
     }
 
     public record WorkflowRequest(
