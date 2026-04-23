@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aimbase Chat Widget — v1</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+           margin: 0; padding: 40px; background: #f3f4f6; color: #111827; line-height: 1.6; }
+    .wrap { max-width: 880px; margin: 0 auto; }
+    .card { background: white; border-radius: 12px; padding: 28px; margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    h1 { margin-top: 0; }
+    h2 { margin-top: 28px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+    pre { background: #1f2937; color: #f3f4f6; padding: 14px 16px; border-radius: 8px;
+          overflow-x: auto; }
+    pre code { background: transparent; color: inherit; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; vertical-align: top; }
+    th { background: #f9fafb; }
+    a { color: #4f46e5; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    ul li { margin-bottom: 4px; }
+    .toc { background: #eef2ff; padding: 16px 20px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="card">
+  <h1>Aimbase Chat Widget — 소비앱 통합 가이드 <small style="color:#6b7280">v1</small></h1>
+  <p>이 페이지는 Aimbase 서버가 <strong>인증 없이 공개 서빙</strong>합니다. 소비앱은 아래 리소스를
+     CDN 처럼 직접 참조하거나 <code>curl -O</code> 로 다운받아 자체 호스팅할 수 있습니다.</p>
+  <div class="toc">
+    <strong>목차</strong>
+    <ul>
+      <li><a href="#assets">빌드 산출물 (공개 URL)</a></li>
+      <li><a href="#flow">전체 플로우</a></li>
+      <li><a href="#admin">관리자 세팅 (1회)</a></li>
+      <li><a href="#bff">BFF 구현 (백엔드)</a></li>
+      <li><a href="#browser">브라우저 삽입 (프론트엔드)</a></li>
+      <li><a href="#modes">UI 모드 선택</a></li>
+      <li><a href="#trouble">트러블슈팅</a></li>
+    </ul>
+  </div>
+</div>
+
+<div class="card" id="assets">
+  <h2>빌드 산출물 (공개 URL)</h2>
+  <table>
+    <tr><th>URL</th><th>용도</th><th>크기</th></tr>
+    <tr><td><code>/widget/v1/aimbase-chat.umd.global.js</code></td>
+        <td>&lt;script&gt; 로드용 (전역 <code>window.AimbaseChat</code>)</td><td>~17 KB</td></tr>
+    <tr><td><code>/widget/v1/aimbase-chat.esm.js</code></td>
+        <td>번들러 import (Vite/webpack 등)</td><td>~25 KB</td></tr>
+    <tr><td><code>/widget/v1/aimbase-chat.d.ts</code></td>
+        <td>TypeScript 타입 정의</td><td>~4 KB</td></tr>
+    <tr><td><code>/widget/v1/sample-bff/server.js</code></td>
+        <td>Node 샘플 BFF (외부 의존 0)</td><td>코드 ~100줄</td></tr>
+  </table>
+  <p>인증 없이 접근 가능. 장기 캐시(30일) 적용되며, 번들이 업데이트되면 ETag/Last-Modified 로 자동 재검증됩니다.</p>
+</div>
+
+<div class="card" id="flow">
+  <h2>전체 플로우</h2>
+<pre>소비앱 브라우저           소비앱 BFF              Aimbase 서버
+(oms.com)              (API Key 보관 유일)      (aimbase.com)
+
+&lt;aimbase-chat&gt;  ──▶   /my-bff/aimbase-token ──▶  /api/v1/sessions/
+ authResolver()                                   issue-widget-token
+                ◀──   (30분 JWT)           ◀──   (type=widget JWT)
+
+브라우저가 받은 JWT 로 직접 호출:
+  /chat/completions (SSE)
+  /workflows/runs/{id}/subscribe (SSE)
+  /knowledge-sources/.../chunks/...</pre>
+  <p><strong>핵심 원칙</strong>: Aimbase API Key 를 브라우저에 절대 내려보내지 않는다. BFF 가 서버간 호출로
+     단기 JWT 를 대리 발급받아 브라우저에 전달하는 3-Tier 구조만 안전.</p>
+</div>
+
+<div class="card" id="admin">
+  <h2>관리자 세팅 (Aimbase 운영자가 1회 수행)</h2>
+  <h3>1. 소비앱 전용 API Key 발급</h3>
+<pre><code>curl -X POST "$AIMBASE/api/v1/platform/api-keys" \
+  -H "Authorization: Bearer $SUPER_ADMIN_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"OMS 위젯 BFF 키","domainApp":"oms","tenantId":"rescue_prod"}'
+# 응답의 apiKey 값은 1회만 조회 가능. BFF env 로 안전 전달.</code></pre>
+
+  <h3>2. 소비앱 Origin 을 화이트리스트에 추가</h3>
+<pre><code>UPDATE global_config
+   SET config_value='https://oms.company.com,https://rescue.company.com',
+       updated_by='ops', updated_at=NOW()
+ WHERE config_key='widget.allowed-origins';</code></pre>
+  <p>CSV 로 여러 origin. 프로토콜+도메인+포트 정확 일치 필요. <code>*</code> 불가.</p>
+
+  <h3>관련 설정 4종</h3>
+  <table>
+    <tr><th>키</th><th>기본</th><th>설명</th></tr>
+    <tr><td><code>widget.allowed-origins</code></td><td>(빈 문자열)</td><td>허용 Origin CSV</td></tr>
+    <tr><td><code>widget.allowed-scopes</code></td><td>chat:stream,workflow:subscribe,rag:read</td><td>scope 화이트리스트</td></tr>
+    <tr><td><code>widget.token-ttl-seconds</code></td><td>1800</td><td>기본 TTL</td></tr>
+    <tr><td><code>widget.token-max-ttl-seconds</code></td><td>3600</td><td>최대 TTL 하드캡</td></tr>
+  </table>
+</div>
+
+<div class="card" id="bff">
+  <h2>BFF 구현 (소비앱 백엔드 개발자)</h2>
+  <p>BFF 의 유일한 역할은 <strong>API Key 를 env 에 보관</strong>하고 <strong>토큰 요청을 Aimbase 로 중계</strong>하는 것.
+     앞에 소비앱 자체 로그인 검증을 둔다.</p>
+
+  <h3>Node.js</h3>
+<pre><code>const http = require("http");
+
+async function issueWidgetToken() {
+  const res = await fetch(`${process.env.AIMBASE_URL}/api/v1/sessions/issue-widget-token`, {
+    method: "POST",
+    headers: {
+      "X-API-Key": process.env.AIMBASE_API_KEY,
+      "X-Tenant-Id": process.env.AIMBASE_TENANT_ID,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      origin: process.env.ALLOWED_ORIGIN,
+      scopes: ["chat:stream", "workflow:subscribe", "rag:read"],
+      ttl_seconds: 1800,
+    }),
+  });
+  if (!res.ok) throw new Error(`Aimbase token ${res.status}`);
+  return (await res.json()).data;
+}
+
+http.createServer(async (req, res) => {
+  if (req.method === "POST" &amp;&amp; req.url === "/my-bff/aimbase-token") {
+    // TODO: 자체 사용자 세션 검증
+    const token = await issueWidgetToken();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(token));
+  }
+}).listen(3000);</code></pre>
+
+  <h3>Spring Boot (Java)</h3>
+<pre><code>@RestController
+public class AimbaseTokenController {
+  @Value("${aimbase.url}")       private String aimbaseUrl;
+  @Value("${aimbase.api-key}")   private String apiKey;
+  @Value("${aimbase.tenant-id}") private String tenantId;
+  @Value("${widget.origin}")     private String origin;
+
+  private final RestClient rest = RestClient.create();
+
+  @PostMapping("/my-bff/aimbase-token")
+  public Map&lt;String, Object&gt; issue() {
+    var body = Map.of(
+      "origin", origin,
+      "scopes", List.of("chat:stream","workflow:subscribe","rag:read"),
+      "ttl_seconds", 1800
+    );
+    Map&lt;String, Object&gt; wrap = rest.post()
+        .uri(aimbaseUrl + "/api/v1/sessions/issue-widget-token")
+        .header("X-API-Key", apiKey)
+        .header("X-Tenant-Id", tenantId)
+        .body(body).retrieve().body(Map.class);
+    return (Map&lt;String, Object&gt;) wrap.get("data");
+  }
+}</code></pre>
+
+  <h3>FastAPI (Python)</h3>
+<pre><code>import os, httpx
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.post("/my-bff/aimbase-token")
+async def issue_token():
+    async with httpx.AsyncClient() as c:
+        r = await c.post(
+            f"{os.environ['AIMBASE_URL']}/api/v1/sessions/issue-widget-token",
+            headers={"X-API-Key": os.environ["AIMBASE_API_KEY"],
+                     "X-Tenant-Id": os.environ["AIMBASE_TENANT_ID"]},
+            json={"origin": os.environ["ALLOWED_ORIGIN"],
+                  "scopes": ["chat:stream","workflow:subscribe","rag:read"],
+                  "ttl_seconds": 1800},
+        )
+    r.raise_for_status()
+    return r.json()["data"]</code></pre>
+
+  <h3>체크리스트</h3>
+  <ul>
+    <li>API Key 는 <strong>환경변수</strong>에만. 코드·로그·번들 금지.</li>
+    <li>BFF 호출 앞에 <strong>자체 사용자 인증</strong> 검증.</li>
+    <li><code>origin</code> 은 BFF 가 <strong>고정값</strong>으로 주입하거나 검증.</li>
+  </ul>
+</div>
+
+<div class="card" id="browser">
+  <h2>브라우저 삽입 (소비앱 프론트엔드 개발자)</h2>
+
+  <h3>A. CDN 방식 (Aimbase 가 서빙)</h3>
+<pre><code>&lt;script src="https://aimbase.company.com/widget/v1/aimbase-chat.umd.global.js"&gt;&lt;/script&gt;
+&lt;aimbase-chat
+  base-url="https://aimbase.company.com"
+  token-endpoint="/my-bff/aimbase-token"
+  display="bubble"&gt;&lt;/aimbase-chat&gt;</code></pre>
+
+  <h3>B. 다운로드 방식 (소비앱 자체 호스팅)</h3>
+<pre><code># 소비앱 배포 스크립트에 1회
+curl -O https://aimbase.company.com/widget/v1/aimbase-chat.umd.global.js
+mv aimbase-chat.umd.global.js public/assets/</code></pre>
+<pre><code>&lt;script src="/assets/aimbase-chat.umd.global.js"&gt;&lt;/script&gt;
+&lt;aimbase-chat base-url="https://aimbase.company.com"
+              token-endpoint="/my-bff/aimbase-token"
+              display="bubble"&gt;&lt;/aimbase-chat&gt;</code></pre>
+
+  <h3>C. npm 방식 (번들러 통합)</h3>
+<pre><code>import { defineAimbaseChat, createWidget } from "@aimbase/chat-widget-embed";
+
+// Web Component 로
+defineAimbaseChat();
+
+// JS API 로 직접 (React/Vue 컨테이너)
+const handle = createWidget({
+  baseUrl: "https://aimbase.company.com",
+  authResolver: async () =&gt; (await (await fetch("/my-bff/aimbase-token", { method: "POST" })).json()),
+  display: "inline",
+  target: document.getElementById("chat-container"),
+  ragSourceId: "kb_rescue",
+  contextProvider: () =&gt; ({ orderId: currentOrderId, page: "order-detail" }),
+  on: {
+    onWorkflowStep: (ev) =&gt; console.log("workflow", ev),
+    onApprovalRequired: (ev) =&gt; openMyOwnApprovalFlow(ev),
+  },
+});</code></pre>
+
+  <h3>주요 옵션</h3>
+  <table>
+    <tr><th>속성</th><th>값</th><th>기본</th><th>설명</th></tr>
+    <tr><td><code>base-url</code></td><td>URL</td><td>필수</td><td>Aimbase 서버 URL</td></tr>
+    <tr><td><code>token-endpoint</code></td><td>URL</td><td>—</td><td>BFF 경로 (authResolver JS 주입 시 생략)</td></tr>
+    <tr><td><code>display</code></td><td>bubble / inline / panel</td><td>inline</td><td>렌더 모드</td></tr>
+    <tr><td><code>rag-source-id</code></td><td>string</td><td>—</td><td>RAG 소스 지정 시 citations 자동 표시</td></tr>
+    <tr><td><code>theme-mode</code></td><td>light / dark / auto</td><td>auto</td><td>테마</td></tr>
+  </table>
+</div>
+
+<div class="card" id="modes">
+  <h2>UI 모드 선택</h2>
+  <table>
+    <tr><th>모드</th><th>용도</th></tr>
+    <tr><td><code>bubble</code></td><td>전역 도우미 — 모든 페이지 우하단</td></tr>
+    <tr><td><code>inline</code></td><td>특정 화면 전용 — 예: 주문 상세에서 "환불 처리해줘"</td></tr>
+    <tr><td><code>panel</code></td><td>관리자 도구 — 측면 고정 패널</td></tr>
+  </table>
+</div>
+
+<div class="card" id="trouble">
+  <h2>트러블슈팅</h2>
+  <table>
+    <tr><th>증상</th><th>해결</th></tr>
+    <tr><td>CORS 에러 (프리플라이트 차단)</td><td><code>widget.allowed-origins</code> 에 소비앱 origin 추가 (프로토콜·포트 정확히)</td></tr>
+    <tr><td>401 "API Key is required"</td><td>BFF 가 JWT 로 호출 중. 반드시 <code>X-API-Key</code> 헤더</td></tr>
+    <tr><td>400 "origin is not allowed"</td><td>토큰 발급 body 의 <code>origin</code> 과 화이트리스트 불일치</td></tr>
+    <tr><td>403 간헐 발생</td><td>토큰 만료. <code>on.onTokenExpiring</code> 에서 재시도</td></tr>
+    <tr><td>citations 없음</td><td><code>rag-source-id</code> 미지정 또는 해당 소스 검색 결과 0건</td></tr>
+    <tr><td>SSE 연결 후 이벤트 없음</td><td>이미 종료된 run (snapshot + done 1회씩 오고 close, 정상)</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>관련 문서</h2>
+  <ul>
+    <li>서버 API 레퍼런스: <code>docs/guides/aimbase-api-guide.md</code> § 17 (Aimbase 저장소 내부)</li>
+    <li>운영 가이드: <code>docs/guides/aimbase-ops-guide.md</code> § 2-5 / 시나리오 N</li>
+    <li>위젯 패키지 README: <code>packages/chat-widget-embed/README.md</code></li>
+    <li>마크다운 버전: <code>docs/guides/embed-chat-widget.md</code></li>
+  </ul>
+</div>
+
+<p style="text-align: center; color: #6b7280; font-size: 13px; padding: 20px;">
+  Aimbase Chat Widget v1 · 문의는 Aimbase 프로젝트 이슈 트래커로
+</p>
+
+</div>
+</body>
+</html>

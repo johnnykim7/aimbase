@@ -70,6 +70,24 @@ dependencyManagement {
     }
 }
 
+// CR-058 Sprint 53: 위젯 번들을 정적 리소스(/widget/v1/*)로 포함해 공개 서빙.
+// packages/chat-widget-embed/dist/ 가 존재하면 그 산출물을,
+// 없으면 static/widget/v1/ 에 체크인된 기존 사본을 그대로 사용한다.
+val copyWidgetBundle by tasks.registering(Copy::class) {
+    val widgetDist = rootProject.projectDir.resolve("../packages/chat-widget-embed/dist")
+    if (widgetDist.exists()) {
+        from(widgetDist)
+        include("aimbase-chat.umd.global.js", "aimbase-chat.esm.js", "index.d.ts")
+        into(layout.projectDirectory.dir("src/main/resources/static/widget/v1"))
+    }
+    // rename .d.ts → aimbase-chat.d.ts for clearer public URL
+    rename("^index\\.d\\.ts$", "aimbase-chat.d.ts")
+}
+
+tasks.named("processResources") {
+    dependsOn(copyWidgetBundle)
+}
+
 tasks.withType<Test> {
     useJUnitPlatform()
 

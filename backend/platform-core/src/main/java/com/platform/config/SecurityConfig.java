@@ -64,6 +64,8 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/**", "/swagger-ui/**", "/api-docs/**", "/ws/**").permitAll()
+                // CR-058: 위젯 번들·가이드 정적 리소스 — 인증 없이 공개 (소비앱이 CDN 처럼 소비)
+                .requestMatchers("/widget/**").permitAll()
                 // MCP SSE 엔드포인트
                 .requestMatchers("/sse/**", "/mcp/**", "/admin-mcp/**").permitAll()
                 // 인증 엔드포인트
