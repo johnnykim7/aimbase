@@ -1286,7 +1286,7 @@
 - **범위 경계**: CDN 배포 인프라 결정(공개 npm/사내 registry/자체 CDN) / Vue·Svelte 전용 래퍼 / 음성 입력(STT) UI / 파일 업로드 / `allowApproval: true` 모드 위젯 내 승인 UI 완전 구현은 **본 CR 범위 제외** — CR-059~062 후속 CR 후보로 식별됨
 - **요청자**: sykim | **승인자**: sykim (2026-04-24) | **적용 버전**: v8.0.0 (예정)
 - **변경 일자**: 2026-04-24
-- **상태**: 🔧 **Sprint 52 완료 (2026-04-24)** — 서버 Phase 1~3 구현 + 신규 파일 17개(프로덕션 10 + 테스트 7) + Flyway 2개(V17 master, V54 tenant) + 신규 엔드포인트 3개. 단위 테스트 50건(Phase 1:21 / Phase 2:9 / Phase 3:17 / snake_case+OPTIONS:3) 추가, 전체 회귀 494/496 PASS (2건 `MCPServerManagerTest` 사전 존재 실패 — CR-058 무관). curl 기반 E2E 8시나리오 전체 PASS (토큰 발급/CORS preflight/scope/SSE). Sprint 52 구현 중 발견된 델타 5건은 T3-9 § 9 에 기록(S3-2 스킵, snake_case 바인딩, OPTIONS preflight, Tenant Flyway 자동 적용 부재, scope gate 느슨함). **Sprint 53 (프론트 10MD) 대기**. CR-062(CDN 배포 인프라) 분리.
+- **상태**: 🔧 **Sprint 52 완료 (2026-04-24)** — 서버 Phase 1~3 구현 + 신규 파일 17개(프로덕션 10 + 테스트 7) + Flyway 2개(V17 master, V54 tenant) + 신규 엔드포인트 3개. 단위 테스트 50건(Phase 1:21 / Phase 2:9 / Phase 3:17 / snake_case+OPTIONS:3) 추가. MCPServerManagerTest 사전 실패 2건도 동일 세션에 해소하여 **전체 회귀 497/497 PASS (실패 0건)**. curl 기반 E2E 8시나리오 전체 PASS (토큰 발급/CORS preflight/scope/SSE). Sprint 52 구현 중 발견된 델타 5건은 T3-9 § 9 에 기록(S3-2 스킵, snake_case 바인딩, OPTIONS preflight, Tenant Flyway 자동 적용 부재, scope gate 느슨함). **Sprint 53 (프론트) 범위 확정 — B 축소 MVP 5MD** (UMD 번들 + Web Component `<aimbase-chat>` 한 종 + 샘플 BFF 1종 Node + E2E 5 시나리오). React npm 패키지와 Vue 래퍼는 실제 소비앱 요청 시 2MD 추가로 분리. CR-062(CDN 배포 인프라) 분리.
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR058_ChatWidget_20260424.md`
 - **T3 설계서**: `docs/T3-9_CR-058_ChatWidget_설계서.md` (§ 9 Sprint 52 델타 포함)
 - **Plan 파일**: `~/.claude/plans/joyful-petting-pond.md`
