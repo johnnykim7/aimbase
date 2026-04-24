@@ -4,6 +4,7 @@ import com.platform.hook.HookDecision;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookOutput;
 import com.platform.llm.model.UnifiedMessage;
+import com.platform.repository.ConversationMessageRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +29,7 @@ class ContextWindowManagerTest {
     @Mock private HookDispatcher hookDispatcher;
     @Mock private SessionMemoryCompactionService sessionMemoryCompaction;
     @Mock private PostCompactRecoveryService postCompactRecovery;
+    @Mock private ConversationMessageRepository conversationMessageRepository;
 
     private ContextWindowManager manager;
 
@@ -38,7 +40,7 @@ class ContextWindowManagerTest {
 
     @BeforeEach
     void setUp() {
-        manager = new ContextWindowManager(summarizer, hookDispatcher, sessionMemoryCompaction, postCompactRecovery, THRESHOLDS);
+        manager = new ContextWindowManager(summarizer, hookDispatcher, sessionMemoryCompaction, postCompactRecovery, THRESHOLDS, conversationMessageRepository);
 
         // 기본: 훅 PASSTHROUGH
         lenient().when(hookDispatcher.dispatch(any(), any()))
