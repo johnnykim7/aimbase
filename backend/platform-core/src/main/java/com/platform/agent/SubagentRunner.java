@@ -10,6 +10,7 @@ import com.platform.llm.model.UnifiedMessage;
 import com.platform.orchestrator.ChatRequest;
 import com.platform.orchestrator.ChatResponse;
 import com.platform.orchestrator.OrchestratorEngine;
+import com.platform.orchestrator.stream.StreamEvent;
 import com.platform.repository.SubagentRunRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * CR-030 PRD-207: 서브에이전트 생성 및 실행.
@@ -33,6 +35,33 @@ import java.util.concurrent.TimeUnit;
 public class SubagentRunner {
 
     private static final Logger log = LoggerFactory.getLogger(SubagentRunner.class);
+
+    /**
+     * CR-053 Phase 2: 현재 스트리밍 컨텍스트의 StreamEvent 싱크.
+     * ChatController.streamResponse()가 Virtual Thread 시작 시 set, 종료 시 clear.
+     * 서브에이전트 실행 중 SubagentStart/Done 이벤트를 이 싱크로 발행.
+     * null이면 비스트리밍 경로(REST /subagents 등)이므로 이벤트 발행을 생략.
+     */
+    private static final ThreadLocal<Consumer<StreamEvent>> STREAM_SINK = new ThreadLocal<>();
+
+    public static void setStreamSink(Consumer<StreamEvent> sink) {
+        STREAM_SINK.set(sink);
+    }
+
+    public static void clearStreamSink() {
+        STREAM_SINK.remove();
+    }
+
+    private static void emit(StreamEvent event) {
+        Consumer<StreamEvent> sink = STREAM_SINK.get();
+        if (sink != null) {
+            try {
+                sink.accept(event);
+            } catch (Exception e) {
+                log.warn("Stream sink emit failed: {}", event.getClass().getSimpleName(), e);
+            }
+        }
+    }
 
     private final OrchestratorEngine orchestratorEngine;
     private final SubagentRunRepository subagentRunRepository;
@@ -86,6 +115,13 @@ public class SubagentRunner {
                 Map.of("description", request.description(),
                         "isolation", request.isolation().name(),
                         "runInBackground", request.runInBackground()));
+
+        // CR-053 Phase 3: 사용자 가시 텍스트 한 줄을 먼저 주입 — 챗 UI에서 "어떤 에이전트가 뭘 시작했는지" 바로 보임.
+        String humanPreamble = buildPreamble(request);
+        emit(new StreamEvent.TextDelta(humanPreamble));
+
+        // CR-053 Phase 2: SSE SubagentStart 이벤트 발행 (스트리밍 컨텍스트에서만)
+        emit(new StreamEvent.SubagentStart(runId, request.agentType().name(), request.description()));
 
         // 6. 실행 분기
         if (request.runInBackground()) {
@@ -150,7 +186,10 @@ public class SubagentRunner {
     // ── 백그라운드 실행 (비동기) ──
 
     private SubagentResult runBackground(SubagentContext context, SubagentRunEntity entity) {
+        // CR-053 Phase 2: 자식 VT는 부모의 ThreadLocal을 상속하지 않으므로 싱크를 캡처해서 전달.
+        Consumer<StreamEvent> capturedSink = STREAM_SINK.get();
         Thread.ofVirtual().name("subagent-" + context.getSubagentRunId()).start(() -> {
+            if (capturedSink != null) STREAM_SINK.set(capturedSink);
             try {
                 SubagentResult result = executeAgent(context);
                 updateEntity(entity, result);
@@ -165,6 +204,8 @@ public class SubagentRunner {
                 updateEntity(entity, result);
                 cleanupWorktree(context);
                 dispatchStopHook(context, result);
+            } finally {
+                STREAM_SINK.remove();
             }
         });
 
@@ -256,6 +297,14 @@ public class SubagentRunner {
                         "exitCode", result.exitCode(),
                         "durationMs", result.durationMs()));
 
+        // CR-053 Phase 2: SSE SubagentDone 이벤트 발행 (스트리밍 컨텍스트에서만)
+        String summary = buildDoneSummary(result);
+        emit(new StreamEvent.SubagentDone(
+                context.getSubagentRunId(),
+                result.status().name(),
+                summary,
+                result.durationMs()));
+
         // CR-034: TASK_COMPLETED 훅 (태스크로 실행된 경우)
         if (context.getRequest().runInBackground()) {
             dispatchHook(HookEvent.TASK_COMPLETED,
@@ -319,6 +368,36 @@ public class SubagentRunner {
                 e.getWorktreePath(), e.getBranchName(),
                 e.getDurationMs(), e.getStartedAt(), e.getCompletedAt(),
                 e.getError());
+    }
+
+    /**
+     * CR-053 Phase 3: 서브에이전트 실행 직전에 채팅에 주입할 한 줄 안내.
+     * 예: "\n> Explore 서브에이전트로 'T2 파일 분석' 시작합니다.\n\n"
+     */
+    private String buildPreamble(SubagentRequest request) {
+        String typeLabel = switch (request.agentType()) {
+            case PLAN -> "Plan";
+            case EXPLORE -> "Explore";
+            case GUIDE -> "Guide";
+            case VERIFICATION -> "Verification";
+            case GENERAL -> "General";
+        };
+        String desc = request.description() != null && !request.description().isBlank()
+                ? request.description().strip()
+                : "작업";
+        return "\n> " + typeLabel + " 서브에이전트로 '" + desc + "' 시작합니다.\n\n";
+    }
+
+    /**
+     * CR-053 Phase 2: SubagentDone 이벤트의 summary 필드 구성.
+     * COMPLETED → output 앞 200자, 실패/타임아웃 → error 메시지.
+     */
+    private String buildDoneSummary(SubagentResult result) {
+        if (result.status() == SubagentResult.Status.COMPLETED && result.output() != null) {
+            String out = result.output().strip();
+            return out.length() <= 200 ? out : out.substring(0, 200) + "...";
+        }
+        return result.error() != null ? result.error() : result.status().name();
     }
 
     private void cleanupWorktree(SubagentContext context) {

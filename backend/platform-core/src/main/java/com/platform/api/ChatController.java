@@ -133,52 +133,75 @@ public class ChatController {
                 com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
             }
             org.springframework.security.core.context.SecurityContextHolder.setContext(propagatedSecurityContext);
-            try {
-                orchestrator.chatStream(chatRequest, ev -> {
-                    try {
-                        switch (ev) {
-                            case com.platform.orchestrator.stream.StreamEvent.TextDelta t ->
-                                emitter.send(SseEmitter.event()
-                                        .name("delta")
-                                        .data(Map.of("delta", t.delta() != null ? t.delta() : "")));
-                            case com.platform.orchestrator.stream.StreamEvent.ThinkingDelta t ->
-                                emitter.send(SseEmitter.event()
-                                        .name("thinking")
-                                        .data(Map.of("delta", t.delta() != null ? t.delta() : "")));
-                            case com.platform.orchestrator.stream.StreamEvent.ToolUseStart s ->
-                                emitter.send(SseEmitter.event()
-                                        .name("tool_use_start")
-                                        .data(Map.of("id", s.id(), "name", s.name(),
-                                                "input", s.input() != null ? s.input() : Map.of())));
-                            case com.platform.orchestrator.stream.StreamEvent.ToolResultEvent r ->
-                                emitter.send(SseEmitter.event()
-                                        .name("tool_result")
-                                        .data(Map.of("tool_use_id", r.toolUseId(),
-                                                "output", r.output() != null ? r.output() : "",
-                                                "is_error", r.isError())));
-                            case com.platform.orchestrator.stream.StreamEvent.Done d -> {
-                                // CR-058: citations + rag_used 를 done payload 에 병합.
-                                Map<String, Object> donePayload = new HashMap<>();
-                                donePayload.put("done", true);
-                                if (d.citations() != null && !d.citations().isEmpty()) {
-                                    donePayload.put("citations", d.citations());
-                                }
-                                if (Boolean.TRUE.equals(d.ragUsed())) {
-                                    donePayload.put("rag_used", true);
-                                }
-                                emitter.send(SseEmitter.event()
-                                        .name("done")
-                                        .data(donePayload));
-                                emitter.complete();
+
+            // 단일 SSE 송출 람다 — orchestrator.chatStream과 SubagentRunner가 공유.
+            // CR-053 Phase 2: SubagentStart/Done도 같은 emitter로 송출한다.
+            java.util.function.Consumer<com.platform.orchestrator.stream.StreamEvent> sseSink = ev -> {
+                try {
+                    switch (ev) {
+                        case com.platform.orchestrator.stream.StreamEvent.TextDelta t ->
+                            emitter.send(SseEmitter.event()
+                                    .name("delta")
+                                    .data(Map.of("delta", t.delta() != null ? t.delta() : "")));
+                        case com.platform.orchestrator.stream.StreamEvent.ThinkingDelta t ->
+                            emitter.send(SseEmitter.event()
+                                    .name("thinking")
+                                    .data(Map.of("delta", t.delta() != null ? t.delta() : "")));
+                        case com.platform.orchestrator.stream.StreamEvent.ToolUseStart s ->
+                            emitter.send(SseEmitter.event()
+                                    .name("tool_use_start")
+                                    .data(Map.of("id", s.id(), "name", s.name(),
+                                            "input", s.input() != null ? s.input() : Map.of())));
+                        case com.platform.orchestrator.stream.StreamEvent.ToolResultEvent r ->
+                            emitter.send(SseEmitter.event()
+                                    .name("tool_result")
+                                    .data(Map.of("tool_use_id", r.toolUseId(),
+                                            "output", r.output() != null ? r.output() : "",
+                                            "is_error", r.isError())));
+                        case com.platform.orchestrator.stream.StreamEvent.Done d -> {
+                            Map<String, Object> donePayload = new HashMap<>();
+                            donePayload.put("done", true);
+                            if (d.citations() != null && !d.citations().isEmpty()) {
+                                donePayload.put("citations", d.citations());
                             }
+                            if (Boolean.TRUE.equals(d.ragUsed())) {
+                                donePayload.put("rag_used", true);
+                            }
+                            emitter.send(SseEmitter.event()
+                                    .name("done")
+                                    .data(donePayload));
+                            emitter.complete();
                         }
-                    } catch (IOException e) {
-                        emitter.completeWithError(e);
+                        case com.platform.orchestrator.stream.StreamEvent.SubagentStart s ->
+                            emitter.send(SseEmitter.event()
+                                    .name("subagent_start")
+                                    .data(Map.of(
+                                            "run_id", s.runId(),
+                                            "agent_type", s.agentType(),
+                                            "description", s.description() != null ? s.description() : "")));
+                        case com.platform.orchestrator.stream.StreamEvent.SubagentDone sd ->
+                            emitter.send(SseEmitter.event()
+                                    .name("subagent_done")
+                                    .data(Map.of(
+                                            "run_id", sd.runId(),
+                                            "status", sd.status(),
+                                            "summary", sd.summary() != null ? sd.summary() : "",
+                                            "duration_ms", sd.durationMs())));
                     }
-                });
+                } catch (IOException e) {
+                    emitter.completeWithError(e);
+                }
+            };
+
+            // CR-053 Phase 2: SubagentRunner가 emit()으로 발행한 이벤트가 같은 SSE emitter로 가도록 싱크 등록.
+            // 백그라운드 서브에이전트는 자식 VT에서 Done을 발행하므로, 람다가 부모 emitter를 클로저로 캡처해서 전달.
+            com.platform.agent.SubagentRunner.setStreamSink(sseSink);
+            try {
+                orchestrator.chatStream(chatRequest, sseSink);
             } catch (Exception e) {
                 emitter.completeWithError(e);
             } finally {
+                com.platform.agent.SubagentRunner.clearStreamSink();
                 com.platform.tenant.TenantContext.clear();
                 org.springframework.security.core.context.SecurityContextHolder.clearContext();
             }

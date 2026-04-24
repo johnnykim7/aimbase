@@ -36,4 +36,21 @@ public sealed interface StreamEvent {
             this(usage, null, null);
         }
     }
+
+    /**
+     * CR-053 Phase 2: 서브에이전트 실행 시작.
+     * @param runId       서브에이전트 실행 ID
+     * @param agentType   GENERAL / PLAN / EXPLORE / GUIDE / VERIFICATION
+     * @param description 부모가 지정한 작업 설명
+     */
+    record SubagentStart(String runId, String agentType, String description) implements StreamEvent {}
+
+    /**
+     * CR-053 Phase 2: 서브에이전트 실행 종료.
+     * @param runId       서브에이전트 실행 ID
+     * @param status      COMPLETED / FAILED / TIMEOUT / CANCELLED / RUNNING(백그라운드 즉시 반환)
+     * @param summary     결과 요약 (COMPLETED 시 첫 200자, 실패 시 에러 메시지)
+     * @param durationMs  실행 시간
+     */
+    record SubagentDone(String runId, String status, String summary, long durationMs) implements StreamEvent {}
 }

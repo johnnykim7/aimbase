@@ -1,6 +1,7 @@
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { ToolUseBlock } from "./blocks/ToolUseBlock";
+import { SubagentBlock } from "./blocks/SubagentBlock";
 import type { StreamMessage } from "../../hooks/useChatStream";
 
 interface MessageListProps {
@@ -28,6 +29,18 @@ export const MessageList = ({ messages, isStreaming }: MessageListProps) => {
                     name={b.name}
                     input={b.input}
                     result={b.result}
+                  />
+                );
+              if (b.kind === "subagent")
+                return (
+                  <SubagentBlock
+                    key={b.runId || i}
+                    runId={b.runId}
+                    agentType={b.agentType}
+                    description={b.description}
+                    status={b.status}
+                    summary={b.summary}
+                    durationMs={b.durationMs}
                   />
                 );
               return null;

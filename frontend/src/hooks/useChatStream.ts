@@ -24,6 +24,17 @@ export type StreamBlock =
       input: Record<string, unknown>;
       /** tool_result 수신 시 주입 */
       result?: { output: string; isError: boolean };
+    }
+  | {
+      /** CR-053 Phase 4: 서브에이전트 실행 블록 */
+      kind: "subagent";
+      runId: string;
+      agentType: string;
+      description: string;
+      /** RUNNING → COMPLETED/FAILED/TIMEOUT/CANCELLED */
+      status: "RUNNING" | "COMPLETED" | "FAILED" | "TIMEOUT" | "CANCELLED";
+      summary?: string;
+      durationMs?: number;
     };
 
 export interface StreamMessage {
@@ -186,6 +197,63 @@ export const useChatStream = (
       });
     };
 
+    const pushSubagentStart = (
+      runId: string,
+      agentType: string,
+      description: string,
+    ) => {
+      setMessages((prev) => {
+        const copy = [...prev];
+        const idx = copy.findIndex((m) => m.id === assistantId);
+        if (idx < 0) return prev;
+        const msg = { ...copy[idx], blocks: [...copy[idx].blocks] };
+        msg.blocks.push({
+          kind: "subagent",
+          runId,
+          agentType,
+          description,
+          status: "RUNNING",
+        });
+        copy[idx] = msg;
+        return copy;
+      });
+    };
+
+    const setSubagentDone = (
+      runId: string,
+      status: string,
+      summary: string,
+      durationMs: number,
+    ) => {
+      setMessages((prev) => {
+        const copy = [...prev];
+        const idx = copy.findIndex((m) => m.id === assistantId);
+        if (idx < 0) return prev;
+        const msg = { ...copy[idx], blocks: [...copy[idx].blocks] };
+        for (let i = msg.blocks.length - 1; i >= 0; i--) {
+          const b = msg.blocks[i];
+          if (b.kind === "subagent" && b.runId === runId) {
+            const normalized = (
+              ["RUNNING", "COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"].includes(
+                status,
+              )
+                ? status
+                : "FAILED"
+            ) as "RUNNING" | "COMPLETED" | "FAILED" | "TIMEOUT" | "CANCELLED";
+            msg.blocks[i] = {
+              ...b,
+              status: normalized,
+              summary,
+              durationMs,
+            };
+            break;
+          }
+        }
+        copy[idx] = msg;
+        return copy;
+      });
+    };
+
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -257,6 +325,29 @@ export const useChatStream = (
                 String(payload.tool_use_id ?? ""),
                 String(payload.output ?? ""),
                 Boolean(payload.is_error),
+              );
+            } catch {
+              // skip
+            }
+          } else if (ev.event === "subagent_start") {
+            try {
+              const payload = JSON.parse(ev.data);
+              pushSubagentStart(
+                String(payload.run_id ?? ""),
+                String(payload.agent_type ?? "GENERAL"),
+                String(payload.description ?? ""),
+              );
+            } catch {
+              // skip
+            }
+          } else if (ev.event === "subagent_done") {
+            try {
+              const payload = JSON.parse(ev.data);
+              setSubagentDone(
+                String(payload.run_id ?? ""),
+                String(payload.status ?? "FAILED"),
+                String(payload.summary ?? ""),
+                Number(payload.duration_ms ?? 0),
               );
             } catch {
               // skip
