@@ -4,9 +4,11 @@ import com.anthropic.client.AnthropicClient;
 import com.anthropic.core.JsonValue;
 import com.anthropic.helpers.MessageAccumulator;
 import com.anthropic.models.messages.Base64ImageSource;
+import com.anthropic.models.messages.Base64PdfSource;
 import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.ContentBlockParam;
+import com.anthropic.models.messages.DocumentBlockParam;
 import com.anthropic.models.messages.ImageBlockParam;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.MessageParam;
@@ -79,6 +81,12 @@ public class AnthropicAdapter implements LLMAdapter {
 
     @Override
     public String getProvider() { return "anthropic"; }
+
+    @Override
+    public AdapterCapability capabilities() {
+        // CR-061: Claude 3.5+ 는 이미지 + PDF Document 블록 네이티브 지원
+        return AdapterCapability.IMAGE_AND_PDF;
+    }
 
     @Override
     public List<String> getSupportedModels() {
@@ -457,14 +465,17 @@ public class AnthropicAdapter implements LLMAdapter {
                         .build();
             }
             default -> {
-                // PRD-111: 멀티모달 — Image 블록 포함 시 ContentBlockParam 목록으로 변환
-                boolean hasImage = msg.content().stream()
-                        .anyMatch(b -> b instanceof com.platform.llm.model.ContentBlock.Image);
-                if (hasImage) {
+                // PRD-111 + CR-061: 멀티모달 — Image / Document 블록 포함 시 ContentBlockParam 목록으로 변환
+                boolean hasMultimodal = msg.content().stream()
+                        .anyMatch(b -> b instanceof com.platform.llm.model.ContentBlock.Image
+                                || b instanceof com.platform.llm.model.ContentBlock.Document);
+                if (hasMultimodal) {
                     List<ContentBlockParam> params = msg.content().stream()
                             .map(b -> {
                                 if (b instanceof com.platform.llm.model.ContentBlock.Image img) {
                                     return toImageBlockParam(img);
+                                } else if (b instanceof com.platform.llm.model.ContentBlock.Document doc) {
+                                    return toDocumentBlockParam(doc);
                                 } else if (b instanceof com.platform.llm.model.ContentBlock.Text text) {
                                     return ContentBlockParam.ofText(
                                             TextBlockParam.builder().text(text.text()).build());
@@ -511,6 +522,22 @@ public class AnthropicAdapter implements LLMAdapter {
                             .build());
         }
         return ContentBlockParam.ofText(TextBlockParam.builder().text("[unsupported image]").build());
+    }
+
+    /** CR-061: Document ContentBlock → Anthropic DocumentBlockParam (Base64 PDF). */
+    private ContentBlockParam toDocumentBlockParam(com.platform.llm.model.ContentBlock.Document doc) {
+        if (doc.isBase64() && "application/pdf".equals(doc.mediaType())) {
+            return ContentBlockParam.ofDocument(
+                    DocumentBlockParam.builder()
+                            .source(DocumentBlockParam.Source.ofBase64(
+                                    Base64PdfSource.builder()
+                                            .data(doc.data())
+                                            .build()))
+                            .build());
+        }
+        String hint = doc.filename() != null ? doc.filename() : "document";
+        return ContentBlockParam.ofText(TextBlockParam.builder()
+                .text("[unsupported document: " + hint + "]").build());
     }
 
     private LLMResponse toLLMResponse(com.anthropic.models.messages.Message msg,

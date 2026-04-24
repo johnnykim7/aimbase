@@ -63,7 +63,8 @@ public class WidgetTokenController {
 
         // 3) Scope 화이트리스트 교집합
         List<String> allowedScopes = settings.getStringList(
-                "widget.allowed-scopes", List.of("chat:stream", "workflow:subscribe", "rag:read"));
+                "widget.allowed-scopes",
+                List.of("chat:stream", "chat:upload", "workflow:subscribe", "rag:read"));
         List<String> requestedScopes = (req.scopes != null && !req.scopes.isEmpty())
                 ? req.scopes : allowedScopes;
         List<String> grantedScopes = new ArrayList<>();

@@ -9,14 +9,15 @@ import java.util.Map;
 @JsonSubTypes({
         @JsonSubTypes.Type(value = ContentBlock.Text.class, name = "text"),
         @JsonSubTypes.Type(value = ContentBlock.Image.class, name = "image"),
+        @JsonSubTypes.Type(value = ContentBlock.Document.class, name = "document"),
         @JsonSubTypes.Type(value = ContentBlock.ToolUse.class, name = "tool_use"),
         @JsonSubTypes.Type(value = ContentBlock.ToolResult.class, name = "tool_result"),
         @JsonSubTypes.Type(value = ContentBlock.Structured.class, name = "structured"),
         @JsonSubTypes.Type(value = ContentBlock.Thinking.class, name = "thinking"),
 })
 public sealed interface ContentBlock
-        permits ContentBlock.Text, ContentBlock.Image, ContentBlock.ToolUse, ContentBlock.ToolResult,
-                ContentBlock.Structured, ContentBlock.Thinking {
+        permits ContentBlock.Text, ContentBlock.Image, ContentBlock.Document, ContentBlock.ToolUse,
+                ContentBlock.ToolResult, ContentBlock.Structured, ContentBlock.Thinking {
 
     record Text(String text) implements ContentBlock {}
 
@@ -42,6 +43,25 @@ public sealed interface ContentBlock
         /** 하위 호환: 기존 (mediaType, data) 생성자 */
         public Image(String mediaType, String data) {
             this(mediaType, data, null);
+        }
+
+        public boolean isBase64() { return data != null && !data.isBlank(); }
+        public boolean isUrl() { return url != null && !url.isBlank(); }
+    }
+
+    /**
+     * 문서 블록 (CR-061: PDF Vision 첨부).
+     * 현재 PDF 만 지원. Anthropic Claude 는 네이티브 {@code document} 블록으로 전달되고,
+     * 미지원 프로바이더는 ChatController 레이어에서 텍스트 추출 후 {@link Text} 로 폴백된다.
+     *
+     * @param mediaType  MIME 타입 (e.g., "application/pdf")
+     * @param data       base64 인코딩된 파일 데이터 (URL 방식이면 null)
+     * @param url        파일 URL (base64 방식이면 null)
+     * @param filename   원본 파일명 (프롬프트 힌트용, nullable)
+     */
+    record Document(String mediaType, String data, String url, String filename) implements ContentBlock {
+        public static Document ofBase64(String mediaType, String base64Data, String filename) {
+            return new Document(mediaType, base64Data, null, filename);
         }
 
         public boolean isBase64() { return data != null && !data.isBlank(); }

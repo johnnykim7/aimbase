@@ -1,7 +1,13 @@
 package com.platform.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.platform.attachment.AttachmentException;
+import com.platform.attachment.AttachmentService;
+import com.platform.attachment.PdfTextExtractor;
 import com.platform.config.WorkspaceProperties;
+import com.platform.domain.ChatAttachmentEntity;
+import com.platform.llm.LLMAdapterRegistry;
+import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.UnifiedMessage;
 import com.platform.orchestrator.ChatRequest;
@@ -23,9 +29,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/chat")
@@ -35,13 +43,22 @@ public class ChatController {
     private final OrchestratorEngine orchestrator;
     private final WorkspaceProperties workspaceProperties;
     private final CancellationRegistry cancellationRegistry;
+    private final AttachmentService attachmentService;
+    private final PdfTextExtractor pdfTextExtractor;
+    private final LLMAdapterRegistry adapterRegistry;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
-                          CancellationRegistry cancellationRegistry) {
+                          CancellationRegistry cancellationRegistry,
+                          AttachmentService attachmentService,
+                          PdfTextExtractor pdfTextExtractor,
+                          LLMAdapterRegistry adapterRegistry) {
         this.orchestrator = orchestrator;
         this.workspaceProperties = workspaceProperties;
         this.cancellationRegistry = cancellationRegistry;
+        this.attachmentService = attachmentService;
+        this.pdfTextExtractor = pdfTextExtractor;
+        this.adapterRegistry = adapterRegistry;
     }
 
     /**
@@ -66,8 +83,9 @@ public class ChatController {
         // CR-045 L0: working_directory 화이트리스트 조기 차단 (400)
         validateWorkingDirectory(request.workingDirectory());
 
+        AdapterResolution resolved = resolveAdapter(request.model());
         List<UnifiedMessage> messages = request.messages().stream()
-                .map(this::toUnifiedMessage)
+                .map(dto -> toUnifiedMessage(dto, request.sessionId(), resolved))
                 .toList();
 
         // CR-007: response_format → ChatRequest.ResponseFormat 변환
@@ -324,40 +342,56 @@ public class ChatController {
     // ─── 멀티모달 변환 헬퍼 ───
 
     @SuppressWarnings("unchecked")
-    private UnifiedMessage toUnifiedMessage(MessageDto dto) {
+    private UnifiedMessage toUnifiedMessage(MessageDto dto, String sessionId, AdapterResolution adapter) {
         UnifiedMessage.Role role = UnifiedMessage.Role.valueOf(dto.role().toUpperCase());
 
         if (dto.content() instanceof String text) {
-            // 기존 동작: 문자열 content
             return UnifiedMessage.ofText(role, text);
         }
 
         if (dto.content() instanceof List<?> parts) {
-            // 멀티모달: List<Map> → ContentBlock 목록
             List<ContentBlock> blocks = new ArrayList<>();
+            // CR-061: PDF 폴백 텍스트는 유저 메시지 맨 앞에 prepend 하기 위해 누적.
+            StringBuilder pdfFallbackPrefix = new StringBuilder();
+
             for (Object part : parts) {
-                if (part instanceof Map<?, ?> map) {
-                    String type = (String) map.get("type");
-                    if ("text".equals(type)) {
-                        String text = (String) map.get("text");
-                        if (text != null) blocks.add(new ContentBlock.Text(text));
-                    } else if ("image_url".equals(type)) {
-                        Map<?, ?> imageUrl = (Map<?, ?>) map.get("image_url");
-                        if (imageUrl != null) {
-                            String url = (String) imageUrl.get("url");
-                            if (url != null && url.startsWith("data:")) {
-                                // data URI: data:image/png;base64,<base64data>
-                                int semicolonIdx = url.indexOf(';');
-                                int commaIdx = url.indexOf(',');
-                                String mediaType = url.substring(5, semicolonIdx);
-                                String base64Data = url.substring(commaIdx + 1);
-                                blocks.add(ContentBlock.Image.ofBase64(mediaType, base64Data));
-                            } else if (url != null) {
-                                blocks.add(ContentBlock.Image.ofUrl(url, "image/jpeg"));
-                            }
+                if (!(part instanceof Map<?, ?> map)) continue;
+                String type = (String) map.get("type");
+
+                if ("text".equals(type)) {
+                    String text = (String) map.get("text");
+                    if (text != null) blocks.add(new ContentBlock.Text(text));
+
+                } else if ("image".equals(type)) {
+                    // CR-061: 새 이미지 블록 — attachment_id 참조 or 인라인 data
+                    ContentBlock img = resolveImageBlock(map, sessionId, adapter);
+                    if (img != null) blocks.add(img);
+
+                } else if ("document".equals(type)) {
+                    // CR-061: PDF 첨부 — adapter.pdf 지원 여부에 따라 Document or 텍스트 폴백
+                    resolveDocumentBlock(map, sessionId, adapter, blocks, pdfFallbackPrefix);
+
+                } else if ("image_url".equals(type)) {
+                    // PRD-111 호환: OpenAI 스타일 data: URI 또는 URL
+                    Map<?, ?> imageUrl = (Map<?, ?>) map.get("image_url");
+                    if (imageUrl != null) {
+                        String url = (String) imageUrl.get("url");
+                        if (url != null && url.startsWith("data:")) {
+                            int semicolonIdx = url.indexOf(';');
+                            int commaIdx = url.indexOf(',');
+                            String mediaType = url.substring(5, semicolonIdx);
+                            String base64Data = url.substring(commaIdx + 1);
+                            blocks.add(ContentBlock.Image.ofBase64(mediaType, base64Data));
+                        } else if (url != null) {
+                            blocks.add(ContentBlock.Image.ofUrl(url, "image/jpeg"));
                         }
                     }
                 }
+            }
+
+            // PDF 폴백 텍스트가 있으면 맨 앞에 1개 Text 블록으로 삽입
+            if (pdfFallbackPrefix.length() > 0) {
+                blocks.add(0, new ContentBlock.Text(pdfFallbackPrefix.toString()));
             }
             if (blocks.isEmpty()) {
                 return UnifiedMessage.ofText(role, "");
@@ -365,7 +399,69 @@ public class ChatController {
             return new UnifiedMessage(role, blocks);
         }
 
-        // fallback
         return UnifiedMessage.ofText(role, dto.content() != null ? dto.content().toString() : "");
     }
+
+    /** CR-061: image 블록 해석. attachment_id 우선, 없으면 인라인 data/url. */
+    private ContentBlock resolveImageBlock(Map<?, ?> map, String sessionId, AdapterResolution adapter) {
+        String attachmentId = (String) map.get("attachment_id");
+        if (attachmentId != null && !attachmentId.isBlank()) {
+            if (!adapter.capability().supportsImage()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "selected adapter does not support image input");
+            }
+            ChatAttachmentEntity att = attachmentService.loadOwned(UUID.fromString(attachmentId), sessionId);
+            byte[] bytes = attachmentService.readBytes(att);
+            String base64 = Base64.getEncoder().encodeToString(bytes);
+            return ContentBlock.Image.ofBase64(att.getMediaType(), base64);
+        }
+        String inlineData = (String) map.get("data");
+        String mediaType = (String) map.get("media_type");
+        if (inlineData != null && mediaType != null) {
+            return ContentBlock.Image.ofBase64(mediaType, inlineData);
+        }
+        String url = (String) map.get("url");
+        if (url != null) {
+            return ContentBlock.Image.ofUrl(url, mediaType != null ? mediaType : "image/jpeg");
+        }
+        return null;
+    }
+
+    /** CR-061: document 블록 해석 — 지원 adapter 는 Document 블록, 미지원은 텍스트 폴백 prefix 에 누적. */
+    private void resolveDocumentBlock(Map<?, ?> map, String sessionId, AdapterResolution adapter,
+                                       List<ContentBlock> blocks, StringBuilder pdfFallbackPrefix) {
+        String attachmentId = (String) map.get("attachment_id");
+        if (attachmentId == null || attachmentId.isBlank()) {
+            throw new AttachmentException(HttpStatus.BAD_REQUEST,
+                    AttachmentException.CODE_NOT_FOUND,
+                    "document block requires attachment_id");
+        }
+        ChatAttachmentEntity att = attachmentService.loadOwned(UUID.fromString(attachmentId), sessionId);
+        byte[] bytes = attachmentService.readBytes(att);
+
+        if (adapter.capability().supportsPdf()) {
+            String base64 = Base64.getEncoder().encodeToString(bytes);
+            blocks.add(ContentBlock.Document.ofBase64(att.getMediaType(), base64, att.getFilename()));
+        } else {
+            PdfTextExtractor.ExtractResult extracted = pdfTextExtractor.extract(bytes);
+            pdfFallbackPrefix
+                    .append("[첨부 문서: ").append(att.getFilename()).append("]\n")
+                    .append(extracted.isEmpty() ? "(텍스트 추출 실패)" : extracted.text())
+                    .append("\n\n");
+        }
+    }
+
+    /** CR-061: 모델 문자열 → 어댑터 + capability. 모델 미지정("auto") 시 anthropic 기본값. */
+    private AdapterResolution resolveAdapter(String model) {
+        String modelId = model != null && !model.isBlank() && !"auto".equalsIgnoreCase(model)
+                ? model : "anthropic/claude-sonnet-4-5";
+        if (!adapterRegistry.hasAdapter(modelId)) {
+            // 등록되지 않은 모델이면 image/pdf 미지원으로 취급 — orchestrator 레이어에서 라우팅 재해석.
+            return new AdapterResolution(modelId, com.platform.llm.adapter.AdapterCapability.NONE);
+        }
+        LLMAdapter adapter = adapterRegistry.getAdapter(modelId);
+        return new AdapterResolution(modelId, adapter.capabilities());
+    }
+
+    private record AdapterResolution(String modelId, com.platform.llm.adapter.AdapterCapability capability) {}
 }

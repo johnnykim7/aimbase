@@ -29,4 +29,9 @@ public interface LLMAdapter {
         String provider = modelId.split("/")[0];
         return getProvider().equals(provider);
     }
+
+    /** CR-061: 어댑터 멀티모달 지원 선언 (기본 NONE — 필요한 어댑터가 오버라이드). */
+    default AdapterCapability capabilities() {
+        return AdapterCapability.NONE;
+    }
 }

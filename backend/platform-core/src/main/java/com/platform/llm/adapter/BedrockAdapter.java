@@ -60,6 +60,12 @@ public class BedrockAdapter implements LLMAdapter {
     public String getProvider() { return "bedrock"; }
 
     @Override
+    public AdapterCapability capabilities() {
+        // CR-061: Bedrock 경유 Claude 는 이미지+PDF 모두 지원 (Anthropic 경로와 동일).
+        return AdapterCapability.IMAGE_AND_PDF;
+    }
+
+    @Override
     public List<String> getSupportedModels() {
         return List.of(modelId);
     }

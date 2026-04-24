@@ -58,6 +58,12 @@ public class VertexAIAdapter implements LLMAdapter {
     public String getProvider() { return "vertex_ai"; }
 
     @Override
+    public AdapterCapability capabilities() {
+        // CR-061: Vertex AI Gemini/Claude 모두 이미지 지원. PDF 는 폴백 경로 이용.
+        return AdapterCapability.IMAGE_ONLY;
+    }
+
+    @Override
     public List<String> getSupportedModels() {
         return List.of(modelId);
     }

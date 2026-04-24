@@ -64,6 +64,12 @@ public class OpenAIAdapter implements LLMAdapter {
     public String getProvider() { return "openai"; }
 
     @Override
+    public AdapterCapability capabilities() {
+        // CR-061: GPT-4o 계열 이미지만 지원. PDF 는 ChatController 에서 텍스트 추출 폴백.
+        return AdapterCapability.IMAGE_ONLY;
+    }
+
+    @Override
     public List<String> getSupportedModels() {
         return List.of("gpt-4o", "gpt-4o-mini", "gpt-4-turbo");
     }

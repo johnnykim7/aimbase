@@ -47,6 +47,13 @@ public class OllamaAdapter implements LLMAdapter {
     }
 
     @Override
+    public AdapterCapability capabilities() {
+        // CR-061: Ollama 는 Llava 등 일부 모델만 이미지 지원. 관리자가 모델 선택 책임.
+        // 표준적으로 이미지까지만 허용하고 PDF 는 텍스트 폴백.
+        return AdapterCapability.IMAGE_ONLY;
+    }
+
+    @Override
     public List<String> getSupportedModels() {
         // 동적으로 /api/tags 조회 가능 — Phase 2에서 확장
         return List.of("llama3.2", "mistral", "gemma2", "phi3");

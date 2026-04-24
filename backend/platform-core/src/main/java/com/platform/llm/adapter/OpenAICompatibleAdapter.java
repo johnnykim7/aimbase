@@ -53,6 +53,12 @@ public class OpenAICompatibleAdapter implements LLMAdapter {
     public String getProvider() { return provider; }
 
     @Override
+    public AdapterCapability capabilities() {
+        // CR-061: OpenAI 호환 shim 은 이미지만 기본 허용. PDF 는 폴백.
+        return AdapterCapability.IMAGE_ONLY;
+    }
+
+    @Override
     public List<String> getSupportedModels() {
         return List.of(defaultModel);
     }
