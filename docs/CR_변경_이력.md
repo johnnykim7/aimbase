@@ -52,6 +52,7 @@
 | CR-054 | Aimbase 플랫폼 공통 HttpRequestTool — 범용 REST 호출 Tool + Connection type=HTTP + 가이드 문서 | 신규 | High | v7.9.0 | ✅ 완료 |
 | CR-055 | Evaluator-Optimizer 워크플로우 노드 — EVALUATOR_LOOP StepType 신설 (generator + evaluator + max_iterations + pass_criteria), Anthropic 6패턴 커버리지 완성 | 신규 | Medium | v7.10.0 | ✅ 설계 완료 |
 | CR-058 | Aimbase Chat Widget SDK — 소비앱 임베드용 채팅 + 워크플로우 실행 가시화 + RAG 출처 카드 (CORS + 단기 위젯 토큰 + 워크플로우 SSE + Web Component/UMD) | 신규 | High | v8.0.0 | ✅ 완료 (Sprint 52+53) |
+| CR-061 | 위젯 파일 업로드 (이미지/PDF Vision 첨부) — 사전업로드 + attachment_id 참조 + Anthropic document 블록 + 비-Anthropic 프로바이더 텍스트 추출 폴백 (PRD-319~323, FE-036, BIZ-099~101) | 신규 | Medium | v8.1.0 | 📝 설계 완료 |
 
 ---
 
@@ -1300,6 +1301,48 @@
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR058_ChatWidget_20260424.md`
 - **T3 설계서**: `docs/T3-9_CR-058_ChatWidget_설계서.md` (§ 9 Sprint 52 델타 포함)
 - **Plan 파일**: `~/.claude/plans/joyful-petting-pond.md`
+
+---
+
+### CR-061 | 위젯 파일 업로드 (이미지/PDF Vision 첨부)
+
+- **대상 기능 ID**: PRD-319, PRD-320, PRD-321, PRD-322, PRD-323, FE-036
+- **변경 타입**: 신규
+- **변경 내용**:
+  1. **첨부 업로드 API 2종**: `POST /api/v1/chat/attachments` (multipart), `DELETE /api/v1/chat/attachments/{id}` — scope `chat:upload`
+  2. **데이터 모델 신규**: `chat_attachments` 테이블 (V58, tenant DB) — id / session_id / media_type / size_bytes / storage_path / pages / checksum / expires_at
+  3. **Chat Completions 확장**: `messages[].content[]` 에 `{type:"image"|"document", attachment_id:"..."}` 블록 수용, 기존 인라인·문자열 호환 유지
+  4. **프로바이더 capability 분기**: Anthropic Claude → 네이티브 `image`/`document` 블록, OpenAI/Ollama 등 → 이미지는 네이티브, PDF는 Python 사이드카 `parse_document` 로 텍스트 추출 후 Text 블록 prepend 폴백
+  5. **위젯 FE 증분**: 클립 아이콘 버튼 + 드래그앤드롭 + 썸네일(이미지)/파일명+페이지수(PDF) 칩 UI + `attachment-client.ts` + `chat-client.ts` attachment_ids 전달
+  6. **보안 다층 방어**: magic number 기반 MIME 재검증 + 세션 소유권 검증 + Redis rate limit(세션 5req/min, 토큰 20req/min) + CR-058 CORS 재사용
+  7. **GC 배치**: `AttachmentGcScheduler` 매 5분, `expires_at < now()` → StorageService.delete() + 레코드 삭제
+  8. **런타임 설정화**: 크기/개수 제한을 `platform_settings.widget.attachment.*` 로 소프트 코드 (Phase 2 범위)
+  9. **Scope 확장**: `platform_settings.widget.allowed-scopes` 기본값에 `chat:upload` 추가
+  10. **API 가이드 v2.6.0 § 18** (첨부 API) + **운용 가이드 v2.5.0 § 2-6** (GC/사용량 모니터링) 신설
+- **변경 사유**:
+  - CR-058 Sprint 53 배포 후 소비앱 채널에서 **실사용 요청 1순위** — 상담 중 영수증/스크린샷/PDF 첨부
+  - `ContentBlock.Image` + `AnthropicAdapter` Vision 경로가 이미 완성되어 있음 → **위젯 FE + 업로드 엔드포인트만 추가**하면 최소 비용으로 대응 가능
+  - RAG 인제스션 연동은 파이프라인 오염·GC 복잡도 우려로 **본 CR 범위에서 제외**하고 별도 CR로 분리
+- **영향 모듈**:
+  - **BE**: 신규 `com.platform.attachment` 패키지(Service/Validator/Extractor/Scheduler) + `api/AttachmentController` + `domain/ChatAttachmentEntity` + `repository/ChatAttachmentRepository` + `llm/model/ContentBlock$Document` + `llm/adapter/AnthropicAdapter` 확장 + `api/ChatController.toUnifiedMessage` 분기 + `api/WidgetTokenController` 기본 scope
+  - **FE**: `packages/chat-widget-embed/src/` — 신규 `attachment-client.ts` + `widget.ts` UI 증분 + `chat-client.ts` content 블록 확장 + `types.ts` export
+  - **DB**: Flyway tenant `V58__create_chat_attachments.sql`
+  - **Python 사이드카**: 기존 `parse_document` 재사용, 변경 없음
+- **영향도**: Medium
+- **영향 범위**: CR-011 (StorageService 재사용), CR-045 (Chat SSE content 확장), CR-058 (위젯 토큰/CORS/Scope), CR-040 (platform_settings)
+- **영향 설계서**: T3-10 (신규), T1-3 (BIZ-099~101 추가), T3-2 (API 섹션 추가), T3-3 (위젯 컴포넌트 추가)
+- **요청자**: 위젯 소비앱 실사용 피드백 | **승인자**: 기획자 | **적용 버전**: v8.1.0
+- **변경 일자**: 2026-04-24
+- **범위 경계**: RAG 인제스션 연동(세션 ad-hoc KnowledgeSource) / 음성(STT) / OCR 후처리 / Office 문서(DOCX/XLSX/PPTX) 위젯 첨부 / 멀티페이지 PDF UI 페이지 선택 / 첨부 영구 저장 — **본 CR 범위 제외**
+- **Sprint 배치 (5MD)**:
+  - Phase 1 — DB V58 + Entity/Repository (0.5MD)
+  - Phase 2 — AttachmentController + Service + MimeValidator + GcScheduler (1.0MD)
+  - Phase 3 — ContentBlock.Document + AdapterCapability + ChatController 분기 + PdfTextExtractor (1.0MD)
+  - Phase 4 — 위젯 FE 파일 선택/드래그앤드롭/칩 프리뷰 + chat-client 확장 (1.5MD)
+  - Phase 5 — BE 단위+통합+E2E 테스트 + API/운용 가이드 갱신 (1.0MD)
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR061_파일업로드_20260424.md`
+- **T3 설계서**: `docs/T3-10_CR-061_FileUpload_설계서.md`
+- **Plan 파일**: `~/.claude/plans/cr-061-file-upload.md` (구현 착수 시 생성)
 
 ---
 

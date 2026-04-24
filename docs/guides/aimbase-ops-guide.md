@@ -135,13 +135,13 @@ Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 | 설정 키 | 타입 | 기본값 | 설명 |
 |---------|------|--------|------|
 | `widget.allowed-origins` | CSV | *(빈 문자열)* | 위젯 임베드를 허용할 전역 Origin. 비어 있으면 위젯 호출이 전부 CORS 거부된다. 예: `https://oms.company.com,https://rescue.company.com` |
-| `widget.allowed-scopes` | CSV | `chat:stream,workflow:subscribe,rag:read` | 위젯 토큰에 부여 가능한 scope 화이트리스트. 발급 요청 scope 와 교집합만 적용 |
+| `widget.allowed-scopes` | CSV | `chat:stream,chat:upload,workflow:subscribe,rag:read` | 위젯 토큰에 부여 가능한 scope 화이트리스트. 발급 요청 scope 와 교집합만 적용. CR-061: `chat:upload` 미포함 시 위젯 파일 첨부 동작 불가 |
 | `widget.token-ttl-seconds` | int | `1800` | 위젯 토큰 기본 TTL (초) |
 | `widget.token-max-ttl-seconds` | int | `3600` | 위젯 토큰 최대 TTL 하드캡. 요청 TTL 이 이를 초과하면 cap 적용 + 로그 |
 
 **Tenant Flyway 마이그레이션 수동 적용 (중요)**:
 
-CR-058 Sprint 52 는 `db/migration/tenant/V54__cr058_workflow_parent_run.sql` 을 포함한다. **현재 Aimbase 의 Tenant Flyway 는 기존 활성 테넌트에 대해 기동 시점에 자동으로 재실행되지 않는다** — `LocalDevInitializer` 는 `@Profile("local")` 한정이고, `TenantOnboardingService` 는 신규 테넌트 등록 시점에만 호출된다. 따라서 CR-058 이후 버전 배포 시 각 기존 테넌트 DB 에 수동으로 한 번 적용해야 한다.
+CR-058 Sprint 52 는 `V54__cr058_workflow_parent_run.sql`, CR-061 Sprint 54 는 `V58__cr061_chat_attachments.sql` 을 포함한다. **현재 Aimbase 의 Tenant Flyway 는 기존 활성 테넌트에 대해 기동 시점에 자동으로 재실행되지 않는다** — `LocalDevInitializer` 는 `@Profile("local")` 한정이고, `TenantOnboardingService` 는 신규 테넌트 등록 시점에만 호출된다. 따라서 CR-058/CR-061 이후 버전 배포 시 각 기존 테넌트 DB 에 수동으로 한 번 적용해야 한다.
 
 ```bash
 # 각 활성 테넌트 DB 목록 (master 에서 조회)
@@ -150,15 +150,25 @@ psql -U platform -h <master-host> -p 5432 aimbase_master \
 
 # 각 테넌트 DB 에 V54 적용 (SQL 본문은 IF NOT EXISTS 가 걸려 있어 재실행 안전)
 for TENANT_DB in aimbase_tenant_dev aimbase_tenant_<other>; do
+  # V54 (CR-058)
   psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" \
     < backend/platform-core/src/main/resources/db/migration/tenant/V54__cr058_workflow_parent_run.sql
-  # flyway 이력 반영 — 동일 version 중복 INSERT 방지
   psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" -c "
     INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)
     SELECT COALESCE(MAX(installed_rank),0)+1, '54', 'cr058 workflow parent run', 'SQL',
            'V54__cr058_workflow_parent_run.sql', 0, 'ops-deploy', 0, true
     FROM flyway_schema_history
     WHERE NOT EXISTS (SELECT 1 FROM flyway_schema_history WHERE version='54');"
+
+  # V58 (CR-061) — 위젯 파일 첨부 테이블
+  psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" \
+    < backend/platform-core/src/main/resources/db/migration/tenant/V58__cr061_chat_attachments.sql
+  psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" -c "
+    INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)
+    SELECT COALESCE(MAX(installed_rank),0)+1, '58', 'cr061 chat attachments', 'SQL',
+           'V58__cr061_chat_attachments.sql', 0, 'ops-deploy', 0, true
+    FROM flyway_schema_history
+    WHERE NOT EXISTS (SELECT 1 FROM flyway_schema_history WHERE version='58');"
 done
 ```
 
@@ -192,6 +202,56 @@ UPDATE global_config SET config_value='https://oms.company.com,https://rescue.co
 **로그/감사**:
 - `widget.*` 설정 변경은 `audit_logs` 에 `platform_setting_change` 이벤트로 기록
 - 위젯 토큰 발급 성공/실패는 `WidgetTokenController` 로거 경유 (origin, scope 교집합, TTL cap 여부)
+
+---
+
+### 2-6. 위젯 파일 첨부 운영 [CR-061]
+
+CR-061 은 위젯에서 업로드한 이미지/PDF 를 `chat_attachments` 테이블(테넌트 DB) + StorageService(로컬 또는 S3) 에 저장한다. 관리자는 용량 모니터링과 설정 조정, GC 상태 확인을 담당한다.
+
+**UI 경로**: Platform > Runtime Settings → `widget.attachment.*` 카테고리
+**저장소 경로**: `widget-attachments/{session_id}/{원본파일명}` — StorageService 활성 구현체(`LocalStorageService` 는 `storage.local.base-path` 아래, `S3StorageService` 는 설정 버킷)
+**GC**: `AttachmentGcScheduler` 가 매 5분 최대 100건 만료 배치 삭제 (스토리지 → DB 순, 스토리지 실패해도 DB 정리 진행)
+
+| 설정 키 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `widget.attachment.max-image-bytes` | int | `10485760` (10MB) | 이미지 단일 최대. 초과 시 400 FG-ATT-4002 (BIZ-099) |
+| `widget.attachment.max-pdf-bytes` | int | `33554432` (32MB) | PDF 단일 최대. Anthropic document 블록 상한과 동일 (BIZ-099) |
+| `widget.attachment.max-per-session` | int | `10` | 세션당 활성 첨부 상한. 초과 시 409 FG-ATT-4091 (BIZ-100) |
+| `widget.attachment.ttl-seconds` | int | `86400` (24h) | 세션 TTL 과 동기화 권장. GC 가 `expires_at < now()` 기준으로 정리 (BIZ-101) |
+
+**스토리지 사용량 모니터링 (권장)**:
+```sql
+-- 테넌트 DB 에서 실행
+SELECT
+    DATE_TRUNC('day', created_at) AS day,
+    COUNT(*) AS files,
+    SUM(size_bytes) / 1024 / 1024 AS total_mb,
+    SUM(CASE WHEN media_type = 'application/pdf' THEN 1 ELSE 0 END) AS pdfs,
+    SUM(CASE WHEN media_type LIKE 'image/%' THEN 1 ELSE 0 END) AS images
+FROM chat_attachments
+WHERE created_at > NOW() - INTERVAL '30 days'
+GROUP BY day ORDER BY day DESC;
+
+-- 만료 대기 건 (GC 배치가 처리할 대상)
+SELECT COUNT(*), MAX(expires_at) FROM chat_attachments WHERE expires_at < NOW();
+```
+
+**GC 스케줄러 관찰**:
+- 애플리케이션 로그에서 `Attachment GC — purged=X storageFailed=Y total=Z` 5분 주기로 기록
+- `storageFailed > 0` 가 지속되면 StorageService 권한/네트워크 점검 필요
+- Docker 재기동 후 첫 GC 는 60초 후 (`initialDelay = 60_000`)
+
+**장애 대응**:
+- **스토리지 용량 초과**: 우선 기본값을 낮춰 신규 업로드 차단 (`max-image-bytes=0` 일시 설정) → 볼륨 증설/S3 버킷 정리 → 복구. 기존 업로드 건은 TTL 로 자동 정리되므로 24h 내 자연 감소
+- **Python 사이드카 다운 시 PDF 폴백 실패**: 비-Anthropic 모델로 PDF 첨부 시 `PdfTextExtractor.extract()` 가 빈 텍스트 반환(graceful) — 사용자에겐 "첨부 문서: {filename}\n(텍스트 추출 실패)" 가 보인다. 운영자는 Python 사이드카 상태를 먼저 점검
+- **chat_attachments 테이블 스캔 느려짐**: `idx_chat_attachments_session`, `idx_chat_attachments_expires` 인덱스가 있으나 수백만 건 누적 시 `VACUUM ANALYZE chat_attachments` 주기적으로 실행
+
+**배포 전 체크리스트 (CR-061 이후 업그레이드)**:
+- [ ] § 2-5 의 V58 수동 마이그레이션을 모든 기존 테넌트 DB 에 적용
+- [ ] Master `global_config.widget.allowed-scopes` 값이 있는 테넌트 — **수동으로 `chat:upload` 추가 필수** (폴백 기본값은 새 문자열이 되지만 DB 에 이미 값이 있으면 폴백 미적용)
+- [ ] `/widget/v1/aimbase-chat.umd.global.js` 번들이 최신(24KB+)인지 확인 — Gradle `copyWidgetBundle` 태스크가 빌드 시 자동 수행
+- [ ] 위젯 샘플 consumer 로 이미지 1장 / PDF 1건 업로드 → 채팅 전송 → 응답 확인 (골든 패스)
 
 ---
 
@@ -1137,6 +1197,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.5.0 | 2026-04-24 | CR-061 위젯 파일 첨부 운영 — § 2-5 V58 수동 마이그레이션 스니펫 추가 + `widget.allowed-scopes` 기본값에 `chat:upload` 반영. § 2-6 신설: `widget.attachment.*` 설정 4종, 스토리지 사용량 모니터링 SQL, GC 스케줄러 관찰 로그 포인트, 장애 대응 가이드, 배포 전 체크리스트 |
 | v2.4.0 | 2026-04-24 | CR-058 임베드 위젯(Chat Widget) 운영 — § 2-5 `widget.*` 설정 4종(allowed-origins/allowed-scopes/token-ttl-seconds/token-max-ttl-seconds), § 4 시나리오 N(위젯 SDK 온보딩 — API Key 발급 + Origin 화이트리스트 + 검증 체크리스트) |
 | v2.3.0 | 2026-04-24 | CR-055 평가-최적화 루프 노드 (§ 3-5) — `EVALUATOR_LOOP` StepType, pass_criteria 3종(SCORE_THRESHOLD/JSONPATH_MATCH/LLM_JUDGE), evaluator 프롬프트 seed 3종, `{{loop.*}}` 변수 규약 |
 | v2.2.0 | 2026-04-22 | CR-054 HTTP Connection 등록 절차 § 3-1 보강 — `type=HTTP` 신설, 인증 4종(API_KEY/BEARER/BASIC/NONE), `value_env` 환경변수 참조 권장, DomainFilterPolicy 연계 체크리스트 |

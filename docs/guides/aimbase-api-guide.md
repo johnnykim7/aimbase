@@ -1329,10 +1329,100 @@ await fetch(`${baseUrl}/api/v1/knowledge-sources/${sourceId}/chunks/${chunkId}`,
 
 ---
 
+## 18. 위젯 파일 첨부 (이미지/PDF Vision) [CR-061]
+
+CR-058 위젯이 채팅 메시지에 이미지·PDF 를 첨부할 수 있도록 하는 API. RAG 인제스션은 하지 않고 **해당 메시지 1회에만 LLM 컨텍스트로 투입**된다 (세션 TTL 과 함께 자동 GC). 직접 소비하는 주체는 위젯 SDK 이며, 소비앱 BFF 는 `chat:upload` scope 을 위젯 토큰에 허용만 하면 된다.
+
+### 18-1. 전제 — 위젯 토큰 Scope
+BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:upload` 를 포함해야 한다. `widget.allowed-scopes` 기본값은 `[chat:stream, chat:upload, workflow:subscribe, rag:read]` 로 확장되어 있다.
+
+### 18-2. `POST /api/v1/chat/attachments`
+
+**Scope**: `chat:upload`
+**Content-Type**: `multipart/form-data`
+
+| 파라미터 | 필수 | 설명 |
+|---------|:-:|------|
+| `session_id` | ✅ | 첨부가 속할 세션 — 타 세션에서 참조 시 403 |
+| `file`       | ✅ | 파일 (PNG/JPEG/GIF/WEBP/PDF) — magic number 재검증 |
+
+**응답 201**
+```json
+{
+  "success": true,
+  "data": {
+    "attachment_id": "a1b2c3d4-...",
+    "filename": "receipt.pdf",
+    "media_type": "application/pdf",
+    "size_bytes": 1048576,
+    "pages": 3,
+    "expires_at": "2026-04-25T12:00:00Z"
+  }
+}
+```
+
+**에러 코드**
+| HTTP | 코드 | 원인 |
+|:---:|------|------|
+| 400 | FG-ATT-4001 | 지원하지 않는 MIME (위젯은 PNG/JPEG/GIF/WEBP/PDF만) |
+| 400 | FG-ATT-4002 | 크기 초과 (BIZ-099: 이미지 10MB / PDF 32MB) |
+| 403 | FG-ATT-4031 | 세션 소유권 불일치 |
+| 404 | FG-ATT-4041 | 첨부 없음 또는 만료 |
+| 409 | FG-ATT-4091 | 세션당 활성 첨부 초과 (BIZ-100: 최대 10개) |
+| 422 | FG-ATT-4221 | magic number 와 Content-Type 헤더 불일치 |
+
+### 18-3. `DELETE /api/v1/chat/attachments/{attachment_id}?session_id=...`
+
+**Scope**: `chat:upload`
+**응답 204** — 세션 소유권 OK, 스토리지+DB 삭제 완료
+**에러 403** — 다른 세션 소유
+
+### 18-4. 채팅에 첨부 포함 — `POST /api/v1/chat/completions`
+
+`messages[].content[]` 에 신규 블록 2종이 추가된다:
+
+```json
+{
+  "model": "auto",
+  "session_id": "...",
+  "stream": true,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "image",    "attachment_id": "a1b2..." },
+        { "type": "document", "attachment_id": "b3c4..." },
+        { "type": "text",     "text": "이 영수증 금액을 정리하고 PDF 내용과 비교해줘" }
+      ]
+    }
+  ]
+}
+```
+
+**처리 규칙** — 서버가 요청 모델의 어댑터 capability 를 확인한 뒤:
+- `image` 블록: 이미지 지원 어댑터(Anthropic/OpenAI/Bedrock/Ollama/Vertex)는 모두 네이티브 `ImageBlockParam` 으로 전달
+- `document` 블록: Anthropic/Bedrock Claude 는 네이티브 PDF `DocumentBlockParam` 전달, 그 외 프로바이더는 Python 사이드카 `parse_document` 로 텍스트 추출 후 `"[첨부 문서: {filename}]\n{text}\n\n"` 를 메시지 앞에 prepend 하는 폴백 경로 사용
+
+기존 `image_url` (OpenAI 스타일 data: URI) 과 문자열 content 도 호환 유지.
+
+### 18-5. 위젯 SDK 사용 예
+
+위젯을 한 줄로 얹은 경우(`<aimbase-chat>`) 파일 첨부는 UI 에서 자동으로 처리된다 — 📎 아이콘 클릭 · 드래그앤드롭 · 클립보드 붙여넣기(Ctrl+V) 3가지 입력 방법. SDK 내부적으로 위 API 3종(`POST /attachments`, `DELETE /attachments/{id}`, `POST /completions`) 를 자동 호출한다.
+
+소비앱 개발자는 BFF 에서 토큰 scope 에 `chat:upload` 만 포함시키면 된다.
+
+### 18-6. 제약 요약 (BIZ 규칙 → API 반영)
+- **이미지 10MB / PDF 32MB** (BIZ-099) — `widget.attachment.max-image-bytes`, `widget.attachment.max-pdf-bytes` 로 조정 가능
+- **세션당 활성 첨부 10개** (BIZ-100) — `widget.attachment.max-per-session`
+- **TTL 24h** (BIZ-101) — `widget.attachment.ttl-seconds`. 5분마다 `AttachmentGcScheduler` 가 만료 건 정리 (스토리지 → DB 순)
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.6.0 | 2026-04-24 | CR-061 위젯 파일 첨부 API 2종 추가 — `POST /chat/attachments` (multipart, scope=chat:upload), `DELETE /chat/attachments/{id}`. `messages[].content[]` 에 `{type:"image"\|"document", attachment_id}` 블록 수용. Anthropic/Bedrock 는 네이티브 PDF 블록, 그 외 프로바이더는 텍스트 추출 폴백. 크기 제한 이미지 10MB / PDF 32MB, 세션당 활성 10개, TTL 24h (BIZ-099~101). `widget.allowed-scopes` 기본값에 `chat:upload` 추가 (§ 18) |
 | v2.5.1 | 2026-04-24 | CR-058 Sprint 53 공개 리소스 — `/widget/v1/*` 정적 서빙(인증 없이): UMD/ESM 번들, 통합 가이드 HTML, 샘플 BFF 코드. 소비앱이 CDN 처럼 직접 참조하거나 curl 로 다운받아 자체 호스팅 가능 (§ 17 헤더) |
 | v2.5.0 | 2026-04-24 | CR-058 Chat Widget SDK 서버 엔드포인트 3종 추가 — `POST /sessions/issue-widget-token` (단기 JWT 발급, API Key 인증), `GET /knowledge-sources/{sid}/chunks/{cid}` (RAG 원문 조회), `GET /workflows/runs/{id}/subscribe` (SSE 구독). 기존 Chat API 응답/ SSE `done` payload 에 `citations` + `rag_used` 필드 추가. SSE 는 `?access_token=` 쿼리 전달 허용(widget 토큰만) (§ 17) |
 | v2.4.0 | 2026-04-22 | CR-054 범용 HTTP 요청 도구(`http_request`) 추가 — Connection `type=HTTP` 등록 + 에이전트/워크플로우에서 임의 REST API 호출 지원. 인증 4종(API_KEY/BEARER/BASIC/NONE), 4xx/5xx status 반환, 감사 로그 헤더 마스킹(§ 7-6) |
