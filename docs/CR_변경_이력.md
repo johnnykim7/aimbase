@@ -45,7 +45,7 @@
 | CR-047 | 런타임 성능 최적화 — 병렬 도구 실행 + Prefetch + Cache TTL 분기 + Hook 비동기 (PRD-298~301) | 변경 | High | v7.5.0 | 📝 등록 |
 | CR-048 | 컨텍스트·토큰 효율 — Deferred Tool 스키마 런타임 주입 + Tool Result Storage + Adaptive Thinking 동적 조정 (PRD-300~302) | 변경 | High | v7.6.0 | 📝 등록 |
 | CR-049 | 세션 복원·지침 체계 — Session Resume + Compact Boundary + 테넌트/프로젝트 커스텀 지침 (PRD-303~305, FE-034) | 변경 | High | v7.7.0 | 📝 등록 |
-| CR-050 | Claude CLI → LLM 어댑터 승격 — Worker Pool + fork-session 병렬 브랜치 + Max 구독 정액제 활용 (PRD-306~309) | 변경 | High | v7.8.0 | 📝 등록 |
+| CR-050 | Claude CLI → LLM 어댑터 승격 — Worker Pool + fork-session 병렬 브랜치 + Max 구독 정액제 활용 (PRD-306~309) | 변경 | High | v7.8.0 | ✅ 구현 완료 (2026-04-24) |
 | CR-051 | SSE 스트림 가상 스레드 SecurityContext 전파 — AccessDenied 로그 해소 | 버그수정 | Low | v7.3.1 | ✅ 완료 |
 | CR-052 | SessionStore append-only persist — conversation_sessions 중복키 근본 해소 | 버그수정 | Medium | v7.3.1 | ✅ 완료 |
 | CR-053 | 서브에이전트 UX 완성 — Built-in Agent 프롬프트 고도화 + SSE 라이프사이클 이벤트 + FE Task 블록 렌더 (PRD-310~312, FE-035) | 변경 | Medium | v7.8.0 | 📝 등록 |
@@ -53,6 +53,9 @@
 | CR-055 | Evaluator-Optimizer 워크플로우 노드 — EVALUATOR_LOOP StepType 신설 (generator + evaluator + max_iterations + pass_criteria), Anthropic 6패턴 커버리지 완성 | 신규 | Medium | v7.10.0 | ✅ 설계 완료 |
 | CR-058 | Aimbase Chat Widget SDK — 소비앱 임베드용 채팅 + 워크플로우 실행 가시화 + RAG 출처 카드 (CORS + 단기 위젯 토큰 + 워크플로우 SSE + Web Component/UMD) | 신규 | High | v8.0.0 | ✅ 완료 (Sprint 52+53) |
 | CR-061 | 위젯 파일 업로드 (이미지/PDF Vision 첨부) — 사전업로드 + attachment_id 참조 + Anthropic document 블록 + 비-Anthropic 프로바이더 텍스트 추출 폴백 (PRD-319~323, FE-036, BIZ-099~101) | 신규 | Medium | v8.1.0 | 📝 설계 완료 |
+| CR-060 | 위젯 음성 입력 (STT) — 마이크 녹음 + Whisper 변환 + 입력창 자동 삽입 (`/chat/stt` 전용 + `SpeechService` 추출 + scope `chat:stt` + BIZ-102~104 + global_config) (PRD-324~326, FE-037) | 신규 | Medium | v8.2.0 | 📝 설계 완료 |
+| CR-065 | SubWorkflow 자식 run 분리 생성 — `SubWorkflowStepExecutor` 인라인 실행 → `WorkflowRunEntity` 별도 레코드 승격 + `parent_run_id` 트리 + 자식 개별 재시도 API (PRD-327~329) | 변경 | Medium | v8.3.0 | 📝 발번 |
+| CR-066 | Tenant Flyway 자동 재실행 — `TenantMigrationRunner` + Admin API `POST /platform/tenants/migrate` + 실패 격리 + 운영 가이드 § 2-5 자동화 (PRD-330~332) | 변경 | Medium | v8.4.0 | ✅ 구현 완료 |
 
 ---
 
@@ -1136,9 +1139,17 @@
   - 병렬 브랜치 캐시 hit율 — 첫 브랜치 대비 이후 브랜치 토큰 과금.
   - Max 플랜 5시간 윈도우 내 호출 가능 수.
   - 워커 크래시 빈도(run 대비 %).
-- **요청자**: sykim | **승인자**: sykim (2026-04-16) | **적용 버전**: v7.8.0
-- **변경 일자**: 2026-04-16
-- **상태**: 📝 등록 완료. 결정 포인트 7종 사용자 승인 후 Phase 1 구현 착수 예정.
+- **요청자**: sykim | **승인자**: sykim (2026-04-16, 결정 7종 추천안 확정 2026-04-24) | **적용 버전**: v7.8.0
+- **변경 일자**: 2026-04-16 (착수 2026-04-24)
+- **상태**: ✅ Phase 1~7 구현 완료 + **로컬 IT 4/4 실측 PASS** (2026-04-24, claude 2.1.109). 신규 클래스 6개(Worker/Pool/Adapter/Config/BranchScope + 예외 2), 수정 4개(ConnectionAdapterFactory, WorkflowEngine, ParallelStepExecutor, application.yml), 단위 테스트 **22 PASS** (Worker 6 + Pool 8 + Adapter 8), IT 4 PASS (프로세스 누수 없음, fork-session `--resume <sid> --fork-session` 실동작 확인, "indigo" 컨텍스트 회상 성공). **Phase 7**: ParallelStepExecutor 가 각 서브스텝을 `ClaudeCliBranchScope` 로 감싸 자동으로 fork 워커 spawn + 종료 시 release — prompt prefix 캐시 재사용 실현. 대량 병렬 비용 실측($0.07→$0.007)은 계정 overage 복구 후 진행.
+- **결정 승인 (2026-04-24 전부 추천안 확정)**:
+  1. run당 최대 워커 수 = 5, 초과 시 큐잉(Semaphore 대기)
+  2. Usage 추출 = stream-json 파싱, 실패 시 0 폴백 + 경고 로그
+  3. IT = 로컬 전용 `@EnabledIfEnvironmentVariable(CLAUDE_CLI_IT=true)`, CI skip
+  4. 피처 플래그 = `global_config.llm.anthropic-cli.enabled-tenants` (CR-040 재사용), `*`=전체 / `,`구분=특정 / 빈값=차단
+  5. 첫 턴/이후 턴 = Worker 내부 상태(`firstTurnSent`) + Adapter 중복 가드
+  6. `--model` = Connection config 의 model 을 그대로 CLI 인자로
+  7. 타임아웃 = 워커 강제 종료 + run 실패 (상위 `WorkflowStep.retry` 에서 재시도)
 - **이관 인계서**: `docs/origins/CR050_이관인계서_20260416.md`
 
 ### CR-051 | SSE 스트림 가상 스레드 SecurityContext 전파 — AccessDenied 로그 해소
@@ -1343,6 +1354,144 @@
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR061_파일업로드_20260424.md`
 - **T3 설계서**: `docs/T3-10_CR-061_FileUpload_설계서.md`
 - **Plan 파일**: `~/.claude/plans/cr-061-file-upload.md` (구현 착수 시 생성)
+
+---
+
+### CR-060 | 위젯 음성 입력 (STT) — 마이크 녹음 + Whisper 변환 + 입력창 삽입
+
+- **대상 기능 ID**: PRD-324, PRD-325, PRD-326, FE-037
+- **변경 타입**: 신규
+- **변경 내용**:
+  1. **위젯 전용 STT API**: `POST /api/v1/chat/stt` (multipart) — scope `chat:stt`. 기존 `/api/v1/speech/stt`는 Platform JWT 전용으로 유지하고 로직은 `SpeechService` 로 추출해 공유
+  2. **SpeechService 추출**: `OpenAI Whisper` 호출·multipart body 조립·에러 매핑을 서비스로 이동. `SpeechController`(Platform)/`ChatSttController`(Widget) 양쪽에서 주입 사용
+  3. **런타임 설정화**: `global_config` 신규 4건 — `widget.stt.max-duration-seconds`(60) / `widget.stt.max-size-bytes`(26214400, 25MB) / `widget.stt.allowed-mime-types`(audio/webm,audio/mp4,audio/mpeg,audio/wav,audio/ogg) / `widget.stt.rate-limit-per-minute`(10). Flyway master V19 seed
+  4. **Scope 확장**: `platform_settings.widget.allowed-scopes` 기본값에 `chat:stt` 추가
+  5. **BIZ 규칙 신설**: BIZ-102(녹음 시간 상한) / BIZ-103(파일 크기 상한) / BIZ-104(세션당 분당 rate limit)
+  6. **위젯 FE 증분**: 마이크 아이콘 버튼 + 녹음 타이머 + 파형 펄스 애니메이션 + 취소 버튼 + `stt-client.ts` 신규 + `widget.ts` 입력창 자동 삽입. 모바일 Safari 폴백(`audio/mp4`)
+  7. **권한 처리**: `getUserMedia` 권한 거부/블록 상태 명시 UI + 재시도 안내. HTTPS/localhost 외 환경 감지 시 마이크 버튼 비활성
+  8. **보안 다층 방어**: magic number 기반 MIME 재검증 + 세션 소유권 검증(JWT session_id) + Redis rate limit(세션 10req/min) + CR-058 CORS 재사용
+  9. **감사 로그**: `audit_log` 에 `event_type=STT_TRANSCRIBE` 기록 (session_id / duration_sec / size_bytes / language). **변환 텍스트 본문은 저장하지 않음** (PII)
+  10. **API 가이드 v2.7.0 § 19** (위젯 STT API) + **운용 가이드 v2.6.0 § 2-7** (STT 사용량/마이크 권한 FAQ) 신설
+- **변경 사유**:
+  - CR-058 위젯 배포 후 **모바일 사용성 요청** — 입력창 타이핑 불편, 음성 입력 선호도 높음
+  - 기존 `SpeechController` 프록시 인프라가 이미 존재 → 위젯 전용 엔드포인트 + FE UI만 추가하면 최소 비용
+  - CR-061 과 동일한 위젯 API 패턴(`/chat/*` + 전용 scope + `global_config` 설정화)을 그대로 따라 일관성 확보
+- **영향 모듈**:
+  - **BE**: 신규 `com.platform.speech.SpeechService` + `api/ChatSttController` + `api/SpeechController` 리팩터(서비스 주입) + `api/WidgetTokenController` 기본 scope 갱신 + `policy/SttRateLimiter`(Redis 기반)
+  - **FE**: `packages/chat-widget-embed/src/` — 신규 `stt-client.ts` + `widget.ts` 마이크 UI 증분 + `types.ts` SttResult export + `styles.ts` 마이크/파형 CSS
+  - **DB**: Flyway master `V19__add_widget_stt_config.sql` (global_config seed, 테이블 신규 없음)
+  - **Python 사이드카**: 변경 없음
+- **영향도**: Medium
+- **영향 범위**: CR-011 (SpeechController 기존 자산), CR-040 (global_config 설정화), CR-058 (위젯 토큰/CORS/Scope), CR-061 (위젯 API 패턴/BIZ 연번)
+- **영향 설계서**: T3-11 (신규), T1-3 (BIZ-102~104 추가), T3-2 (API 섹션 추가), T3-3 (위젯 마이크 컴포넌트 추가)
+- **요청자**: 위젯 소비앱 모바일 UX 피드백 | **승인자**: 기획자 | **적용 버전**: v8.2.0
+- **변경 일자**: 2026-04-24
+- **범위 경계**: 실시간 스트리밍 STT(OpenAI Realtime API) / TTS 위젯 UI(Assistant 응답 낭독) / 화자 분리·타임스탬프 세그먼트 노출 / 오프라인·온디바이스 STT / Whisper 외 프로바이더 — **본 CR 범위 제외**. Realtime 스트리밍과 TTS UI 는 CR-063/CR-064 후속 후보로 식별
+- **Sprint 배치 (4.5MD)**:
+  - Phase 1 — `global_config` master V19 seed + `PlatformSettings` 키 상수 추가 (0.5MD)
+  - Phase 2 — `SpeechService` 추출 + `SpeechController` 리팩터 + 기존 회귀 테스트 (1.0MD)
+  - Phase 3 — `ChatSttController` + `SttRateLimiter` + `WidgetTokenController` scope 추가 + BIZ-102~104 enforcement (1.0MD)
+  - Phase 4 — 위젯 FE 마이크 버튼 + MediaRecorder 훅 + 파형 타이머 + `stt-client.ts` + Safari 폴백 (1.5MD)
+  - Phase 5 — BE 단위+통합 테스트 + FE 수동 검증 + API/운용 가이드 갱신 (0.5MD)
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR060_STT_20260424.md`
+- **T3 설계서**: `docs/T3-11_CR-060_STT_설계서.md`
+- **Plan 파일**: `~/.claude/plans/cr-060-stt-widget.md` (구현 착수 시 생성)
+
+---
+
+### CR-065 | SubWorkflow 자식 run 분리 생성
+
+- **대상 기능 ID**: PRD-327, PRD-328, PRD-329
+- **변경 타입**: 변경
+- **변경 내용**:
+  1. **자식 run 실존 트리 저장**: `SubWorkflowStepExecutor` 인라인 실행을 자식 `WorkflowRunEntity` 생성 경로로 승격. `parent_run_id` + `parent_step_id` 설정하여 부모-자식 트리 구조 DB 저장
+  2. **WorkflowEngine 재진입 가능 구조 분리**: 현재 executor 레이어에서 `doExecuteAsync()` 재호출 시 순환 의존 유발 → 내부 실행 경로를 `WorkflowEngineInternal` 또는 유사 인터페이스로 분리하여 executor가 엔진을 재호출 가능하도록 의존 그래프 재설계
+  3. **자식 run 조회/재시도 API**: `GET /api/v1/workflows/runs/{parentId}/children` (자식 run 목록) + `POST /api/v1/workflows/runs/{childId}/retry` (자식 단위 재시도) 신설
+  4. **stepResults 자식 run 기록**: 자식 run 전용 `workflow_step_runs` 레코드 — 부모 run의 `stepResults`에는 `sub_workflow_run_id` 참조만 유지
+  5. **SSE 이벤트 호환성 유지**: 기존 `workflow.step` 이벤트 payload의 `sub_workflow_id` 필드는 그대로 유지 + 신규 `sub_workflow_run_id` 추가하여 위젯 트리 UI 기존 코드 무수정 동작
+  6. **위젯 FE 증분 (CR-058 SDK 업데이트)**: 트리 UI에 "자식 run 재시도" 버튼 + 자식 run 상태 개별 표시 (별도 FE 작업, 본 CR Phase 4)
+- **변경 사유**:
+  - CR-058 Sprint 52 구현 중 `SubWorkflowStepExecutor` child run 분리 생성을 스킵 (T3-9 § 9-1) — executor 레이어에서 `WorkflowEngine.doExecuteAsync()` 재호출 시 순환 의존 유발
+  - 현재는 인라인 실행 + SSE `sub_workflow_id` 로 위젯 트리 표시 가능하나 **"자식 run 전용 stepResults 기록"** 과 **"자식 run 개별 재시도"** 는 불가
+  - DB 스키마(`parent_run_id` 컬럼)는 이미 적용되어 있어 엔진 의존 구조 재설계만 해결되면 즉시 승격 가능
+  - 위젯 트리 UI에서 "자식 run 재시도"·"개별 조회" 요구가 실사용에서 제기될 때 착수 (현재는 화면 표시 자체는 되므로 **긴급하지 않음**)
+- **영향 모듈**:
+  - **BE**: `workflow/step/SubWorkflowStepExecutor.java` (핵심 수정) + `workflow/WorkflowEngine.java` (doExecuteAsync 재진입 가능 구조로 분리) + `domain/WorkflowRunEntity.java` (parent_run_id 이미 존재, 활용만) + `api/WorkflowController.java` (자식 run 조회/재시도 API 신설)
+  - **FE**: `frontend/src/components/workflow/RunTree.tsx` 또는 유사 — 자식 run 재시도 버튼 / 개별 상태 표시 (CR-058 위젯 SDK 포함)
+  - **DB**: 스키마 변경 없음 — 기존 `workflow_runs.parent_run_id`, `workflow_step_runs` 활용
+  - **Python 사이드카**: 변경 없음
+- **영향도**: Medium (리팩토링 + 회귀 위험 있음)
+- **영향 범위**: CR-009 (워크플로우 엔진 DAG 실행), CR-045 (Chat 실시간 워크플로우 SSE), CR-058 (위젯 트리 UI)
+- **영향 설계서**: T3-12 (신규), T3-6 (워크플로우 엔진 의존 구조 섹션 개정), T1-3 (BIZ-009 SUB_WORKFLOW 런타임 서술 갱신)
+- **요청자**: CR-058 Sprint 52 델타 (T3-9 § 9-1) | **승인자**: sykim (2026-04-24) | **적용 버전**: v8.3.0 (예약)
+- **변경 일자**: 2026-04-24
+- **범위 경계**: 부모-자식 외 3단 이상 중첩 SUB_WORKFLOW 재시도 UX / 자식 run 병렬 실행 제한 정책 / 자식 run 스로틀링 / 자식 run 트리 시각화 React Flow 통합 — **본 CR 범위 제외**
+- **Sprint 배치 (예상 5.5MD)**:
+  - Phase 0 — `WorkflowEngine`·`SubWorkflowStepExecutor` 의존 그래프 분석 + 리팩토링 전략 결정 + 사용자 승인 (0.5MD)
+  - Phase 1 — `WorkflowEngine` `doExecuteAsync()` 재진입 가능 구조로 분리 (`WorkflowEngineInternal` 또는 유사 인터페이스) (1.5MD)
+  - Phase 2 — `SubWorkflowStepExecutor`에서 자식 `WorkflowRunEntity` 생성 + `parent_run_id`/`parent_step_id` 설정 + stepResults 분리 기록 (1.0MD)
+  - Phase 3 — 자식 run API (`GET /runs/{parentId}/children` + `POST /runs/{childId}/retry`) (0.5MD)
+  - Phase 4 — 위젯 UI 자식 재시도 버튼 (CR-058 SDK 업데이트) (1.0MD)
+  - Phase 5 — 회귀 테스트 (기존 SSE 이벤트 포맷 유지 검증 + 단위/통합 테스트) (1.0MD)
+- **착수 시점 판단 기준**: 위젯 트리 UI에서 "자식 run 재시도"·"개별 조회" 요구가 실사용에서 제기될 때 / 현재는 화면 표시 자체는 되므로 긴급하지 않음
+- **완료 기준**:
+  - [ ] 자식 run이 `workflow_runs` 별도 레코드로 저장됨
+  - [ ] `parent_run_id` 기반 트리 조회 API 동작
+  - [ ] 자식 run 개별 재시도 API 동작
+  - [ ] 기존 인라인 SSE 이벤트 포맷 호환성 유지 (위젯 기존 코드 무수정 동작)
+  - [ ] 회귀 테스트 PASS (단위/통합)
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR065_SubWorkflow자식run_20260424.md`
+- **T3 설계서**: `docs/T3-12_CR-065_SubWorkflowChildRun_설계서.md` (구현 착수 시 작성)
+- **Plan 파일**: `~/.claude/plans/cr-065-subworkflow-child-run.md` (구현 착수 시 생성)
+
+---
+
+### CR-066 | Tenant Flyway 자동 재실행
+
+- **대상 기능 ID**: PRD-330, PRD-331, PRD-332
+- **변경 타입**: 변경
+- **변경 내용**:
+  1. **TenantMigrationRunner 신설**: `tenants` 테이블 활성 테넌트 목록 순회 → 각 DB에 격리된 `Flyway.migrate()` 실행 + 결과 요약 반환. 1개 테넌트 실패 시 나머지 진행 (실패 격리)
+  2. **Admin API 신설**: `POST /api/v1/platform/tenants/migrate` (Master DB 전용, `SCOPE_platform:admin` 필수) — body `{tenantIds?: [...], dryRun?: bool}` / 응답 `{total, success, failed, details[]}`. 호출자 감사 로그 기록
+  3. **마이그레이션 상태 조회 API**: `GET /api/v1/platform/tenants/{id}/migrations` — 적용된 버전 + 실패 이력 조회
+  4. **기동 시점 자동 훅 (선택, Phase 3)**: `ApplicationReadyEvent` 리스너에서 `tenantMigrationRunner.migrateAll()` 호출 + 실패 격리 (기동 차단하지 않음) + 기동 로그에 결과 요약. `application.yml` `aimbase.tenant.migration.auto-migrate-on-startup: true/false` 플래그로 제어
+  5. **TenantOnboardingService 리팩터**: 신규 테넌트 등록 시 호출되는 Flyway 실행 로직을 `TenantMigrationRunner` 로 통합 — 단일 진입점화
+  6. **감사 로그 (선택)**: `tenant_migration_logs` Master 테이블 신설 — `tenant_id / from_version / to_version / triggered_by / status / error / executed_at` (운영 가시성 확보)
+  7. **운영 가이드 § 2-5 개정**: 수동 `flyway migrate` 절차 → 자동/반자동 절차로 갱신. Admin API 호출 예시 + 기동 시점 자동 훅 운영 주의사항 추가
+- **변경 사유**:
+  - CR-058 Sprint 52 구현 중 발견 (T3-9 § 9-4) — `db/migration/tenant/V*.sql` 신규 마이그레이션이 기동 시점에 기존 활성 테넌트에 자동 적용되지 않음
+  - `LocalDevInitializer` 는 `@Profile("local")` 이라 운영 경로 없음, `TenantOnboardingService` 는 신규 테넌트 등록 시점만 호출
+  - 현재 배포 가이드 § 2-5 에 수동 절차로 문서화 → 테넌트 수 × 배포 횟수만큼 수동 실행
+  - "A 테넌트는 V54 적용, B 테넌트는 V53 누락" 같은 사고 가능성 — 테넌트 수 늘어날수록 실수 확률 선형 증가
+  - 테넌트 10개+ 증가 또는 마이그레이션 누락 사고 1회라도 발생하면 즉시 착수
+- **영향 모듈**:
+  - **BE**: 신규 `tenant/TenantMigrationRunner.java` (핵심) + `api/platform/TenantController.java` (Admin API 추가) + `config/FlywayMultiTenantConfig.java` (재실행 가능 구조로 정리) + `tenant/TenantOnboardingService.java` (Runner로 Flyway 로직 이관) + (선택) `domain/master/TenantMigrationLogEntity.java` + `repository/master/TenantMigrationLogRepository.java`
+  - **FE**: 없음 (관리자 UI는 별도 CR로 분리, 본 CR은 API만)
+  - **DB**: (선택) Flyway master 신규 마이그레이션 — `tenant_migration_logs` 테이블
+  - **Python 사이드카**: 변경 없음
+  - **운영**: `docs/guides/aimbase-ops-guide.md § 2-5` 개정
+- **영향도**: Medium (기동 시점 자동 훅 채택 시 장애 전파 리스크)
+- **영향 범위**: CR-001 (멀티테넌시 DB-per-Tenant 기반), CR-041 (Tenant 프로비저닝 흐름), CR-058 (V54 이후 tenant 마이그레이션 자동 적용 필요)
+- **영향 설계서**: T3-13 (신규), T3-1 (인프라/DB-per-Tenant 마이그레이션 섹션 개정), `docs/guides/aimbase-ops-guide.md` § 2-5 (자동 절차로 갱신)
+- **요청자**: CR-058 Sprint 52 델타 (T3-9 § 9-4) | **승인자**: sykim (2026-04-24) | **적용 버전**: v8.4.0 (예약)
+- **변경 일자**: 2026-04-24
+- **범위 경계**: 테넌트별 마이그레이션 타임아웃 정책 / 롤백 자동화 (Flyway undo 불가 — 별도 CR) / 관리자 UI 페이지 / 마이그레이션 스케줄러 (cron 기반 주기 실행) / Master DB 마이그레이션 자동화 (본 CR은 tenant DB만) — **본 CR 범위 제외**
+- **Sprint 배치 (예상 4.5MD)**:
+  - Phase 0 — 해결안(기동훅/Admin API/조합) 중 선택 + 실패 격리 전략 결정 (사용자 승인) (0.5MD)
+  - Phase 1 — `TenantMigrationRunner` 구현 (테넌트 순회 + 격리된 Flyway 실행 + 결과 요약) + `TenantOnboardingService` Runner 통합 (1.5MD)
+  - Phase 2 — Admin API `POST /platform/tenants/migrate` + `GET /platform/tenants/{id}/migrations` + (선택) 감사 로그 테이블 (1.0MD)
+  - Phase 3 — (선택) `ApplicationReadyEvent` 기동 시점 자동 훅 + `application.yml` 플래그 + 실패 격리 (0.5MD)
+  - Phase 4 — 운영 가이드 § 2-5 자동 절차로 개정 + 회귀 테스트 (3테넌트 환경, V55~V56 일괄 적용 + 1개 의도적 실패 격리) (1.0MD)
+- **착수 시점 판단 기준**: 테넌트가 **10개 이상**으로 증가할 때 / 마이그레이션 누락 사고 **1회라도 발생**하면 즉시 / 현재는 수동 절차로 운영 중이라 급하진 않으나 **선제 대응이 합리적**
+- **완료 기준**:
+  - [ ] `TenantMigrationRunner`로 활성 테넌트 일괄 migrate 동작
+  - [ ] Admin API `POST /platform/tenants/migrate` 동작 (호출자 감사 로그 기록)
+  - [ ] 실패 격리: 1개 테넌트 실패 시 나머지 진행, 결과 요약 반환
+  - [ ] 운영 가이드 § 2-5 자동 절차로 갱신
+  - [ ] 회귀 테스트 (신규 테넌트 등록 경로 기존대로 동작)
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR066_TenantFlyway자동재실행_20260424.md`
+- **T3 설계서**: `docs/T3-13_CR-066_TenantFlywayAutoMigrate_설계서.md` (구현 착수 시 작성)
+- **Plan 파일**: `~/.claude/plans/cr-066-tenant-flyway-auto-migrate.md` (구현 착수 시 생성)
 
 ---
 

@@ -45,6 +45,8 @@ public class WorkflowEngine {
     private final PlatformMetrics platformMetrics;
     /** CR-058: 스텝/런 상태 전이 이벤트 브로드캐스터. null 이면 발행 스킵(테스트 편의). */
     private final com.platform.workflow.event.WorkflowEventPublisher eventPublisher;
+    /** CR-050 PRD-309: run 종료 시 CLI 워커 정리 (프로세스 누수 방지). null 허용 — 피처 비활성 환경. */
+    private final com.platform.llm.claudecli.ClaudeCliWorkerPool claudeCliWorkerPool;
 
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
@@ -52,7 +54,8 @@ public class WorkflowEngine {
                           ObjectMapper objectMapper,
                           List<StepExecutor> stepExecutors,
                           PlatformMetrics platformMetrics,
-                          com.platform.workflow.event.WorkflowEventPublisher eventPublisher) {
+                          com.platform.workflow.event.WorkflowEventPublisher eventPublisher,
+                          com.platform.llm.claudecli.ClaudeCliWorkerPool claudeCliWorkerPool) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -61,7 +64,18 @@ public class WorkflowEngine {
                 .collect(Collectors.toMap(StepExecutor::supports, e -> e));
         this.platformMetrics = platformMetrics;
         this.eventPublisher = eventPublisher;
+        this.claudeCliWorkerPool = claudeCliWorkerPool;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
+    }
+
+    /** CR-050: run 종료 시 CLI 워커를 반드시 정리. 실패해도 run 결과는 유지. */
+    private void shutdownCliWorkers(String runId) {
+        if (claudeCliWorkerPool == null || runId == null) return;
+        try {
+            claudeCliWorkerPool.shutdownForRun(runId);
+        } catch (Exception e) {
+            log.warn("Run '{}': CLI worker shutdown failed: {}", runId, e.getMessage());
+        }
     }
 
     // ─── 공개 API ─────────────────────────────────────────────────────────
@@ -92,6 +106,7 @@ public class WorkflowEngine {
 
         // Virtual Thread에 TenantContext 전파
         String tenantId = TenantContext.getTenantId();
+        String runIdForShutdown = saved.getId().toString();
         Thread.ofVirtual()
                 .name("workflow-run-" + saved.getId())
                 .start(() -> {
@@ -99,6 +114,8 @@ public class WorkflowEngine {
                     try {
                         doExecuteAsync(workflowEntity, saved);
                     } finally {
+                        // CR-050 PRD-309: 정상/예외 무관 CLI 워커 정리 (프로세스 누수 방지)
+                        shutdownCliWorkers(runIdForShutdown);
                         TenantContext.clear();
                     }
                 });
@@ -130,6 +147,7 @@ public class WorkflowEngine {
         WorkflowRunEntity saved = workflowRunRepository.save(run);
 
         String tenantId = TenantContext.hasTenant() ? TenantContext.getTenantId() : null;
+        String runIdForShutdown = saved.getId().toString();
         Thread.ofVirtual()
                 .name("platform-workflow-run-" + saved.getId())
                 .start(() -> {
@@ -137,6 +155,7 @@ public class WorkflowEngine {
                     try {
                         doExecuteAsync(proxy, saved);
                     } finally {
+                        shutdownCliWorkers(runIdForShutdown);
                         TenantContext.clear();
                     }
                 });
@@ -194,6 +213,7 @@ public class WorkflowEngine {
 
         // Virtual Thread에 TenantContext 전파
         String tenantId = TenantContext.getTenantId();
+        String runIdForShutdown = run.getId().toString();
         Thread.ofVirtual()
                 .name("workflow-resume-" + runId)
                 .start(() -> {
@@ -201,6 +221,7 @@ public class WorkflowEngine {
                     try {
                         doExecuteAsync(workflowEntity, run);
                     } finally {
+                        shutdownCliWorkers(runIdForShutdown);
                         TenantContext.clear();
                     }
                 });

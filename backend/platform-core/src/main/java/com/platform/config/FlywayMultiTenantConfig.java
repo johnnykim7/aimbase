@@ -59,7 +59,20 @@ public class FlywayMultiTenantConfig {
             .locations("classpath:db/migration/tenant")
             .table("flyway_schema_history")
             .baselineOnMigrate(true)
+            // CR-049: V23~V26 중복 해소 과정에서 V23.1/V24.1/V25.1/V26.1(소급 rename 된 과거 이력) +
+            // V23.2/V23.3/V24.2/V24.3/V25.2/V25.3/V26.2/V26.3(통일된 신규 파일)이 혼재한다.
+            // 기존 테넌트 DB 에서 V23.2 등이 V50 이후 시점에 실행될 수 있으므로 out-of-order 허용 필요.
+            .outOfOrder(true)
+            // CR-049: 예전에 제거된 resolve 불가 migration(V23.1 처럼 파일이 없어진 레거시 이력)은 무시.
+            .ignoreMigrationPatterns("*:missing")
             .load();
+        // CR-049: 본 CR 배포 중 V24.3 파일이 HNSW 가드 추가를 위해 한 번 변경되었다. 체크섬 불일치가 발생한 테넌트를
+        // 자동 복구하기 위해 migrate 직전에 repair() 를 호출한다. repair 는 이미 일치하는 경우 no-op 이므로 안전.
+        try {
+            flyway.repair();
+        } catch (Exception e) {
+            log.warn("Tenant DB Flyway repair 실패 (무시하고 migrate 시도): {}", e.getMessage());
+        }
         flyway.migrate();
         log.info("Tenant DB Flyway migration completed");
     }
@@ -74,6 +87,9 @@ public class FlywayMultiTenantConfig {
             .locations("classpath:db/migration/tenant")
             .table("flyway_schema_history")
             .baselineOnMigrate(true)
+            // CR-049: tenant 경로와 동일한 이유로 out-of-order 허용 + 누락 파일 이력 무시.
+            .outOfOrder(true)
+            .ignoreMigrationPatterns("*:missing")
             .load();
         flyway.migrate();
         log.info("App DB Flyway migration completed");

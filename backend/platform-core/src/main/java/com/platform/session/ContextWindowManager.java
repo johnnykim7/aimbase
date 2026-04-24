@@ -46,6 +46,8 @@ public class ContextWindowManager {
     private final SessionMemoryCompactionService sessionMemoryCompaction;
     private final PostCompactRecoveryService postCompactRecovery;
     private final CompactionThresholds thresholds;
+    /** CR-049 PRD-303: 압축 경계 메시지 INSERT 용. 주입 실패해도 기본 동작에는 영향 없음. */
+    private final com.platform.repository.ConversationMessageRepository conversationMessageRepository;
 
     // C2: 세션별 마지막 압축 요약 저장 (session_summary 소스에서 활용)
     private final Map<String, String> sessionSummaries = new ConcurrentHashMap<>();
@@ -54,12 +56,14 @@ public class ContextWindowManager {
                                 HookDispatcher hookDispatcher,
                                 SessionMemoryCompactionService sessionMemoryCompaction,
                                 @Lazy PostCompactRecoveryService postCompactRecovery,
-                                CompactionThresholds thresholds) {
+                                CompactionThresholds thresholds,
+                                com.platform.repository.ConversationMessageRepository conversationMessageRepository) {
         this.summarizer = summarizer;
         this.hookDispatcher = hookDispatcher;
         this.sessionMemoryCompaction = sessionMemoryCompaction;
         this.postCompactRecovery = postCompactRecovery;
         this.thresholds = thresholds;
+        this.conversationMessageRepository = conversationMessageRepository;
         log.info("ContextWindowManager 초기화: thresholds={}", thresholds);
     }
 
@@ -204,7 +208,48 @@ public class ContextWindowManager {
                                 "usageRatio", usageRatio),
                         Map.of()));
 
+        // CR-049 PRD-303: 압축 경계 메시지 INSERT (SNIP 제외 — 실질 압축만 기록).
+        if (sessionId != null && strategyUsed != CompactionStrategy.SNIP) {
+            int compactedCount = messages.size() - result.size();
+            int tokensSaved = total - estimateTokens(result);
+            String summary = extractSummary(result).orElse(null);
+            insertCompactBoundary(sessionId, strategyUsed, summary, compactedCount, tokensSaved);
+        }
+
         return new TrimResult(result, state);
+    }
+
+    /**
+     * CR-049 PRD-303: conversation_messages 테이블에 COMPACT_BOUNDARY 메시지 append.
+     * LLM 컨텍스트 전송 시 본문은 생략되며 boundary_meta 만 Resume API 에서 사용된다.
+     */
+    private void insertCompactBoundary(String sessionId,
+                                        CompactionStrategy strategy,
+                                        String summary,
+                                        int compactedCount,
+                                        int tokensSaved) {
+        try {
+            com.platform.domain.ConversationMessageEntity entity =
+                    new com.platform.domain.ConversationMessageEntity();
+            entity.setSessionId(sessionId);
+            entity.setRole("system");
+            entity.setMessageType(com.platform.domain.ConversationMessageEntity.TYPE_COMPACT_BOUNDARY);
+            entity.setContent(summary != null ? summary : "[compact boundary]");
+            entity.setTokens(0);
+            Map<String, Object> meta = new java.util.LinkedHashMap<>();
+            meta.put("summary", summary);
+            meta.put("compacted_count", compactedCount);
+            meta.put("tokens_saved", tokensSaved);
+            meta.put("strategy", strategy.name());
+            meta.put("boundary_at", java.time.OffsetDateTime.now().toString());
+            entity.setBoundaryMeta(meta);
+            conversationMessageRepository.save(entity);
+            log.debug("COMPACT_BOUNDARY inserted: session={} strategy={} compacted={} tokensSaved={}",
+                    sessionId, strategy, compactedCount, tokensSaved);
+        } catch (Exception e) {
+            // DB 저장 실패해도 압축 자체는 이미 반영되었으므로 로그만 남긴다 (BIZ-002 기본 동작 유지).
+            log.warn("COMPACT_BOUNDARY insert 실패 (무시): sessionId={}, err={}", sessionId, e.getMessage());
+        }
     }
 
     /** 기존 호환: trim(messages, maxTokens) */

@@ -127,6 +127,9 @@ public class ToolCallHandler {
             }
         }
 
+        // CR-049 BIZ-097: Stop Hook BLOCK 재진입 시 동일 사유 누적 카운터 (3회 초과 시 강제 종료)
+        java.util.Map<String, Integer> stopBlockReasonCount = new java.util.HashMap<>();
+
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             LLMRequest request = new LLMRequest(
                     resolvedModel,
@@ -151,6 +154,37 @@ public class ToolCallHandler {
 
             if (response.finishReason() != LLMResponse.FinishReason.TOOL_USE
                     || !response.hasToolCalls()) {
+                // CR-049 PRD-304: 턴 종료 직전 STOP 훅으로 사용자 정의 검증 hook(TodoWrite 미완료/테스트 FAIL 등)을 실행.
+                // BLOCK 이면 사유를 새 user 메시지로 주입하고 재진입 (BIZ-097: 동일 사유 3회 초과 시 강제 종료).
+                Map<String, Object> stopInput = Map.of(
+                        "iteration", iteration,
+                        "finishReason", String.valueOf(response.finishReason()));
+                HookOutput stopHook = hookDispatcher.dispatch(
+                        HookEvent.STOP,
+                        HookInput.of(HookEvent.STOP, sessionId, stopInput, Map.<String, Object>of()),
+                        null);
+                if (stopHook != null && stopHook.decision() == HookDecision.BLOCK) {
+                    Object reasonMeta = stopHook.metadata() != null ? stopHook.metadata().get("reason") : null;
+                    String reason = reasonMeta != null ? reasonMeta.toString() : "검증 실패로 재시도가 필요합니다.";
+                    int prior = stopBlockReasonCount.getOrDefault(reason, 0);
+                    int count = prior + 1;
+                    stopBlockReasonCount.put(reason, count);
+                    if (count > 3) {
+                        log.warn("Stop hook BLOCK 동일 사유 3회 초과, 강제 종료: session={}, reason={}",
+                                sessionId, reason);
+                        mutableMessages.add(UnifiedMessage.ofText(
+                                UnifiedMessage.Role.SYSTEM,
+                                "[시스템] 동일한 검증 실패(" + reason + ")가 3회 초과되어 턴을 강제 종료합니다."));
+                        break;
+                    }
+                    log.info("Stop hook BLOCK, 루프 재진입: session={}, count={}/{}, reason={}",
+                            sessionId, count, 3, reason);
+                    // 새 user 메시지 주입 → 다음 iteration 에서 모델이 reason 을 읽고 보완 작업 수행
+                    mutableMessages.add(UnifiedMessage.ofText(
+                            UnifiedMessage.Role.USER,
+                            "다음 검증 실패를 확인하고 보완해주세요: " + reason));
+                    continue;
+                }
                 break;
             }
 

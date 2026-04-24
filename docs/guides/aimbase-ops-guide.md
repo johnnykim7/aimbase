@@ -139,28 +139,72 @@ Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 | `widget.token-ttl-seconds` | int | `1800` | 위젯 토큰 기본 TTL (초) |
 | `widget.token-max-ttl-seconds` | int | `3600` | 위젯 토큰 최대 TTL 하드캡. 요청 TTL 이 이를 초과하면 cap 적용 + 로그 |
 
-**Tenant Flyway 마이그레이션 수동 적용 (중요)**:
+**Tenant Flyway 마이그레이션 자동 적용 [CR-066]**:
 
-CR-058 Sprint 52 는 `V54__cr058_workflow_parent_run.sql`, CR-061 Sprint 54 는 `V58__cr061_chat_attachments.sql` 을 포함한다. **현재 Aimbase 의 Tenant Flyway 는 기존 활성 테넌트에 대해 기동 시점에 자동으로 재실행되지 않는다** — `LocalDevInitializer` 는 `@Profile("local")` 한정이고, `TenantOnboardingService` 는 신규 테넌트 등록 시점에만 호출된다. 따라서 CR-058/CR-061 이후 버전 배포 시 각 기존 테넌트 DB 에 수동으로 한 번 적용해야 한다.
+CR-066 부터 신규 tenant 마이그레이션(`V54` / `V58` 등)은 **Admin API 또는 기동 훅으로 자동 재실행** 가능하다. `TenantMigrationRunner` 는 `Flyway.migrate()` 의 `baselineOnMigrate` / `outOfOrder` / `ignoreMigrationPatterns("*:missing")` / `repair()` 옵션을 이미 적용하므로 **재실행이 안전**하다. 1개 테넌트 실패는 격리되어 나머지 진행.
+
+**(A) Admin API — 권장 방식**:
+
+```bash
+# 1. 전체 활성 테넌트 일괄 migrate (dryRun=true 로 먼저 확인)
+curl -X POST http://<aimbase-host>:8181/api/v1/platform/tenants/migrate \
+  -H "Authorization: Bearer <SUPER_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"dryRun": true}'
+# → {"success": true, "data": {"total": 3, "success": 3, "failed": 0, "skipped": 0,
+#     "details": [{"tenantId":"dev","dbName":"aimbase_dev","status":"SUCCESS","migrationsApplied":2}, ...]}}
+
+# 2. 실제 적용 (body 생략 시 활성 테넌트 전체)
+curl -X POST http://<aimbase-host>:8181/api/v1/platform/tenants/migrate \
+  -H "Authorization: Bearer <SUPER_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# 3. 특정 테넌트만 migrate
+curl -X POST http://<aimbase-host>:8181/api/v1/platform/tenants/migrate \
+  -H "Authorization: Bearer <SUPER_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"tenantIds": ["dev","prod-a"]}'
+
+# 4. 단일 테넌트 현황 조회 (적용 버전 + 대기 버전)
+curl -H "Authorization: Bearer <SUPER_ADMIN_TOKEN>" \
+  http://<aimbase-host>:8181/api/v1/platform/tenants/dev/migrations
+# → {"success": true, "data": {"tenantId":"dev","dbName":"aimbase_dev",
+#     "currentVersion":"58","applied":[...], "pendingVersions":[]}}
+```
+
+**(B) 기동 시점 자동 훅 — opt-in**:
+
+`application.yml` 또는 환경변수로 켠다. 기본값 `false`.
+
+```yaml
+platform:
+  tenant:
+    migration:
+      auto-migrate-on-startup: true   # 또는 TENANT_AUTO_MIGRATE_ON_STARTUP=true
+```
+
+켜면 `ApplicationReadyEvent` 시 활성 테넌트 전체에 migrate 수행 후 로그 출력:
+```
+CR-066 startup auto-migrate done — total=3, success=3, failed=0, skipped=0
+```
+
+실패가 있어도 기동은 계속 진행됨 (실패 격리). 실패한 테넌트는 Admin API 로 재시도한다.
+
+**(C) 레거시 수동 절차 (Admin API 불가 시 폴백)**:
+
+기존 수동 절차(테넌트별 `psql -f V__.sql` + `flyway_schema_history` INSERT 스크립트 루프)는 여전히 유효하다. 단 **CR-066 의 Admin API 가 주(主) 수단**이고, 수동은 긴급 상황(BE 기동 불가 등) 시 폴백으로만 사용한다.
+
+<details>
+<summary>레거시 수동 스크립트 (접기)</summary>
 
 ```bash
 # 각 활성 테넌트 DB 목록 (master 에서 조회)
 psql -U platform -h <master-host> -p 5432 aimbase_master \
   -tAc "SELECT id, db_name FROM tenants WHERE status='active';"
 
-# 각 테넌트 DB 에 V54 적용 (SQL 본문은 IF NOT EXISTS 가 걸려 있어 재실행 안전)
+# 각 테넌트 DB 에 V__ 적용 (WHERE NOT EXISTS 가드 필수 — flyway_schema_history 유니크 제약 없음)
 for TENANT_DB in aimbase_tenant_dev aimbase_tenant_<other>; do
-  # V54 (CR-058)
-  psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" \
-    < backend/platform-core/src/main/resources/db/migration/tenant/V54__cr058_workflow_parent_run.sql
-  psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" -c "
-    INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)
-    SELECT COALESCE(MAX(installed_rank),0)+1, '54', 'cr058 workflow parent run', 'SQL',
-           'V54__cr058_workflow_parent_run.sql', 0, 'ops-deploy', 0, true
-    FROM flyway_schema_history
-    WHERE NOT EXISTS (SELECT 1 FROM flyway_schema_history WHERE version='54');"
-
-  # V58 (CR-061) — 위젯 파일 첨부 테이블
   psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" \
     < backend/platform-core/src/main/resources/db/migration/tenant/V58__cr061_chat_attachments.sql
   psql -U platform -h <tenant-host> -p 5432 "$TENANT_DB" -c "
@@ -172,11 +216,9 @@ for TENANT_DB in aimbase_tenant_dev aimbase_tenant_<other>; do
 done
 ```
 
-> **중요**: `flyway_schema_history` 에는 version 유니크 제약이 없어 동일 version 을
-> 두 번 INSERT 하면 중복 row 가 생긴다. 위 WHERE NOT EXISTS 가드는 필수다. 재실행
-> 안전성을 기대한다면 `psql -f` 와 조합한 스크립트로 감싸 한 번에 처리할 것을 권장.
+</details>
 
-> 신규 온보딩하는 테넌트에는 `TenantOnboardingService` 가 자동으로 최신까지 migrate 하므로 별도 조치 불필요. 구조적 개선(기동 시점 자동 재migrate) 은 별도 CR 후보.
+> 신규 온보딩하는 테넌트에는 `TenantOnboardingService` 가 자동으로 최신까지 migrate 하므로 별도 조치 불필요.
 
 **관리자 수정 절차 (psql 직접)**:
 ```bash
@@ -252,6 +294,70 @@ SELECT COUNT(*), MAX(expires_at) FROM chat_attachments WHERE expires_at < NOW();
 - [ ] Master `global_config.widget.allowed-scopes` 값이 있는 테넌트 — **수동으로 `chat:upload` 추가 필수** (폴백 기본값은 새 문자열이 되지만 DB 에 이미 값이 있으면 폴백 미적용)
 - [ ] `/widget/v1/aimbase-chat.umd.global.js` 번들이 최신(24KB+)인지 확인 — Gradle `copyWidgetBundle` 태스크가 빌드 시 자동 수행
 - [ ] 위젯 샘플 consumer 로 이미지 1장 / PDF 1건 업로드 → 채팅 전송 → 응답 확인 (골든 패스)
+
+---
+
+### 2-7. 위젯 음성 입력 STT 운영 [CR-060]
+
+**기본값 seed** (V19 마이그레이션 — BE 재기동 시 Flyway 가 자동 적용. 기존 테넌트에 수동 적용 필요 없음, 마스터 DB 1회만 작동):
+
+```bash
+# 신규 DB면 BE 가 알아서 Flyway 실행. 기존 운영 DB에도 master 는 1개 이므로 재기동 1회로 충분.
+# 수동 확인만 필요한 경우:
+psql -U platform -h localhost -p 5432 -d aimbase_master -c "
+SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'widget.stt.%';"
+```
+
+**런타임 설정** (`global_config` — 관리자 UI 또는 psql UPDATE 로 변경):
+
+| Key | 기본값 | 의미 | BIZ |
+|-----|--------|------|-----|
+| `widget.stt.max-duration-seconds` | 60 | 녹음 시간 상한 (Whisper duration 응답 기준 사후 검증) | BIZ-102 |
+| `widget.stt.max-size-bytes` | 26214400 (25MB) | 업로드 크기 상한. Whisper API 절대 상한 | BIZ-103 |
+| `widget.stt.allowed-mime-types` | `audio/webm,audio/mp4,audio/mpeg,audio/wav,audio/ogg` | 허용 오디오 MIME (magic number 판정 기준) | — |
+| `widget.stt.rate-limit-per-minute` | 10 | 세션당 분당 호출 한도 | BIZ-104 |
+| `widget.stt.default-language` | `auto` | 요청에 `language` 가 없을 때 Whisper 에 전달할 값. `auto` 면 자동 감지 | — |
+
+**사용량 모니터링**:
+
+```bash
+# 최근 1시간 STT 호출 건수 (감사 로그 기반, 변환 텍스트 본문은 저장되지 않음)
+psql -U platform -h localhost -p 5432 -d {tenant_db} -c "
+SELECT
+  DATE_TRUNC('minute', created_at) AS minute,
+  COUNT(*) AS calls,
+  SUM((detail->>'size_bytes')::bigint) AS total_bytes,
+  AVG((detail->>'duration_sec')::float) AS avg_duration_sec
+FROM audit_logs
+WHERE action = 'stt_transcribe'
+  AND created_at > NOW() - INTERVAL '1 hour'
+GROUP BY 1 ORDER BY 1 DESC;"
+```
+
+```bash
+# 현재 Redis rate-limit 카운터 확인 (세션별)
+redis-cli -h localhost -p 6379 --scan --pattern 'stt:rate:*' | head -20
+redis-cli -h localhost -p 6379 get "stt:rate:sess-abc"
+```
+
+**장애 대응**:
+- **OpenAI Connection 미설정 / 키 만료**: 사용자에게 503 `STT_PROVIDER_UNAVAILABLE` 반환. 운영자는 테넌트 Connection 페이지에서 OpenAI 항목 점검
+- **Whisper 5xx 지속**: 502 `STT_UPSTREAM_ERROR` 로 사용자에게 반환됨. OpenAI Status 페이지 확인 + 일시적이면 재시도 안내
+- **Redis 다운**: `SttRateLimiter` 는 fail-open — rate limit 검사 통과. 로그에 `STT rate limiter Redis failure, failing open` 기록. OpenAI 호출 비용 급증 우려 있으니 Redis 복구 우선
+- **특정 테넌트 남용**: `widget.stt.rate-limit-per-minute` 를 일시적으로 낮춤 (e.g., 3). 변경 즉시 5분 캐시 TTL 후 반영
+
+**사용자 측 트러블슈팅 FAQ (소비앱 운영자가 사용자에게 전달)**:
+- "마이크 권한이 필요합니다" → 브라우저 주소창의 🔒 아이콘 → "마이크" 허용. iOS Safari 는 매 세션 재허용 요구 가능 (정상)
+- "HTTPS 환경에서만 사용 가능" → 위젯은 HTTPS 페이지 또는 `localhost` 에서만 동작. HTTP 페이지에 임베드 시 마이크 버튼 자동 숨김
+- "음성 입력 버튼이 안 보임" → 위젯 토큰에 `chat:stt` scope 이 있는지 BFF 확인. `widget.allowed-scopes` 에 `chat:stt` 포함되어야 함
+- "잠시 후 다시 시도해주세요 (분당 10회 제한)" → BIZ-104 rate limit. `widget.stt.rate-limit-per-minute` 상향 또는 사용자 대기
+
+**배포 전 체크리스트 (CR-060 업그레이드)**:
+- [ ] BE 재기동으로 V19 Flyway 적용 확인 — `SELECT * FROM flyway_schema_history_master WHERE version='19'` 에 `success=t` 로우 존재
+- [ ] `global_config.widget.allowed-scopes` 에 `chat:stt` 포함 확인
+- [ ] `/widget/v1/aimbase-chat.umd.global.js` 번들이 최신(33KB+)인지 확인 — Gradle `copyWidgetBundle` 태스크가 빌드 시 자동 수행
+- [ ] 테넌트 Connection 에 OpenAI 등록 + `connected` 상태 확인 (위젯 STT 는 테넌트 OpenAI 키를 공유)
+- [ ] 샘플 consumer HTTPS 환경에서 마이크 버튼 노출 → 녹음 5초 → 입력창 자동 삽입 확인 (골든 패스)
 
 ---
 
@@ -1197,6 +1303,9 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.8.0 | 2026-04-24 | CR-066 Tenant Flyway 자동 재실행 — § 2-5 수동 절차 → Admin API 기반 자동 절차로 개정. `POST /api/v1/platform/tenants/migrate` (body 생략 시 활성 테넌트 전체, `tenantIds` / `dryRun` 지원) + `GET /api/v1/platform/tenants/{id}/migrations` (적용/대기 버전 조회). opt-in 기동 훅 `platform.tenant.migration.auto-migrate-on-startup` (기본 false, 실패 격리로 기동 차단 없음). 레거시 수동 스크립트는 폴백으로 접기 처리 유지 |
+| v2.7.0 | 2026-04-24 | CR-060 위젯 STT 운영 — § 2-7 신설: V19 master 마이그레이션(`widget.stt.*` 5설정 seed + `widget.allowed-scopes` 에 `chat:stt` append), 사용량 모니터링 SQL(audit_logs `action=stt_transcribe`, 텍스트 본문 미저장), Redis rate-limit 카운터 확인, fail-open 경고, 마이크 권한 FAQ. `copyWidgetBundle` 최신 번들 33KB+ 확인. 테넌트 OpenAI Connection 공유(신규 키 불필요) |
+| v2.6.0 | 2026-04-24 | CR-050 Claude CLI LLM 어댑터 운영 — `application.yml platform.llm.anthropic-cli.*` (enabled/timeout-seconds/max-workers-per-run/acquire-timeout-seconds/cli-binary-path) 5설정, 테넌트 피처 플래그 = `global_config.llm.anthropic-cli.enabled-tenants`(기본 빈 값=차단, `*`=전체, 쉼표 구분=선택). 사전 조건: 각 노드에 `claude` CLI 설치 + OAuth 로그인 또는 `claude_config_dir` 지정. BIZ-099 ToS 경계상 상용 외부 테넌트 비활성 유지. BIZ-100 run당 워커 5개 상한(큐잉). 프로세스 누수 감시: 정상 시 `ps -ef \| grep 'claude -p'` 는 run 종료 후 빈 결과 |
 | v2.5.0 | 2026-04-24 | CR-061 위젯 파일 첨부 운영 — § 2-5 V58 수동 마이그레이션 스니펫 추가 + `widget.allowed-scopes` 기본값에 `chat:upload` 반영. § 2-6 신설: `widget.attachment.*` 설정 4종, 스토리지 사용량 모니터링 SQL, GC 스케줄러 관찰 로그 포인트, 장애 대응 가이드, 배포 전 체크리스트 |
 | v2.4.0 | 2026-04-24 | CR-058 임베드 위젯(Chat Widget) 운영 — § 2-5 `widget.*` 설정 4종(allowed-origins/allowed-scopes/token-ttl-seconds/token-max-ttl-seconds), § 4 시나리오 N(위젯 SDK 온보딩 — API Key 발급 + Origin 화이트리스트 + 검증 체크리스트) |
 | v2.3.0 | 2026-04-24 | CR-055 평가-최적화 루프 노드 (§ 3-5) — `EVALUATOR_LOOP` StepType, pass_criteria 3종(SCORE_THRESHOLD/JSONPATH_MATCH/LLM_JUDGE), evaluator 프롬프트 seed 3종, `{{loop.*}}` 변수 규약 |

@@ -6,6 +6,9 @@ import com.platform.repository.master.SubscriptionRepository;
 import com.platform.repository.master.TenantRepository;
 import com.platform.repository.master.TenantUsageSummaryRepository;
 import com.platform.tenant.TenantDataSourceManager;
+import com.platform.tenant.migration.TenantMigrationInfo;
+import com.platform.tenant.migration.TenantMigrationResult;
+import com.platform.tenant.migration.TenantMigrationRunner;
 import com.platform.tenant.onboarding.TenantOnboardingRequest;
 import com.platform.tenant.onboarding.TenantOnboardingResult;
 import com.platform.tenant.onboarding.TenantOnboardingService;
@@ -39,6 +42,7 @@ public class PlatformController {
     private final TenantUsageSummaryRepository usageSummaryRepository;
     private final TenantOnboardingService onboardingService;
     private final TenantDataSourceManager dataSourceManager;
+    private final TenantMigrationRunner migrationRunner;
 
     @Value("${platform.default-db-host:localhost}")
     private String defaultDbHost;
@@ -56,12 +60,14 @@ public class PlatformController {
                                SubscriptionRepository subscriptionRepository,
                                TenantUsageSummaryRepository usageSummaryRepository,
                                TenantOnboardingService onboardingService,
-                               TenantDataSourceManager dataSourceManager) {
+                               TenantDataSourceManager dataSourceManager,
+                               TenantMigrationRunner migrationRunner) {
         this.tenantRepository = tenantRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.usageSummaryRepository = usageSummaryRepository;
         this.onboardingService = onboardingService;
         this.dataSourceManager = dataSourceManager;
+        this.migrationRunner = migrationRunner;
     }
 
     // ─── Tenant CRUD ─────────────────────────────────────────────────
@@ -226,6 +232,35 @@ public class PlatformController {
         ));
     }
 
+    // ─── CR-066: Tenant Flyway 자동 재실행 ────────────────────────────
+
+    @PostMapping("/tenants/migrate")
+    @Operation(summary = "테넌트 DB Flyway 일괄 마이그레이션 (CR-066)",
+            description = "활성 테넌트(기본) 또는 지정 테넌트 목록에 대해 Flyway.migrate() 를 일괄 실행한다. "
+                    + "1개 테넌트 실패는 격리되어 나머지 진행. dryRun=true 면 pending 카운트만 반환.")
+    public ApiResponse<TenantMigrationResult> migrateTenants(@RequestBody(required = false) TenantMigrateRequest request) {
+        boolean dryRun = request != null && Boolean.TRUE.equals(request.dryRun());
+        List<String> tenantIds = (request != null) ? request.tenantIds() : null;
+
+        TenantMigrationResult result = (tenantIds == null || tenantIds.isEmpty())
+                ? migrationRunner.migrateAll(dryRun)
+                : migrationRunner.migrate(tenantIds, dryRun);
+        return ApiResponse.ok(result);
+    }
+
+    @GetMapping("/tenants/{id}/migrations")
+    @Operation(summary = "테넌트 DB Flyway 마이그레이션 현황 (CR-066)",
+            description = "flyway_schema_history 기반 적용 이력 + 대기 중(pending) 버전 목록 조회.")
+    public ApiResponse<TenantMigrationInfo> getTenantMigrations(@PathVariable String id) {
+        try {
+            return ApiResponse.ok(migrationRunner.describe(id));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
     // ─── Request Records ─────────────────────────────────────────────
 
     public record TenantCreateRequest(
@@ -251,5 +286,11 @@ public class PlatformController {
         Integer maxKnowledgeSources,
         Integer maxWorkflows,
         Integer storageGb
+    ) {}
+
+    /** CR-066: 테넌트 일괄 마이그레이션 요청. body 생략 시 활성 테넌트 전체, dryRun=false 적용. */
+    public record TenantMigrateRequest(
+        List<String> tenantIds,
+        Boolean dryRun
     ) {}
 }

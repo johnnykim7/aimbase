@@ -1,5 +1,6 @@
 import { AttachmentClient } from "./attachment-client";
 import { ChatClient } from "./chat-client";
+import { SttClient, SttError } from "./stt-client";
 import { WIDGET_CSS } from "./styles";
 import { TokenStore } from "./token-store";
 import type {
@@ -7,6 +8,7 @@ import type {
   AttachmentDraft,
   Citation,
   DisplayMode,
+  SttRecordingState,
   WidgetHandle,
   WidgetOptions,
   WorkflowStepEvent,
@@ -141,12 +143,37 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   const textarea = document.createElement("textarea");
   textarea.placeholder = "메시지를 입력하세요… (Enter 전송, Shift+Enter 줄바꿈)";
   textarea.rows = 1;
+  // CR-060: 마이크 버튼 (위젯 토큰에 chat:stt 스코프 있고 브라우저 지원 시 활성)
+  const micBtn = el("button", "mic-btn", "🎤");
+  micBtn.type = "button";
+  micBtn.setAttribute("aria-label", "음성 입력 시작");
+  micBtn.setAttribute("aria-pressed", "false");
+  micBtn.hidden = true; // 기본 숨김, 토큰·환경 체크 후 노출
   const sendBtn = el("button", "send-btn", "전송");
   composer.appendChild(attachBtn);
   composer.appendChild(fileInput);
   composer.appendChild(textarea);
+  composer.appendChild(micBtn);
   composer.appendChild(sendBtn);
   panel.appendChild(composer);
+
+  // CR-060: 녹음 오버레이 (recording 상태에서만 표시)
+  const recordingOverlay = el("div", "recording-overlay hidden");
+  recordingOverlay.setAttribute("role", "status");
+  recordingOverlay.setAttribute("aria-live", "polite");
+  const wave = el("span", "rec-wave", "▁▃▅▇▅▃▁");
+  const timer = el("span", "rec-timer", "0:00");
+  const cancelRec = el("button", "rec-cancel", "취소");
+  cancelRec.type = "button";
+  cancelRec.setAttribute("aria-label", "녹음 취소");
+  const stopRec = el("button", "rec-stop", "■ 정지");
+  stopRec.type = "button";
+  stopRec.setAttribute("aria-label", "녹음 정지 후 변환");
+  recordingOverlay.appendChild(wave);
+  recordingOverlay.appendChild(timer);
+  recordingOverlay.appendChild(cancelRec);
+  recordingOverlay.appendChild(stopRec);
+  panel.appendChild(recordingOverlay);
 
   // CR-061: 드래그앤드롭 오버레이 (panel 전체 범위)
   let dragCounter = 0;
@@ -382,6 +409,223 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     }
   }
 
+  // ── CR-060: STT 로직 ─────────────────────────
+  const stt = new SttClient(tokens);
+  let recorder: MediaRecorder | null = null;
+  let recordedChunks: Blob[] = [];
+  let micStream: MediaStream | null = null;
+  let recStartedAt = 0;
+  let recTickTimer: ReturnType<typeof setInterval> | null = null;
+  let recAutoStopTimer: ReturnType<typeof setTimeout> | null = null;
+  let recState: SttRecordingState = "idle";
+  const MAX_RECORD_MS = 60_000; // 서버와 동일 기본값. 초과 시 서버 400.
+
+  function sttSupported(): boolean {
+    return (
+      typeof window !== "undefined"
+      && !!window.isSecureContext
+      && !!navigator.mediaDevices?.getUserMedia
+      && typeof MediaRecorder !== "undefined"
+    );
+  }
+
+  function pickMimeType(): string | undefined {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+    ];
+    for (const m of candidates) {
+      try {
+        if (MediaRecorder.isTypeSupported(m)) return m;
+      } catch {
+        // ignore
+      }
+    }
+    return undefined;
+  }
+
+  function setRecState(next: SttRecordingState): void {
+    recState = next;
+    micBtn.setAttribute("aria-pressed", next === "recording" ? "true" : "false");
+    micBtn.setAttribute(
+      "aria-label",
+      next === "recording" ? "녹음 정지" : "음성 입력 시작",
+    );
+    micBtn.textContent = next === "recording" ? "⏹" : "🎤";
+    if (next === "recording") {
+      recordingOverlay.classList.remove("hidden");
+    } else {
+      recordingOverlay.classList.add("hidden");
+    }
+  }
+
+  function formatTimer(ms: number): string {
+    const sec = Math.floor(ms / 1000);
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
+
+  function clearRecTimers(): void {
+    if (recTickTimer) { clearInterval(recTickTimer); recTickTimer = null; }
+    if (recAutoStopTimer) { clearTimeout(recAutoStopTimer); recAutoStopTimer = null; }
+  }
+
+  function releaseMic(): void {
+    micStream?.getTracks().forEach((t) => t.stop());
+    micStream = null;
+  }
+
+  async function startRecording(): Promise<void> {
+    if (recState !== "idle") return;
+    if (!sttSupported()) {
+      appendMessage("error", "이 브라우저·환경에서는 음성 입력을 사용할 수 없습니다 (HTTPS 필수)");
+      return;
+    }
+    setRecState("requesting-permission");
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      setRecState("error");
+      appendMessage("error", "마이크 권한이 필요합니다. 브라우저 주소창에서 🔒 아이콘을 눌러 허용해주세요");
+      options.on?.onError?.(e as Error);
+      setRecState("idle");
+      return;
+    }
+
+    const mimeType = pickMimeType();
+    try {
+      recorder = new MediaRecorder(micStream, mimeType ? { mimeType } : undefined);
+    } catch (e) {
+      releaseMic();
+      setRecState("idle");
+      appendMessage("error", "이 브라우저의 MediaRecorder 포맷이 서버와 호환되지 않습니다");
+      options.on?.onError?.(e as Error);
+      return;
+    }
+    recordedChunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+    recorder.onstop = () => void finalizeRecording();
+    recorder.onerror = (ev) => {
+      options.on?.onError?.(new Error("recorder error: " + (ev as Event).type));
+    };
+
+    recorder.start();
+    recStartedAt = Date.now();
+    setRecState("recording");
+
+    timer.textContent = "0:00";
+    recTickTimer = setInterval(() => {
+      const elapsed = Date.now() - recStartedAt;
+      timer.textContent = formatTimer(elapsed);
+    }, 250);
+    recAutoStopTimer = setTimeout(() => {
+      if (recState === "recording") stopRecordingAndSend();
+    }, MAX_RECORD_MS);
+  }
+
+  function stopRecordingAndSend(): void {
+    if (recState !== "recording") return;
+    clearRecTimers();
+    try { recorder?.stop(); } catch { /* ignore */ }
+    setRecState("uploading");
+  }
+
+  function cancelRecording(): void {
+    clearRecTimers();
+    if (recorder && recorder.state !== "inactive") {
+      // ondataavailable 는 발생하지만 finalize 에서 cancel 플래그로 무시
+      recorder.onstop = null;
+      try { recorder.stop(); } catch { /* ignore */ }
+    }
+    releaseMic();
+    recorder = null;
+    recordedChunks = [];
+    setRecState("idle");
+  }
+
+  async function finalizeRecording(): Promise<void> {
+    const chunks = recordedChunks;
+    recordedChunks = [];
+    releaseMic();
+    if (!chunks.length) {
+      setRecState("idle");
+      return;
+    }
+    const type = recorder?.mimeType || "audio/webm";
+    recorder = null;
+    const blob = new Blob(chunks, { type });
+
+    try {
+      const result = await stt.transcribe(
+        { baseUrl: options.baseUrl, sessionId: state.sessionId, blob },
+      );
+      insertTextAtCursor(textarea, result.text);
+      textarea.focus();
+      updateSendDisabled();
+    } catch (e) {
+      const err = e instanceof SttError ? e : new Error(String(e));
+      appendMessage("error", sttErrorMessage(err));
+      options.on?.onError?.(err);
+    } finally {
+      setRecState("idle");
+    }
+  }
+
+  function sttErrorMessage(err: SttError | Error): string {
+    if (err instanceof SttError) {
+      switch (err.code) {
+        case "STT_RATE_LIMITED":  return "음성 입력을 너무 자주 사용했습니다. 잠시 후 다시 시도해주세요";
+        case "STT_FILE_TOO_LARGE": return "녹음 파일이 너무 큽니다";
+        case "STT_FILE_TOO_LONG":  return "녹음 시간이 너무 깁니다";
+        case "STT_INVALID_MIME":   return "이 오디오 포맷은 서버에서 지원하지 않습니다";
+        case "STT_PROVIDER_UNAVAILABLE": return "음성 인식 서비스를 사용할 수 없습니다 (OpenAI 연결 확인 필요)";
+        case "STT_TIMEOUT":        return "음성 인식 응답이 지연됩니다. 다시 시도해주세요";
+        case "STT_NETWORK":        return "네트워크 오류로 음성을 전송하지 못했습니다";
+      }
+    }
+    return "음성 인식에 실패했습니다: " + err.message;
+  }
+
+  function insertTextAtCursor(el: HTMLTextAreaElement, text: string): void {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const before = el.value.slice(0, start);
+    const after = el.value.slice(end);
+    const sep = before.length > 0 && !/\s$/.test(before) ? " " : "";
+    const insert = sep + text;
+    el.value = before + insert + after;
+    const caret = (before + insert).length;
+    el.setSelectionRange(caret, caret);
+  }
+
+  micBtn.addEventListener("click", () => {
+    if (recState === "idle") void startRecording();
+    else if (recState === "recording") stopRecordingAndSend();
+  });
+  stopRec.addEventListener("click", () => stopRecordingAndSend());
+  cancelRec.addEventListener("click", () => cancelRecording());
+  // 키보드 접근성: Escape 로 녹음 취소
+  panel.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && recState === "recording") {
+      e.stopPropagation();
+      cancelRecording();
+    }
+  });
+
+  // 최초 토큰 로드 후 마이크 버튼 가시성 결정
+  (async () => {
+    try {
+      await tokens.ensureLoaded();
+      if (sttSupported() && tokens.hasScope("chat:stt")) {
+        micBtn.hidden = false;
+      }
+    } catch {
+      // 토큰 로드 실패는 기존 경로에서 처리
+    }
+  })();
+
   function updateSendDisabled(): void {
     const hasUploading = state.attachments.some((a) => a.status === "uploading");
     const hasText = textarea.value.trim().length > 0;
@@ -560,6 +804,8 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       return () => unsub?.();
     },
     destroy: () => {
+      // CR-060: 녹음 중이면 마이크/리소스 정리
+      cancelRecording();
       tokens.destroy();
       host.remove();
     },

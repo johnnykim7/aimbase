@@ -150,6 +150,8 @@ public class ContextAssemblyEngine {
     private final com.platform.tool.ToolRegistry toolRegistry;
     /** CR-048 PRD-300: 세션별 활성 도구 — 비활성 도구는 이름+설명만 system prompt 후미에 노출 */
     private final com.platform.tool.registry.SessionToolRegistry sessionToolRegistry;
+    /** CR-049 PRD-305: system prompt cascade 병합 시 sessionId → projectId 해석용. */
+    private final com.platform.repository.ConversationSessionRepository conversationSessionRepository;
 
     // 세션별 연속 압축 실패 카운터 (circuit breaker)
     private final Map<String, Integer> compactFailures = new HashMap<>();
@@ -170,7 +172,8 @@ public class ContextAssemblyEngine {
             ContextRecipeRepository recipeRepository,
             com.platform.service.PromptTemplateService promptTemplateService,
             com.platform.tool.ToolRegistry toolRegistry,
-            com.platform.tool.registry.SessionToolRegistry sessionToolRegistry) {
+            com.platform.tool.registry.SessionToolRegistry sessionToolRegistry,
+            com.platform.repository.ConversationSessionRepository conversationSessionRepository) {
         this.sessionStore = sessionStore;
         this.memoryService = memoryService;
         this.contextWindowManager = contextWindowManager;
@@ -178,6 +181,7 @@ public class ContextAssemblyEngine {
         this.promptTemplateService = promptTemplateService;
         this.toolRegistry = toolRegistry;
         this.sessionToolRegistry = sessionToolRegistry;
+        this.conversationSessionRepository = conversationSessionRepository;
     }
 
     /**
@@ -418,11 +422,15 @@ public class ContextAssemblyEngine {
                 "core.git_instructions.prompt",
         };
 
+        // CR-049 PRD-305: sessionId 로 projectId 해석 (없으면 null → PROJECT 단계 생략).
+        String projectId = resolveProjectId(sessionId);
+
         StringBuilder sb = new StringBuilder();
         boolean anyFound = false;
 
         for (String key : coreSections) {
-            String section = promptTemplateService.getTemplate(key);
+            // CR-049 BIZ-098: PROJECT > TENANT > GLOBAL cascade append.
+            String section = promptTemplateService.getMergedTemplateText(key, projectId);
             if (section != null && !section.isBlank()) {
                 if (!sb.isEmpty()) sb.append("\n\n");
                 sb.append(section);
@@ -463,6 +471,25 @@ public class ContextAssemblyEngine {
 
         // 최종 폴백: 기존 하드코딩 프롬프트
         return promptTemplateService.getTemplateOrFallback("context.tool_usage.system", TOOL_USAGE_PROMPT);
+    }
+
+    /**
+     * CR-049 PRD-305: sessionId 로부터 projectId 를 해석한다. 세션이 없거나 project 미지정이면 null.
+     * DB 조회 실패해도 예외를 전파하지 않고 null 반환 (system prompt 조립을 차단하지 않는다).
+     */
+    private String resolveProjectId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank() || conversationSessionRepository == null) {
+            return null;
+        }
+        try {
+            return conversationSessionRepository.findBySessionIdIncludingDeleted(sessionId)
+                    .map(com.platform.domain.ConversationSessionEntity::getProjectId)
+                    .filter(pid -> pid != null && !pid.isBlank())
+                    .orElse(null);
+        } catch (Exception e) {
+            log.debug("resolveProjectId failed for sessionId={}: {}", sessionId, e.getMessage());
+            return null;
+        }
     }
 
     /**

@@ -73,6 +73,20 @@ public class PlatformSettingsService {
     }
 
     /**
+     * 64비트 정수형 설정값 조회 (파일 크기·바이트 수용 등 int 범위를 넘을 수 있는 값 대상).
+     */
+    public long getLong(String key, long defaultValue) {
+        String value = getString(key, null);
+        if (value == null) return defaultValue;
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            log.warn("Invalid long for key '{}': '{}', using default {}", key, value, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    /**
      * 실수형 설정값 조회.
      */
     public double getDouble(String key, double defaultValue) {

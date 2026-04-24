@@ -1418,10 +1418,100 @@ BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:upload` 
 
 ---
 
+## 19. 위젯 음성 입력 STT (Whisper) [CR-060]
+
+위젯이 마이크로 녹음한 오디오를 OpenAI Whisper API 로 텍스트 변환해 입력창에 자동 삽입한다. **녹음 후 일괄 전송** 방식 (Whisper 는 실시간 스트리밍 미지원). Platform 경로(`/api/v1/speech/stt`) 는 그대로 유지되며 본 CR 에서는 위젯 전용 엔드포인트가 신설됐다.
+
+### 19-1. 전제 — 위젯 토큰 Scope
+BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:stt` 를 포함해야 한다. `widget.allowed-scopes` 기본값은 `[chat:stream, chat:upload, chat:stt, workflow:subscribe, rag:read]` 로 확장되어 있다.
+
+### 19-2. `POST /api/v1/chat/stt`
+
+**Scope**: `chat:stt`
+**Content-Type**: `multipart/form-data`
+
+| 파라미터 | 필수 | 설명 |
+|---------|:-:|------|
+| `file` | ✅ | 오디오 파일. MIME 허용: `audio/webm`, `audio/mp4`, `audio/mpeg`, `audio/wav`, `audio/ogg` (magic number 재검증) |
+| `language` | ❌ | `auto` 또는 ISO-639-1 (ko/en/ja/…). 기본 `widget.stt.default-language` (초기 `auto`) |
+| `session_id` | ❌ | 감사 로그 기록 단위. 없으면 `anonymous` 로 간주 |
+
+**응답 200**
+```json
+{
+  "success": true,
+  "data": {
+    "text": "안녕하세요 오늘 날씨가 좋네요",
+    "language": "ko",
+    "duration_sec": 3.4
+  }
+}
+```
+
+**에러 코드**
+| HTTP | 코드 | 원인 |
+|:---:|------|------|
+| 400 | STT_FILE_MISSING | `file` 파라미터 누락 또는 빈 파일 |
+| 400 | STT_FILE_TOO_LARGE | BIZ-103: `widget.stt.max-size-bytes` 초과 (기본 25MB) |
+| 400 | STT_FILE_TOO_LONG | BIZ-102: Whisper duration 응답이 `widget.stt.max-duration-seconds` 초과 (기본 60s) |
+| 400 | STT_INVALID_MIME | magic number 검출 실패 또는 허용 MIME 목록 외 |
+| 400 | STT_INVALID_MULTIPART | multipart body 읽기 실패 |
+| 429 | STT_RATE_LIMITED | BIZ-104: 세션당 분당 호출 한도 초과 (기본 10/min) |
+| 502 | STT_UPSTREAM_ERROR | OpenAI Whisper 5xx 응답 |
+| 503 | STT_PROVIDER_UNAVAILABLE | 테넌트에 연결된 OpenAI Connection 없음 |
+| 504 | STT_TIMEOUT | Whisper 호출 타임아웃 (기본 120s) |
+
+**예시 (curl)**
+```bash
+curl -X POST https://aimbase.company.com/api/v1/chat/stt \
+  -H "Authorization: Bearer $WIDGET_TOKEN" \
+  -F "file=@recording.webm" \
+  -F "language=auto" \
+  -F "session_id=sess-abc"
+```
+
+### 19-3. 위젯 SDK 사용 예
+
+위젯을 한 줄로 얹은 경우(`<aimbase-chat>`) 음성 입력은 UI 에서 자동으로 처리된다 — 🎤 아이콘 클릭으로 녹음 시작/정지, 60초 자동 종료, 결과가 입력창에 삽입된다. SDK 는 `SttClient` 를 public 으로도 export 한다:
+
+```ts
+import { createWidget, SttClient, SttError } from "@aimbase/chat-widget-embed";
+
+// 수동 사용 (고급) — 별도 녹음 UI 를 구현하고 Aimbase 서버에만 붙일 때
+const stt = new SttClient(tokens); // tokens: TokenStore
+try {
+  const result = await stt.transcribe({
+    baseUrl: "https://aimbase.company.com",
+    sessionId: "sess-abc",
+    blob: recordedBlob,      // MediaRecorder 결과
+    language: "auto",
+  });
+  console.log(result.text, result.language, result.duration_sec);
+} catch (e) {
+  if (e instanceof SttError) {
+    if (e.code === "STT_RATE_LIMITED") { /* ... */ }
+  }
+}
+```
+
+### 19-4. 제약 요약 (BIZ 규칙 → API 반영)
+- **녹음 시간 60초 이내** (BIZ-102) — `widget.stt.max-duration-seconds`
+- **파일 크기 25MB 이내** (BIZ-103) — `widget.stt.max-size-bytes` (Whisper API 상한)
+- **세션당 분당 10회** (BIZ-104) — `widget.stt.rate-limit-per-minute`. Redis 장애 시 fail-open (가용성 우선)
+- 변환 텍스트 본문은 **감사 로그에 저장되지 않음** — PII 보호. 메타데이터(duration/size/language/mime) 만 기록
+
+### 19-5. 기존 Platform 경로와의 관계
+
+`POST /api/v1/speech/stt` (Platform JWT 전용) 는 동작이 동일하게 유지된다. 단 응답 포맷이 기존 `{text}` → `{text, language, duration}` 로 필드가 추가됐다 (backward compatible). 실제 Whisper 호출 로직은 `SpeechService` 로 추출되어 양쪽 엔드포인트가 공유한다.
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v2.8.0 | 2026-04-24 | CR-060 위젯 STT 추가 — `POST /api/v1/chat/stt` (multipart, scope=chat:stt). Whisper 일괄 전송(실시간 스트리밍 없음). 녹음시간 60s / 파일 25MB / 세션당 10/min 제한(BIZ-102~104, `widget.stt.*` 로 조정). 기존 `POST /api/v1/speech/stt` 응답에 `language/duration` 필드 추가(backward compatible, `SpeechService` 로 로직 추출). `widget.allowed-scopes` 기본값에 `chat:stt` 추가 (§ 19) |
+| v2.7.0 | 2026-04-24 | CR-050 Connection `adapter=anthropic-cli`(또는 `claude-cli`/`claude-max`/`claude-pro`) 지원 — Max/Pro 구독 OAuth 로 LLM_CALL. `config`에 `model`(CLI `--model` 전달), 선택 `claude_config_dir`. 테넌트 피처 플래그는 `global_config.llm.anthropic-cli.enabled-tenants` (`*`=전체, `,`구분=선택, 빈값=차단). 도구 미지원(`--tools ""` 봉인), 호출 시 `LLMRequest.sessionId` 필수 (BIZ-099/100) |
 | v2.6.0 | 2026-04-24 | CR-061 위젯 파일 첨부 API 2종 추가 — `POST /chat/attachments` (multipart, scope=chat:upload), `DELETE /chat/attachments/{id}`. `messages[].content[]` 에 `{type:"image"\|"document", attachment_id}` 블록 수용. Anthropic/Bedrock 는 네이티브 PDF 블록, 그 외 프로바이더는 텍스트 추출 폴백. 크기 제한 이미지 10MB / PDF 32MB, 세션당 활성 10개, TTL 24h (BIZ-099~101). `widget.allowed-scopes` 기본값에 `chat:upload` 추가 (§ 18) |
 | v2.5.1 | 2026-04-24 | CR-058 Sprint 53 공개 리소스 — `/widget/v1/*` 정적 서빙(인증 없이): UMD/ESM 번들, 통합 가이드 HTML, 샘플 BFF 코드. 소비앱이 CDN 처럼 직접 참조하거나 curl 로 다운받아 자체 호스팅 가능 (§ 17 헤더) |
 | v2.5.0 | 2026-04-24 | CR-058 Chat Widget SDK 서버 엔드포인트 3종 추가 — `POST /sessions/issue-widget-token` (단기 JWT 발급, API Key 인증), `GET /knowledge-sources/{sid}/chunks/{cid}` (RAG 원문 조회), `GET /workflows/runs/{id}/subscribe` (SSE 구독). 기존 Chat API 응답/ SSE `done` payload 에 `citations` + `rag_used` 필드 추가. SSE 는 `?access_token=` 쿼리 전달 허용(widget 토큰만) (§ 17) |

@@ -1,6 +1,8 @@
 package com.platform.api;
 
 import com.platform.repository.ConnectionRepository;
+import com.platform.speech.SpeechException;
+import com.platform.speech.SpeechService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
@@ -10,6 +12,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -17,6 +20,8 @@ import java.util.Map;
  *
  * OpenAI TTS(text-to-speech) 및 STT(speech-to-text/Whisper) API를 프록시.
  * 테넌트의 OpenAI Connection 설정에서 API 키를 가져와 요청을 중계.
+ *
+ * CR-060: STT 로직은 {@link SpeechService} 로 이동. 본 컨트롤러는 Platform JWT 경로 유지.
  */
 @RestController
 @RequestMapping("/api/v1/speech")
@@ -24,13 +29,14 @@ public class SpeechController {
 
     private static final Logger log = LoggerFactory.getLogger(SpeechController.class);
     private static final String OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech";
-    private static final String OPENAI_STT_URL = "https://api.openai.com/v1/audio/transcriptions";
 
     private final ConnectionRepository connectionRepository;
+    private final SpeechService speechService;
     private final HttpClient httpClient;
 
-    public SpeechController(ConnectionRepository connectionRepository) {
+    public SpeechController(ConnectionRepository connectionRepository, SpeechService speechService) {
         this.connectionRepository = connectionRepository;
+        this.speechService = speechService;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(java.time.Duration.ofSeconds(30))
                 .build();
@@ -93,60 +99,46 @@ public class SpeechController {
     /**
      * POST /api/v1/speech/stt — Speech-to-Text (Whisper).
      *
+     * CR-060: 실제 Whisper 호출은 {@link SpeechService} 로 위임. 본 엔드포인트는 Platform JWT 경로 유지.
      * Request: multipart/form-data { file: audio blob, model: "whisper-1", language: "ko" }
-     * Response: { "text": "인식된 텍스트" }
+     * Response: { "text": "...", "language": "...", "duration": ... }
      */
     @PostMapping(value = "/stt", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<Map<String, Object>>> speechToText(
             @RequestParam("file") org.springframework.web.multipart.MultipartFile file,
-            @RequestParam(value = "model", defaultValue = "whisper-1") String model,
+            @RequestParam(value = "model", defaultValue = "whisper-1") String ignoredModel,
             @RequestParam(value = "language", defaultValue = "ko") String language) {
 
-        String apiKey = resolveOpenAIKey();
-        if (apiKey == null) {
-            return ResponseEntity.status(503)
-                    .body(ApiResponse.error("OpenAI connection not configured"));
-        }
-
         try {
-            String boundary = "----AimbaseBoundary" + System.currentTimeMillis();
-            byte[] fileBytes = file.getBytes();
-            String filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "audio.wav";
+            byte[] audio = file.getBytes();
+            String mimeType = file.getContentType();
+            String filename = file.getOriginalFilename();
 
-            byte[] body = buildMultipartBody(boundary, model, language, filename, fileBytes);
+            SpeechService.TranscribeResult r = speechService.transcribe(audio, mimeType, filename, language);
 
-            HttpRequest httpReq = HttpRequest.newBuilder()
-                    .uri(URI.create(OPENAI_STT_URL))
-                    .timeout(java.time.Duration.ofSeconds(120))
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                    .build();
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("text", r.text());
+            if (r.language() != null) body.put("language", r.language());
+            if (r.durationSec() != null) body.put("duration", r.durationSec());
+            return ResponseEntity.ok(ApiResponse.ok(body));
 
-            HttpResponse<String> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
-
-            if (resp.statusCode() >= 400) {
-                log.warn("STT API error: HTTP {} — {}", resp.statusCode(), resp.body());
-                return ResponseEntity.status(resp.statusCode())
-                        .body(ApiResponse.error("STT failed: " + resp.body()));
-            }
-
-            // OpenAI 응답: {"text": "..."}
-            com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
-            @SuppressWarnings("unchecked")
-            Map<String, Object> result = om.readValue(resp.body(), Map.class);
-
-            return ResponseEntity.ok(ApiResponse.ok(result));
-
-        } catch (Exception e) {
-            log.error("STT proxy failed: {}", e.getMessage());
-            return ResponseEntity.status(500)
-                    .body(ApiResponse.error("STT proxy error: " + e.getMessage()));
+        } catch (SpeechException e) {
+            return switch (e.getCode()) {
+                case PROVIDER_UNAVAILABLE -> ResponseEntity.status(503)
+                        .body(ApiResponse.error(e.getMessage()));
+                case TIMEOUT -> ResponseEntity.status(504)
+                        .body(ApiResponse.error(e.getMessage()));
+                case UPSTREAM_ERROR -> ResponseEntity.status(502)
+                        .body(ApiResponse.error(e.getMessage()));
+            };
+        } catch (java.io.IOException e) {
+            log.error("STT request read failed: {}", e.getMessage());
+            return ResponseEntity.status(400).body(ApiResponse.error("invalid multipart: " + e.getMessage()));
         }
     }
 
     /**
-     * 테넌트의 OpenAI Connection에서 API 키 조회.
+     * 테넌트의 OpenAI Connection에서 API 키 조회 (TTS 전용).
      */
     private String resolveOpenAIKey() {
         return connectionRepository.findAll().stream()
@@ -158,37 +150,6 @@ public class SpeechController {
                     return cfg != null ? (String) cfg.get("api_key") : null;
                 })
                 .orElse(null);
-    }
-
-    private byte[] buildMultipartBody(String boundary, String model, String language,
-                                        String filename, byte[] fileBytes) {
-        StringBuilder sb = new StringBuilder();
-        String crlf = "\r\n";
-
-        // model field
-        sb.append("--").append(boundary).append(crlf);
-        sb.append("Content-Disposition: form-data; name=\"model\"").append(crlf).append(crlf);
-        sb.append(model).append(crlf);
-
-        // language field
-        sb.append("--").append(boundary).append(crlf);
-        sb.append("Content-Disposition: form-data; name=\"language\"").append(crlf).append(crlf);
-        sb.append(language).append(crlf);
-
-        // file field header
-        sb.append("--").append(boundary).append(crlf);
-        sb.append("Content-Disposition: form-data; name=\"file\"; filename=\"").append(filename).append("\"").append(crlf);
-        sb.append("Content-Type: application/octet-stream").append(crlf).append(crlf);
-
-        byte[] headerBytes = sb.toString().getBytes();
-        byte[] footerBytes = (crlf + "--" + boundary + "--" + crlf).getBytes();
-
-        byte[] result = new byte[headerBytes.length + fileBytes.length + footerBytes.length];
-        System.arraycopy(headerBytes, 0, result, 0, headerBytes.length);
-        System.arraycopy(fileBytes, 0, result, headerBytes.length, fileBytes.length);
-        System.arraycopy(footerBytes, 0, result, headerBytes.length + fileBytes.length, footerBytes.length);
-
-        return result;
     }
 
     // ─── 요청 DTO ────────────────────────────────────────────────────

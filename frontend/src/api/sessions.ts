@@ -52,6 +52,33 @@ export interface BriefData {
   created_at: string;
 }
 
+/* CR-049 PRD-303: Session Resume 응답 */
+export interface CompactBoundaryInfo {
+  summary?: string | null;
+  compacted_count?: number;
+  tokens_saved?: number;
+  strategy?: string;
+  boundary_at?: string;
+}
+
+export interface ResumeMessage {
+  id: string;
+  role: string;
+  message_type: "TEXT" | "TOOL_USE" | "TOOL_RESULT" | "COMPACT_BOUNDARY" | string;
+  content: string;
+  tokens: number;
+  created_at: string;
+  boundary_meta?: CompactBoundaryInfo;
+}
+
+export interface ResumeResponse {
+  session_id: string;
+  resumed_at: string;
+  boundary: CompactBoundaryInfo | null;
+  messages: ResumeMessage[];
+  preserved_context: Record<string, unknown>;
+}
+
 export const sessionsApi = {
   list: (params?: { page?: number; size?: number; scope_type?: string; runtime_kind?: string }) =>
     apiClient.get<ApiResponse<PagedResponse<SessionMeta> | SessionMeta[]>>("/conversations", { params }),
@@ -90,4 +117,8 @@ export const sessionsApi = {
     apiClient.get<ApiResponse<BriefData | null>>(`/sessions/${sessionId}/brief`),
   createBrief: (sessionId: string) =>
     apiClient.post<ApiResponse<BriefData>>(`/sessions/${sessionId}/brief`),
+
+  // CR-049 PRD-303: 세션 재개
+  resume: (sessionId: string) =>
+    apiClient.post<ApiResponse<ResumeResponse>>(`/sessions/${sessionId}/resume`),
 };

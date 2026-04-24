@@ -100,6 +100,16 @@ interface WidgetHandle {
     subscribeWorkflow(runId: string): () => void;
     destroy(): void;
 }
+/** CR-060: STT 변환 결과 (POST /api/v1/chat/stt 응답) */
+interface SttResult {
+    text: string;
+    /** Whisper 자동 감지 or 요청한 language */
+    language: string;
+    /** verbose_json duration (seconds). 일부 응답에서 누락 가능 */
+    duration_sec?: number;
+}
+/** CR-060: 위젯 STT 녹음 상태 머신 */
+type SttRecordingState = "idle" | "requesting-permission" | "recording" | "uploading" | "error";
 
 declare function createWidget(options: WidgetOptions): WidgetHandle;
 
@@ -129,7 +139,56 @@ declare class AimbaseChatElement extends HTMLElement {
 /** 엘리먼트 등록 — 중복 등록 방지. */
 declare function defineAimbaseChat(): void;
 
+/**
+ * 토큰 수명주기 관리 — 만료 5분 전 자동 재호출.
+ * 메모리 내 클로저 보관 (localStorage 사용 금지 — XSS 노출).
+ */
+declare class TokenStore {
+    private readonly resolver;
+    private token;
+    private expiresAtMs;
+    private refreshTimer;
+    private onExpiring?;
+    constructor(resolver: AuthResolver, onExpiring?: () => void);
+    getToken(): Promise<string>;
+    /** 현재 토큰이 특정 scope 를 포함하는지 (지연 초기화됨 — 미초기화면 false) */
+    hasScope(scope: string): boolean;
+    /** 토큰 메타 미리 로드 (getToken 호출로 초기화만 수행) */
+    ensureLoaded(): Promise<void>;
+    private refresh;
+    private scheduleRefresh;
+    destroy(): void;
+}
+
+interface SttArgs {
+    baseUrl: string;
+    sessionId: string;
+    /** 녹음된 오디오 Blob (MediaRecorder 결과) */
+    blob: Blob;
+    /** "auto" 또는 ISO-639-1 코드. 미지정 시 서버 기본값 사용 */
+    language?: string;
+    /** MIME 에 맞는 확장자로 붙이는 파일명 (디폴트: rec.<ext>) */
+    filename?: string;
+}
+/**
+ * CR-060: 위젯 STT (Whisper) 클라이언트.
+ * 엔드포인트: POST /api/v1/chat/stt (multipart/form-data, scope=chat:stt)
+ *
+ * 녹음 완료 후 1회 일괄 전송 방식 — 스트리밍 미지원(Whisper 한계).
+ * XHR 로 구현해 업로드 진행률(onProgress) 을 얻는다.
+ */
+declare class SttClient {
+    private readonly tokens;
+    constructor(tokens: TokenStore);
+    transcribe(args: SttArgs, onProgress?: (pct: number) => void): Promise<SttResult>;
+}
+declare class SttError extends Error {
+    readonly code: string;
+    readonly status: number;
+    constructor(code: string, message: string, status: number);
+}
+
 /** 전역 네임스페이스 편의 API — <script> 로드 시 `window.AimbaseChat.init(...)` 로 호출 가능. */
 declare function init(options: WidgetOptions): WidgetHandle;
 
-export { AimbaseChatElement, type ApprovalEvent, type AuthResolver, type ChatDelta, type Citation, type DisplayMode, type TokenResponse, type WidgetHandle, type WidgetOptions, type WorkflowStepEvent, createWidget, defineAimbaseChat, init };
+export { AimbaseChatElement, type ApprovalEvent, type AuthResolver, type ChatDelta, type Citation, type DisplayMode, SttClient, SttError, type SttRecordingState, type SttResult, type TokenResponse, type WidgetHandle, type WidgetOptions, type WorkflowStepEvent, createWidget, defineAimbaseChat, init };

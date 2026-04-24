@@ -9,11 +9,14 @@ export type {
   ChatDelta,
   Citation,
   DisplayMode,
+  SttResult,
+  SttRecordingState,
   TokenResponse,
   WidgetHandle,
   WidgetOptions,
   WorkflowStepEvent,
 } from "./types";
+export { SttClient, SttError } from "./stt-client";
 
 /** UMD/IIFE 번들 로드 시 자동으로 <aimbase-chat> 커스텀 엘리먼트 등록. */
 if (typeof window !== "undefined") {

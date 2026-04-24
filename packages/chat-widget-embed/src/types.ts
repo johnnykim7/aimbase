@@ -133,3 +133,20 @@ export interface AttachmentDraft {
   previewDataUrl?: string;
   error?: string;
 }
+
+/** CR-060: STT 변환 결과 (POST /api/v1/chat/stt 응답) */
+export interface SttResult {
+  text: string;
+  /** Whisper 자동 감지 or 요청한 language */
+  language: string;
+  /** verbose_json duration (seconds). 일부 응답에서 누락 가능 */
+  duration_sec?: number;
+}
+
+/** CR-060: 위젯 STT 녹음 상태 머신 */
+export type SttRecordingState =
+  | "idle"
+  | "requesting-permission"
+  | "recording"
+  | "uploading"
+  | "error";

@@ -1,5 +1,7 @@
 package com.platform.workflow.step;
 
+import com.platform.llm.claudecli.ClaudeCliBranchScope;
+import com.platform.llm.claudecli.ClaudeCliWorkerPool;
 import com.platform.workflow.StepContext;
 import com.platform.workflow.WorkflowEngine;
 import com.platform.workflow.model.WorkflowStep;
@@ -30,9 +32,13 @@ public class ParallelStepExecutor implements StepExecutor {
 
     // 순환 의존성 방지: WorkflowEngine을 ApplicationContext를 통해 지연 로드
     private final ApplicationContext applicationContext;
+    /** CR-050: 병렬 브랜치 fork 워커 라이프사이클. null 허용 — 피처 비활성 환경. */
+    private final ClaudeCliWorkerPool claudeCliWorkerPool;
 
-    public ParallelStepExecutor(ApplicationContext applicationContext) {
+    public ParallelStepExecutor(ApplicationContext applicationContext,
+                                ClaudeCliWorkerPool claudeCliWorkerPool) {
         this.applicationContext = applicationContext;
+        this.claudeCliWorkerPool = claudeCliWorkerPool;
     }
 
     @Override
@@ -57,12 +63,27 @@ public class ParallelStepExecutor implements StepExecutor {
 
         log.debug("PARALLEL step '{}': running {} sub-steps in parallel", step.id(), stepIds.size());
 
+        // CR-050: 각 병렬 서브스텝은 독립 브랜치 — fork-session 워커로 캐시 재사용.
+        // 부모 runId = context.workflowRunId(), branchKey = 서브스텝 id.
+        String parentRunId = context.workflowRunId();
+
         // 각 스텝을 Virtual Thread로 병렬 실행
         List<CompletableFuture<Map.Entry<String, Map<String, Object>>>> futures = stepIds.stream()
                 .map(stepId -> CompletableFuture.supplyAsync(
                         () -> {
-                            Map<String, Object> result = engine.executeStepById(stepId, context);
-                            return Map.entry(stepId, result);
+                            try (ClaudeCliBranchScope ignored = ClaudeCliBranchScope.open(parentRunId, stepId)) {
+                                Map<String, Object> result = engine.executeStepById(stepId, context);
+                                return Map.entry(stepId, result);
+                            } finally {
+                                if (claudeCliWorkerPool != null) {
+                                    try {
+                                        claudeCliWorkerPool.releaseBranchWorker(parentRunId, stepId);
+                                    } catch (Exception e) {
+                                        log.warn("Release branch worker failed (run={}, branch={}): {}",
+                                                parentRunId, stepId, e.getMessage());
+                                    }
+                                }
+                            }
                         },
                         Executors.newVirtualThreadPerTaskExecutor()
                 ))

@@ -1,5 +1,6 @@
 -- CR-012 / PRD-128, PRD-129: 응답 캐시 테이블
-CREATE TABLE response_cache (
+-- CR-049: V24 중복 해소로 V24.2 로 재번호 + IF NOT EXISTS 방어 (기존 적용 테넌트에 재실행 안전).
+CREATE TABLE IF NOT EXISTS response_cache (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     cache_key       VARCHAR(64)     NOT NULL,           -- SHA-256 hash (Exact Match)
     model           VARCHAR(100)    NOT NULL,
@@ -12,9 +13,9 @@ CREATE TABLE response_cache (
     expires_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW() + INTERVAL '1 hour'
 );
 
-CREATE UNIQUE INDEX idx_response_cache_key ON response_cache (cache_key);
-CREATE INDEX idx_response_cache_expires ON response_cache (expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_response_cache_key     ON response_cache (cache_key);
+CREATE INDEX        IF NOT EXISTS idx_response_cache_expires ON response_cache (expires_at);
 
 -- PRD-129: Semantic Match용 HNSW 인덱스
-CREATE INDEX idx_response_cache_embedding ON response_cache
+CREATE INDEX IF NOT EXISTS idx_response_cache_embedding ON response_cache
     USING hnsw (query_embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);

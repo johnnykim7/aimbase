@@ -197,4 +197,51 @@ export const WIDGET_CSS = `
   font-size: 13px; color: var(--aimbase-primary); font-weight: 500;
   pointer-events: none; z-index: 10;
 }
+
+/* CR-060: 마이크 버튼 & 녹음 오버레이 */
+.mic-btn {
+  background: none; border: 1px solid var(--aimbase-border);
+  border-radius: 999px; width: 32px; height: 32px; cursor: pointer;
+  font-size: 14px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; color: var(--aimbase-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.mic-btn:hover { color: var(--aimbase-primary); border-color: var(--aimbase-primary); }
+.mic-btn[aria-pressed="true"] {
+  background: #ef4444; color: #fff; border-color: #ef4444;
+}
+.mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.recording-overlay {
+  position: absolute; left: 12px; right: 12px; bottom: 64px;
+  background: var(--aimbase-surface); border: 1px solid #ef4444;
+  border-radius: var(--aimbase-radius);
+  padding: 10px 12px; display: flex; align-items: center; gap: 10px;
+  z-index: 11; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.recording-overlay.hidden { display: none; }
+.rec-wave {
+  flex: 1; font-family: monospace; color: #ef4444; font-size: 14px;
+  letter-spacing: 1px;
+  animation: rec-pulse 0.9s ease-in-out infinite;
+}
+.rec-timer {
+  font-variant-numeric: tabular-nums; color: var(--aimbase-text);
+  font-size: 13px; font-weight: 600;
+}
+.rec-cancel, .rec-stop {
+  background: none; border: 1px solid var(--aimbase-border);
+  border-radius: var(--aimbase-radius); padding: 4px 10px;
+  font-size: 12px; cursor: pointer; color: var(--aimbase-text);
+}
+.rec-cancel:hover { color: var(--aimbase-muted); }
+.rec-stop {
+  border-color: #ef4444; color: #ef4444; font-weight: 600;
+}
+.rec-stop:hover { background: #ef4444; color: #fff; }
+@keyframes rec-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
 `;

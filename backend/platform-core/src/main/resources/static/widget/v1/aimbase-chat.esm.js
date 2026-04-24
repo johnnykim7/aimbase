@@ -221,6 +221,87 @@ ${JSON.stringify(args.context, null, 2)}`
   }
 };
 
+// src/stt-client.ts
+var SttClient = class {
+  constructor(tokens) {
+    this.tokens = tokens;
+  }
+  async transcribe(args, onProgress) {
+    const token = await this.tokens.getToken();
+    const ext = mimeToExt(args.blob.type);
+    const filename = args.filename ?? `rec.${ext}`;
+    const form = new FormData();
+    form.append("session_id", args.sessionId);
+    form.append("file", args.blob, filename);
+    if (args.language) form.append("language", args.language);
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${args.baseUrl}/api/v1/chat/stt`);
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      if (onProgress && xhr.upload) {
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100));
+        });
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const body = JSON.parse(xhr.responseText);
+            resolve(body.data ?? body);
+          } catch (e) {
+            reject(new SttError("STT_INVALID_RESPONSE", `invalid JSON: ${e.message}`, xhr.status));
+          }
+        } else {
+          const { code, message } = parseErrorBody(xhr.responseText, xhr.status);
+          reject(new SttError(code, message, xhr.status));
+        }
+      };
+      xhr.onerror = () => reject(new SttError("STT_NETWORK", "network error", 0));
+      xhr.onabort = () => reject(new SttError("STT_ABORTED", "aborted", 0));
+      xhr.send(form);
+    });
+  }
+};
+var SttError = class extends Error {
+  constructor(code, message, status) {
+    super(message);
+    this.code = code;
+    this.status = status;
+    this.name = "SttError";
+  }
+};
+function parseErrorBody(raw, status) {
+  if (!raw) return { code: "STT_UNKNOWN", message: `status ${status}` };
+  try {
+    const body = JSON.parse(raw);
+    const errText = body.error ?? body.message;
+    if (errText) {
+      const m = errText.match(/^(STT_[A-Z_]+):\s*(.*)$/);
+      if (m) return { code: m[1], message: m[2] };
+      return { code: "STT_UNKNOWN", message: errText };
+    }
+  } catch {
+  }
+  return { code: "STT_UNKNOWN", message: raw.slice(0, 200) };
+}
+function mimeToExt(mime) {
+  const m = (mime || "").toLowerCase().split(";")[0].trim();
+  switch (m) {
+    case "audio/webm":
+      return "webm";
+    case "audio/mp4":
+      return "mp4";
+    case "audio/mpeg":
+      return "mp3";
+    case "audio/wav":
+      return "wav";
+    case "audio/ogg":
+      return "ogg";
+    default:
+      return "bin";
+  }
+}
+
 // src/styles.ts
 var WIDGET_CSS = `
 :host {
@@ -420,6 +501,53 @@ var WIDGET_CSS = `
   font-size: 13px; color: var(--aimbase-primary); font-weight: 500;
   pointer-events: none; z-index: 10;
 }
+
+/* CR-060: \uB9C8\uC774\uD06C \uBC84\uD2BC & \uB179\uC74C \uC624\uBC84\uB808\uC774 */
+.mic-btn {
+  background: none; border: 1px solid var(--aimbase-border);
+  border-radius: 999px; width: 32px; height: 32px; cursor: pointer;
+  font-size: 14px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; color: var(--aimbase-muted);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.mic-btn:hover { color: var(--aimbase-primary); border-color: var(--aimbase-primary); }
+.mic-btn[aria-pressed="true"] {
+  background: #ef4444; color: #fff; border-color: #ef4444;
+}
+.mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.recording-overlay {
+  position: absolute; left: 12px; right: 12px; bottom: 64px;
+  background: var(--aimbase-surface); border: 1px solid #ef4444;
+  border-radius: var(--aimbase-radius);
+  padding: 10px 12px; display: flex; align-items: center; gap: 10px;
+  z-index: 11; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.recording-overlay.hidden { display: none; }
+.rec-wave {
+  flex: 1; font-family: monospace; color: #ef4444; font-size: 14px;
+  letter-spacing: 1px;
+  animation: rec-pulse 0.9s ease-in-out infinite;
+}
+.rec-timer {
+  font-variant-numeric: tabular-nums; color: var(--aimbase-text);
+  font-size: 13px; font-weight: 600;
+}
+.rec-cancel, .rec-stop {
+  background: none; border: 1px solid var(--aimbase-border);
+  border-radius: var(--aimbase-radius); padding: 4px 10px;
+  font-size: 12px; cursor: pointer; color: var(--aimbase-text);
+}
+.rec-cancel:hover { color: var(--aimbase-muted); }
+.rec-stop {
+  border-color: #ef4444; color: #ef4444; font-weight: 600;
+}
+.rec-stop:hover { background: #ef4444; color: #fff; }
+@keyframes rec-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
 `;
 
 // src/token-store.ts
@@ -436,6 +564,14 @@ var TokenStore = class {
       await this.refresh();
     }
     return this.token.token;
+  }
+  /** 현재 토큰이 특정 scope 를 포함하는지 (지연 초기화됨 — 미초기화면 false) */
+  hasScope(scope) {
+    return !!this.token?.scopes?.includes(scope);
+  }
+  /** 토큰 메타 미리 로드 (getToken 호출로 초기화만 수행) */
+  async ensureLoaded() {
+    if (!this.token) await this.refresh();
   }
   async refresh() {
     const res = await this.resolver();
@@ -610,12 +746,34 @@ function createWidget(options) {
   const textarea = document.createElement("textarea");
   textarea.placeholder = "\uBA54\uC2DC\uC9C0\uB97C \uC785\uB825\uD558\uC138\uC694\u2026 (Enter \uC804\uC1A1, Shift+Enter \uC904\uBC14\uAFC8)";
   textarea.rows = 1;
+  const micBtn = el("button", "mic-btn", "\u{1F3A4}");
+  micBtn.type = "button";
+  micBtn.setAttribute("aria-label", "\uC74C\uC131 \uC785\uB825 \uC2DC\uC791");
+  micBtn.setAttribute("aria-pressed", "false");
+  micBtn.hidden = true;
   const sendBtn = el("button", "send-btn", "\uC804\uC1A1");
   composer.appendChild(attachBtn);
   composer.appendChild(fileInput);
   composer.appendChild(textarea);
+  composer.appendChild(micBtn);
   composer.appendChild(sendBtn);
   panel.appendChild(composer);
+  const recordingOverlay = el("div", "recording-overlay hidden");
+  recordingOverlay.setAttribute("role", "status");
+  recordingOverlay.setAttribute("aria-live", "polite");
+  const wave = el("span", "rec-wave", "\u2581\u2583\u2585\u2587\u2585\u2583\u2581");
+  const timer = el("span", "rec-timer", "0:00");
+  const cancelRec = el("button", "rec-cancel", "\uCDE8\uC18C");
+  cancelRec.type = "button";
+  cancelRec.setAttribute("aria-label", "\uB179\uC74C \uCDE8\uC18C");
+  const stopRec = el("button", "rec-stop", "\u25A0 \uC815\uC9C0");
+  stopRec.type = "button";
+  stopRec.setAttribute("aria-label", "\uB179\uC74C \uC815\uC9C0 \uD6C4 \uBCC0\uD658");
+  recordingOverlay.appendChild(wave);
+  recordingOverlay.appendChild(timer);
+  recordingOverlay.appendChild(cancelRec);
+  recordingOverlay.appendChild(stopRec);
+  panel.appendChild(recordingOverlay);
   let dragCounter = 0;
   let dropOverlay = null;
   panel.addEventListener("dragenter", (e) => {
@@ -821,6 +979,214 @@ function createWidget(options) {
       }
     }
   }
+  const stt = new SttClient(tokens);
+  let recorder = null;
+  let recordedChunks = [];
+  let micStream = null;
+  let recStartedAt = 0;
+  let recTickTimer = null;
+  let recAutoStopTimer = null;
+  let recState = "idle";
+  const MAX_RECORD_MS = 6e4;
+  function sttSupported() {
+    return typeof window !== "undefined" && !!window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
+  }
+  function pickMimeType() {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4"
+    ];
+    for (const m of candidates) {
+      try {
+        if (MediaRecorder.isTypeSupported(m)) return m;
+      } catch {
+      }
+    }
+    return void 0;
+  }
+  function setRecState(next) {
+    recState = next;
+    micBtn.setAttribute("aria-pressed", next === "recording" ? "true" : "false");
+    micBtn.setAttribute(
+      "aria-label",
+      next === "recording" ? "\uB179\uC74C \uC815\uC9C0" : "\uC74C\uC131 \uC785\uB825 \uC2DC\uC791"
+    );
+    micBtn.textContent = next === "recording" ? "\u23F9" : "\u{1F3A4}";
+    if (next === "recording") {
+      recordingOverlay.classList.remove("hidden");
+    } else {
+      recordingOverlay.classList.add("hidden");
+    }
+  }
+  function formatTimer(ms) {
+    const sec = Math.floor(ms / 1e3);
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
+  function clearRecTimers() {
+    if (recTickTimer) {
+      clearInterval(recTickTimer);
+      recTickTimer = null;
+    }
+    if (recAutoStopTimer) {
+      clearTimeout(recAutoStopTimer);
+      recAutoStopTimer = null;
+    }
+  }
+  function releaseMic() {
+    micStream?.getTracks().forEach((t) => t.stop());
+    micStream = null;
+  }
+  async function startRecording() {
+    if (recState !== "idle") return;
+    if (!sttSupported()) {
+      appendMessage("error", "\uC774 \uBE0C\uB77C\uC6B0\uC800\xB7\uD658\uACBD\uC5D0\uC11C\uB294 \uC74C\uC131 \uC785\uB825\uC744 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4 (HTTPS \uD544\uC218)");
+      return;
+    }
+    setRecState("requesting-permission");
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      setRecState("error");
+      appendMessage("error", "\uB9C8\uC774\uD06C \uAD8C\uD55C\uC774 \uD544\uC694\uD569\uB2C8\uB2E4. \uBE0C\uB77C\uC6B0\uC800 \uC8FC\uC18C\uCC3D\uC5D0\uC11C \u{1F512} \uC544\uC774\uCF58\uC744 \uB20C\uB7EC \uD5C8\uC6A9\uD574\uC8FC\uC138\uC694");
+      options.on?.onError?.(e);
+      setRecState("idle");
+      return;
+    }
+    const mimeType = pickMimeType();
+    try {
+      recorder = new MediaRecorder(micStream, mimeType ? { mimeType } : void 0);
+    } catch (e) {
+      releaseMic();
+      setRecState("idle");
+      appendMessage("error", "\uC774 \uBE0C\uB77C\uC6B0\uC800\uC758 MediaRecorder \uD3EC\uB9F7\uC774 \uC11C\uBC84\uC640 \uD638\uD658\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
+      options.on?.onError?.(e);
+      return;
+    }
+    recordedChunks = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+    recorder.onstop = () => void finalizeRecording();
+    recorder.onerror = (ev) => {
+      options.on?.onError?.(new Error("recorder error: " + ev.type));
+    };
+    recorder.start();
+    recStartedAt = Date.now();
+    setRecState("recording");
+    timer.textContent = "0:00";
+    recTickTimer = setInterval(() => {
+      const elapsed = Date.now() - recStartedAt;
+      timer.textContent = formatTimer(elapsed);
+    }, 250);
+    recAutoStopTimer = setTimeout(() => {
+      if (recState === "recording") stopRecordingAndSend();
+    }, MAX_RECORD_MS);
+  }
+  function stopRecordingAndSend() {
+    if (recState !== "recording") return;
+    clearRecTimers();
+    try {
+      recorder?.stop();
+    } catch {
+    }
+    setRecState("uploading");
+  }
+  function cancelRecording() {
+    clearRecTimers();
+    if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = null;
+      try {
+        recorder.stop();
+      } catch {
+      }
+    }
+    releaseMic();
+    recorder = null;
+    recordedChunks = [];
+    setRecState("idle");
+  }
+  async function finalizeRecording() {
+    const chunks = recordedChunks;
+    recordedChunks = [];
+    releaseMic();
+    if (!chunks.length) {
+      setRecState("idle");
+      return;
+    }
+    const type = recorder?.mimeType || "audio/webm";
+    recorder = null;
+    const blob = new Blob(chunks, { type });
+    try {
+      const result = await stt.transcribe(
+        { baseUrl: options.baseUrl, sessionId: state.sessionId, blob }
+      );
+      insertTextAtCursor(textarea, result.text);
+      textarea.focus();
+      updateSendDisabled();
+    } catch (e) {
+      const err = e instanceof SttError ? e : new Error(String(e));
+      appendMessage("error", sttErrorMessage(err));
+      options.on?.onError?.(err);
+    } finally {
+      setRecState("idle");
+    }
+  }
+  function sttErrorMessage(err) {
+    if (err instanceof SttError) {
+      switch (err.code) {
+        case "STT_RATE_LIMITED":
+          return "\uC74C\uC131 \uC785\uB825\uC744 \uB108\uBB34 \uC790\uC8FC \uC0AC\uC6A9\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574\uC8FC\uC138\uC694";
+        case "STT_FILE_TOO_LARGE":
+          return "\uB179\uC74C \uD30C\uC77C\uC774 \uB108\uBB34 \uD07D\uB2C8\uB2E4";
+        case "STT_FILE_TOO_LONG":
+          return "\uB179\uC74C \uC2DC\uAC04\uC774 \uB108\uBB34 \uAE41\uB2C8\uB2E4";
+        case "STT_INVALID_MIME":
+          return "\uC774 \uC624\uB514\uC624 \uD3EC\uB9F7\uC740 \uC11C\uBC84\uC5D0\uC11C \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4";
+        case "STT_PROVIDER_UNAVAILABLE":
+          return "\uC74C\uC131 \uC778\uC2DD \uC11C\uBE44\uC2A4\uB97C \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4 (OpenAI \uC5F0\uACB0 \uD655\uC778 \uD544\uC694)";
+        case "STT_TIMEOUT":
+          return "\uC74C\uC131 \uC778\uC2DD \uC751\uB2F5\uC774 \uC9C0\uC5F0\uB429\uB2C8\uB2E4. \uB2E4\uC2DC \uC2DC\uB3C4\uD574\uC8FC\uC138\uC694";
+        case "STT_NETWORK":
+          return "\uB124\uD2B8\uC6CC\uD06C \uC624\uB958\uB85C \uC74C\uC131\uC744 \uC804\uC1A1\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4";
+      }
+    }
+    return "\uC74C\uC131 \uC778\uC2DD\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + err.message;
+  }
+  function insertTextAtCursor(el2, text) {
+    const start = el2.selectionStart ?? el2.value.length;
+    const end = el2.selectionEnd ?? el2.value.length;
+    const before = el2.value.slice(0, start);
+    const after = el2.value.slice(end);
+    const sep = before.length > 0 && !/\s$/.test(before) ? " " : "";
+    const insert = sep + text;
+    el2.value = before + insert + after;
+    const caret = (before + insert).length;
+    el2.setSelectionRange(caret, caret);
+  }
+  micBtn.addEventListener("click", () => {
+    if (recState === "idle") void startRecording();
+    else if (recState === "recording") stopRecordingAndSend();
+  });
+  stopRec.addEventListener("click", () => stopRecordingAndSend());
+  cancelRec.addEventListener("click", () => cancelRecording());
+  panel.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && recState === "recording") {
+      e.stopPropagation();
+      cancelRecording();
+    }
+  });
+  (async () => {
+    try {
+      await tokens.ensureLoaded();
+      if (sttSupported() && tokens.hasScope("chat:stt")) {
+        micBtn.hidden = false;
+      }
+    } catch {
+    }
+  })();
   function updateSendDisabled() {
     const hasUploading = state.attachments.some((a) => a.status === "uploading");
     const hasText = textarea.value.trim().length > 0;
@@ -982,6 +1348,7 @@ function createWidget(options) {
       return () => unsub?.();
     },
     destroy: () => {
+      cancelRecording();
       tokens.destroy();
       host.remove();
     }
@@ -1073,6 +1440,8 @@ function init(options) {
 }
 export {
   AimbaseChatElement,
+  SttClient,
+  SttError,
   createWidget,
   defineAimbaseChat,
   init

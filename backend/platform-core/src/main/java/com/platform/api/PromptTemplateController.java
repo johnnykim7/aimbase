@@ -27,14 +27,40 @@ public class PromptTemplateController {
 
     @GetMapping
     public ApiResponse<List<Map<String, Object>>> list(
-            @RequestParam(required = false) String category) {
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String scope,
+            @RequestParam(required = false) String projectId) {
         List<PromptTemplateEntity> entities;
-        if (category != null && !category.isBlank()) {
+        if (scope != null && !scope.isBlank()) {
+            // CR-049: scope 필터링 (tenant DB 이므로 tenant_id 는 자동 스코프)
+            entities = repository.findActiveByScope(scope, projectId);
+        } else if (category != null && !category.isBlank()) {
             entities = repository.findByCategoryAndIsActiveTrue(category);
         } else {
             entities = repository.findByIsActiveTrue();
         }
         return ApiResponse.ok(entities.stream().map(PromptTemplateEntity::toMap).toList());
+    }
+
+    /**
+     * CR-049 PRD-305: cascade 병합된 최종 system prompt 미리보기.
+     * GLOBAL + TENANT + PROJECT 각 본문 + merged 결과 + 합산 길이(+경고) 반환.
+     */
+    @GetMapping("/preview")
+    public ApiResponse<Map<String, Object>> preview(
+            @RequestParam String key,
+            @RequestParam(required = false) String projectId) {
+        PromptTemplateService.CascadeResult r = service.getMergedTemplate(key, projectId);
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("key", key);
+        body.put("project_id", projectId);
+        body.put("global", r.globalTemplate());
+        body.put("tenant", r.tenantTemplate());
+        body.put("project", r.projectTemplate());
+        body.put("merged", r.merged());
+        body.put("total_length_bytes", r.totalLengthBytes());
+        body.put("warning", r.warning());
+        return ApiResponse.ok(body);
     }
 
     @GetMapping("/{key}/{version}")
@@ -61,6 +87,14 @@ public class PromptTemplateController {
 
         PromptTemplateEntity entity = new PromptTemplateEntity();
         entity.setPk(new PromptTemplateEntityId(key, version));
+        // CR-049: scope / project_id (기본 GLOBAL)
+        String scope = body.containsKey("scope") ? (String) body.get("scope") : "GLOBAL";
+        String projectId = (String) body.get("project_id");
+        if ("PROJECT".equals(scope) && (projectId == null || projectId.isBlank())) {
+            return ApiResponse.error("scope=PROJECT 인 경우 project_id 가 필수입니다.");
+        }
+        entity.setScope(scope);
+        entity.setProjectId(projectId);
         entity.setCategory((String) body.get("category"));
         entity.setName((String) body.get("name"));
         entity.setDescription((String) body.get("description"));

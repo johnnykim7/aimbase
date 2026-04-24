@@ -114,6 +114,19 @@ platform:
   orchestrator:
     max-tool-iterations: ${PLATFORM_MAX_TOOL_ITERATIONS:30}
     default-max-tokens: ${PLATFORM_DEFAULT_MAX_TOKENS:16000}
+  # ─── CR-050: Claude CLI LLM 어댑터 (PRD-306~309) ─────────────────────
+  # OAuth(Max/Pro 구독) 기반 CLI 워커 풀. 테넌트 피처 플래그는
+  # global_config 테이블 키 'llm.anthropic-cli.enabled-tenants' (CR-040)에서 읽는다.
+  # - 값 '*'          → 전체 테넌트 허용
+  # - 쉼표 구분 ID    → 해당 테넌트만
+  # - 빈 값/키 없음   → 전체 차단 (BIZ-099 기본값)
+  llm:
+    anthropic-cli:
+      enabled: ${ANTHROPIC_CLI_ENABLED:false}
+      timeout-seconds: ${ANTHROPIC_CLI_TIMEOUT:300}
+      max-workers-per-run: ${ANTHROPIC_CLI_MAX_WORKERS:5}
+      acquire-timeout-seconds: ${ANTHROPIC_CLI_ACQUIRE_TIMEOUT:60}
+      cli-binary-path: ${ANTHROPIC_CLI_BINARY:claude}
   # ─── 압축 임계값 (PRD-206, CR-030 Phase 5) ─────────────────────────
   # 퍼센트 단위 (70 = 70%). 환경변수 PLATFORM_*_PCT가 우선.
   compaction:
@@ -122,6 +135,13 @@ platform:
     session-memory-percent: 91
     auto-compact-percent: 93
     blocking-limit-percent: 98
+  # ─── CR-066: Tenant Flyway 자동 재실행 ─────────────────────────────
+  # auto-migrate-on-startup=true 로 설정하면 ApplicationReadyEvent 시
+  # 활성 테넌트 전체에 migrate 수행. 실패는 격리되어 기동을 차단하지 않는다.
+  # 기본값 false — 운영 환경에서 사용자 명시 승인 후 켤 것.
+  tenant:
+    migration:
+      auto-migrate-on-startup: ${TENANT_AUTO_MIGRATE_ON_STARTUP:false}
 
 management:
   endpoints:

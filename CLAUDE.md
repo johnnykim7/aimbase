@@ -144,6 +144,8 @@ frontend/src/
 - 에이전트 하트비트 간격 60초 (BIZ-078)
 - 에이전트 stale 임계값 5분 (BIZ-079)
 - 원격 도구 동기화 주기 30초 (BIZ-080)
+- Claude CLI 어댑터는 테넌트 피처 플래그 허용 시에만 활성화, 상용 외부 테넌트는 ToS 경계상 비활성 유지 (BIZ-099)
+- run당 CLI 워커 기본 상한 5개, 초과 시 큐잉(Semaphore 대기) (BIZ-100)
 
 ## 테스트 전략
 
@@ -200,6 +202,7 @@ frontend/src/
 - [x] Sprint 50: CR-040 런타임 설정 관리 3 Phase (PRD-269~272, FE-023) — global_config seed 12개, PlatformSettingsService(캐시+감사), GET/PUT API, 하드코딩 7곳 교체, FE 설정 관리 페이지
 - [ ] Sprint 50: CR-039 고급 확장 도구 4 Phase (PRD-265~268, FE-022) — TeamCreate/Delete(Swarm 팀 협업), NotebookEditTool(.ipynb 편집), LSPTool(코드 분석), FE 팀 관리 UI
 - [x] Sprint 51: CR-041 Agent SDK 추출 + Agent Registry 5 Phase (PRD-273~278) — aimbase-tool-sdk-core(도구 17개 추출), aimbase-tool-sdk-mcp(MCP 서버+STUN+등록), Agent Registry(등록/해제/하트비트), RemoteToolDiscovery(원격 도구 동기화)
+- [x] CR-050: Claude CLI → LLM 어댑터 승격 5 Phase (PRD-306~309, BIZ-099/100) — ClaudeCliWorker/Pool/Adapter/Config + WorkflowEngine run-종료 정리 훅, 단위 19 PASS, IT 4(CLAUDE_CLI_IT=true)
 
 ## 참조 문서
 - `docs/T1-*` — 요구사항 명세 (T1-1 ~ T1-8)

@@ -4,6 +4,10 @@ import type { ApiResponse } from "../types/api";
 export interface PromptTemplate {
   key: string;
   version: number;
+  /** CR-049: GLOBAL / TENANT / PROJECT */
+  scope?: "GLOBAL" | "TENANT" | "PROJECT";
+  /** CR-049: scope=PROJECT 일 때만 세팅 */
+  project_id?: string | null;
   category: string;
   name: string;
   description: string;
@@ -17,9 +21,26 @@ export interface PromptTemplate {
   updated_at: string;
 }
 
+/** CR-049 PRD-305: cascade 병합 미리보기 응답 */
+export interface PromptCascadePreview {
+  key: string;
+  project_id: string | null;
+  global: string | null;
+  tenant: string | null;
+  project: string | null;
+  merged: string | null;
+  total_length_bytes: number;
+  warning: string | null;
+}
+
 export const promptTemplatesApi = {
-  list: (category?: string) =>
-    apiClient.get<ApiResponse<PromptTemplate[]>>("/prompt-templates", { params: { category } }),
+  list: (params?: { category?: string; scope?: "GLOBAL" | "TENANT" | "PROJECT"; projectId?: string }) =>
+    apiClient.get<ApiResponse<PromptTemplate[]>>("/prompt-templates", { params }),
+
+  preview: (key: string, projectId?: string) =>
+    apiClient.get<ApiResponse<PromptCascadePreview>>("/prompt-templates/preview", {
+      params: { key, projectId },
+    }),
 
   get: (key: string, version: number) =>
     apiClient.get<ApiResponse<PromptTemplate>>(`/prompt-templates/${key}/${version}`),

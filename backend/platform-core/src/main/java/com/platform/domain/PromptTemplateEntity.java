@@ -19,6 +19,14 @@ public class PromptTemplateEntity {
     @EmbeddedId
     private PromptTemplateEntityId pk;
 
+    /** CR-049: 적용 범위 GLOBAL / TENANT / PROJECT. */
+    @Column(length = 20, nullable = false)
+    private String scope = "GLOBAL";
+
+    /** CR-049: scope=PROJECT 일 때만 세팅. */
+    @Column(name = "project_id", length = 100)
+    private String projectId;
+
     @Column(length = 50, nullable = false)
     private String category;
 
@@ -63,6 +71,12 @@ public class PromptTemplateEntity {
     public PromptTemplateEntityId getPk() { return pk; }
     public void setPk(PromptTemplateEntityId pk) { this.pk = pk; }
 
+    public String getScope() { return scope; }
+    public void setScope(String scope) { this.scope = scope; }
+
+    public String getProjectId() { return projectId; }
+    public void setProjectId(String projectId) { this.projectId = projectId; }
+
     public String getCategory() { return category; }
     public void setCategory(String category) { this.category = category; }
 
@@ -97,6 +111,8 @@ public class PromptTemplateEntity {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("key", pk != null ? pk.getKey() : null);
         m.put("version", pk != null ? pk.getVersion() : null);
+        m.put("scope", scope);
+        m.put("project_id", projectId);
         m.put("category", category);
         m.put("name", name);
         m.put("description", description);

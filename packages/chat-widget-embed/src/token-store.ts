@@ -21,6 +21,16 @@ export class TokenStore {
     return this.token!.token;
   }
 
+  /** 현재 토큰이 특정 scope 를 포함하는지 (지연 초기화됨 — 미초기화면 false) */
+  hasScope(scope: string): boolean {
+    return !!this.token?.scopes?.includes(scope);
+  }
+
+  /** 토큰 메타 미리 로드 (getToken 호출로 초기화만 수행) */
+  async ensureLoaded(): Promise<void> {
+    if (!this.token) await this.refresh();
+  }
+
   private async refresh(): Promise<void> {
     const res = await this.resolver();
     this.token = res;
