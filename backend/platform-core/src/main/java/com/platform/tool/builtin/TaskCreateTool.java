@@ -1,6 +1,9 @@
 package com.platform.tool.builtin;
 
-import com.platform.domain.SubagentRunEntity;
+import com.platform.agent.AgentType;
+import com.platform.agent.SubagentRequest;
+import com.platform.agent.SubagentResult;
+import com.platform.agent.SubagentRunner;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookEvent;
 import com.platform.hook.HookInput;
@@ -14,7 +17,7 @@ import java.util.Map;
 
 /**
  * CR-033 PRD-226: 백그라운드 태스크 생성.
- * SubagentRunner를 래핑하여 Task 인터페이스를 제공한다.
+ * CR-053 Phase 0.5: SubagentRunner.run()을 호출해 실제 실행까지 연결.
  * BIZ-056: 세션당 동시 실행 태스크 5개 제한.
  */
 @Component
@@ -23,10 +26,14 @@ public class TaskCreateTool implements EnhancedToolExecutor {
     private static final int MAX_CONCURRENT_TASKS = 5;
 
     private final SubagentRunRepository subagentRunRepository;
+    private final SubagentRunner subagentRunner;
     private final HookDispatcher hookDispatcher;
 
-    public TaskCreateTool(SubagentRunRepository subagentRunRepository, HookDispatcher hookDispatcher) {
+    public TaskCreateTool(SubagentRunRepository subagentRunRepository,
+                          SubagentRunner subagentRunner,
+                          HookDispatcher hookDispatcher) {
         this.subagentRunRepository = subagentRunRepository;
+        this.subagentRunner = subagentRunner;
         this.hookDispatcher = hookDispatcher;
     }
 
@@ -76,26 +83,32 @@ public class TaskCreateTool implements EnhancedToolExecutor {
 
         String description = (String) input.get("description");
         String prompt = (String) input.get("prompt");
-        String isolation = (String) input.getOrDefault("isolation", "none");
+        String model = (String) input.get("model");
+        String isolationRaw = (String) input.getOrDefault("isolation", "none");
+        SubagentRequest.IsolationMode isolation = "worktree".equalsIgnoreCase(isolationRaw)
+                ? SubagentRequest.IsolationMode.WORKTREE
+                : SubagentRequest.IsolationMode.NONE;
 
-        // SubagentRunEntity를 Task로 생성
-        SubagentRunEntity entity = new SubagentRunEntity();
-        entity.setParentSessionId(sessionId);
-        entity.setDescription(description);
-        entity.setPrompt(prompt);
-        entity.setStatus("RUNNING");
-        entity.setRunInBackground(true);
-        entity.setIsolationMode(isolation.toUpperCase());
-        entity.setTaskDescription(description);
-        entity.setPriority((String) input.getOrDefault("priority", "medium"));
+        // SubagentRunner에 위임 — DB 저장/Virtual Thread 실행/훅 발행을 Runner가 통합 처리
+        SubagentRequest request = new SubagentRequest(
+                description, prompt, model,
+                null,                 // connectionId: 부모 세션 커넥션 상속
+                isolation,
+                true,                 // runInBackground
+                0L,                   // timeoutMs: 기본값(120s)
+                Map.of(),
+                sessionId,
+                AgentType.GENERAL
+        );
 
-        SubagentRunEntity saved = subagentRunRepository.save(entity);
+        SubagentResult result = subagentRunner.run(request);
+        String taskId = result.subagentRunId();
 
         // CR-034: TASK_CREATED 훅 발행
         try {
             hookDispatcher.dispatch(HookEvent.TASK_CREATED,
                     HookInput.of(HookEvent.TASK_CREATED, sessionId,
-                            Map.of("taskId", saved.getId().toString(),
+                            Map.of("taskId", taskId,
                                     "description", description),
                             Map.of()));
         } catch (Exception e) {
@@ -104,7 +117,7 @@ public class TaskCreateTool implements EnhancedToolExecutor {
 
         return ToolResult.ok(
                 Map.of(
-                        "task_id", saved.getId().toString(),
+                        "task_id", taskId,
                         "status", "running",
                         "message", "Task created and running in background."
                 ),

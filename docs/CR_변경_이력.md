@@ -984,6 +984,10 @@
      - `HookEvent.STOP` 결과가 BLOCK이면 BLOCK 사유를 새 user 메시지로 주입하고 `ToolCallHandler.executeLoop()` 루프 재진입.
      - 무한루프 방지: 동일 BLOCK 사유 **3회 초과** 시 강제 종료 + 사용자 알림. (BIZ-097)
      - 사용 사례: TodoWrite 미완료, 테스트 FAIL, 사용자 정의 검증.
+  0. **(범위 확장, 2026-04-24) prod 테넌트 자동 마이그레이션 Initializer**:
+     - 운영(prod) 환경에서 앱 기동 시 모든 활성 테넌트 DB 에 Flyway 를 자동 적용하도록 `ProdTenantMigrationInitializer`(@Profile("prod"), ApplicationRunner, @Order(1000)) 신규.
+     - 기존에는 `TenantOnboardingService`(신규 테넌트 생성 시에만 migrate) 경로만 있어서 CR-046/048/055/058(V51~V54) 가 운영 DB 에 미적용된 사례 발생 — CR-049 배포 시 수동 복구함. 본 Initializer 로 구조적 해소.
+     - 실패 테넌트는 로그만 남기고 다음 테넌트로 계속 진행 (한 테넌트 오류로 서비스 기동 차단하지 않음).
   3. **PRD-305 테넌트/프로젝트 커스텀 지침**:
      - DB: `prompt_templates` 테이블 확장 (Flyway V48) — `scope VARCHAR(20) NOT NULL DEFAULT 'GLOBAL'`, `project_id VARCHAR(100) NULL`. scope: `GLOBAL | TENANT | PROJECT`. tenant DB라 tenant_id는 자동 스코프됨. 인덱스 `idx_prompt_templates_scope(scope, project_id)`.
      - `PromptTemplateService.getTemplate(key, tenantId, projectId)` 확장. 우선순위 PROJECT → TENANT → GLOBAL **폴백 + append**(cascade 병합, BIZ-098).
@@ -1007,7 +1011,7 @@
   - 신규: `SessionResumeController`, `TenantInstructionsController`, `ProjectInstructionsController`.
 - **영향 모듈**:
   - BE 수정: `ConversationMessageEntity`, `ContextWindowManager`, `ContextAssemblyEngine`, `PromptTemplateService`, `PromptTemplateEntity`, `HookDispatcher`, `ToolCallHandler`
-  - BE 신규: `SessionResumeController`, `TenantInstructionsController`, `ProjectInstructionsController`
+  - BE 신규: `SessionResumeController`, `TenantInstructionsController`, `ProjectInstructionsController`, `ProdTenantMigrationInitializer`(prod 테넌트 자동 마이그레이션)
   - Flyway: V48 (prompt_templates scope 확장, tenant DB), V49 (conversation_messages.message_type COMPACT_BOUNDARY 추가, tenant DB)
   - FE 신규: 테넌트 설정 "시스템 지침" 탭, 프로젝트 상세 "프로젝트 지침" 탭, 대화방 목록 "재개" 버튼, 압축 경계 UI 컴포넌트 (FE-034)
 - **영향도**: High
