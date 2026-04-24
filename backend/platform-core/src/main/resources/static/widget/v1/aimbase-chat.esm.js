@@ -1,3 +1,68 @@
+// src/attachment-client.ts
+var AttachmentClient = class {
+  constructor(tokens) {
+    this.tokens = tokens;
+  }
+  async upload(args, onProgress) {
+    const token = await this.tokens.getToken();
+    const form = new FormData();
+    form.append("session_id", args.sessionId);
+    form.append("file", args.file, args.file.name);
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${args.baseUrl}/api/v1/chat/attachments`);
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      if (onProgress && xhr.upload) {
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round(e.loaded / e.total * 100);
+            onProgress(pct);
+          }
+        });
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const body = JSON.parse(xhr.responseText);
+            const data = body.data ?? body;
+            resolve(data);
+          } catch (e) {
+            reject(new Error(`invalid response JSON: ${e.message}`));
+          }
+        } else {
+          const msg = extractErrorMessage(xhr.responseText) ?? `status ${xhr.status}`;
+          reject(new Error(msg));
+        }
+      };
+      xhr.onerror = () => reject(new Error("network error"));
+      xhr.send(form);
+    });
+  }
+  async delete(args) {
+    const token = await this.tokens.getToken();
+    const url = `${args.baseUrl}/api/v1/chat/attachments/${encodeURIComponent(args.attachmentId)}?session_id=${encodeURIComponent(args.sessionId)}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok && res.status !== 404) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`delete attachment ${res.status}: ${text.slice(0, 200)}`);
+    }
+  }
+};
+function extractErrorMessage(raw) {
+  if (!raw) return null;
+  try {
+    const body = JSON.parse(raw);
+    if (typeof body.error === "string") return body.error;
+    if (typeof body.message === "string") return body.message;
+    return null;
+  } catch {
+    return raw.slice(0, 200);
+  }
+}
+
 // src/sse-parser.ts
 async function* parseSseStream(response, signal) {
   if (!response.body) throw new Error("SSE response has no body");
@@ -53,7 +118,16 @@ var ChatClient = class {
     const ac = new AbortController();
     this.currentAbort = ac;
     const token = await this.tokens.getToken();
-    const userContent = [{ type: "text", text: args.text }];
+    const userContent = [];
+    for (const att of args.attachments ?? []) {
+      userContent.push({
+        type: att.mediaType === "application/pdf" ? "document" : "image",
+        attachment_id: att.attachmentId
+      });
+    }
+    if (args.text && args.text.length > 0) {
+      userContent.push({ type: "text", text: args.text });
+    }
     const messages = [];
     if (args.context && Object.keys(args.context).length > 0) {
       messages.push({
@@ -281,6 +355,71 @@ var WIDGET_CSS = `
 .citation-preview .meta { font-size: 12px; color: var(--aimbase-muted); margin-bottom: 10px; }
 .citation-preview .content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .citation-preview .close { position: absolute; top: 8px; right: 8px; background: none; border: none; font-size: 18px; cursor: pointer; }
+
+/* CR-061: \uCCA8\uBD80 UI */
+.attach-btn {
+  background: transparent; color: var(--aimbase-muted);
+  border: 1px solid var(--aimbase-border); border-radius: 6px;
+  width: 34px; height: 34px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 16px; line-height: 1; flex-shrink: 0;
+}
+.attach-btn:hover { color: var(--aimbase-primary); border-color: var(--aimbase-primary); }
+.attach-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.attachments {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 6px 10px 0;
+}
+.attachments:empty { padding: 0; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px 4px 4px;
+  background: var(--aimbase-assistant-bg);
+  border: 1px solid var(--aimbase-border);
+  border-radius: 6px;
+  max-width: 220px;
+  font-size: 12px;
+}
+.chip.uploading { opacity: .75; }
+.chip.error { border-color: #ef4444; color: #ef4444; }
+.chip-thumb {
+  width: 28px; height: 28px; border-radius: 4px;
+  object-fit: cover;
+  background: var(--aimbase-border);
+  flex-shrink: 0;
+}
+.chip-thumb.pdf {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--aimbase-primary); font-weight: 700; font-size: 10px;
+  background: var(--aimbase-assistant-bg);
+  border: 1px solid var(--aimbase-border);
+}
+.chip-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.chip-remove {
+  background: none; border: none; cursor: pointer;
+  color: var(--aimbase-muted); font-size: 14px; padding: 0 2px; line-height: 1;
+}
+.chip-remove:hover { color: #ef4444; }
+.chip-spinner {
+  width: 10px; height: 10px; border: 2px solid var(--aimbase-border);
+  border-top-color: var(--aimbase-primary); border-radius: 50%;
+  animation: chip-spin 0.8s linear infinite; flex-shrink: 0;
+}
+@keyframes chip-spin { to { transform: rotate(360deg); } }
+
+.drop-overlay {
+  position: absolute; inset: 0;
+  border: 2px dashed var(--aimbase-primary);
+  background: rgba(79, 70, 229, 0.08);
+  border-radius: var(--aimbase-radius);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--aimbase-primary); font-weight: 500;
+  pointer-events: none; z-index: 10;
+}
 `;
 
 // src/token-store.ts
@@ -382,6 +521,9 @@ var WorkflowClient = class {
 };
 
 // src/widget.ts
+var ACCEPT_MIME = "image/png,image/jpeg,image/gif,image/webp,application/pdf";
+var MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+var MAX_PDF_BYTES = 32 * 1024 * 1024;
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -426,7 +568,8 @@ function createWidget(options) {
     ragSourceId: options.ragSourceId,
     currentAssistantDiv: null,
     currentAssistantText: "",
-    workflowRuns: /* @__PURE__ */ new Map()
+    workflowRuns: /* @__PURE__ */ new Map(),
+    attachments: []
   };
   let bubbleBtn = null;
   if (display === "bubble") {
@@ -447,14 +590,67 @@ function createWidget(options) {
   panel.appendChild(header);
   const messagesEl = el("div", "messages");
   panel.appendChild(messagesEl);
+  const attachmentsEl = el("div", "attachments");
+  panel.appendChild(attachmentsEl);
   const composer = el("div", "composer");
+  const attachBtn = el("button", "attach-btn", "\u{1F4CE}");
+  attachBtn.setAttribute("aria-label", "\uD30C\uC77C \uCCA8\uBD80 (\uC774\uBBF8\uC9C0/PDF)");
+  attachBtn.type = "button";
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = ACCEPT_MIME;
+  fileInput.multiple = true;
+  fileInput.style.display = "none";
+  attachBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const files = fileInput.files ? Array.from(fileInput.files) : [];
+    for (const f of files) void addAttachment(f);
+    fileInput.value = "";
+  });
   const textarea = document.createElement("textarea");
   textarea.placeholder = "\uBA54\uC2DC\uC9C0\uB97C \uC785\uB825\uD558\uC138\uC694\u2026 (Enter \uC804\uC1A1, Shift+Enter \uC904\uBC14\uAFC8)";
   textarea.rows = 1;
   const sendBtn = el("button", "send-btn", "\uC804\uC1A1");
+  composer.appendChild(attachBtn);
+  composer.appendChild(fileInput);
   composer.appendChild(textarea);
   composer.appendChild(sendBtn);
   panel.appendChild(composer);
+  let dragCounter = 0;
+  let dropOverlay = null;
+  panel.addEventListener("dragenter", (e) => {
+    if (!hasFile(e)) return;
+    e.preventDefault();
+    dragCounter += 1;
+    if (!dropOverlay) {
+      dropOverlay = el("div", "drop-overlay", "\uD30C\uC77C\uC744 \uB193\uC544 \uCCA8\uBD80\uD558\uC138\uC694");
+      panel.appendChild(dropOverlay);
+    }
+  });
+  panel.addEventListener("dragover", (e) => {
+    if (hasFile(e)) e.preventDefault();
+  });
+  panel.addEventListener("dragleave", (e) => {
+    if (!hasFile(e)) return;
+    dragCounter -= 1;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      dropOverlay?.remove();
+      dropOverlay = null;
+    }
+  });
+  panel.addEventListener("drop", (e) => {
+    if (!hasFile(e)) return;
+    e.preventDefault();
+    dragCounter = 0;
+    dropOverlay?.remove();
+    dropOverlay = null;
+    const files = e.dataTransfer ? Array.from(e.dataTransfer.files) : [];
+    for (const f of files) void addAttachment(f);
+  });
+  function hasFile(e) {
+    return !!e.dataTransfer && Array.from(e.dataTransfer.types ?? []).includes("Files");
+  }
   function setOpen(v) {
     state.open = v;
     if (v) panel.classList.remove("hidden");
@@ -520,12 +716,138 @@ function createWidget(options) {
   const tokens = new TokenStore(options.authResolver, options.on?.onTokenExpiring);
   const chat = new ChatClient(tokens);
   const workflow = new WorkflowClient(tokens);
+  const attachments = new AttachmentClient(tokens);
+  function genLocalId() {
+    return `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+  function validateFile(file) {
+    const isImage = file.type.startsWith("image/");
+    const isPdf = file.type === "application/pdf";
+    if (!isImage && !isPdf) return "\uC774\uBBF8\uC9C0(PNG/JPEG/GIF/WEBP) \uB610\uB294 PDF \uB9CC \uCCA8\uBD80 \uAC00\uB2A5\uD569\uB2C8\uB2E4";
+    const limit = isPdf ? MAX_PDF_BYTES : MAX_IMAGE_BYTES;
+    if (file.size > limit) {
+      const mb = Math.round(limit / 1024 / 1024);
+      return `\uD30C\uC77C\uC774 \uB108\uBB34 \uD07D\uB2C8\uB2E4 (\uCD5C\uB300 ${mb}MB)`;
+    }
+    return null;
+  }
+  function renderChips() {
+    attachmentsEl.innerHTML = "";
+    for (const draft of state.attachments) {
+      const chip = el("div", `chip ${draft.status}`);
+      if (draft.previewDataUrl) {
+        const img = document.createElement("img");
+        img.className = "chip-thumb";
+        img.src = draft.previewDataUrl;
+        img.alt = draft.file.name;
+        chip.appendChild(img);
+      } else {
+        const icon = el("span", "chip-thumb pdf", "PDF");
+        chip.appendChild(icon);
+      }
+      const label = el("span", "chip-label");
+      const pages = draft.serverMeta?.pages;
+      const pageSuffix = pages ? ` \xB7 ${pages}p` : "";
+      label.textContent = draft.status === "error" ? `${draft.file.name} \u2014 ${draft.error ?? "\uC2E4\uD328"}` : `${draft.file.name}${pageSuffix}`;
+      label.title = label.textContent ?? "";
+      chip.appendChild(label);
+      if (draft.status === "uploading") {
+        chip.appendChild(el("span", "chip-spinner"));
+      } else {
+        const rm = el("button", "chip-remove", "\xD7");
+        rm.type = "button";
+        rm.setAttribute("aria-label", "\uCCA8\uBD80 \uC81C\uAC70");
+        rm.addEventListener("click", () => void removeAttachment(draft.localId));
+        chip.appendChild(rm);
+      }
+      attachmentsEl.appendChild(chip);
+    }
+    updateSendDisabled();
+  }
+  async function readThumb(file) {
+    if (!file.type.startsWith("image/")) return void 0;
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : void 0);
+      reader.onerror = () => resolve(void 0);
+      reader.readAsDataURL(file);
+    });
+  }
+  async function addAttachment(file) {
+    const err = validateFile(file);
+    if (err) {
+      options.on?.onError?.(new Error(err));
+      appendMessage("error", err);
+      return;
+    }
+    const draft = {
+      localId: genLocalId(),
+      file,
+      status: "uploading",
+      previewDataUrl: await readThumb(file)
+    };
+    state.attachments.push(draft);
+    renderChips();
+    try {
+      const meta = await attachments.upload({
+        baseUrl: options.baseUrl,
+        sessionId: state.sessionId,
+        file
+      });
+      draft.serverMeta = meta;
+      draft.status = "ready";
+    } catch (e) {
+      draft.status = "error";
+      draft.error = e.message;
+      options.on?.onError?.(e);
+    } finally {
+      renderChips();
+    }
+  }
+  async function removeAttachment(localId) {
+    const idx = state.attachments.findIndex((a) => a.localId === localId);
+    if (idx < 0) return;
+    const draft = state.attachments[idx];
+    state.attachments.splice(idx, 1);
+    renderChips();
+    if (draft.serverMeta) {
+      try {
+        await attachments.delete({
+          baseUrl: options.baseUrl,
+          sessionId: state.sessionId,
+          attachmentId: draft.serverMeta.attachment_id
+        });
+      } catch {
+      }
+    }
+  }
+  function updateSendDisabled() {
+    const hasUploading = state.attachments.some((a) => a.status === "uploading");
+    const hasText = textarea.value.trim().length > 0;
+    const hasReady = state.attachments.some((a) => a.status === "ready");
+    if (hasUploading || !hasText && !hasReady) {
+      sendBtn.setAttribute("disabled", "true");
+    } else {
+      sendBtn.removeAttribute("disabled");
+    }
+  }
   async function sendMessage(text) {
     const trimmed = text.trim();
-    if (!trimmed) return;
-    appendMessage("user", trimmed);
+    const readyAtts = state.attachments.filter((a) => a.status === "ready" && a.serverMeta);
+    if (!trimmed && readyAtts.length === 0) return;
+    const userDisplay = [
+      trimmed,
+      ...readyAtts.map((a) => `\u{1F4CE} ${a.file.name}`)
+    ].filter((s) => s.length > 0).join("\n");
+    appendMessage("user", userDisplay);
     resetAssistantBlock();
     sendBtn.setAttribute("disabled", "true");
+    const attachmentPayload = readyAtts.map((a) => ({
+      attachmentId: a.serverMeta.attachment_id,
+      mediaType: a.serverMeta.media_type
+    }));
+    state.attachments = [];
+    renderChips();
     try {
       await chat.sendMessage(
         {
@@ -533,7 +855,8 @@ function createWidget(options) {
           sessionId: state.sessionId,
           text: trimmed,
           ragSourceId: state.ragSourceId,
-          context: options.contextProvider?.()
+          context: options.contextProvider?.(),
+          attachments: attachmentPayload
         },
         (d) => {
           options.on?.onMessage?.(d);
@@ -576,14 +899,28 @@ function createWidget(options) {
   sendBtn.addEventListener("click", () => {
     void sendMessage(textarea.value);
     textarea.value = "";
+    updateSendDisabled();
   });
   textarea.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void sendMessage(textarea.value);
       textarea.value = "";
+      updateSendDisabled();
     }
   });
+  textarea.addEventListener("input", updateSendDisabled);
+  textarea.addEventListener("paste", (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === "file") {
+        const f = item.getAsFile();
+        if (f) void addAttachment(f);
+      }
+    }
+  });
+  updateSendDisabled();
   async function subscribeWorkflow(runId) {
     const wfPanel = el("div", "workflow-panel");
     const wfTitle = el("div", "title", `\uC6CC\uD06C\uD50C\uB85C\uC6B0 ${runId.slice(0, 8)}\u2026`);

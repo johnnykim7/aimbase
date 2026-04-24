@@ -106,7 +106,21 @@
     </div>
 
     <div class="card">
-      <h2>③ Bubble 모드</h2>
+      <h2>③ 파일 첨부 데모 (CR-061)</h2>
+      <p>
+        위의 inline 위젯에서 입력창 좌측의 <strong>📎 아이콘</strong>을 클릭하거나, 이미지/PDF 파일을
+        위젯 위로 <strong>드래그앤드롭</strong>하면 첨부됩니다.
+      </p>
+      <ul>
+        <li>지원 MIME: PNG / JPEG / GIF / WEBP / PDF</li>
+        <li>크기 제한: 이미지 10MB, PDF 32MB (세션당 최대 10개)</li>
+        <li>Claude 계열 모델은 PDF 를 네이티브 해석, 그 외는 텍스트 추출 폴백</li>
+        <li>첨부는 현재 메시지 1회에만 컨텍스트로 사용되고 세션 종료 시 자동 정리됩니다</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>④ Bubble 모드</h2>
       <p>
         아래 엘리먼트는 페이지 우하단에 버블 버튼으로 떠 있습니다. 클릭하면 플로팅 채팅 패널이
         열립니다.

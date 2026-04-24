@@ -10,6 +10,8 @@ export interface SendMessageArgs {
   ragSourceId?: string;
   connectionId?: string;
   context?: Record<string, unknown>;
+  /** CR-061: 사전 업로드된 첨부들. `{media_type, attachment_id}` 로 BE 에 전달. */
+  attachments?: Array<{ attachmentId: string; mediaType: string }>;
 }
 
 export class ChatClient {
@@ -28,7 +30,17 @@ export class ChatClient {
 
     const token = await this.tokens.getToken();
 
-    const userContent = [{ type: "text", text: args.text }];
+    // CR-061: 첨부 블록 먼저, 텍스트 블록 뒤 — LLM 이 첨부 맥락을 먼저 본다.
+    const userContent: Array<Record<string, unknown>> = [];
+    for (const att of args.attachments ?? []) {
+      userContent.push({
+        type: att.mediaType === "application/pdf" ? "document" : "image",
+        attachment_id: att.attachmentId,
+      });
+    }
+    if (args.text && args.text.length > 0) {
+      userContent.push({ type: "text", text: args.text });
+    }
     const messages: unknown[] = [];
     if (args.context && Object.keys(args.context).length > 0) {
       // 컨텍스트는 system 메시지로 선행 주입 (간단·가시적)

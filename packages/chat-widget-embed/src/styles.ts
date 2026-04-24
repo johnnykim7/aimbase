@@ -132,4 +132,69 @@ export const WIDGET_CSS = `
 .citation-preview .meta { font-size: 12px; color: var(--aimbase-muted); margin-bottom: 10px; }
 .citation-preview .content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .citation-preview .close { position: absolute; top: 8px; right: 8px; background: none; border: none; font-size: 18px; cursor: pointer; }
+
+/* CR-061: 첨부 UI */
+.attach-btn {
+  background: transparent; color: var(--aimbase-muted);
+  border: 1px solid var(--aimbase-border); border-radius: 6px;
+  width: 34px; height: 34px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 16px; line-height: 1; flex-shrink: 0;
+}
+.attach-btn:hover { color: var(--aimbase-primary); border-color: var(--aimbase-primary); }
+.attach-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.attachments {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 6px 10px 0;
+}
+.attachments:empty { padding: 0; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px 4px 4px;
+  background: var(--aimbase-assistant-bg);
+  border: 1px solid var(--aimbase-border);
+  border-radius: 6px;
+  max-width: 220px;
+  font-size: 12px;
+}
+.chip.uploading { opacity: .75; }
+.chip.error { border-color: #ef4444; color: #ef4444; }
+.chip-thumb {
+  width: 28px; height: 28px; border-radius: 4px;
+  object-fit: cover;
+  background: var(--aimbase-border);
+  flex-shrink: 0;
+}
+.chip-thumb.pdf {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--aimbase-primary); font-weight: 700; font-size: 10px;
+  background: var(--aimbase-assistant-bg);
+  border: 1px solid var(--aimbase-border);
+}
+.chip-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.chip-remove {
+  background: none; border: none; cursor: pointer;
+  color: var(--aimbase-muted); font-size: 14px; padding: 0 2px; line-height: 1;
+}
+.chip-remove:hover { color: #ef4444; }
+.chip-spinner {
+  width: 10px; height: 10px; border: 2px solid var(--aimbase-border);
+  border-top-color: var(--aimbase-primary); border-radius: 50%;
+  animation: chip-spin 0.8s linear infinite; flex-shrink: 0;
+}
+@keyframes chip-spin { to { transform: rotate(360deg); } }
+
+.drop-overlay {
+  position: absolute; inset: 0;
+  border: 2px dashed var(--aimbase-primary);
+  background: rgba(79, 70, 229, 0.08);
+  border-radius: var(--aimbase-radius);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--aimbase-primary); font-weight: 500;
+  pointer-events: none; z-index: 10;
+}
 `;

@@ -102,3 +102,34 @@ export interface WidgetHandle {
   subscribeWorkflow(runId: string): () => void; // unsubscribe fn
   destroy(): void;
 }
+
+/** CR-061: 업로드된 첨부 파일의 서버 응답 메타 */
+export interface Attachment {
+  attachment_id: string;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+  /** PDF 업로드 시에만 채워짐 (업로드 즉시 추출 정책에 따라 null 가능) */
+  pages?: number | null;
+  expires_at: string;
+}
+
+/**
+ * CR-061: 업로드 진행 상태. 위젯 UI 의 칩 렌더링에 사용.
+ * - uploading: 서버로 업로드 중
+ * - ready: 서버 저장 성공, 전송 대기
+ * - error: 실패 (에러 메시지 포함)
+ */
+export type AttachmentStatus = "uploading" | "ready" | "error";
+
+export interface AttachmentDraft {
+  /** 클라이언트 임시 id — ready 이전엔 서버 attachment_id 가 없음 */
+  localId: string;
+  file: File;
+  status: AttachmentStatus;
+  /** ready 이후에만 채워짐 */
+  serverMeta?: Attachment;
+  /** 이미지면 data URL 썸네일 */
+  previewDataUrl?: string;
+  error?: string;
+}
