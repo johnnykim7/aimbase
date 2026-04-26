@@ -35,6 +35,13 @@ public class ClaudeCliAdapterConfig {
     private int acquireTimeoutSeconds = 60;
     private String cliBinaryPath = "claude";
     /**
+     * CR-069: CLI 도구 노출 모드 (Worker / ClaudeCodeTool 양쪽 default).
+     * application.yml: platform.llm.anthropic-cli.tool-mode 또는 환경변수
+     * ANTHROPIC_CLI_TOOL_MODE 로 설정. 호출처가 명시 override 시 그쪽이 우선.
+     * 값: aimbase | native | hybrid (대소문자 무관)
+     */
+    private String toolMode = "aimbase";
+    /**
      * Phase 9: Aimbase 도구를 CLI 에 노출하는 MCP 서버 설정 (JSON).
      * 비어있으면 도구 미연결 모드 (순수 텍스트 LLM_CALL 만).
      * 예시: {"mcpServers":{"aimbase":{"command":"java","args":["-jar","/path/to/aimbase-agent.jar","--mcp-stdio"]}}}
@@ -59,6 +66,20 @@ public class ClaudeCliAdapterConfig {
 
     public String getCliBinaryPath() { return cliBinaryPath; }
     public void setCliBinaryPath(String v) { this.cliBinaryPath = v; }
+
+    public String getToolMode() { return toolMode; }
+    public void setToolMode(String v) { this.toolMode = (v == null || v.isBlank()) ? "aimbase" : v; }
+
+    /**
+     * CR-069: 문자열 toolMode 를 enum 으로 변환. 알 수 없는 값이면 AIMBASE 폴백 (보안 default).
+     */
+    public ClaudeCliCommandBuilder.ToolMode resolveToolMode() {
+        try {
+            return ClaudeCliCommandBuilder.ToolMode.valueOf(toolMode.trim().toUpperCase());
+        } catch (Exception e) {
+            return ClaudeCliCommandBuilder.ToolMode.AIMBASE;
+        }
+    }
 
     public String getMcpConfigJson() { return mcpConfigJson; }
     public void setMcpConfigJson(String v) { this.mcpConfigJson = v; }
@@ -98,7 +119,8 @@ public class ClaudeCliAdapterConfig {
         ClaudeCliWorkerPool.WorkerFactory factory = (model, resumeSessionId, forkSession, configDir) ->
                 new ClaudeCliWorker(cliBinaryPath, model, resumeSessionId, forkSession,
                         configDir, turnTimeout, mcpConfig);
+        // CR-069: application.yml 의 tool-mode 를 default 로 Pool 에 주입
         return new ClaudeCliWorkerPool(factory, maxWorkersPerRun,
-                Duration.ofSeconds(acquireTimeoutSeconds));
+                Duration.ofSeconds(acquireTimeoutSeconds), resolveToolMode());
     }
 }

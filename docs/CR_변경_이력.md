@@ -58,6 +58,7 @@
 | CR-066 | Tenant Flyway 자동 재실행 — `TenantMigrationRunner` + Admin API `POST /platform/tenants/migrate` + 실패 격리 + 운영 가이드 § 2-5 자동화 (PRD-330~332) | 변경 | Medium | v8.4.0 | ✅ 구현 완료 |
 | CR-067 | EnhancedToolExecutor default bridge 본문 노출 — `ToolResultRenderer` 신설 + bridge 정정 (CR-050 Phase 9 후속, MCP stdio 직접 검증으로 본문 노출 확인) | 버그수정 | High | v8.5.0 | ✅ 구현 완료 |
 | CR-068 | API 어댑터 도구 호출 회귀 4종 정공 — (1) CR-048 filterActive 회귀 (2) HttpRequestTool body type 오타 (3) anti-hallucination 지시문 누락 (4) actions_executed 메타 누락. 작년 4월 정상 동작 동등 회복 | 버그수정 | High | v8.5.1 | ✅ 구현 완료 |
+| CR-069 | Claude CLI 호출 공통 빌더 — `ClaudeCliCommandBuilder` 신설 + ToolMode(AIMBASE/NATIVE/HYBRID) 단일 스위치. Worker / ClaudeCodeTool 양쪽 잠금 정책(strict-mcp-config / bypassPermissions / --tools "" sealing) 통일. application.yml `tool-mode` 외부화 | 변경 | Medium | v8.5.2 | ✅ 구현 완료 |
 
 ---
 
@@ -1646,6 +1647,58 @@
   - [x] OrchestratorEngine actions_executed ThreadLocal 누적 패턴
   - [x] 단위 9 PASS + HttpRequestToolTest 16 회귀 PASS
   - [x] run_adapter_compare.py 로 API tools=11/7 실측 + 응답 정확성 검증
+- **원본 요구사항**: 본 카드 「발견 경위」 섹션 내장
+- **Plan 파일**: 없음
+
+---
+
+### CR-069 | Claude CLI 호출 공통 빌더 — Worker / ClaudeCodeTool 잠금 정책 통일
+
+- **대상 기능 ID**: PRD-340 (신규 — Aimbase CLI 호출 정책 단일 진실 소스)
+- **변경 타입**: 변경
+- **발견 경위**:
+  - 사용자 지적: "어차피 둘 다 Claude CLI 사용. 둘 다 Aimbase 도구 사용하길 원함. 차이가 없어야 정상"
+  - CR-067/068 작업 중 ClaudeCliWorker 의 잠금 정책 (strict-mcp-config, bypassPermissions, --tools "" sealing) 정착
+  - ClaudeCodeTool (CR-044) 도 같은 CLI 호출하지만 일부 잠금 누락 (`--strict-mcp-config` 0건, default permission_mode null) → 다른 개발자도 같은 함정 빠질 위험 + 디버깅 비용 두 배
+- **결함**:
+  - **공통 정책 분산**: Worker 와 ClaudeCodeTool 이 같은 CLI 를 다른 정책으로 호출. 향후 CLI flag 변경 시 두 곳 따로 수정 필요. 한 쪽만 잠금 적용되면 다른 쪽이 침범 통로
+  - **에이전트 배포 시 모드 외부화 부재**: 에이전트가 "Aimbase 도구만" / "CLI 본체 도구만" 사용 모드 결정을 코드 변경 없이 환경변수로 못 함
+- **변경 내용**:
+  1. **`ClaudeCliCommandBuilder` 신설** (`platform-core/llm/claudecli`): fluent API 로 CLI 인자 조립. `ToolMode` 단일 스위치 (AIMBASE / NATIVE / HYBRID) 로 도구 노출 정책 결정. 잠금 정책 (strict-mcp-config, permission-mode bypassPermissions, --tools "" sealing) 빌더 내부 default
+  2. **`ClaudeCliAdapterConfig.toolMode`** 신규 필드 + getter/setter + `resolveToolMode()` enum 변환 헬퍼. application.yml 의 `platform.llm.anthropic-cli.tool-mode` (default `aimbase`) 외부화. 환경변수 `ANTHROPIC_CLI_TOOL_MODE` 로 에이전트 배포 시 override
+  3. **`ClaudeCliWorkerPool`** 에 `defaultToolMode` 필드 + 신규 생성자 + `getOrCreateMain(runId, model, configDir, systemPrompt, toolMode)` 오버로드. AdapterConfig 가 default 주입, 호출처가 명시 시 override 가능
+  4. **`ClaudeCliWorker.buildCommand`** 교체 — 직접 cmd.add 호출 → `ClaudeCliCommandBuilder.builder(...).build()` 사용. `setToolMode()` setter 추가 (Pool 이 spawn 전 호출)
+  5. **`ClaudeCodeTool`** 보강 — `tool_bridge=aimbase-mcp-only` 시 `permission_mode` default 가 `bypassPermissions` 자동 적용. `--mcp-config` 가 하나라도 있으면 `--strict-mcp-config` 동반 주입 (Worker 와 동일 잠금). handledOptions 에 `--strict-mcp-config` 추가
+  6. **단위 테스트 13 케이스** (`ClaudeCliCommandBuilderTest`): default AIMBASE 잠금 / Worker 시나리오 / ClaudeCodeTool 시나리오 / NATIVE / HYBRID / explicit 도구 리스트 / permissionMode override / strictMcpConfig 비활성 / system prompt 동시 적용 / resume+fork 순서 / sealNativeTools=false / toolsSpec explicit
+- **변경 사유**:
+  - 잠금 정책의 단일 진실 소스 — CLI flag 변경 시 빌더 한 곳만 수정
+  - 에이전트별 도구 노출 모드 외부화 (환경변수)
+  - ClaudeCodeTool 의 잠금 누락 (strict-mcp-config 0건) 보강 — 다른 개발자가 같은 함정 안 빠짐
+- **영향 모듈**:
+  - **BE 신규**: `llm/claudecli/ClaudeCliCommandBuilder.java`
+  - **BE 수정**: `ClaudeCliAdapterConfig` (toolMode 필드) / `ClaudeCliWorker` (buildCommand 빌더 사용) / `ClaudeCliWorkerPool` (defaultToolMode + 오버로드) / `ClaudeCodeTool` (잠금 보강)
+  - **설정**: `application.yml` 의 `platform.llm.anthropic-cli.tool-mode` 키 신규
+  - **테스트**: `ClaudeCliCommandBuilderTest` (신규, 13 케이스)
+  - **FE/DB/사이드카**: 없음
+- **영향도**: Medium (cmd 빌더 추출 — 잠금 정책 동작은 동일, ClaudeCodeTool 의 strict-mcp-config 누락만 신규)
+- **영향 범위**: CR-050 (Worker buildCommand) / CR-068 (--append-system-prompt 통합) / CR-044 (ClaudeCodeTool tool_bridge — 잠금 보강)
+- **검증 결과 (2026-04-27 06:50, ANTHROPIC_CLI_TOOL_MODE=aimbase + run_adapter_compare.py)**:
+  - 빌더가 만든 cmd 정확: `[claude, -p, --verbose, --input-format, stream-json, --output-format, stream-json, --tools, "", --strict-mcp-config, --mcp-config, {...}, --permission-mode, bypassPermissions, --append-system-prompt, ...]`
+  - API tools=11/7, CLI 도구 정상 사용 — CR-067/068 동등성 유지
+  - CLI 응답이 ClaudeCliCommandBuilder 인식: "ToolMode(AIMBASE/NATIVE/HYBRID) 단일 스위치로 도구 노출 정책... Worker와 ClaudeCodeTool 양쪽이 공유"
+  - 단위: ClaudeCliCommandBuilderTest 13 PASS + Worker/Pool/Adapter 회귀 PASS + ClaudeCodeTool 컴파일 PASS
+- **요청자**: 사용자 ("Tool 거 보고 구현하면 될 것을 우리가 생고생한 건가요?" → 공통화 정공 결정) | **승인자**: sykim (2026-04-27) | **적용 버전**: v8.5.2
+- **변경 일자**: 2026-04-27
+- **범위 경계**:
+  - ClaudeCodeTool 의 buildCommand 전체를 빌더로 대체 — 본 CR 범위 제외 (json-schema, max-budget-usd, fallback-model, cli_options, --add-dir 등 ClaudeCodeTool 고유 옵션 다수, 빌더 시그니처 비대화. 잠금 정책만 통일)
+  - tool-mode 의 런타임 동적 변경 (global_config) — 본 CR 범위 제외 (에이전트 배포 시점 결정으로 충분)
+  - HYBRID 모드의 정밀 화이트리스트 (어떤 네이티브 도구 허용/차단) — 본 CR 범위 제외 (호출처가 allowedTools/disallowedTools 명시)
+- **완료 기준**:
+  - [x] ClaudeCliCommandBuilder 신설 + 단위 13 PASS
+  - [x] ToolMode application.yml 외부화 (`tool-mode` 키 + ANTHROPIC_CLI_TOOL_MODE 환경변수)
+  - [x] ClaudeCliWorker.buildCommand 빌더 사용 + Worker/Pool 회귀 PASS
+  - [x] ClaudeCodeTool 잠금 정책 보강 (--strict-mcp-config 자동 주입 + bypassPermissions default)
+  - [x] 어댑터 비교로 빌더 출력 정확성 + CR-067/068 동등성 유지 검증
 - **원본 요구사항**: 본 카드 「발견 경위」 섹션 내장
 - **Plan 파일**: 없음
 

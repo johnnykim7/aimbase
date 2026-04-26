@@ -298,7 +298,9 @@ public class ClaudeCodeTool implements ToolExecutor {
                 : new ArrayList<>();
         String toolBridge = (String) input.getOrDefault("tool_bridge", "native");
 
-        // CR-044: tool_bridge 모드에 따라 allowed/disallowed 도구 목록 자동 구성
+        // CR-044 + CR-069: tool_bridge 모드에 따라 allowed/disallowed 도구 목록 자동 구성.
+        // Worker(LLM 어댑터) 와 동일한 잠금 정책 패턴 — ClaudeCliCommandBuilder.ToolMode 와 1:1 매핑:
+        // aimbase-mcp-only → AIMBASE / hybrid → HYBRID / native → NATIVE
         if (!"native".equals(toolBridge)) {
             allowedTools = new ArrayList<>(allowedTools);
             disallowedTools = new ArrayList<>(disallowedTools);
@@ -323,7 +325,12 @@ public class ClaudeCodeTool implements ToolExecutor {
                 if (mcpConfigPath != null && !mcpConfig.contains(mcpConfigPath)) {
                     mcpConfig.add(mcpConfigPath);
                 }
-                log.info("tool_bridge=aimbase-mcp-only: 네이티브 도구 봉인, Aimbase MCP 전용 모드");
+                // CR-069: stdio/자동화 환경 권한 게이트 봉인 (Worker 와 동일 패턴).
+                // 사용자가 permission_mode 를 명시하지 않은 경우에만 default 적용.
+                if (permissionMode == null || permissionMode.isBlank()) {
+                    permissionMode = "bypassPermissions";
+                }
+                log.info("tool_bridge=aimbase-mcp-only: 네이티브 도구 봉인, Aimbase MCP 전용 모드 (permission=bypassPermissions)");
 
             } else if ("hybrid".equals(toolBridge)) {
                 // 고위험 네이티브 도구만 차단 — Bash/Read/Grep/Glob 허용, 실행계 도구만 봉인
@@ -522,7 +529,7 @@ public class ClaudeCodeTool implements ToolExecutor {
                 "--add-dir", "--no-session-persistence", "--permission-mode",
                 "--reasoning-effort", "--thinking", "--max-thinking-tokens",
                 "--continue", "--resume", "--fork-session",
-                "--tools", "--mcp-config",
+                "--tools", "--mcp-config", "--strict-mcp-config",
                 "--max-budget-usd", "--task-budget"
         );
 
@@ -637,8 +644,15 @@ public class ClaudeCodeTool implements ToolExecutor {
         }
 
         // MCP 서버 설정 주입 (세션 단위)
+        // CR-069: --mcp-config 가 하나라도 있으면 --strict-mcp-config 동반 주입 — 사용자 글로벌
+        // ~/.claude/.mcp.json 오염 방지 (Worker 와 동일 잠금 정책).
+        boolean hasMcpConfig = false;
         for (String mcpEntry : mcpConfig) {
             if (mcpEntry != null && !mcpEntry.isBlank()) {
+                if (!hasMcpConfig) {
+                    cmd.add("--strict-mcp-config");
+                    hasMcpConfig = true;
+                }
                 cmd.add("--mcp-config");
                 cmd.add(mcpEntry);
             }

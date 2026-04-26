@@ -58,6 +58,8 @@ public class ClaudeCliWorker implements AutoCloseable {
     private final Duration turnTimeout;
     /** Phase 9: --mcp-config 로 CLI 에 주입할 JSON. 비어있으면 {"mcpServers":{}} 로 격리. */
     private final String mcpConfigJson;
+    /** CR-069: 도구 노출 모드 (AIMBASE/NATIVE/HYBRID). null/미설정 시 빌더 default(AIMBASE). */
+    private volatile ClaudeCliCommandBuilder.ToolMode toolMode;
     /**
      * CR-068 후속: --system-prompt flag 로 CLI 의 기본 system prompt 를 우리 prompt 로 교체.
      * null 이면 CLI 기본(Claude Code 학습 패턴) 사용. 비어있으면 SYSTEM 메시지 prepend 폴백.
@@ -110,6 +112,17 @@ public class ClaudeCliWorker implements AutoCloseable {
     /** SYSTEM prepend 폴백 여부 — override 가 설정됐으면 false. */
     boolean hasSystemPromptOverride() {
         return systemPromptOverride != null;
+    }
+
+    /**
+     * CR-069: start() 호출 전 도구 노출 모드 설정.
+     * null 이면 빌더 default(AIMBASE) 적용.
+     */
+    public void setToolMode(ClaudeCliCommandBuilder.ToolMode mode) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set toolMode after start()");
+        }
+        this.toolMode = mode;
     }
 
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
@@ -487,49 +500,22 @@ public class ClaudeCliWorker implements AutoCloseable {
         return 0;
     }
 
+    /**
+     * CR-069: 공통 ClaudeCliCommandBuilder 사용. Worker 는 stream-json + verbose 모드 +
+     * SYSTEM 메시지를 --append-system-prompt 로 통제 (CR-068 결정 유지).
+     * tool_mode 는 application.yml 의 platform.llm.anthropic-cli.tool-mode 가 default,
+     * 호출처가 setToolMode(...) 로 override.
+     */
     private List<String> buildCommand() {
-        List<String> cmd = new ArrayList<>();
-        cmd.add(binaryPath != null ? binaryPath : "claude");
-        cmd.add("-p");
-        cmd.add("--verbose");
-        cmd.add("--input-format");
-        cmd.add("stream-json");
-        cmd.add("--output-format");
-        cmd.add("stream-json");
-        // CR-050 Phase 9: 도구는 MCP 채널로만 노출.
-        // --tools "" : CLI 내장 빌트인 도구 봉인
-        // --strict-mcp-config : 사용자 글로벌 ~/.claude 설정 무시 (오염 방지)
-        // --mcp-config <json> : Aimbase 가 명시한 MCP 서버만 연결.
-        //   - mcpConfigJson="{\"mcpServers\":{}}" 이면 도구 비연결(순수 텍스트 LLM_CALL)
-        //   - aimbase-agent 가 노출된 설정이면 BashTool/ReadTool 등이 native tool_use 로 연결됨.
-        cmd.add("--tools");
-        cmd.add("");
-        cmd.add("--strict-mcp-config");
-        cmd.add("--mcp-config");
-        cmd.add(mcpConfigJson);
-        // CR-050 Phase 9: CLI 의 자체 permission prompt 는 stdin/stdout 자동화 환경에서
-        // 처리 불가 → 모든 tool_use 가 "차단" 으로 응답되어 모델이 무한 재시도. MCP 서버
-        // (aimbase-agent) 자체가 도구 권한·감사를 보유하므로 CLI 권한 게이트는 봉인.
-        cmd.add("--permission-mode");
-        cmd.add("bypassPermissions");
-        // CR-068 후속: --append-system-prompt 로 CLI 기본 system prompt 끝에 우리 prompt 추가.
-        // (--system-prompt 는 cwd/env 같은 dynamic 섹션도 같이 제거되어 CLI 가 워크스페이스 인식 못 함)
-        // append 방식: CLI 의 environment(cwd, env, git status 등) + Claude Code 기본 톤은 유지하되,
-        // 우리(Aimbase) 의 도구 사용 가이드·anti-hallucination 지시문·역할 정의를 추가 통제.
-        if (systemPromptOverride != null) {
-            cmd.add("--append-system-prompt");
-            cmd.add(systemPromptOverride);
-        }
-        if (model != null && !model.isBlank()) {
-            cmd.add("--model");
-            cmd.add(model);
-        }
-        if (resumeSessionId != null && !resumeSessionId.isBlank()) {
-            cmd.add("--resume");
-            cmd.add(resumeSessionId);
-            if (forkSession) cmd.add("--fork-session");
-        }
-        return cmd;
+        return ClaudeCliCommandBuilder.builder(binaryPath)
+                .toolMode(toolMode)               // null 이면 빌더 default(AIMBASE)
+                .mcpConfigJson(mcpConfigJson)
+                .streamJson(true)
+                .verbose(true)
+                .resume(resumeSessionId, forkSession)
+                .appendSystemPrompt(systemPromptOverride)
+                .model(model)
+                .build();
     }
 
     private void drainStdout() {

@@ -127,6 +127,12 @@ platform:
       max-workers-per-run: ${ANTHROPIC_CLI_MAX_WORKERS:5}
       acquire-timeout-seconds: ${ANTHROPIC_CLI_ACQUIRE_TIMEOUT:60}
       cli-binary-path: ${ANTHROPIC_CLI_BINARY:claude}
+      # CR-069: CLI 도구 노출 모드 (Worker / ClaudeCodeTool 양쪽 default).
+      # aimbase  - 네이티브 도구 봉인 + Aimbase MCP 만 노출 (default, 정책·감사 완전 경유)
+      # native   - CLI 본체 도구만 (MCP 미연결)
+      # hybrid   - 둘 다 (실험용, 운영 비권장)
+      # 에이전트 배포 시 환경변수 ANTHROPIC_CLI_TOOL_MODE 로 결정.
+      tool-mode: ${ANTHROPIC_CLI_TOOL_MODE:aimbase}
   # ─── 압축 임계값 (PRD-206, CR-030 Phase 5) ─────────────────────────
   # 퍼센트 단위 (70 = 70%). 환경변수 PLATFORM_*_PCT가 우선.
   compaction:
