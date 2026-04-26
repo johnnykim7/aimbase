@@ -8,7 +8,9 @@ import com.platform.llm.model.LLMRequest;
 import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.LLMStreamChunk;
 import com.platform.llm.model.ModelConfig;
+import com.platform.llm.model.ToolCall;
 import com.platform.llm.model.UnifiedMessage;
+import com.platform.tool.model.UnifiedToolDef;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,6 +23,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -192,6 +195,126 @@ class ClaudeCliLlmAdapterTest {
         adapter.closeBranch(runId, "B");
 
         pool.shutdownForRun(runId);
+    }
+
+    @Test
+    void tool_use_blocks_are_observed_but_NOT_propagated_to_orchestrator_phase9() throws Exception {
+        Path inputLog = tempDir.resolve("tools-stdin.log");
+        Path toolBinary = writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-tool"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo "$line" >> %s
+                  # assistant 이벤트 안에 tool_use 블록 포함
+                  echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reading file"},{"type":"tool_use","id":"toolu_01","name":"Read","input":{"path":"a.txt"}}]}}'
+                  echo '{"type":"result","subtype":"success","result":"reading file","session_id":"sess-tool","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(inputLog));
+
+        ClaudeCliWorkerPool toolPool = new ClaudeCliWorkerPool(
+                (model, sid, fork, cfg) -> new ClaudeCliWorker(
+                        toolBinary.toString(), model, sid, fork, cfg, Duration.ofSeconds(5)),
+                5, Duration.ofSeconds(2));
+
+        ClaudeCliLlmAdapter adapter = new ClaudeCliLlmAdapter(toolPool, null, null);
+
+        UnifiedToolDef readTool = new UnifiedToolDef(
+                "Read",
+                "Read a file",
+                Map.of("type", "object",
+                       "properties", Map.of("path", Map.of("type", "string")),
+                       "required", List.of("path")));
+
+        LLMRequest req = new LLMRequest(
+                "claude-sonnet-4-6",
+                List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "read a.txt")),
+                List.of(readTool),
+                ModelConfig.defaults(), false, "run-tool");
+
+        LLMResponse resp = adapter.chat(req).get();
+
+        // Phase 9: CLI 가 도구 루프를 자체적으로 완결하므로 OrchestratorEngine 입장에서는
+        // 도구 호출이 없는 응답으로 보여야 한다 (그렇지 않으면 외부 루프와 CLI 루프가 충돌).
+        // 어댑터는 tool_use 를 관찰 로그로만 남기고 LLMResponse 에 노출하지 않는다.
+        assertThat(resp.toolCalls()).isEmpty();
+        assertThat(resp.finishReason()).isEqualTo(LLMResponse.FinishReason.END);
+        assertThat(adapter.parseToolCalls(resp)).isEmpty();
+
+        // 도구는 MCP 채널로 전달되므로 stdin 에 도구 명세 텍스트가 들어가지 않는다.
+        java.util.List<String> lines = Files.readAllLines(inputLog);
+        assertThat(lines).hasSize(1);
+        assertThat(lines.get(0)).doesNotContain("<tools>");
+        assertThat(lines.get(0)).contains("\"content\":\"read a.txt\"");
+
+        toolPool.shutdownForRun("run-tool");
+    }
+
+    @Test
+    void tool_result_is_forwarded_to_cli_as_user_message() throws Exception {
+        Path inputLog = tempDir.resolve("toolresult-stdin.log");
+        Path toolBinary = writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-tr"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo "$line" >> %s
+                  echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}'
+                  echo '{"type":"result","subtype":"success","result":"done","session_id":"sess-tr","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(inputLog));
+
+        ClaudeCliWorkerPool toolPool = new ClaudeCliWorkerPool(
+                (model, sid, fork, cfg) -> new ClaudeCliWorker(
+                        toolBinary.toString(), model, sid, fork, cfg, Duration.ofSeconds(5)),
+                5, Duration.ofSeconds(2));
+
+        ClaudeCliLlmAdapter adapter = new ClaudeCliLlmAdapter(toolPool, null, null);
+
+        // 첫 턴: 평범한 USER
+        adapter.chat(new LLMRequest("m",
+                List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "hi")),
+                null, ModelConfig.defaults(), false, "run-tr")).get();
+
+        // 이후 턴: TOOL_RESULT 메시지를 OrchestratorEngine 이 주입한다고 가정
+        UnifiedMessage trMsg = UnifiedMessage.ofToolResults(List.of(
+                new com.platform.llm.model.ContentBlock.ToolResult("toolu_01", "file contents")));
+        adapter.chat(new LLMRequest("m",
+                List.of(trMsg), null, ModelConfig.defaults(), false, "run-tr")).get();
+
+        java.util.List<String> lines = Files.readAllLines(inputLog);
+        assertThat(lines).hasSize(2);
+        // 두 번째 라인이 tool_result 블록을 포함한 user 메시지여야 함
+        assertThat(lines.get(1)).contains("\"type\":\"tool_result\"");
+        assertThat(lines.get(1)).contains("\"tool_use_id\":\"toolu_01\"");
+        assertThat(lines.get(1)).contains("file contents");
+
+        toolPool.shutdownForRun("run-tr");
+    }
+
+    @Test
+    void transformToolDefs_always_returns_null_phase9() {
+        // Phase 9: 도구는 MCP 채널 (--mcp-config) 로 전달되므로 어댑터가 도구 정의를 변환하지 않는다.
+        ClaudeCliLlmAdapter adapter = new ClaudeCliLlmAdapter(pool, null, null);
+        assertThat(adapter.transformToolDefs(List.of(
+                new UnifiedToolDef("Read", "Read a file",
+                        Map.of("type", "object", "properties", Map.of()))))).isNull();
+        assertThat(adapter.transformToolDefs(null)).isNull();
+        assertThat(adapter.transformToolDefs(List.of())).isNull();
+    }
+
+    @Test
+    void stripMcpPrefix_removes_mcp_server_prefix_phase9() {
+        // CLI 가 MCP 도구 호출 시 발행하는 mcp__<server>__<tool> 이름을 OrchestratorEngine 의
+        // 원본 도구명(<tool>) 으로 매핑한다.
+        assertThat(com.platform.llm.claudecli.ClaudeCliWorker.stripMcpPrefix("mcp__aimbase__bash"))
+                .isEqualTo("bash");
+        assertThat(com.platform.llm.claudecli.ClaudeCliWorker.stripMcpPrefix("mcp__aimbase__file_read"))
+                .isEqualTo("file_read");
+        // 비-MCP 이름은 그대로
+        assertThat(com.platform.llm.claudecli.ClaudeCliWorker.stripMcpPrefix("bash"))
+                .isEqualTo("bash");
+        assertThat(com.platform.llm.claudecli.ClaudeCliWorker.stripMcpPrefix(null)).isNull();
     }
 
     @Test

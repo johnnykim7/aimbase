@@ -96,6 +96,40 @@ class ClaudeCliLlmAdapterIT {
     }
 
     @Test
+    void llm_returns_tool_use_when_tools_provided() {
+        // OrchestratorEngine 의 도구 루프 1턴을 시뮬레이션 — 어댑터가 ToolCall 을 반환해야 함.
+        ClaudeCliWorkerPool pool = newPool();
+        ClaudeCliLlmAdapter adapter = new ClaudeCliLlmAdapter(pool, null, null);
+        String runId = "it-run-tools";
+
+        com.platform.tool.model.UnifiedToolDef readTool = new com.platform.tool.model.UnifiedToolDef(
+                "Read",
+                "Read a file from disk and return its contents",
+                java.util.Map.of(
+                        "type", "object",
+                        "properties", java.util.Map.of(
+                                "path", java.util.Map.of("type", "string", "description", "absolute path")
+                        ),
+                        "required", List.of("path")));
+
+        LLMRequest req = new LLMRequest(
+                null,
+                List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER,
+                        "Use the Read tool to read /tmp/example.txt. Respond with a tool_use block.")),
+                List.of(readTool),
+                ModelConfig.defaults(), false, runId);
+
+        com.platform.llm.model.LLMResponse resp = adapter.chat(req).join();
+
+        assertThat(resp.toolCalls()).isNotEmpty();
+        assertThat(resp.toolCalls().get(0).name()).isEqualTo("Read");
+        assertThat(resp.finishReason())
+                .isEqualTo(com.platform.llm.model.LLMResponse.FinishReason.TOOL_USE);
+
+        pool.shutdownForRun(runId);
+    }
+
+    @Test
     void run_shutdown_terminates_all_processes() {
         ClaudeCliWorkerPool pool = newPool();
         ClaudeCliLlmAdapter adapter = new ClaudeCliLlmAdapter(pool, null, null);

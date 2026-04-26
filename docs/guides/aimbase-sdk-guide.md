@@ -1,6 +1,6 @@
 # Aimbase Tool SDK 사용 가이드
 
-> **v1.1.0** | 2026-04-10 | CR-041, CR-042
+> **v1.2.0** | 2026-04-26 | CR-041, CR-042, CR-067
 
 소비앱이 Aimbase 도구를 로컬에서 사용하거나, 원격 Agent로 Aimbase 오케스트레이션에 참여하는 방법을 안내합니다.
 
@@ -401,9 +401,55 @@ java -jar aimbase-agent.jar \
 
 ---
 
+## 7. ToolResult → String 직렬화 규칙 (CR-067)
+
+`EnhancedToolExecutor.execute(Map)` default bridge 와 `AgentMcpServer` (MCP 서버 도구 디스패치) 는 모두 `ToolResultRenderer.render(ToolResult)` 를 통해 `ToolResult` 를 String 으로 직렬화한다. **본문(파일 내용·stdout·grep 결과 등)을 손실 없이 노출**하는 표준 규칙이다.
+
+### 규칙 요약
+
+| 입력 | 직렬화 결과 |
+|---|---|
+| `ToolResult` 가 null | 빈 문자열 |
+| `output == null` && `success=true` | `summary` 만 (헤더 없음) |
+| `output instanceof CharSequence` | `# {summary}\n{본문}` |
+| `output instanceof Map`, 본문 키 발견 | `# {summary}\n{본문}\n\n--- meta ---\n{잔여키 pretty JSON}` |
+| `output instanceof Map`, 본문 키 미발견 | `# {summary}\n{전체 pretty JSON}` |
+| `output instanceof Collection / Number / Boolean / record / 그 외` | `# {summary}\n{pretty JSON}` |
+| `success=false` | `[ERROR] {summary}\n{output 본문?}` |
+| 직렬화 실패 | `toString()` 폴백 + WARN 로그 |
+| `summary == body` | 헤더 중복 생략 |
+| `summary` 빈 문자열 | 헤더 생략, 본문만 |
+
+### Map 본문 키 우선순위
+
+`output instanceof Map` 인 경우, 본문 텍스트가 들어가는 키를 다음 순서로 탐색해 첫 발견 값을 본문으로 사용한다:
+
+1. **텍스트 본문** (`CharSequence`): `content` → `stdout` → `text` → `body` → `tree` → `diff` → `appliedDiff`
+2. **List 본문** (`Collection`): `matches` → `filenames` → `results` → `sections`
+
+위 키에 매칭되는 값을 발견하면 그 값을 본문으로 추출하고, 잔여 키들은 `--- meta ---` 섹션 아래 pretty JSON 으로 부착한다. 매칭 키가 없으면 Map 전체를 pretty JSON 으로 직렬화한다.
+
+### 도구 작성 가이드
+
+- 본문이 큰 텍스트(파일 내용·stdout 등)는 위 표의 본문 키 중 하나로 `output` Map 에 넣는다 — 모델이 메타가 아닌 본문을 직접 받게 된다
+- 본문이 List 인 경우(grep matches·glob filenames 등)도 동일하게 본문 키 사용
+- 본문 키 우선순위에 없는 신규 도구 키를 쓰려면 `ToolResultRenderer` 의 `TEXT_BODY_KEYS` / `LIST_BODY_KEYS` 에 추가 필요 (PR 권장)
+- `summary` 는 본문 헤더로 부착되므로 본문과 동일 텍스트로 두지 말 것 (한 줄 요약으로)
+
+### 호출처
+
+이 규칙은 다음 모든 경로에서 자동 적용된다:
+- `AgentMcpServer.dispatch` (MCP 서버 도구 호출 → Claude CLI 등 MCP 클라이언트에 전달)
+- `EnhancedToolExecutor.execute(Map)` default bridge (모든 1-arg 호출처 — 향후 SDK 사용자 포함)
+
+신 인터페이스 `EnhancedToolExecutor.execute(Map, ToolContext)` 를 직접 호출하는 경우(예: `ToolRegistry.execute(ToolCall, ToolContext)`)는 `ToolResult` 그대로 받으므로 별도 직렬화가 필요 없다.
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.2.0 | 2026-04-26 | CR-067 — `ToolResultRenderer` 신설 + `EnhancedToolExecutor` default bridge 본문 노출 정정 + 직렬화 규칙 섹션 추가 |
 | v1.1.0 | 2026-04-10 | CR-042 독립 실행형 Agent (aimbase-agent) 섹션 추가 |
 | v1.0.0 | 2026-04-10 | CR-041 초판 — sdk-core 14개 도구, sdk-mcp Agent 생명주기, Agent Registry API |

@@ -121,21 +121,31 @@ public class AgentMcpServer {
             var mcpTool = new McpSchema.Tool(def.name(), def.description(),
                     AgentMcpServerApp.toJsonSchemaStatic(def.inputSchema()));
             toolSpecs.add(new McpServerFeatures.SyncToolSpecification(mcpTool,
-                    (exchange, args) -> {
-                        try {
-                            String result = tool.execute(args);
-                            result = McpResultTruncator.truncate(def.name(), result);
-                            return new McpSchema.CallToolResult(result, false);
-                        } catch (Exception e) {
-                            return new McpSchema.CallToolResult(
-                                    "{\"error\":\"" + e.getMessage() + "\"}", true);
-                        }
-                    }));
+                    (exchange, args) -> dispatch(tool, def.name(), args)));
         }
         return McpServer.sync(transport)
                 .serverInfo("aimbase-agent", "1.0.0")
                 .tools(toolSpecs)
                 .build();
+    }
+
+    /**
+     * 도구 호출 디스패치 — 단위 테스트에서 직접 검증할 수 있도록 패키지-private 헬퍼로 분리.
+     *
+     * <p>CR-067: EnhancedToolExecutor 의 default bridge 가 ToolResultRenderer 로 본문을 직렬화하므로
+     * 별도 분기 없이 {@code tool.execute(args)} 한 줄로 본문이 정상 노출된다.
+     * 그 후 {@link McpResultTruncator} 로 길이 제한 적용. 예외는 isError=true 로 패킹.
+     */
+    static McpSchema.CallToolResult dispatch(ToolExecutor tool, String name, Map<String, Object> args) {
+        try {
+            String result = tool.execute(args);
+            result = McpResultTruncator.truncate(name, result);
+            return new McpSchema.CallToolResult(result, false);
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return new McpSchema.CallToolResult(
+                    "{\"error\":\"" + msg.replace("\"", "\\\"") + "\"}", true);
+        }
     }
 
     /**

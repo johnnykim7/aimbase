@@ -34,6 +34,16 @@ public class ClaudeCliAdapterConfig {
     private int maxWorkersPerRun = 5;
     private int acquireTimeoutSeconds = 60;
     private String cliBinaryPath = "claude";
+    /**
+     * Phase 9: Aimbase 도구를 CLI 에 노출하는 MCP 서버 설정 (JSON).
+     * 비어있으면 도구 미연결 모드 (순수 텍스트 LLM_CALL 만).
+     * 예시: {"mcpServers":{"aimbase":{"command":"java","args":["-jar","/path/to/aimbase-agent.jar","--mcp-stdio"]}}}
+     */
+    private String mcpConfigJson = "";
+    /** Phase 9: aimbase-agent jar 경로. 미지정 시 mcpConfigJson 직접 설정 필요. */
+    private String aimbaseAgentJar = "";
+    /** Phase 9: aimbase-agent 자식 프로세스 spawn 시 사용할 java 실행 경로 (Java 21 필수). */
+    private String javaCommand = "java";
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -50,13 +60,44 @@ public class ClaudeCliAdapterConfig {
     public String getCliBinaryPath() { return cliBinaryPath; }
     public void setCliBinaryPath(String v) { this.cliBinaryPath = v; }
 
+    public String getMcpConfigJson() { return mcpConfigJson; }
+    public void setMcpConfigJson(String v) { this.mcpConfigJson = v; }
+
+    public String getAimbaseAgentJar() { return aimbaseAgentJar; }
+    public void setAimbaseAgentJar(String v) { this.aimbaseAgentJar = v; }
+
+    public String getJavaCommand() { return javaCommand; }
+    public void setJavaCommand(String v) { this.javaCommand = v; }
+
     public Duration turnTimeout() { return Duration.ofSeconds(timeoutSeconds); }
+
+    /**
+     * 효과적인 MCP 설정 JSON 을 반환.
+     * mcpConfigJson 이 명시되어 있으면 그대로, 아니면 aimbaseAgentJar 로 자동 합성, 둘 다 비면 빈 설정.
+     */
+    public String resolveMcpConfigJson() {
+        if (mcpConfigJson != null && !mcpConfigJson.isBlank()) {
+            return mcpConfigJson;
+        }
+        if (aimbaseAgentJar != null && !aimbaseAgentJar.isBlank()) {
+            // CLI 가 자식 프로세스로 <java-command> -jar <agent> --mcp-stdio 기동
+            String java = (javaCommand == null || javaCommand.isBlank()) ? "java" : javaCommand;
+            return "{\"mcpServers\":{\"aimbase\":{\"command\":\""
+                    + java.replace("\"", "\\\"") + "\","
+                    + "\"args\":[\"-jar\",\"" + aimbaseAgentJar.replace("\"", "\\\"")
+                    + "\",\"--mcp-stdio\"]}}}";
+        }
+        // 도구 비연결 모드 — 순수 텍스트 LLM_CALL.
+        return "{\"mcpServers\":{}}";
+    }
 
     @Bean
     public ClaudeCliWorkerPool claudeCliWorkerPool() {
         Duration turnTimeout = turnTimeout();
+        String mcpConfig = resolveMcpConfigJson();
         ClaudeCliWorkerPool.WorkerFactory factory = (model, resumeSessionId, forkSession, configDir) ->
-                new ClaudeCliWorker(cliBinaryPath, model, resumeSessionId, forkSession, configDir, turnTimeout);
+                new ClaudeCliWorker(cliBinaryPath, model, resumeSessionId, forkSession,
+                        configDir, turnTimeout, mcpConfig);
         return new ClaudeCliWorkerPool(factory, maxWorkersPerRun,
                 Duration.ofSeconds(acquireTimeoutSeconds));
     }

@@ -38,12 +38,17 @@ public interface EnhancedToolExecutor extends ToolExecutor {
 
     /**
      * 기존 ToolExecutor.execute(Map) → String bridge.
-     * EnhancedToolExecutor 구현체에서는 새 execute(Map, ToolContext)를 호출하고
-     * summary를 반환한다.
+     *
+     * <p>CR-067: 이전에는 {@link ToolResult#summary()} 만 반환해 output 본문(파일 내용·stdout·grep 결과 등)이
+     * MCP/Controller/Cron/RemoteTrigger 모든 경로에서 손실됐다. 본 bridge 는 {@link ToolResultRenderer}
+     * 를 통해 본문을 보존하며 직렬화한다.
+     *
+     * <p>호출처(MCP 등)가 {@link ToolContext} 를 알 수 없으므로 {@link ToolContext#minimal} 로 합성한다.
+     * 호출처가 컨텍스트를 가진 경우에는 신 {@link #execute(Map, ToolContext)} 를 직접 호출해야 한다.
      */
     @Override
     default String execute(Map<String, Object> input) {
         ToolResult result = execute(input, ToolContext.minimal(null, null));
-        return result.summary();
+        return ToolResultRenderer.render(result);
     }
 }
