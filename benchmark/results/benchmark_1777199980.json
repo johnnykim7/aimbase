@@ -1,0 +1,110 @@
+[
+  {
+    "platform": "aimbase",
+    "elapsed_s": 4.8,
+    "cost_usd": 0.02533425,
+    "input_tokens": 6135,
+    "output_tokens": 157,
+    "response": "Virtual Thread는 JDK 21에서 정식 도입된 경량 스레드로, JVM이 관리하며 수백만 개 생성이 가능합니다.\nPlatform Thread는 OS 스레드와 1:1 매핑되어 생성 비용이 크고 수천 개 수준이 한계입니다.\nVirtual Thread는 I/O 블로킹 시 OS 스레드를 점유하지 않고 반납하므로, 높은 동시성 처리에 유리합니다.",
+    "task": "T1_simple_qa"
+  },
+  {
+    "platform": "claude_cli",
+    "cost_usd": 0.13587149999999998,
+    "input_tokens": 35497,
+    "output_tokens": 184,
+    "response": "Virtual Thread는 JVM이 관리하는 경량 스레드로, Platform Thread처럼 OS 스레드에 1:1 매핑되지 않아 수백만 개 생성이 가능하다. I/O 블로킹 시 OS 스레드를 점유하지 않고 자동으로 언마운트(unmount)되어, 같은 OS 스레드를 다른 Virtual Thread가 재사용한다. 따라서 기존 동기식 코드 스타일을 그대로 유지하면서도 비동기 수준의 처리량을 얻을 수 있다.",
+    "elapsed_s": 9.6,
+    "task": "T1_simple_qa"
+  },
+  {
+    "platform": "openclaude",
+    "cost_usd": 0.33259,
+    "input_tokens": 52347,
+    "output_tokens": 217,
+    "response": "**Virtual Thread**: JVM이 관리하는 경량 스레드로, 블로킹 I/O 시 캐리어(OS) 스레드를 자동 반납하여 수십만 개 동시 생성 가능.\n\n**Platform Thread**: OS 커널 스레드와 1:1 매핑되어 생성 비용(~1MB 스택)이 크고, 수천 개 수준에서 한계.\n\n**핵심 차이**: Virtual Thread는 블로킹 호출을 논블로킹처럼 처리해 처리량을 높이되, `synchronized` 블록에서 캐리어 스레드를 고정(pinning)하므로 `ReentrantLock` 사용 권장.",
+    "elapsed_s": 20.7,
+    "task": "T1_simple_qa"
+  },
+  {
+    "platform": "aimbase",
+    "elapsed_s": 0.5,
+    "cost_usd": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "response": "",
+    "task": "T2_file_read"
+  },
+  {
+    "platform": "claude_cli",
+    "cost_usd": 0.0957279,
+    "input_tokens": 34595,
+    "output_tokens": 502,
+    "response": "CLAUDE.md에서 확인한 내용:\n\n- **프로젝트**: Aimbase (멀티테넌트 LLM 오케스트레이션 플랫폼)\n- **현재 Sprint**: Sprint 50 진행 중 (CR-039 미완료)\n  - ✅ CR-040 런타임 설정 관리 — 완료\n  - ☐ CR-039 고급 확장 도구 4 Phase — 미완료",
+    "elapsed_s": 15.0,
+    "task": "T2_file_read"
+  },
+  {
+    "platform": "openclaude",
+    "cost_usd": 0.12843475000000001,
+    "input_tokens": 52380,
+    "output_tokens": 70,
+    "response": "현재 **Sprint 50~51** 진행 중이며, 프로젝트 이름은 **Aimbase** (멀티테넌트 LLM 오케스트레이션 플랫폼)입니다.",
+    "elapsed_s": 13.9,
+    "task": "T2_file_read"
+  },
+  {
+    "platform": "aimbase",
+    "elapsed_s": 0.3,
+    "cost_usd": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "response": "",
+    "task": "T3_multi_search"
+  },
+  {
+    "platform": "claude_cli",
+    "cost_usd": 0.23221980000000003,
+    "input_tokens": 77268,
+    "output_tokens": 1702,
+    "response": "`trim` 메서드는 내부적으로 `trimWithState`에 위임하며, 거기서 압축 전략별로 다음 3개의 private 메서드를 호출합니다.\n\n---\n\n### 1. `snip(messages, removeCount)` — 라인 316\n**Level 1 SNIP** 전략. LLM 호출 없이 0비용으로 동작.\n- SYSTEM 메시지는 보존\n- 비-SYSTEM 메시지 중 오래된 것부터 `removeCount`개 제거 (단, 최소 2개는 항상 유지)\n- 사용률 70~85% 구간에서 호출 (snipThreshold 초과 시)\n\n---\n\n### 2. `tryMicroCompact(messages, targetTokens)` — 라인 342\n**Level 2 MICRO_COMPACT** 전략. 2단계 폴백 구조.\n- **1단계 (0비용)**: 오래된 `TOOL_RESULT` 메시지를 `\"[Tool result cleared]\"` 마커로 교체. 최근 3개 tool result는 보존. 마커 후 토큰이 목표의 130% 이하이면 LLM 호출 없이 반환\n- **2단계 (Haiku 폴백)**: 마커 대체가 부족하면 `summarizer.microSummarize()`로 하위 1/3 메시지를 Haiku로 압축 요약\n- 사용률 85~91% 구간 (microThreshold 초과 시)\n\n---\n\n### 3. `trySummarizeAndTrim(messages, targetTokens)` — 라인 274\n**Level 4 AUTO_COMPACT** 전략. 전체 요약.\n- SYSTEM과 비-SYSTEM 메시지 분리\n- 비-SYSTEM 중 하위 2/3를 `summarizer.summarize()`로 LLM 요약\n- 요약 결과를 `[이전 대화 요약]` SYSTEM 메시지로 삽입하고 최근 1/3만 유지\n- 요약 후에도 targetTokens 초과 시 `simpleTrim()`으로 추가 절삭\n- 사용률 93~98% 구간 (autoThreshold 초과 시)\n\n---\n\n> Level 3 `SESSION_MEMORY`는 외부 빈인 `sessionMemoryCompaction.compact()`를 직접 호출하며, 위 3개 private 메서드와는 구분됩니다.",
+    "elapsed_s": 32.1,
+    "task": "T3_multi_search"
+  },
+  {
+    "platform": "openclaude",
+    "cost_usd": 0.248535,
+    "input_tokens": 165466,
+    "output_tokens": 774,
+    "response": "`trim(messages, maxTokens)` (line 256)은 `trimWithState`를 위임 호출하며, `trimWithState` 내부에서 압축 레벨에 따라 다음 3개 메서드를 호출합니다:\n\n| 메서드 | 라인 | 압축 레벨 | 역할 |\n|--------|------|-----------|------|\n| `snip(messages, removeCount)` | 316 | **Level 1 — SNIP** | SYSTEM 메시지는 유지하고, 가장 오래된 비-SYSTEM 메시지 n개를 단순 제거. LLM 호출 없이 0비용 |\n| `tryMicroCompact(messages, targetTokens)` | 342 | **Level 2 — MICRO_COMPACT** | 2단계 전략: ①먼저 오래된 TOOL_RESULT를 `[Tool result cleared]` 마커로 대체(0비용), ②그래도 부족하면 Haiku로 하위 1/3을 200자 불릿 요약 |\n| `trySummarizeAndTrim(messages, targetTokens)` | 274 | **Level 4 — AUTO_COMPACT** | 비-SYSTEM 메시지를 앞쪽 2/3 요약 + 뒤쪽 1/3 유지로 나누고, `ConversationSummarizer.summarize()`로 전체 요약 500자 생성. 요약 후에도 초과하면 `simpleTrim`으로 추가 제거 |\n\n추가로 Level 3(SESSION_MEMORY)에서는 외부 서비스 `sessionMemoryCompaction.compact()`를, Level 5(BLOCK)에서는 `BlockingLimitException`을 던집니다.",
+    "elapsed_s": 33.1,
+    "task": "T3_multi_search"
+  },
+  {
+    "platform": "aimbase",
+    "elapsed_s": 6.1,
+    "cost_usd": 0.0081537,
+    "input_tokens": 6167,
+    "output_tokens": 408,
+    "response": "\n```typescript\n// HealthController.java\n@RestController\n@RequestMapping(\"/api\")\npublic class HealthController {\n\n    @Autowired\n    private DataSource dataSource;\n\n    @Autowired\n    private RedisTemplate<String, String> redisTemplate;\n\n    @GetMapping(\"/health\")\n    public ResponseEntity<Map<String, Object>> health() {\n        Map<String, Object> result = new LinkedHashMap<>();\n\n        // DB ping\n        try (Connection conn = dataSource.getConnection()) {\n            conn.isValid(1);\n            result.put(\"db\", \"ok\");\n        } catch (Exception e) {\n            result.put(\"db\", \"fail: \" + e.getMessage());\n        }\n\n        // Redis ping\n        try {\n            String pong = redisTemplate.getConnectionFactory()\n                .getConnection().ping();\n            result.put(\"redis\", \"PONG\".equals(pong) ? \"ok\" : \"fail\");\n        } catch (Exception e) {\n            result.put(\"redis\", \"fail: \" + e.getMessage());\n        }\n\n        boolean healthy = result.values().stream().allMatch(\"ok\"::equals);\n        result.put(\"status\", healthy ? \"UP\" : \"DOWN\");\n\n        return ResponseEntity\n            .status(healthy ? 200 : 503)\n            .body(result);\n    }\n}\n```\n\n응답 예시:\n```json\n{\n  \"db\": \"ok\",\n  \"redis\": \"ok\",\n  \"status\": \"UP\"\n}\n```\n\n의존성 확인: `spring-boot-starter-data-redis`와 `spring-boot-starter-jdbc` (또는 JPA) 필요.",
+    "task": "T4_code_gen"
+  },
+  {
+    "platform": "claude_cli",
+    "cost_usd": 0.20673315,
+    "input_tokens": 107666,
+    "output_tokens": 769,
+    "response": "",
+    "elapsed_s": 17.2,
+    "task": "T4_code_gen"
+  },
+  {
+    "platform": "openclaude",
+    "cost_usd": 0.20542924999999998,
+    "input_tokens": 159173,
+    "output_tokens": 721,
+    "response": "",
+    "elapsed_s": 26.5,
+    "task": "T4_code_gen"
+  }
+]

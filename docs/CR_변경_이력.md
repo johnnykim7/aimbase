@@ -56,6 +56,8 @@
 | CR-060 | 위젯 음성 입력 (STT) — 마이크 녹음 + Whisper 변환 + 입력창 자동 삽입 (`/chat/stt` 전용 + `SpeechService` 추출 + scope `chat:stt` + BIZ-102~104 + global_config) (PRD-324~326, FE-037) | 신규 | Medium | v8.2.0 | 📝 설계 완료 |
 | CR-065 | SubWorkflow 자식 run 분리 생성 — `SubWorkflowStepExecutor` 인라인 실행 → `WorkflowRunEntity` 별도 레코드 승격 + `parent_run_id` 트리 + 자식 개별 재시도 API (PRD-327~329) | 변경 | Medium | v8.3.0 | 📝 발번 |
 | CR-066 | Tenant Flyway 자동 재실행 — `TenantMigrationRunner` + Admin API `POST /platform/tenants/migrate` + 실패 격리 + 운영 가이드 § 2-5 자동화 (PRD-330~332) | 변경 | Medium | v8.4.0 | ✅ 구현 완료 |
+| CR-067 | EnhancedToolExecutor default bridge 본문 노출 — `ToolResultRenderer` 신설 + bridge 정정 (CR-050 Phase 9 후속, MCP stdio 직접 검증으로 본문 노출 확인) | 버그수정 | High | v8.5.0 | ✅ 구현 완료 |
+| CR-068 | API 어댑터 도구 호출 회귀 4종 정공 — (1) CR-048 filterActive 회귀 (2) HttpRequestTool body type 오타 (3) anti-hallucination 지시문 누락 (4) actions_executed 메타 누락. 작년 4월 정상 동작 동등 회복 | 버그수정 | High | v8.5.1 | ✅ 구현 완료 |
 
 ---
 
@@ -1141,7 +1143,7 @@
   - 워커 크래시 빈도(run 대비 %).
 - **요청자**: sykim | **승인자**: sykim (2026-04-16, 결정 7종 추천안 확정 2026-04-24) | **적용 버전**: v7.8.0
 - **변경 일자**: 2026-04-16 (착수 2026-04-24)
-- **상태**: ✅ Phase 1~7 구현 완료 + **로컬 IT 4/4 실측 PASS** (2026-04-24, claude 2.1.109). 신규 클래스 6개(Worker/Pool/Adapter/Config/BranchScope + 예외 2), 수정 4개(ConnectionAdapterFactory, WorkflowEngine, ParallelStepExecutor, application.yml), 단위 테스트 **22 PASS** (Worker 6 + Pool 8 + Adapter 8), IT 4 PASS (프로세스 누수 없음, fork-session `--resume <sid> --fork-session` 실동작 확인, "indigo" 컨텍스트 회상 성공). **Phase 7**: ParallelStepExecutor 가 각 서브스텝을 `ClaudeCliBranchScope` 로 감싸 자동으로 fork 워커 spawn + 종료 시 release — prompt prefix 캐시 재사용 실현. 대량 병렬 비용 실측($0.07→$0.007)은 계정 overage 복구 후 진행.
+- **상태**: ✅ Phase 1~9 구현 완료 (2026-04-24~26, claude 2.1.109). 신규 클래스 6개(Worker/Pool/Adapter/Config/BranchScope + 예외 2), 수정 5개(ConnectionAdapterFactory, WorkflowEngine, ParallelStepExecutor, CacheControlStrategy, application.yml), 단위 테스트 **26 PASS** (Worker 6 + Pool 8 + Adapter 12). **Phase 7**: ParallelStepExecutor 자동 fork 워커. **Phase 8 (시도 후 폐기)**: 시스템 프롬프트 텍스트 인젝션으로 도구 호출 시도 — 실측 결과 CLI 환경에서 native tool_use 끌어내지 못함을 확인하고 폐기. **Phase 9 (정석, 2026-04-26)**: MCP 통합으로 도구 호출 정식 구현 — 워커 buildCommand 에 `--strict-mcp-config --mcp-config <aimbase-agent-stdio>` + `--permission-mode bypassPermissions` 주입. aimbase-agent jar 가 자식 프로세스 stdio MCP 서버로 14개 SDK 도구 노출. CLI 가 `mcp__aimbase__<name>` 형식으로 native tool_use 발행, MCP 서버가 도구 실행, **CLI 내부에서 tool_result 자동 소비 후 다음 응답 생성** (실측됨). 외부(어댑터)는 tool_use 를 관찰 로그로만 남기고 LLMResponse.toolCalls 빈 채로 finishReason=END 반환 → OrchestratorEngine 외부 도구 루프와 충돌 없음. **트레이드오프 명시**: API 어댑터는 OrchestratorEngine ToolCallHandler 가 도구 루프 통제, CLI 어댑터는 CLI 내부 루프가 자율 통제 (Stop Hook/max_iterations 등 외부 정책 미적용). 같은 ToolRegistry/SDK 도구 본체는 공유 — 결과물 동등. cache_control TTL 순서 버그(tools 5m vs system 1h) 부수 수정. IT 환경 셋업 검증 완료 (CLI MCP 연결 status=connected, 도구 50회+ native 호출 관찰).
 - **결정 승인 (2026-04-24 전부 추천안 확정)**:
   1. run당 최대 워커 수 = 5, 초과 시 큐잉(Semaphore 대기)
   2. Usage 추출 = stream-json 파싱, 실패 시 0 폴백 + 경고 로그
@@ -1492,6 +1494,160 @@
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR066_TenantFlyway자동재실행_20260424.md`
 - **T3 설계서**: `docs/T3-13_CR-066_TenantFlywayAutoMigrate_설계서.md` (구현 착수 시 작성)
 - **Plan 파일**: `~/.claude/plans/cr-066-tenant-flyway-auto-migrate.md` (구현 착수 시 생성)
+
+---
+
+### CR-067 | EnhancedToolExecutor default bridge 본문 노출 (정공)
+
+- **대상 기능 ID**: PRD-333 (신규 — Tool SDK bridge 본문 노출 규약 일원화)
+- **변경 타입**: 버그수정
+- **선택안**: **옵션 A 정공** — `EnhancedToolExecutor.execute(Map)` default bridge 자체를 본문 직렬화 반환으로 수정. MCP 우회로(옵션 B)는 비대칭 SDK 계약을 만들기에 기각
+- **변경 내용**:
+  1. **`EnhancedToolExecutor.execute(Map)` default bridge 정정** — `ToolResult.output` 을 표준 직렬화 규칙으로 문자열 반환, `summary` 1줄 헤더 부착, 에러 시 본문에 reason 포함. 신규 정적 헬퍼 `ToolResultRenderer.render(ToolResult)` 추출(중복 방지 + 단위 테스트 가능 단위)
+  2. **본문 직렬화 표준 규칙** (`ToolResultRenderer`):
+     - `output == null` && `success` → `summary` 만 반환
+     - `output instanceof CharSequence` → 문자열 그대로
+     - `output instanceof Map` → `content` / `stdout` / `text` / `body` / `result` / `data` 순으로 본문 키 탐색, 발견 시 그 값을 본문으로 + 잔여 키는 `\n---\n<json>` 부록. 본문 키 없으면 전체 Jackson `pretty` JSON
+     - `output instanceof Collection / Number / Boolean` → Jackson `pretty` JSON
+     - 그 외 객체 → Jackson `pretty` JSON, 직렬화 실패 시 `toString()` 폴백 + 경고 로그
+     - `success == false` → `[ERROR] {summary}\n{body?}` 형식
+     - 헤더: `summary` 가 비어있지 않으면 본문 앞에 `# {summary}\n` 부착, 본문 자체와 중복 시 헤더 생략
+  3. **신규 `ToolResultRenderer` 클래스** — `tool-sdk-core` 위치, `EnhancedToolExecutor` default bridge 와 `AgentMcpServer.buildMcpServer` 두 호출처에서 공통 사용. 향후 SDK 사용자가 직접 `output→string` 변환할 때도 재사용 가능하도록 public
+  4. **`AgentMcpServer.buildMcpServer` 정리** — 더 이상 분기 불필요. legacy `ToolExecutor.execute(args)` 가 본문을 자동 반환하므로 기존 한 줄 호출 유지. `McpResultTruncator.truncate` 는 그대로 통과
+  5. **비-MCP 호출처 회귀 점검** — `ToolController` / `CronScheduleManager` / `RemoteTriggerTool` / `HttpRequestToolTest`(16+ 케이스) 동작 변화 확인:
+     - 응답 페이로드가 메타 → 본문으로 바뀜 → 의도된 변경, API 응답 스키마 변경 없음(여전히 String)
+     - HttpRequestToolTest 는 `execute(Map, ToolContext)` 신 메서드를 직접 호출하고 있어 영향 없음 (확인 후 기록)
+     - ToolController 응답 사용자(FE) 도 본문 노출이 자연스러움 (ToolPlayground 등)
+  6. **단위 테스트 신설**:
+     - `ToolResultRendererTest` — 출력 타입별 직렬화 8 케이스 (string / Map+content / Map+stdout / Map+다중키 / Collection / Number / record / 직렬화 실패 폴백)
+     - `ToolResultRendererTest` — success=false 에러 포맷 2 케이스
+     - `EnhancedToolExecutorBridgeTest` — bridge 가 `execute(Map, ctx)` 호출 후 renderer 통과시키는지 1 케이스
+     - `AgentMcpServerTest` — EnhancedToolExecutor 본문 노출 + legacy ToolExecutor 회귀 + 에러 직렬화 + truncator 적용 4 케이스
+  7. **회귀 통합 테스트** — `HttpRequestToolTest` / `ToolControllerTest` / 기타 EnhancedToolExecutor 테스트 전수 PASS 확인
+  8. **CR-050 종합 IT 재실측** — `AdapterToolLoopComparisonIT` 다시 돌려 CLI 어댑터가 파일 6개 분석 완수하는지 검증. 비용/토큰 표 갱신
+  9. **SDK 가이드 갱신** — `aimbase-sdk-guide.md` 에 "ToolResult.output 직렬화 규칙" 섹션 신설. 본문 키 우선순위, 에러 포맷, 헤더 부착 규칙 명시. 가이드 v 패치
+- **변경 사유**:
+  - CR-050 Phase 9 종합 벤치마크에서 발견 (memory `project_cr050_status.md` § 벤치마킹 결과)
+  - `EnhancedToolExecutor.execute(Map)` default bridge 가 `ToolResult.summary()` 만 반환 → `output` Map 의 본문(파일 내용·stdout·grep 결과)이 누락
+  - bridge 호출처가 MCP 한 곳이 아님: `ToolController:106` / `CronScheduleManager:196` / `RemoteTriggerTool:115` / 향후 SDK 사용자 모두 영향
+  - 옵션 B(MCP 분기)로 가면 "MCP 는 본문, 그 외는 메타"라는 비대칭 SDK 계약이 박혀 다음 사람이 또 함정에 빠짐
+  - 정공: bridge 자체를 "신 인터페이스를 String 으로 충실히 어댑트"하는 의미로 일관화
+- **영향 모듈**:
+  - **BE 핵심**:
+    - `backend/sdk/tool-sdk-core/src/main/java/com/platform/tool/EnhancedToolExecutor.java` (default bridge 수정)
+    - `backend/sdk/tool-sdk-core/src/main/java/com/platform/tool/ToolResultRenderer.java` (신규)
+  - **BE 점검**:
+    - `backend/sdk/tool-sdk-mcp/src/main/java/com/platform/mcp/agent/AgentMcpServer.java` (변경 불필요, 동작 검증)
+    - `backend/platform-core/src/main/java/com/platform/api/ToolController.java`
+    - `backend/platform-core/src/main/java/com/platform/workflow/CronScheduleManager.java`
+    - `backend/platform-core/src/main/java/com/platform/tool/builtin/RemoteTriggerTool.java`
+  - **테스트**:
+    - 신규: `ToolResultRendererTest`, `EnhancedToolExecutorBridgeTest`, `AgentMcpServerTest`(없으면 신설)
+    - 회귀: `HttpRequestToolTest` 16+ 케이스 / 기타 EnhancedToolExecutor 단위 / `AdapterToolLoopComparisonIT` 재실측
+  - **FE**: 없음
+  - **DB**: 없음
+  - **Python 사이드카**: 없음
+  - **운영**: `docs/guides/aimbase-sdk-guide.md` ToolResult 직렬화 규칙 섹션 신설
+- **영향도**: High (default bridge 의미를 변경하므로 SDK 호환성 분석 필수)
+- **영향 범위**: CR-029 (EnhancedToolExecutor 도입 — 결함 원천) / CR-041 (Tool SDK 추출 시점 결함 이관) / CR-044 (CLI + Aimbase MCP) / CR-050 (CLI → LLM 어댑터 무력화 차단)
+- **영향 설계서**: `docs/T3-1_*` 도구 SDK 섹션 / `docs/guides/aimbase-sdk-guide.md` (직렬화 규칙 신규)
+- **요청자**: 사용자 (CR-050 Phase 9 후속 보고 기반) | **승인자**: sykim (2026-04-26 옵션 A 확정) | **적용 버전**: v8.5.0 (예약)
+- **변경 일자**: 2026-04-26
+- **범위 경계**:
+  - `ToolExecutor` 인터페이스 자체 변경(`execute(Map)` 시그니처 수정/추가) — **본 CR 범위 제외** (하위 호환 깨짐, 별도 CR)
+  - MCP 응답 안전 가드 (PII redaction / size cap 동적 정책) — **본 CR 범위 제외** (현재는 `McpResultTruncator` 고정값)
+  - `auditPayload` 에 MCP 호출 메타 기록 — **Phase 2 분리**
+  - `output` 직렬화 시 cycle reference / lazy proxy 안전 처리 — **현재는 Jackson 기본 동작 + 직렬화 실패 시 toString 폴백** (필요 시 별도 CR)
+- **Sprint 배치 (예상 2.5MD — 정공 풀 코스)**:
+  - Phase 0 — 옵션 결정 (옵션 A 확정) + 본문 직렬화 규칙 합의 (완료, 본 카드)
+  - Phase 1 — `ToolResultRenderer` 신규 + 단위 테스트 11 케이스 (1.0MD)
+  - Phase 2 — `EnhancedToolExecutor.execute(Map)` default bridge 수정 + bridge 단위 테스트 (0.25MD)
+  - Phase 3 — 비-MCP 호출처 4곳 영향 분석 + 회귀 단위/IT PASS 확인 (0.5MD)
+  - Phase 4 — `AgentMcpServerTest` 4 케이스 신설 + `AdapterToolLoopComparisonIT` 재실측 (0.5MD)
+  - Phase 5 — `aimbase-sdk-guide.md` 직렬화 규칙 섹션 신설 + 변경 이력 패치 + 메모리 갱신 (0.25MD)
+- **착수 시점 판단 기준**: CR-050 어댑터의 실용 가치를 살리려면 **즉시 착수**
+- **완료 기준**:
+  - [x] `ToolResultRenderer` 단위 테스트 12 케이스 PASS (2026-04-26)
+  - [x] `EnhancedToolExecutor` default bridge 가 본문 직렬화 반환 (`ToolResultRenderer.render` 통과)
+  - [x] bridge 호출처 정밀 분석: 핫스팟 = `AgentMcpServer:126` + `ToolRegistry:129` + `ToolCallStepExecutor:70`. 회귀 점검 결과 모두 의도된 본문 노출 변경 + `HttpRequestToolTest` 등 단위 회귀 PASS
+  - [x] `AgentMcpServerTest` 5 케이스 PASS (Enhanced 본문 / legacy String 회귀 / 비즈니스 에러 [ERROR] / 런타임 예외 isError / truncator)
+  - [x] **stdio MCP 직접 호출**로 결함 해소 결정적 검증: `builtin_file_read` 가 `# /path (7줄)\n1\tpackage ...` 형태로 본문+메타 노출 (이전엔 메타만)
+  - [x] `AdapterToolLoopComparisonIT` 풀 IT 재실측 (2026-04-26 18:20~25, 4m 30s, BUILD SUCCESSFUL) — **CLI 가 6개 클래스 정확 식별 + 협력 흐름 작성으로 작업 완수** (CR-050 1차 실측의 "환경 제약" 거부와 정반대). API 와 결과 품질 동등. CLI 4.4× 빠름·비용은 CR-050 1차 $0.602 → $0.250 으로 절반 감소
+  - [x] `aimbase-sdk-guide.md` § 7 직렬화 규칙 섹션 추가 + v1.2.0 패치
+  - [x] CR-050 메모리 갱신 (CR-067 해소 표기)
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR067_EnhancedToolExecutor_MCPbridge_20260426.md`
+- **T3 설계서**: 없음 (버그수정 + 핫픽스 규모, CR 카드 + 원본 요구사항 본문으로 대체)
+- **Plan 파일**: 없음 (Phase 별로 본 카드 직접 참조)
+
+---
+
+### CR-068 | API 어댑터 도구 호출 회귀 5종 정공 + CLI 통제 정렬 (작년 4월 동등 회복 + 어댑터 동등성)
+
+- **대상 기능 ID**: PRD-300 (CR-048 deferred tool), PRD-298 (CR-047), PRD-CR054 (HttpRequestTool), PRD-CR036 (시스템 프롬프트)
+- **변경 타입**: 버그수정
+- **발견 경위**:
+  - 작년 4월 (`benchmark_1775750513.json`) OpenClaude 비교 벤치마크에서 Aimbase API 가 T2 (파일 읽기, in=19,315) / T3 (소스 분석, in=19,760) 모두 정확한 답변으로 정상 처리한 이력
+  - 2026-04-26 사용자가 같은 벤치마크 재실행 요청 → T2/T3 가 in=974/8099 로 급감, 응답 환각 ("Sprint 7" — 실제 51) 또는 빈 응답
+  - 두 어댑터 비교 (`run_adapter_compare.py`) 에서 API 어댑터가 `<tool_call>` XML 텍스트로 도구 흉내 + 가짜 파일명 환각, CLI 어댑터는 [CLI-OBS] 11회 정상 도구 호출
+  - 4단계 디버그 로그 추가로 결함 4개 순차 발견:
+    1. `ToolCallHandler.executeLoop` 에서 `rawDefs=48 filteredTools=5` — `SessionToolRegistry.filterActive` 가 도구 schema 좁힘
+    2. AnthropicAdapter 호출 시 `tools.21.custom.input_schema: JSON schema is invalid` 400 에러 — `HttpRequestTool` body type 오타
+    3. `[ANTHROPIC-RAW] stop_reason=tool_use content_blocks=[tool_use:builtin_glob, ...]` — API 가 진짜로 도구 호출 중인데 `actions_executed=[]` 반환
+    4. `core.using_tools.prompt` (DB) 에 anti-hallucination 지시문 0건 — 작년 시스템 프롬프트의 "CRITICAL: Do NOT guess or fabricate" 핵심 지시 누락
+- **결함 5종** (4종 + CLI 통제 누락):
+  1. **`SessionToolRegistry` (CR-048 회귀)**: `DEFAULT_ACTIVE` 7개 + `NAME_ALIASES` 미흡으로 첫 턴 도구 schema 가 5개로 좁혀짐. 모델이 탐색 도구 (Glob 등) 못 받아 환각 답변. 작년 4월에는 deferred 메커니즘 자체가 없어 모든 도구 전달
+  2. **`HttpRequestTool` (CR-054 오타)**: `body` 속성 type 이 `Object.class.getSimpleName()` = `"Object"` (대문자, JSON Schema 위반). draft 2020-12 는 lowercase `"object"` 또는 multi-type 배열만 허용 → Anthropic API 가 모든 도구 schema 호출 자체 거부 (400)
+  3. **`core.using_tools.prompt` (CR-036 외부화 시 누락)**: 작년 하드코딩 `TOOL_USAGE_PROMPT` 의 "CRITICAL: Do NOT guess or fabricate file names. You MUST use the EXACT file names returned by Glob/Grep" 같은 강한 anti-hallucination 지시문이 외부화 시 빠짐. 모델이 프롬프트의 도구 사용 톤을 약하게 인식
+  4. **`OrchestratorEngine` actions_executed 하드코딩**: line 438 `List.of()` 로 항상 빈 리스트 반환. 모델이 도구를 진짜 11회 호출했어도 응답 메타에 미반영 → 사용자/벤치마크가 "도구 0회" 로 오해
+  5. **CLI 어댑터 통제 누락 (CR-050 SYSTEM prepend 한계)**: ClaudeCliWorker 가 우리 SYSTEM 메시지를 첫 user 메시지 앞에 prepend → CLI 본체의 Claude Code 기본 system prompt 가 우세하고 우리 prompt 는 user 명령으로만 인식. 같은 sonnet 4.6 모델인데 도구 호출 빈도/응답 길이/톤이 API 어댑터와 비대칭 (CLI 가 더 공격적·장문). `--append-system-prompt` flag 미사용
+- **변경 내용**:
+  1. `SessionToolRegistry.DEFAULT_ACTIVE` 에 `Glob/PathInfo/WorkspaceSnapshot` 추가 (10개) + `NAME_ALIASES` 에 `builtin_*` prefix 모두 매핑
+  2. `ToolCallHandler.executeLoop` 의 `filterActive` 호출 제거 → 모든 도구 schema 를 LLM 에 전달 (작년 4월 동등). CR-048 deferred 의도와 충돌하지만 환각 부작용이 더 큼
+  3. `HttpRequestTool` body type: `Object.class.getSimpleName()` → `List.of("object","array","string")`
+  4. `prompt_templates.core.using_tools.prompt` UPDATE: "Do NOT guess or fabricate file names", "Do NOT answer about workspace from prior knowledge alone — verify by Read/Glob/Grep first" 등 강한 anti-hallucination 지시문 복원
+  5. `ToolCallHandler` 에 ThreadLocal action tracking (`beginActionTracking` / `recordAction` / `drainActionTracking`) + `OrchestratorEngine.chat()` 에 begin/drain 끼워 ChatResponse.actions_executed 채움
+  6. **CLI 통제 정렬**: `ClaudeCliWorker` 에 `systemPromptOverride` 필드 + `setSystemPromptOverride()` setter + `buildCommand` 에 `--append-system-prompt` flag 추가. `ClaudeCliWorkerPool.getOrCreateMain` 시그니처에 systemPrompt 인자 추가. `ClaudeCliLlmAdapter.chat()` 가 SYSTEM 메시지를 모아 (`collectSystemPrompt`) Pool 에 전달. CLI 본체 Claude Code prompt 끝에 우리 prompt append → CLI 의 environment 정보(cwd, env, git) 유지하면서 Aimbase 톤·도구 가이드·anti-hallucination 강제. (`--system-prompt` 완전교체는 cwd 정보까지 사라져 CLI 가 워크스페이스 인식 못 함 → 기각)
+  7. 단위 테스트 9 케이스 신설 (`SessionToolRegistryTest` 4 + `ToolCallHandlerActionTrackingTest` 5)
+- **변경 사유**:
+  - 작년 4월 정상 → 오늘 환각/메타 누락 회귀 — 사용자 직접 지적 ("작년에는 도구 호출했다며요 그걸로 테스트해보면 되잖아요")
+  - 4개 결함이 누적돼 사용자에게 "도구 안 부른 환각 답변" 으로 노출됨. 정공으로 모두 제거
+- **영향 모듈**:
+  - **BE 핵심 수정**:
+    - `tool/registry/SessionToolRegistry.java` (DEFAULT_ACTIVE + NAME_ALIASES 확장)
+    - `tool/ToolCallHandler.java` (filterActive 제거, ThreadLocal action tracking 추가)
+    - `orchestrator/OrchestratorEngine.java` (begin/drain action tracking, actions_executed 채움)
+    - `tool/builtin/HttpRequestTool.java` (body type 오타 수정)
+    - `llm/claudecli/ClaudeCliWorker.java` (systemPromptOverride + --append-system-prompt flag + user prepend 회피)
+    - `llm/claudecli/ClaudeCliWorkerPool.java` (getOrCreateMain systemPrompt 인자 추가)
+    - `llm/adapter/ClaudeCliLlmAdapter.java` (collectSystemPrompt 헬퍼 + Pool 호출 시 전달)
+  - **DB**: `prompt_templates.core.using_tools.prompt` UPDATE (tenant DB)
+  - **테스트**: `SessionToolRegistryTest` (4) + `ToolCallHandlerActionTrackingTest` (5)
+  - **FE/사이드카**: 없음
+- **영향도**: High (도구 호출 회귀 = 응답 품질 회귀 + actions_executed 잘못된 메타)
+- **영향 범위**: CR-048 (deferred tool — filterActive 제거), CR-054 (HttpRequestTool — schema 오타 직접 수정), CR-036 (프롬프트 외부화 — using_tools 보강), CR-029 (도구 등록), CR-067 (직전 작업, 같은 경로 추적 중 발견)
+- **검증 결과 (2026-04-26 22:48, 8080 서버 + 결함 5종 모두 수정 + run_adapter_compare.py)**:
+  - 수정 전: API tools=0, in=974/8099, `<tool_call>` XML 텍스트 환각, 가짜 파일명. CLI 는 자체 학습 패턴으로 도구 11회·1500토큰 장문 응답 (API 와 비대칭)
+  - 수정 후: **API tools=11/7, CLI 도구 정상 + Aimbase 통제 톤 강제**, 양쪽 정확한 클래스 6개 식별, 모델 행동 동등화
+  - CLI 응답에 `--system-prompt`/BIZ-100/CR-047~068 같은 우리 prompt 컨텍스트 인식 — 통제가 작동
+  - `--system-prompt` (완전교체) → CLI 의 cwd/env 사라져 워크스페이스 인식 실패 → `--append-system-prompt` 채택 (CLI environment 유지 + Aimbase 톤 추가)
+  - 단위 9 PASS, HttpRequestToolTest 16 PASS, CR-067 단위 19 PASS (회귀 없음)
+- **요청자**: 사용자 (CR-067 IT 어댑터 비대칭 의문 추적 중 발견) | **승인자**: sykim (2026-04-26 "정공") | **적용 버전**: v8.5.1
+- **변경 일자**: 2026-04-26
+- **범위 경계**:
+  - CR-048 deferred tool 메커니즘 자체 재설계 (sessionId 있을 때 적절한 활성 세트 동적 조정) — 본 CR 범위 제외 (별도 CR)
+  - `executeLoopStream` (스트리밍 경로) action tracking — 본 CR 범위 제외 (스트리밍 시 도구 사용 시점 별도 SSE 이벤트로 노출되므로 actions_executed 누적 불요)
+  - 도구별 schema 전수 검증 자동화 (CI 게이트) — 본 CR 범위 제외 (별도 CR 권장)
+  - 시스템 프롬프트 길이 압축 (19K → 작년 수준) — 본 CR 범위 제외 (CR-036 외부화 의도 충돌)
+- **완료 기준**:
+  - [x] DEFAULT_ACTIVE + NAME_ALIASES 확장 (SessionToolRegistry)
+  - [x] ToolCallHandler filterActive 제거 + 모든 도구 schema 전달
+  - [x] HttpRequestTool body type 오타 수정
+  - [x] prompt_templates.core.using_tools.prompt 보강
+  - [x] OrchestratorEngine actions_executed ThreadLocal 누적 패턴
+  - [x] 단위 9 PASS + HttpRequestToolTest 16 회귀 PASS
+  - [x] run_adapter_compare.py 로 API tools=11/7 실측 + 응답 정확성 검증
+- **원본 요구사항**: 본 카드 「발견 경위」 섹션 내장
+- **Plan 파일**: 없음
 
 ---
 

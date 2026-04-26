@@ -1,0 +1,54 @@
+[
+  {
+    "connection_id": "claude-sonnet-dev",
+    "elapsed_s": 146.4,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 15931,
+    "cache_read": 16689,
+    "cache_creation": 40,
+    "output_tokens": 564,
+    "cost_usd": 0.0614097,
+    "response": "**Claude CLI 어댑터 요약**\n\n이 패키지는 Claude CLI 프로세스를 LLM 백엔드로 사용하는 어댑터 레이어다.\n\n- **ClaudeCliWorker** — 단일 `claude` 프로세스 래퍼. stdin으로 NDJSON 메시지를 쓰고, stdout을 가상 스레드로 파싱해 `LLMResponse`를 반환. MCP 도구 이름의 `mcp__server__` 접두사 제거도 담당.\n- **ClaudeCliWorkerPool** — run 단위로 워커를 관리. Semaphore로 run당 최대 워커 수(기본 5)를 제한하며, 메인 워커(lazy spawn)와 병렬 브랜치용 fork 워커를 분리 추적.\n- **ClaudeCliBranchScope** — ThreadLocal 기반 스코프 마커. 병렬 브랜치 실행 중임을 어댑터에 알려 fork-session 워커를 선택하게 한다.\n- **ClaudeCliAdapterConfig** — Spring `@ConfigurationProperties`로 설정 바인딩 + `ClaudeCliWorkerPool` Bean 생성. MCP 설정 JSON을 자동 합성.\n- **ClaudeCliException / ClaudeCliTimeoutException** — 런타임 오류 및 턴 타임아웃용 예외 클래스.\n\n**협력 흐름:** `ClaudeCliAdapterConfig`가 Pool Bean을 생성 → LLM_CALL 발생 시 어댑터가 `ClaudeCliBranchScope`를 확인해 메인/fork 워커를 Pool에서 획득 → `ClaudeCliWorker`가 CLI 프로세스와 NDJSON으로 통신해 `LLMResponse` 반환 → run 종료 시 Pool이 모든 워커를 일괄 정리.",
+    "task": "T_inside_concrete"
+  },
+  {
+    "connection_id": "claude-cli-dev",
+    "elapsed_s": 33.6,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 7,
+    "cache_read": 137705,
+    "cache_creation": 41785,
+    "output_tokens": 1500,
+    "cost_usd": 0.22052624999999998,
+    "response": "main 소스 6개를 병렬로 읽겠습니다.**claudecli 패키지 6개 클래스 요약**\n\n- **ClaudeCliWorker** — Claude CLI 프로세스 1개를 래핑. stdin에 메시지를 쓰고 stdout NDJSON을 파싱해 `LLMResponse`로 변환. Virtual Thread 2개(stdout/stderr drain)로 버퍼 차단 방지.\n- **ClaudeCliWorkerPool** — run 단위로 워커를 관리(최대 5개, BIZ-100). 메인 워커는 lazy spawn, 병렬 브랜치는 `--resume --fork-session`으로 분기해 재사용. Semaphore로 상한 초과 시 큐잉.\n- **ClaudeCliAdapterConfig** — `application.yml` 바인딩 + `WorkerPool` Bean 생성. `aimbaseAgentJar` 지정 시 MCP 설정 JSON을 자동 합성하여 CLI에 Aimbase 도구를 노출.\n- **ClaudeCliBranchScope** — ThreadLocal 마커. `ParallelStepExecutor`가 open하면 `ClaudeCliLlmAdapter`가 감지해 메인 워커 대신 fork 워커를 선택.\n- **ClaudeCliException / ClaudeCliTimeoutException** — 워커/풀 런타임 오류 계층.\n\n**협력 흐름**: `ClaudeCliAdapterConfig`가 `ClaudeCliWorkerPool`(Bean)을 생성 → `ClaudeCliLlmAdapter`가 LLM 호출 시 pool에서 워커 획득 → `ClaudeCliWorker`가 CLI 프로세스 stdin/stdout을 통해 응답 수집 → 병렬 브랜치는 `ClaudeCliBranchScope`로 fork 워커 분리.",
+    "task": "T_inside_concrete"
+  },
+  {
+    "connection_id": "claude-sonnet-dev",
+    "elapsed_s": 17.0,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 16250,
+    "cache_read": 15913,
+    "cache_creation": 0,
+    "output_tokens": 531,
+    "cost_usd": 0.0614889,
+    "response": "**Claude CLI 어댑터 모듈 요약 (6개 클래스)**\n\n- **ClaudeCliWorker**: `claude` CLI 프로세스 하나를 래핑. stdin으로 NDJSON을 쓰고, stdout/stderr를 가상 스레드로 드레인하여 `LLMResponse`를 반환한다.\n- **ClaudeCliWorkerPool**: run 단위로 워커 생명주기를 관리. 메인 워커(lazy spawn)와 병렬 브랜치용 fork 워커를 Semaphore로 상한(기본 5)을 두어 큐잉 처리한다.\n- **ClaudeCliBranchScope**: ThreadLocal 기반 병렬 브랜치 마커. try-with-resources로 활성화하면 Adapter가 fork-session 워커를 선택해 프롬프트 prefix 캐시를 재사용한다.\n- **ClaudeCliAdapterConfig**: Spring `@ConfigurationProperties`로 CLI 경로·타임아웃·MCP 설정을 바인딩하고, `ClaudeCliWorkerPool` 빈을 생성한다.\n- **ClaudeCliException / ClaudeCliTimeoutException**: 워커·풀 실행 오류용 런타임 예외 계층.\n\n협력 흐름: `ClaudeCliAdapterConfig`가 풀 빈을 생성 → LLM 호출 시 Adapter가 `ClaudeCliBranchScope.current()` 유무를 확인해 `getOrCreateMain` 또는 `getOrSpawnBranchWorker`로 워커를 획득 → `ClaudeCliWorker.turn*()`으로 CLI 프로세스와 통신 후 `LLMResponse` 반환 → run 종료 시 `shutdownForRun`으로 전체 워커 회수.",
+    "task": "T_inside_abstract"
+  },
+  {
+    "connection_id": "claude-cli-dev",
+    "elapsed_s": 13.2,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 4,
+    "cache_read": 43646,
+    "cache_creation": 23235,
+    "output_tokens": 243,
+    "cost_usd": 0.10388205,
+    "response": "워크스페이스 루트(`platform-core/`)에 `.java` 파일이 없습니다. Java 소스는 하위 `src/` 디렉토리에 위치합니다. 루트 직접 경로에는 해당 파일이 존재하지 않아 분석할 대상이 없습니다.",
+    "task": "T_inside_abstract"
+  }
+]

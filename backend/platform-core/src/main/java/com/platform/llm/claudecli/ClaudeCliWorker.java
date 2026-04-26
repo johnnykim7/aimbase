@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.TokenUsage;
+import com.platform.llm.model.ToolCall;
 import com.platform.llm.model.UnifiedMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +56,14 @@ public class ClaudeCliWorker implements AutoCloseable {
     private final boolean forkSession;
     private final String configDir;        // CLAUDE_CONFIG_DIR, nullable
     private final Duration turnTimeout;
+    /** Phase 9: --mcp-config 로 CLI 에 주입할 JSON. 비어있으면 {"mcpServers":{}} 로 격리. */
+    private final String mcpConfigJson;
+    /**
+     * CR-068 후속: --system-prompt flag 로 CLI 의 기본 system prompt 를 우리 prompt 로 교체.
+     * null 이면 CLI 기본(Claude Code 학습 패턴) 사용. 비어있으면 SYSTEM 메시지 prepend 폴백.
+     * start() 호출 전에만 setSystemPrompt 로 변경 가능.
+     */
+    private volatile String systemPromptOverride;
 
     private final ReentrantLock turnLock = new ReentrantLock();
 
@@ -66,14 +75,41 @@ public class ClaudeCliWorker implements AutoCloseable {
     private volatile String sessionId;       // CLI `system/init` 이벤트에서 추출
     private volatile boolean firstTurnSent;
 
+    /** 기본 생성자 — 도구 비연결(빈 MCP 설정) 모드. 기존 호출부 호환. */
     public ClaudeCliWorker(String binaryPath, String model, String resumeSessionId,
                            boolean forkSession, String configDir, Duration turnTimeout) {
+        this(binaryPath, model, resumeSessionId, forkSession, configDir, turnTimeout, null);
+    }
+
+    public ClaudeCliWorker(String binaryPath, String model, String resumeSessionId,
+                           boolean forkSession, String configDir, Duration turnTimeout,
+                           String mcpConfigJson) {
         this.binaryPath = binaryPath;
         this.model = model;
         this.resumeSessionId = resumeSessionId;
         this.forkSession = forkSession;
         this.configDir = configDir;
         this.turnTimeout = turnTimeout != null ? turnTimeout : Duration.ofSeconds(300);
+        this.mcpConfigJson = (mcpConfigJson == null || mcpConfigJson.isBlank())
+                ? "{\"mcpServers\":{}}"
+                : mcpConfigJson;
+    }
+
+    /**
+     * CR-068: start() 호출 전 SYSTEM 메시지를 --system-prompt flag 로 주입할 텍스트 설정.
+     * null/빈 문자열 → CLI 기본 system prompt (Claude Code 학습 패턴) 사용.
+     * 설정 시 — CLI 기본 prompt 대체 + user 메시지 SYSTEM prepend 도 생략 (이중 노출 방지).
+     */
+    public void setSystemPromptOverride(String systemPrompt) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set systemPromptOverride after start()");
+        }
+        this.systemPromptOverride = (systemPrompt == null || systemPrompt.isBlank()) ? null : systemPrompt;
+    }
+
+    /** SYSTEM prepend 폴백 여부 — override 가 설정됐으면 false. */
+    boolean hasSystemPromptOverride() {
+        return systemPromptOverride != null;
     }
 
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
@@ -183,25 +219,85 @@ public class ClaudeCliWorker implements AutoCloseable {
     }
 
     private void writeUserMessages(List<UnifiedMessage> messages) throws IOException {
-        for (UnifiedMessage msg : messages) {
-            if (msg.role() != UnifiedMessage.Role.USER) {
-                // CLI stream-json은 assistant/system 메시지 재주입을 허용하지 않는다.
-                // system 은 첫 턴에 --system-prompt 인자로 넣는 대안이 있으나 현재는 user 만.
-                log.debug("Skipping non-USER message in CLI input (role={})", msg.role());
-                continue;
+        // CR-068 후속: systemPromptOverride 가 설정됐으면 SYSTEM 메시지는 이미 --system-prompt flag 로
+        // CLI 에 주입됨 → user prepend 생략 (이중 노출 방지). 미설정 시 기존 prepend 폴백 유지.
+        StringBuilder systemPrefix = new StringBuilder();
+        if (systemPromptOverride == null) {
+            // CR-050: SYSTEM 메시지는 첫 user 메시지 앞에 prepend (CLI stream-json 은 system role 재주입 미지원).
+            for (UnifiedMessage msg : messages) {
+                if (msg.role() == UnifiedMessage.Role.SYSTEM) {
+                    if (systemPrefix.length() > 0) systemPrefix.append("\n\n");
+                    systemPrefix.append(flattenText(msg));
+                }
             }
-            String text = flattenText(msg);
-            Map<String, Object> event = new LinkedHashMap<>();
-            event.put("type", "user");
-            Map<String, Object> message = new LinkedHashMap<>();
-            message.put("role", "user");
-            message.put("content", text);
-            event.put("message", message);
-            String line = MAPPER.writeValueAsString(event);
-            stdin.write(line);
-            stdin.newLine();
+        }
+
+        boolean firstUserConsumed = false;
+        for (UnifiedMessage msg : messages) {
+            switch (msg.role()) {
+                case SYSTEM -> {
+                    // override 있으면 무시, 없으면 위에서 systemPrefix 로 누적됨.
+                }
+                case USER -> {
+                    String text = flattenText(msg);
+                    if (!firstUserConsumed && systemPrefix.length() > 0) {
+                        text = systemPrefix + "\n\n" + text;
+                        firstUserConsumed = true;
+                    }
+                    writeUserLine(text);
+                }
+                case TOOL_RESULT -> {
+                    // CR-050: OrchestratorEngine 이 도구 실행 결과를 다시 주입할 때.
+                    // stream-json: {type:"user", message:{role:"user", content:[{type:"tool_result", tool_use_id, content}]}}
+                    writeToolResultLine(msg);
+                }
+                default -> log.debug("Skipping message role={} in CLI input", msg.role());
+            }
+        }
+        // 입력에 USER 가 없고 SYSTEM 만 있던 경우(이론적, override 없을 때만), system 만 user 라인으로 보낸다.
+        if (!firstUserConsumed && systemPrefix.length() > 0) {
+            writeUserLine(systemPrefix.toString());
         }
         stdin.flush();
+    }
+
+    private void writeUserLine(String text) throws IOException {
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("type", "user");
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", "user");
+        message.put("content", text);
+        event.put("message", message);
+        String line = MAPPER.writeValueAsString(event);
+        log.info("[CLI-STDIN] writing user line: textLen={}, jsonLen={}, preview='{}'",
+                text != null ? text.length() : 0,
+                line.length(),
+                text != null && text.length() > 200 ? text.substring(0, 200) + "..." : text);
+        stdin.write(line);
+        stdin.newLine();
+    }
+
+    private void writeToolResultLine(UnifiedMessage msg) throws IOException {
+        java.util.List<Map<String, Object>> blocks = new java.util.ArrayList<>();
+        for (ContentBlock b : msg.content()) {
+            if (b instanceof ContentBlock.ToolResult tr) {
+                Map<String, Object> block = new LinkedHashMap<>();
+                block.put("type", "tool_result");
+                block.put("tool_use_id", tr.toolUseId());
+                block.put("content", tr.content());
+                blocks.add(block);
+            }
+        }
+        if (blocks.isEmpty()) return;
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("type", "user");
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", "user");
+        message.put("content", blocks);
+        event.put("message", message);
+        String line = MAPPER.writeValueAsString(event);
+        stdin.write(line);
+        stdin.newLine();
     }
 
     private String flattenText(UnifiedMessage msg) {
@@ -255,12 +351,26 @@ public class ClaudeCliWorker implements AutoCloseable {
                         sessionId = sid.toString();
                         log.debug("CLI session_id captured: {}", sessionId);
                     }
+                    if ("init".equals(json.get("subtype"))) {
+                        log.info("[CLI-INIT] tools={}, mcp_servers={}",
+                                json.get("tools"), json.get("mcp_servers"));
+                    }
                 }
                 case "assistant" -> {
                     String delta = extractAssistantText(json);
                     if (delta != null && !delta.isEmpty()) {
                         assistantBuffer.append(delta);
                         if (deltaConsumer != null) deltaConsumer.accept(delta);
+                    }
+                    // CR-050 Phase 9: CLI 의 tool_use/tool_result 흐름은 CLI 내부에서 완결된다 (실측됨).
+                    // 외부(우리 어댑터)는 관찰만 하고 OrchestratorEngine 도구 루프에 포함시키지 않는다 —
+                    // 포함시키면 OrchestratorEngine 이 다음 턴 tool_result 를 주입하려 하지만 CLI 가
+                    // 이미 자기 안에서 결과를 받아 다음 응답 생성 중이라 충돌한다.
+                    java.util.List<ToolCall> tu = extractToolUses(json);
+                    if (!tu.isEmpty()) {
+                        log.info("[CLI-OBS] CLI invoked {} tool(s) internally: {}",
+                                tu.size(),
+                                tu.stream().map(ToolCall::name).toList());
                     }
                 }
                 case "result" -> {
@@ -275,11 +385,17 @@ public class ClaudeCliWorker implements AutoCloseable {
                         finalText = rs;
                     }
                     long latency = System.currentTimeMillis() - startMs;
+
+                    // CR-050 Phase 9: CLI 가 도구 루프를 자체적으로 완결하므로 외부에는 항상
+                    // 최종 텍스트 + finishReason=END 만 노출. tool_use 는 관찰 로그용으로만 사용.
+                    java.util.List<ContentBlock> content = new ArrayList<>();
+                    content.add(new ContentBlock.Text(finalText != null ? finalText : ""));
+
                     return new LLMResponse(
                             id,
                             modelReport,
-                            List.of(new ContentBlock.Text(finalText)),
-                            List.of(),
+                            content,
+                            java.util.List.of(),
                             usage,
                             LLMResponse.FinishReason.END,
                             latency,
@@ -306,6 +422,47 @@ public class ClaudeCliWorker implements AutoCloseable {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * assistant 이벤트의 content[] 에서 type=tool_use 블록만 추출해 ToolCall 로 변환.
+     * stream-json 포맷: {type:"tool_use", id:"toolu_...", name:"...", input:{...}}
+     *
+     * <p>Phase 9: MCP 채널로 노출된 도구는 CLI 가 {@code mcp__<server>__<tool>} 형식으로 발행한다.
+     * OrchestratorEngine 의 ToolRegistry 는 원본 도구명({@code <tool>}) 으로 등록되어 있으므로
+     * prefix 를 제거해 매핑한다.
+     */
+    @SuppressWarnings("unchecked")
+    private java.util.List<ToolCall> extractToolUses(Map<String, Object> event) {
+        Object message = event.get("message");
+        if (!(message instanceof Map<?, ?> msg)) return java.util.List.of();
+        Object content = msg.get("content");
+        if (!(content instanceof List<?> list)) return java.util.List.of();
+        java.util.List<ToolCall> out = new ArrayList<>();
+        for (Object b : list) {
+            if (!(b instanceof Map<?, ?> block)) continue;
+            if (!"tool_use".equals(block.get("type"))) continue;
+            String tid = block.get("id") != null ? block.get("id").toString() : null;
+            String rawName = block.get("name") != null ? block.get("name").toString() : null;
+            String name = stripMcpPrefix(rawName);
+            Object input = block.get("input");
+            Map<String, Object> inputMap = input instanceof Map<?, ?> m
+                    ? (Map<String, Object>) m
+                    : Map.of();
+            out.add(new ToolCall(tid, name, inputMap));
+        }
+        return out;
+    }
+
+    /**
+     * CLI 가 발행하는 MCP 도구 이름 {@code mcp__<server>__<tool>} 에서 server prefix 를 제거.
+     * 예: {@code mcp__aimbase__bash} → {@code bash}. 비-MCP 도구 이름은 그대로 반환.
+     */
+    public static String stripMcpPrefix(String name) {
+        if (name == null || !name.startsWith("mcp__")) return name;
+        int second = name.indexOf("__", 5);
+        if (second < 0) return name;
+        return name.substring(second + 2);
     }
 
     @SuppressWarnings("unchecked")
@@ -339,8 +496,30 @@ public class ClaudeCliWorker implements AutoCloseable {
         cmd.add("stream-json");
         cmd.add("--output-format");
         cmd.add("stream-json");
+        // CR-050 Phase 9: 도구는 MCP 채널로만 노출.
+        // --tools "" : CLI 내장 빌트인 도구 봉인
+        // --strict-mcp-config : 사용자 글로벌 ~/.claude 설정 무시 (오염 방지)
+        // --mcp-config <json> : Aimbase 가 명시한 MCP 서버만 연결.
+        //   - mcpConfigJson="{\"mcpServers\":{}}" 이면 도구 비연결(순수 텍스트 LLM_CALL)
+        //   - aimbase-agent 가 노출된 설정이면 BashTool/ReadTool 등이 native tool_use 로 연결됨.
         cmd.add("--tools");
         cmd.add("");
+        cmd.add("--strict-mcp-config");
+        cmd.add("--mcp-config");
+        cmd.add(mcpConfigJson);
+        // CR-050 Phase 9: CLI 의 자체 permission prompt 는 stdin/stdout 자동화 환경에서
+        // 처리 불가 → 모든 tool_use 가 "차단" 으로 응답되어 모델이 무한 재시도. MCP 서버
+        // (aimbase-agent) 자체가 도구 권한·감사를 보유하므로 CLI 권한 게이트는 봉인.
+        cmd.add("--permission-mode");
+        cmd.add("bypassPermissions");
+        // CR-068 후속: --append-system-prompt 로 CLI 기본 system prompt 끝에 우리 prompt 추가.
+        // (--system-prompt 는 cwd/env 같은 dynamic 섹션도 같이 제거되어 CLI 가 워크스페이스 인식 못 함)
+        // append 방식: CLI 의 environment(cwd, env, git status 등) + Claude Code 기본 톤은 유지하되,
+        // 우리(Aimbase) 의 도구 사용 가이드·anti-hallucination 지시문·역할 정의를 추가 통제.
+        if (systemPromptOverride != null) {
+            cmd.add("--append-system-prompt");
+            cmd.add(systemPromptOverride);
+        }
         if (model != null && !model.isBlank()) {
             cmd.add("--model");
             cmd.add(model);

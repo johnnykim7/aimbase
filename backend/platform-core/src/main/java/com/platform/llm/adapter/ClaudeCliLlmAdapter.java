@@ -88,17 +88,28 @@ public class ClaudeCliLlmAdapter implements LLMAdapter {
                 id, resolveModel(request), resp.usage(), resp.finishReason(), resp.toolCalls()));
     }
 
+    /**
+     * Claude CLI 는 Anthropic API 의 {@code tools} 파라미터가 없으며, 시스템 프롬프트 텍스트
+     * 인젝션으로는 native {@code tool_use} 응답을 끌어낼 수 없다(실측 — Phase 8 우회 시도 실패).
+     * <p>도구 통합의 정식 채널은 {@code --mcp-config} 로 연결되는 MCP 서버이다 (CR-050 Phase 9).
+     * Aimbase 도구는 {@code aimbase-agent --mcp-stdio} (CR-042/044) 가 노출하며,
+     * 워커가 spawn 시 해당 MCP 서버에 자동 연결된다 ({@link com.platform.llm.claudecli.ClaudeCliWorker}
+     * 의 buildCommand 참고). 따라서 어댑터 레벨에서 도구 정의를 변환할 필요가 없다.
+     *
+     * @return 항상 null — 도구는 MCP 채널로 전달됨.
+     */
     @Override
     public Object transformToolDefs(List<UnifiedToolDef> tools) {
-        // 도구 봉인 — CLI 에 빈 --tools "" 로 넘기며, 호출 측이 tools 를 넣어도 무시.
-        if (tools != null && !tools.isEmpty()) {
-            log.debug("ClaudeCliLlmAdapter ignores {} tool defs (--tools '' policy)", tools.size());
-        }
         return null;
     }
 
     @Override
     public List<ToolCall> parseToolCalls(Object nativeResponse) {
+        // CLI 경로에서는 워커가 이미 LLMResponse.toolCalls 에 채워서 반환한다.
+        // 호출자가 LLMResponse 를 그대로 넘기면 거기서 추출.
+        if (nativeResponse instanceof LLMResponse resp) {
+            return resp.toolCalls() != null ? resp.toolCalls() : List.of();
+        }
         return List.of();
     }
 
@@ -118,9 +129,13 @@ public class ClaudeCliLlmAdapter implements LLMAdapter {
             return runBranchTurn(request, branch, model, deltaConsumer);
         }
 
+        // CR-068 후속: SYSTEM 메시지를 모아 --system-prompt flag 로 CLI 본체 prompt 교체.
+        // 첫 spawn 에만 의미 있고 (기존 worker 재사용 시 무시), API 어댑터와 동등한 통제를 모델에 적용.
+        String systemPrompt = collectSystemPrompt(request.messages());
+
         ClaudeCliWorker worker;
         try {
-            worker = workerPool.getOrCreateMain(runId, model, configDir);
+            worker = workerPool.getOrCreateMain(runId, model, configDir, systemPrompt);
         } catch (ClaudeCliException e) {
             throw e;
         } catch (Exception e) {
@@ -130,13 +145,15 @@ public class ClaudeCliLlmAdapter implements LLMAdapter {
         boolean firstTurn = firstTurnMarker.putIfAbsent(runId, Boolean.TRUE) == null;
         try {
             if (firstTurn) {
+                // Phase 9: 도구는 MCP 채널로 전달되므로 messages 가공 없이 그대로 전달.
                 return deltaConsumer == null
                         ? worker.turnFirst(request.messages())
                         : worker.turnStream(request.messages(), true, deltaConsumer);
             }
-            UnifiedMessage last = lastUserMessage(request.messages());
+            // 이후 턴: 마지막 user 또는 tool_result 만 주입.
+            UnifiedMessage last = lastNonAssistantMessage(request.messages());
             if (last == null) {
-                throw new ClaudeCliException("No user message in subsequent turn");
+                throw new ClaudeCliException("No user/tool_result message in subsequent turn");
             }
             return deltaConsumer == null
                     ? worker.turn(last)
@@ -149,6 +166,45 @@ public class ClaudeCliLlmAdapter implements LLMAdapter {
             }
             throw e;
         }
+    }
+
+    private UnifiedMessage lastNonAssistantMessage(List<UnifiedMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            UnifiedMessage m = messages.get(i);
+            if (m.role() == UnifiedMessage.Role.USER || m.role() == UnifiedMessage.Role.TOOL_RESULT) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * CR-068: SYSTEM 메시지를 모아 단일 문자열로 반환 (CLI --system-prompt flag 용).
+     * 메시지가 없거나 SYSTEM role 이 없으면 null → CLI 기본 system prompt 사용.
+     * 여러 SYSTEM 블록은 빈 줄로 join.
+     */
+    private String collectSystemPrompt(List<UnifiedMessage> messages) {
+        if (messages == null || messages.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        for (UnifiedMessage msg : messages) {
+            if (msg.role() != UnifiedMessage.Role.SYSTEM) continue;
+            String text = extractText(msg);
+            if (text == null || text.isBlank()) continue;
+            if (sb.length() > 0) sb.append("\n\n");
+            sb.append(text);
+        }
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
+    private String extractText(UnifiedMessage msg) {
+        if (msg == null || msg.content() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (var block : msg.content()) {
+            if (block instanceof com.platform.llm.model.ContentBlock.Text t) {
+                sb.append(t.text());
+            }
+        }
+        return sb.toString();
     }
 
     /**

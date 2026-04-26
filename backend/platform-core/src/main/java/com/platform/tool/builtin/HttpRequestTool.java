@@ -94,7 +94,9 @@ public class HttpRequestTool implements EnhancedToolExecutor {
                                         "description", "Query parameters (key-value map, values are stringified)"),
                                 "headers", Map.of("type", "object",
                                         "description", "Extra headers (auth header is auto-injected from Connection)"),
-                                "body", Map.of("type", Object.class.getSimpleName(),
+                                // CR-068: Object.class.getSimpleName() == "Object" (대문자) — JSON Schema draft 2020-12 위반.
+                                // 정확한 표현은 type 배열 ["object","array","string"] 또는 단순 "object". 가장 가까운 의미는 multi-type.
+                                "body", Map.of("type", List.of("object", "array", "string"),
                                         "description", "Request body: object/array is JSON-serialized, string is sent as-is"),
                                 "timeout_ms", Map.of("type", "integer",
                                         "description", "Request timeout in ms (default 30000, max 120000)")

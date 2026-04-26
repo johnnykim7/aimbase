@@ -1,0 +1,54 @@
+[
+  {
+    "connection_id": "claude-sonnet-dev",
+    "elapsed_s": 1.2,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 0,
+    "cache_read": 0,
+    "cache_creation": 0,
+    "output_tokens": 0,
+    "cost_usd": 0,
+    "response": "",
+    "task": "T_inside_concrete"
+  },
+  {
+    "connection_id": "claude-cli-dev",
+    "elapsed_s": 35.1,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 7,
+    "cache_read": 135809,
+    "cache_creation": 41323,
+    "output_tokens": 1595,
+    "cost_usd": 0.21964994999999998,
+    "response": "**6개 클래스 요약 (CR-050 Claude CLI LLM 어댑터 패키지)**\n\n- **ClaudeCliWorker** — 단일 `claude` CLI 프로세스 래퍼. stdin으로 메시지를 주입하고, stdout NDJSON을 Virtual Thread로 파싱해 `LLMResponse`로 변환. `--mcp-config`로 aimbase-agent를 stdio MCP 서버로 연결.\n- **ClaudeCliWorkerPool** — run 단위 워커 풀. 메인 워커(lazy spawn)와 병렬 브랜치용 fork 워커를 Semaphore(BIZ-100, 기본 5개)로 제한 관리. run 종료 시 `shutdownForRun`으로 일괄 정리.\n- **ClaudeCliAdapterConfig** — `@ConfigurationProperties`로 CLI 설정 로드 + `ClaudeCliWorkerPool` Bean 생성. `aimbaseAgentJar` 경로만 설정하면 MCP JSON을 자동 합성.\n- **ClaudeCliBranchScope** — ThreadLocal 기반 브랜치 컨텍스트 마커. 병렬 스텝 실행 시 `try-with-resources`로 열어두면 어댑터가 메인 워커 대신 fork 워커를 선택.\n- **ClaudeCliException / ClaudeCliTimeoutException** — CLI 실행 오류 계층. 타임아웃은 별도 서브클래스로 분리해 상위에서 run 실패로 전파.\n\n**협력 흐름**: `ClaudeCliAdapterConfig`가 `ClaudeCliWorkerPool` Bean을 초기화 → `ClaudeCliLlmAdapter`가 요청 시 `ClaudeCliBranchScope.current()`를 확인해 fork/메인 워커를 결정 → `ClaudeCliWorker.turnFirst/turn`으로 CLI 프로세스에 메시지 전달 → NDJSON 응답을 `LLMResponse`로 반환.",
+    "task": "T_inside_concrete"
+  },
+  {
+    "connection_id": "claude-sonnet-dev",
+    "elapsed_s": 0.7,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 0,
+    "cache_read": 0,
+    "cache_creation": 0,
+    "output_tokens": 0,
+    "cost_usd": 0,
+    "response": "",
+    "task": "T_inside_abstract"
+  },
+  {
+    "connection_id": "claude-cli-dev",
+    "elapsed_s": 33.4,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 6,
+    "cache_read": 112223,
+    "cache_creation": 32865,
+    "output_tokens": 1429,
+    "cost_usd": 0.17836365,
+    "response": "git status에서 수정된 핵심 파일들을 읽겠습니다.워크스페이스의 최근 수정된 핵심 Java 파일들을 기반으로 요약합니다.\n\n---\n\n**클래스별 역할 (CR-050/067 중심):**\n\n- `CacheControlStrategy` — Anthropic prompt cache TTL 전략 인터페이스. system/tool schema는 1h, messages는 캐시 미적용.\n- `ClaudeCliLlmAdapter` — `LLMAdapter` 구현체. Claude CLI 프로세스를 LLM 호출 경로로 노출. 세션 ID를 run 식별자로 재사용하며 첫 턴/이후 턴 분기.\n- `ClaudeCliWorker` — 단일 Claude CLI 프로세스 래퍼. stdin/stdout NDJSON 통신, stderr drain 스레드, `ReentrantLock`으로 턴 직렬화, `--mcp-config` 주입으로 MCP 도구 연결.\n- `ToolCallHandler` — LLM tool_use 루프 총괄. 최대 N회 반복, Virtual Thread 병렬 실행, Hook 이벤트 발행, 대형 tool result 외부 저장.\n- `SessionToolRegistry` — 세션별 활성 도구 필터링. 기본 세트(Read/Edit/Glob/Bash 등 10종)만 스키마 주입, 나머지는 ToolSearch 호출 시 동적 활성화.\n\n**협력 흐름:** `OrchestratorEngine` → `ToolCallHandler`(일반 API 경로) 또는 `ClaudeCliLlmAdapter` → `ClaudeCliWorker`(CLI 경로). CLI 경로는 도구 루프를 CLI 프로세스 내부에서 자율 처리하며, `SessionToolRegistry`는 API 경로의 스키마 주입량을 제한해 캐시 안정성을 유지한다.",
+    "task": "T_inside_abstract"
+  }
+]

@@ -53,7 +53,18 @@ public class ClaudeCliWorkerPool {
      * 메인 워커를 반환하거나 lazy spawn 한다. 같은 runId 재호출 시 기존 워커 재사용.
      * 워커가 죽어있으면 재기동.
      */
+    /** 기존 호출 호환. systemPrompt 는 null 로 전달 (CLI 기본 사용). */
     public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir) {
+        return getOrCreateMain(runId, model, configDir, null);
+    }
+
+    /**
+     * CR-068: systemPrompt override 지원.
+     * 메인 워커가 이미 살아있으면 systemPrompt 무시(이미 spawn 시 결정됨).
+     * 새로 spawn 할 때 --system-prompt flag 로 CLI 에 전달 → CLI 기본 prompt 교체.
+     */
+    public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
+                                            String systemPrompt) {
         RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
         synchronized (rw) {
             if (rw.main != null && rw.main.isAlive()) return rw.main;
@@ -61,10 +72,14 @@ public class ClaudeCliWorkerPool {
             acquireSlot(rw, runId);
             try {
                 ClaudeCliWorker worker = workerFactory.create(model, null, false, configDir);
+                if (systemPrompt != null && !systemPrompt.isBlank()) {
+                    worker.setSystemPromptOverride(systemPrompt);
+                }
                 worker.start();
                 rw.main = worker;
                 rw.forks.add(worker); // slot 추적용 (main 도 전체 리스트에 포함)
-                log.info("Run '{}': main worker spawned", runId);
+                log.info("Run '{}': main worker spawned (systemPrompt={})",
+                        runId, systemPrompt != null ? "override(" + systemPrompt.length() + " chars)" : "default");
                 return worker;
             } catch (IOException e) {
                 rw.slots.release();

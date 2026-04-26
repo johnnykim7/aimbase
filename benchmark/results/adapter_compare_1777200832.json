@@ -1,0 +1,54 @@
+[
+  {
+    "connection_id": "claude-sonnet-dev",
+    "elapsed_s": 0.0,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 0,
+    "cache_read": 0,
+    "cache_creation": 0,
+    "output_tokens": 0,
+    "cost_usd": 0,
+    "response": "",
+    "task": "T_inside_concrete"
+  },
+  {
+    "connection_id": "claude-cli-dev",
+    "elapsed_s": 0.0,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 0,
+    "cache_read": 0,
+    "cache_creation": 0,
+    "output_tokens": 0,
+    "cost_usd": 0,
+    "response": "",
+    "task": "T_inside_concrete"
+  },
+  {
+    "connection_id": "claude-sonnet-dev",
+    "elapsed_s": 0.0,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 0,
+    "cache_read": 0,
+    "cache_creation": 0,
+    "output_tokens": 0,
+    "cost_usd": 0,
+    "response": "",
+    "task": "T_inside_abstract"
+  },
+  {
+    "connection_id": "claude-cli-dev",
+    "elapsed_s": 0.0,
+    "tool_calls": 0,
+    "tool_names": [],
+    "input_tokens": 0,
+    "cache_read": 0,
+    "cache_creation": 0,
+    "output_tokens": 0,
+    "cost_usd": 0,
+    "response": "",
+    "task": "T_inside_abstract"
+  }
+]

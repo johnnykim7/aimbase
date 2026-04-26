@@ -309,13 +309,20 @@ public class OrchestratorEngine {
         LLMResponse llmResponse = null;
         long llmStart = System.currentTimeMillis();
         boolean llmSuccess = false;
+        // CR-068: 도구 호출 누적 (ChatResponse.actions_executed 채움)
+        List<Map<String, Object>> actionsExecuted = List.of();
         try {
             if (request.actionsEnabled() && toolRegistry.hasTools()) {
                 // Tool use 루프 — 최대 5회 반복 (CR-006 + CR-029: ToolContext + lineage)
-                llmResponse = toolCallHandler.executeLoop(
-                        adapter, resolvedModel, trimmedMessages,
-                        modelConfig, sessionId, toolRegistry,
-                        request.toolFilter(), request.toolChoice(), toolContext);
+                com.platform.tool.ToolCallHandler.beginActionTracking();
+                try {
+                    llmResponse = toolCallHandler.executeLoop(
+                            adapter, resolvedModel, trimmedMessages,
+                            modelConfig, sessionId, toolRegistry,
+                            request.toolFilter(), request.toolChoice(), toolContext);
+                } finally {
+                    actionsExecuted = com.platform.tool.ToolCallHandler.drainActionTracking();
+                }
             } else {
                 LLMRequest llmRequest = new LLMRequest(
                         resolvedModel, trimmedMessages, null,
@@ -435,7 +442,7 @@ public class OrchestratorEngine {
                 resolvedModel,
                 sessionId,
                 llmResponse.content(),
-                List.of(),  // actions_executed
+                actionsExecuted,  // CR-068: ToolCallHandler ThreadLocal 누적
                 llmResponse.usage(),
                 llmResponse.costUsd(),
                 guardrailResult,

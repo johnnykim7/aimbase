@@ -25,27 +25,61 @@ public class SessionToolRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(SessionToolRegistry.class);
 
-    /** 기본 활성 도구 세트 (CR-048 § 4 결정사항 #1 + ReadToolResult 포함) */
+    /**
+     * 기본 활성 도구 세트.
+     *
+     * <p>CR-067 후속 (2026-04-26): 작년 4월 벤치마크 회귀 분석 결과 — Glob/WorkspaceSnapshot/PathInfo 가
+     * 빠지면 모델이 워크스페이스 탐색 자체를 못 해 ToolSearch 호출 전에 환각 답변을 만드는 사례 다수.
+     * 첫 턴부터 모델이 탐색→Read 흐름을 자율 결정할 수 있도록 핵심 탐색 도구를 기본 활성에 포함.
+     */
     public static final Set<String> DEFAULT_ACTIVE = Set.of(
             "Read",
             "Edit",
             "Grep",
+            "Glob",
             "Bash",
+            "PathInfo",
+            "WorkspaceSnapshot",
             "TodoWrite",
             "ToolSearch",
             "ReadToolResult"
     );
 
-    /** 별칭 매핑 — 도구 이름이 snake_case/PascalCase 혼재할 경우 기본 세트 매칭 */
+    /**
+     * 별칭 매핑 — 도구 이름이 snake_case/PascalCase/builtin_ prefix 혼재할 경우 기본 세트 매칭.
+     *
+     * <p>CR-067 후속: 실제 등록 도구 이름(`builtin_*` prefix 포함)이 키에 들어있어야 매칭됨.
+     * 누락된 alias 가 있으면 DEFAULT_ACTIVE 에 들어있어도 filterActive 가 빠뜨림.
+     * 키는 모두 lowercase (isActive 가 toLowerCase 비교).
+     */
     private static final java.util.Map<String, String> NAME_ALIASES = java.util.Map.ofEntries(
+            // Read (file_read)
             java.util.Map.entry("read", "Read"),
+            java.util.Map.entry("file_read", "Read"),
             java.util.Map.entry("builtin_file_read", "Read"),
+            // Edit (safe_edit)
             java.util.Map.entry("edit", "Edit"),
             java.util.Map.entry("safe_edit", "Edit"),
+            java.util.Map.entry("builtin_safe_edit", "Edit"),
+            // Grep
             java.util.Map.entry("grep", "Grep"),
+            java.util.Map.entry("builtin_grep", "Grep"),
+            // Glob
+            java.util.Map.entry("glob", "Glob"),
+            java.util.Map.entry("builtin_glob", "Glob"),
+            // Bash
             java.util.Map.entry("bash", "Bash"),
+            // PathInfo
+            java.util.Map.entry("path_info", "PathInfo"),
+            java.util.Map.entry("builtin_path_info", "PathInfo"),
+            // WorkspaceSnapshot
+            java.util.Map.entry("workspace_snapshot", "WorkspaceSnapshot"),
+            java.util.Map.entry("builtin_workspace_snapshot", "WorkspaceSnapshot"),
+            // TodoWrite
             java.util.Map.entry("todo_write", "TodoWrite"),
+            // ToolSearch
             java.util.Map.entry("tool_search", "ToolSearch"),
+            // ReadToolResult
             java.util.Map.entry("read_tool_result", "ReadToolResult")
     );
 

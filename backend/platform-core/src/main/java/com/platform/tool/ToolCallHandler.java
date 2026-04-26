@@ -64,6 +64,35 @@ public class ToolCallHandler {
     private static final java.util.Set<String> PLAN_MODE_ALLOWED_WRITES =
             java.util.Set.of("exit_plan_mode", "todo_write");
 
+    /**
+     * CR-068: 현재 호출 컨텍스트의 도구 호출 누적 — OrchestratorEngine 이 호출 전 init,
+     * executeLoop 가 매 도구 호출 시 append, OrchestratorEngine 이 ChatResponse 에 흘림.
+     * ThreadLocal 이라 가상 스레드 propagation 안전(SecurityContextHolder 와 동일 패턴).
+     */
+    private static final ThreadLocal<List<Map<String, Object>>> CURRENT_ACTIONS = new ThreadLocal<>();
+
+    /** OrchestratorEngine: executeLoop 호출 직전 active. */
+    public static void beginActionTracking() {
+        CURRENT_ACTIONS.set(new ArrayList<>());
+    }
+
+    /** OrchestratorEngine: executeLoop 호출 후 누적 결과 회수 + ThreadLocal 정리. */
+    public static List<Map<String, Object>> drainActionTracking() {
+        List<Map<String, Object>> actions = CURRENT_ACTIONS.get();
+        CURRENT_ACTIONS.remove();
+        return actions == null ? List.of() : actions;
+    }
+
+    private static void recordAction(ToolCall tc) {
+        List<Map<String, Object>> bucket = CURRENT_ACTIONS.get();
+        if (bucket != null) {
+            bucket.add(Map.of(
+                    "name", tc.name(),
+                    "input", tc.input() == null ? Map.of() : tc.input()
+            ));
+        }
+    }
+
     public ToolCallHandler(ToolExecutionLogRepository executionLogRepository,
                            HookDispatcher hookDispatcher,
                            PermissionClassifier permissionClassifier,
@@ -254,8 +283,10 @@ public class ToolCallHandler {
 
         List<UnifiedMessage> mutableMessages = new ArrayList<>(messages);
         LLMResponse response = null;
-        List<UnifiedToolDef> filteredTools =
-                sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter));
+        // CR-068 (2026-04-26): CR-048 의 sessionToolRegistry.filterActive 가 도구 schema 를 좁혀서
+        // 모델이 필요한 도구를 못 받고 환각 답변하는 회귀를 만들었다. 작년 4월 정상 동작 동등으로 환원 —
+        // 모든 도구 schema 를 모델에게 전달하고 모델이 자율 선택한다.
+        List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
 
         if (filteredTools.isEmpty()) {
             log.debug("No tools available after filtering, executing without tools");
@@ -311,6 +342,9 @@ public class ToolCallHandler {
             final int turnNum = iteration;
             AtomicInteger seq = new AtomicInteger(0);
             List<ToolCall> toolCalls = response.toolCalls();
+
+            // CR-068: 누적 — OrchestratorEngine 이 ChatResponse.actions_executed 로 흘림
+            for (ToolCall tc : toolCalls) recordAction(tc);
 
             // 병렬 안전한 도구와 아닌 도구 분리
             List<ToolCall> safeCalls = new ArrayList<>();
