@@ -450,6 +450,7 @@ java -jar aimbase-agent.jar \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.3.0 | 2026-04-27 | CR-071 — aimbase-agent 에 `--runner-mode` 추가 (`ClaudeCliRunner` HTTP 서비스). 기존 `--mcp-stdio` 와 별개 모드 — Aimbase 서버의 `ClaudeCliAdapter` 가 `/v1/chat`, `/v1/chat/stream`, `/v1/cancel` 호출. agent 등록 시 metadata 에 `runnerEndpoint` / `runnerApiKeyHash` 포함하면 `runner_capability=true` 자동 설정. 신규 모듈 `cli-runner` (Worker/Pool/CommandBuilder, CR-050/CR-069 자산 이동). 기존 `ClaudeCliLlmAdapter` / `ClaudeCodeTool` 즉시 삭제 |
 | v1.2.0 | 2026-04-26 | CR-067 — `ToolResultRenderer` 신설 + `EnhancedToolExecutor` default bridge 본문 노출 정정 + 직렬화 규칙 섹션 추가 |
 | v1.1.0 | 2026-04-10 | CR-042 독립 실행형 Agent (aimbase-agent) 섹션 추가 |
 | v1.0.0 | 2026-04-10 | CR-041 초판 — sdk-core 14개 도구, sdk-mcp Agent 생명주기, Agent Registry API |

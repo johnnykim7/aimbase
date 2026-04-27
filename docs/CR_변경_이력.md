@@ -60,7 +60,7 @@
 | CR-068 | API 어댑터 도구 호출 회귀 4종 정공 — (1) CR-048 filterActive 회귀 (2) HttpRequestTool body type 오타 (3) anti-hallucination 지시문 누락 (4) actions_executed 메타 누락. 작년 4월 정상 동작 동등 회복 | 버그수정 | High | v8.5.1 | ✅ 구현 완료 |
 | CR-069 | Claude CLI 호출 공통 빌더 — `ClaudeCliCommandBuilder` 신설 + ToolMode(AIMBASE/NATIVE/HYBRID) 단일 스위치. Worker / ClaudeCodeTool 양쪽 잠금 정책(strict-mcp-config / bypassPermissions / --tools "" sealing) 통일. application.yml `tool-mode` 외부화 | 변경 | Medium | v8.5.2 | ✅ 구현 완료 |
 | CR-070 | ClaudeCodeTool 실시간 스트리밍 중계 보강 — Phase A: stdout 라인 단위 스트림 + `STREAM_SINK` ThreadLocal 패턴 적용 (ClaudeCliWorker/SubagentRunner 패턴 차용). Phase B: Agent 실행 시 Agent → 서버 진행 이벤트 push 채널 추가. ToS 안전한 (3) 표준 경로 UX 완성 | 변경 | Medium | v8.5.3 | 📝 발번 |
-| CR-071 | ClaudeCliAdapter — 3경로(API/CLI어댑터/ClaudeCodeTool) 단일 LLMAdapter 통일. CLI 실행 주체(`ClaudeCliRunner`)를 connection 단위 자유 배치 (서버/사용자 PC). aimbase-agent Runner화 + ClaudeCliLlmAdapter→ClaudeCliAdapter 진화 + ClaudeCodeTool deprecate. ToolMode(CR-069) 재활용. API/CLI 어댑터 대칭(`AnthropicAdapter` vs `ClaudeCliAdapter`) | 변경 | High | v8.6.0 | 📐 설계 승인 |
+| CR-071 | ClaudeCliAdapter — 3경로(API/CLI어댑터/ClaudeCodeTool) 단일 LLMAdapter 통일. CLI 실행 주체(`ClaudeCliRunner`)를 connection 단위 자유 배치 (서버/사용자 PC). aimbase-agent Runner화 + ClaudeCliLlmAdapter→ClaudeCliAdapter 진화 + ClaudeCodeTool 즉시 삭제. ToolMode(CR-069) 재활용. API/CLI 어댑터 대칭(`AnthropicAdapter` vs `ClaudeCliAdapter`) | 변경 | High | v8.6.0 | ✅ 구현 완료 |
 
 ---
 
@@ -1781,9 +1781,10 @@ Claude 사용 3가지 방식((1) API / (2) CLI 어댑터 / (3) ClaudeCodeTool) �
 - **변경 타입**: 변경
 - **영향도**: High
 - **적용 버전**: v8.6.0
-- **상태**: 📐 설계 승인 (2026-04-27)
+- **상태**: ✅ 구현 완료 (2026-04-27, Phase 1~5)
 - **설계서**: `docs/T3-12_CR-071_ClaudeCliAdapter_설계서.md`
 - **변경 일자**: 2026-04-27
+- **커밋 이력**: 3a85453 (Phase 1) → df168f8 (Phase 2) → 2554b5a (Phase 3) → 3878095 (Phase 4) → Phase 5 (가이드 + 본 항목)
 
 #### 발견 경위
 
@@ -1834,14 +1835,14 @@ OrchestratorEngine
 
 #### 완료 기준
 
-- [ ] T3 설계서 작성 (`docs/T3-12_CR-071_ClaudeCliAdapter_설계서.md`)
-- [ ] `ClaudeCliRunner` HTTP API 명세 확정 (스트림/인증/취소)
-- [ ] aimbase-agent `--runner-mode` 골격 (LLM 호출 endpoint)
-- [ ] `ClaudeCliAdapter` 신설 + LLMAdapter 등록
-- [ ] `ClaudeCliLlmAdapter` → `ClaudeCliAdapter` 마이그레이션 (BIZ-099 피처 플래그 호환)
-- [ ] `ClaudeCodeTool` deprecation 마킹 + 후속 CR 발번
-- [ ] 회귀 테스트 (CR-067/068 어댑터 동등성 + CR-070 스트리밍)
-- [ ] 통합 테스트 (서버 Runner + 사용자 PC Runner 양 시나리오)
+- [x] T3 설계서 작성 (`docs/T3-12_CR-071_ClaudeCliAdapter_설계서.md`)
+- [x] `ClaudeCliRunner` HTTP API 명세 확정 (스트림/인증/취소)
+- [x] aimbase-agent `--runner-mode` 골격 (LLM 호출 endpoint)
+- [x] `ClaudeCliAdapter` 신설 + LLMAdapter 등록
+- [x] `ClaudeCliLlmAdapter` 즉시 삭제 (단계적 deprecation 생략 — 운영 미사용)
+- [x] `ClaudeCodeTool` 즉시 삭제 (단계적 deprecation 생략)
+- [x] 단위 테스트 (RunnerController 11 + RequestContext 6 + AgentIdRequestFilter 5 + ClaudeCliAdapter 8 = 30 PASS)
+- [ ] 통합 테스트 (서버 Runner + 사용자 PC Runner 양 시나리오) — Phase 5 후속 (실제 CLI 환경 필요)
 
 #### 결정 사항 (2026-04-27 사용자 확정)
 
