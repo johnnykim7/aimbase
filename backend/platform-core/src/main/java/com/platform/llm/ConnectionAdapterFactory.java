@@ -13,8 +13,11 @@ import com.platform.action.model.HealthStatus;
 import com.platform.config.PlatformSettingsService;
 import com.platform.domain.ConnectionEntity;
 import com.platform.llm.adapter.AnthropicAdapter;
+import com.platform.llm.adapter.ClaudeCliAdapter;
+import com.platform.llm.adapter.ClaudeCliRunnerClient;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.adapter.OpenAIAdapter;
+import com.platform.service.AgentRegistryService;
 import com.platform.llm.model.ModelConfig;
 import com.platform.repository.ConnectionRepository;
 import com.platform.tenant.TenantContext;
@@ -45,6 +48,10 @@ public class ConnectionAdapterFactory {
     private final com.platform.llm.thinking.AdaptiveThinkingPolicy adaptiveThinkingPolicy;
     /** CR-071: 테넌트 피처 플래그 조회용 (Phase 4 ClaudeCliAdapter 라우팅 게이트로 의미 변경) */
     private final PlatformSettingsService platformSettings;
+    /** CR-071 Phase 4: ClaudeCliAdapter 가 ClaudeCliRunner 를 HTTP 로 호출 */
+    private final ClaudeCliRunnerClient claudeCliRunnerClient;
+    /** CR-071 Phase 4: agent-id → AgentEndpoint 라우팅 */
+    private final AgentRegistryService agentRegistryService;
 
     /** CR-050/CR-071: 테넌트 피처 플래그 키 (global_config). 값은 쉼표 구분 tenantId 또는 '*' (전체 허용). */
     private static final String CLI_ENABLED_TENANTS_KEY = "llm.anthropic-cli.enabled-tenants";
@@ -55,11 +62,15 @@ public class ConnectionAdapterFactory {
     public ConnectionAdapterFactory(ConnectionRepository connectionRepository,
                                     @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens,
                                     com.platform.llm.thinking.AdaptiveThinkingPolicy adaptiveThinkingPolicy,
-                                    PlatformSettingsService platformSettings) {
+                                    PlatformSettingsService platformSettings,
+                                    ClaudeCliRunnerClient claudeCliRunnerClient,
+                                    AgentRegistryService agentRegistryService) {
         this.connectionRepository = connectionRepository;
         this.defaultMaxTokens = defaultMaxTokens;
         this.adaptiveThinkingPolicy = adaptiveThinkingPolicy;
         this.platformSettings = platformSettings;
+        this.claudeCliRunnerClient = claudeCliRunnerClient;
+        this.agentRegistryService = agentRegistryService;
     }
 
     /**
@@ -270,9 +281,23 @@ public class ConnectionAdapterFactory {
             case "vertex_ai" -> {
                 yield new com.platform.llm.adapter.VertexAIAdapter(conn.getConfig());
             }
-            // CR-071 Phase 1: ClaudeCliLlmAdapter(CR-050) 즉시 삭제. Phase 4 에서 ClaudeCliAdapter 신설 예정.
-            case "anthropic-cli" -> throw new UnsupportedOperationException(
-                    "ClaudeCliAdapter coming in Phase 4 (CR-071)");
+            // CR-071 Phase 4: ClaudeCliAdapter — Runner 를 HTTP 로 호출.
+            // 호출 시점에 X-Aimbase-Agent-Id 헤더 → AgentRegistry 조회 → Runner endpoint 결정.
+            case "anthropic-cli" -> {
+                String model = resolveModelId(conn, null);
+                String toolModeStr = (String) conn.getConfig().get("tool_mode");
+                String configDirOpt = (String) conn.getConfig().get("config_dir");
+                String systemPromptOverride = (String) conn.getConfig().get("system_prompt_override");
+                String runnerApiKey = (String) conn.getConfig().get("runner_api_key");
+                yield new ClaudeCliAdapter(
+                        claudeCliRunnerClient,
+                        agentRegistryService,
+                        model,
+                        toolModeStr,
+                        configDirOpt,
+                        systemPromptOverride,
+                        runnerApiKey);
+            }
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Unsupported adapter type: " + adapterType);
         };
