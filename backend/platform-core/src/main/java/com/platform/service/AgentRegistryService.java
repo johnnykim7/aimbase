@@ -62,6 +62,16 @@ public class AgentRegistryService {
             if (turnRelay instanceof String addr && !addr.isBlank()) {
                 entity.setTurnRelayAddress(addr);
             }
+            // CR-071 Phase 3: Runner 정보 추출
+            Object runnerEndpoint = metadata.get("runnerEndpoint");
+            if (runnerEndpoint instanceof String url && !url.isBlank()) {
+                entity.setRunnerEndpoint(url);
+                entity.setRunnerCapability(true);
+            }
+            Object runnerApiKeyHash = metadata.get("runnerApiKeyHash");
+            if (runnerApiKeyHash instanceof String hash && !hash.isBlank()) {
+                entity.setRunnerApiKeyHash(hash);
+            }
         }
         if (existing.isEmpty()) entity.setRegisteredAt(OffsetDateTime.now());
 
@@ -81,6 +91,47 @@ public class AgentRegistryService {
                 entity.getId(), agentName, publicAddress, mcpPort,
                 entity.getToolsCache().size());
         return entity;
+    }
+
+    /**
+     * CR-071 Phase 3: ClaudeCliAdapter 가 X-Aimbase-Agent-Id 헤더로 라우팅 시 호출.
+     * 활성 + runner_capability=true 인 에이전트의 endpoint 를 반환.
+     *
+     * @param agentId AgentRegistry.id (UUID 문자열)
+     * @return AgentEndpoint (없거나 비활성/Runner 미지원이면 빈 Optional)
+     */
+    public Optional<AgentEndpoint> resolveActiveRunner(String agentId) {
+        if (agentId == null || agentId.isBlank()) return Optional.empty();
+        UUID id;
+        try {
+            id = UUID.fromString(agentId);
+        } catch (IllegalArgumentException e) {
+            log.warn("resolveActiveRunner: 잘못된 agentId 형식: {}", agentId);
+            return Optional.empty();
+        }
+        return repository.findById(id)
+                .filter(a -> "ACTIVE".equals(a.getStatus()))
+                .filter(AgentRegistryEntity::isRunnerCapability)
+                .filter(a -> a.getRunnerEndpoint() != null && !a.getRunnerEndpoint().isBlank())
+                .map(a -> new AgentEndpoint(
+                        a.getId().toString(),
+                        a.getRunnerEndpoint(),
+                        a.getRunnerApiKeyHash()));
+    }
+
+    /**
+     * CR-071 Phase 3: Runner 능력 정보 갱신. 등록/하트비트 흐름과 별개로 호출 가능.
+     */
+    public void updateRunnerCapability(UUID agentId, String runnerEndpoint,
+                                       String runnerApiKeyHash, boolean capability) {
+        repository.findById(agentId).ifPresent(entity -> {
+            entity.setRunnerEndpoint(runnerEndpoint);
+            entity.setRunnerApiKeyHash(runnerApiKeyHash);
+            entity.setRunnerCapability(capability);
+            repository.save(entity);
+            log.info("Agent runner capability updated: id={}, endpoint={}, capability={}",
+                    agentId, runnerEndpoint, capability);
+        });
     }
 
     /**

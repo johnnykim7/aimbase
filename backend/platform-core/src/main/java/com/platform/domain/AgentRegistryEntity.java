@@ -59,6 +59,17 @@ public class AgentRegistryEntity {
     @Column(name = "deregistered_at")
     private OffsetDateTime deregisteredAt;
 
+    // ── CR-071 Phase 3: ClaudeCliRunner 정보 ──
+
+    @Column(name = "runner_endpoint", length = 255)
+    private String runnerEndpoint;
+
+    @Column(name = "runner_api_key_hash", length = 255)
+    private String runnerApiKeyHash;
+
+    @Column(name = "runner_capability", nullable = false)
+    private boolean runnerCapability = false;
+
     // ── Convenience ──
 
     /** MCP 서버 접속 URL 생성 (직접 연결) */
@@ -112,4 +123,15 @@ public class AgentRegistryEntity {
 
     public OffsetDateTime getDeregisteredAt() { return deregisteredAt; }
     public void setDeregisteredAt(OffsetDateTime deregisteredAt) { this.deregisteredAt = deregisteredAt; }
+
+    // ── CR-071 Phase 3 ──
+
+    public String getRunnerEndpoint() { return runnerEndpoint; }
+    public void setRunnerEndpoint(String runnerEndpoint) { this.runnerEndpoint = runnerEndpoint; }
+
+    public String getRunnerApiKeyHash() { return runnerApiKeyHash; }
+    public void setRunnerApiKeyHash(String runnerApiKeyHash) { this.runnerApiKeyHash = runnerApiKeyHash; }
+
+    public boolean isRunnerCapability() { return runnerCapability; }
+    public void setRunnerCapability(boolean runnerCapability) { this.runnerCapability = runnerCapability; }
 }
