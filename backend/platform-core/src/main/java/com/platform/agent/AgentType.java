@@ -37,7 +37,7 @@ public enum AgentType {
     VERIFICATION("verification",
             "검증 에이전트. 코드 검증, 테스트 실행, 결과 분석에 특화됩니다. "
             + "검증에 필요한 읽기/실행 도구만 사용합니다.",
-            "read,search,glob,grep,claude_code",
+            "read,search,glob,grep",
             true);
 
     private final String displayName;

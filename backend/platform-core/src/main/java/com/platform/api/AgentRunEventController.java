@@ -26,7 +26,7 @@ import java.util.UUID;
 /**
  * CR-070 Phase B: Agent → 서버 진행 이벤트 수신 엔드포인트.
  *
- * Agent 가 ClaudeCodeTool 등 자율 실행 도구의 진행상황을 NDJSON 으로 push 하면,
+ * Agent 가 자율 실행 도구의 진행상황을 NDJSON 으로 push 하면,
  * AgentRunEventRouter 에 등록된 사용자 SSE sink 로 dispatch.
  *
  * 입력 포맷:

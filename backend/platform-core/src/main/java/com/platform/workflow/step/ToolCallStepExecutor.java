@@ -56,7 +56,7 @@ public class ToolCallStepExecutor implements StepExecutor {
             rawInput.put("response_schema", responseSchema);
         }
 
-        // 에이전트 계정 ID 패스스루 (claude_code 도구용)
+        // 에이전트 계정 ID 패스스루 (도구 dispatch 시 _agent_account_id 로 노출)
         String agentAccountId = (String) config.get("agent_account_id");
         if (agentAccountId != null && !agentAccountId.isBlank()) {
             rawInput.put("_agent_account_id", agentAccountId);

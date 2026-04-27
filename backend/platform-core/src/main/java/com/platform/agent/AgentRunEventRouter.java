@@ -16,7 +16,7 @@ import java.util.function.Consumer;
 /**
  * CR-070 Phase B: Agent → 서버 진행 이벤트 라우팅 테이블.
  *
- * 사용자 SSE 스트림이 Agent 측 ClaudeCodeTool 실행 진행상황을 받기 위한 매핑:
+ * 사용자 SSE 스트림이 Agent 측 자율 실행 도구의 진행상황을 받기 위한 매핑:
  * - 사용자 SSE 진입점(예: ChatController.streamResponse)이 runId 를 발급하고 sink 등록
  * - Agent 가 NDJSON 이벤트를 `POST /api/v1/agents/{id}/runs/{runId}/events` 로 push
  * - 라우터가 runId → sink 로 dispatch

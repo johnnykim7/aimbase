@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * CR-037 PRD-244: 워크플로우 결과 기반 Git 커밋 + GitHub PR 자동 생성.
- * ClaudeCodeTool 경유 없이 ProcessBuilder(git) + GitHub REST API로 직접 실행.
+ * ProcessBuilder(git) + GitHub REST API로 직접 실행.
  */
 @Component
 public class SuggestBackgroundPRTool implements EnhancedToolExecutor {

@@ -90,19 +90,8 @@ agent:
     url: ${AGENT_MCP_URL:http://localhost:8003}
     enabled: ${AGENT_MCP_ENABLED:false}
 
-# ─── Claude Code CLI 도구 설정 ───────────────────────────────────────
-# Claude Code를 워크플로우 TOOL_CALL Step으로 사용.
-# 인증: 로컬은 `claude login`, 서버/AWS는 api-key 설정.
-claude-code:
-  enabled: ${CLAUDE_CODE_ENABLED:false}
-  executable: ${CLAUDE_CODE_EXECUTABLE:claude}
-  api-key: ${CLAUDE_CODE_API_KEY:}
-  timeout-seconds: ${CLAUDE_CODE_TIMEOUT:300}
-  max-turns: ${CLAUDE_CODE_MAX_TURNS:10}
-  default-allowed-tools: ${CLAUDE_CODE_ALLOWED_TOOLS:}
-  working-directory: ${CLAUDE_CODE_WORKING_DIR:}
-  default-session-persistence: ${CLAUDE_CODE_SESSION_PERSISTENCE:true}
-  default-system-prompt: ${CLAUDE_CODE_SYSTEM_PROMPT:PDF 파일은 반드시 Read 도구로 읽어라. 문서 요약 시 모든 페이지와 첨부자료, 표, 수치 데이터를 빠짐없이 포함하라.}
+# ─── CR-071 Phase 1: claude-code 블록 삭제 (ClaudeCodeTool / ClaudeCliLlmAdapter 즉시 제거) ─────
+# Claude CLI 호출은 Phase 4 ClaudeCliAdapter 가 connection.config 와 AgentRegistry 만으로 라우팅한다.
 
 # ─── Platform 설정 (테넌트 프로비저닝 기본값) ────────────────────────
 platform:
@@ -114,25 +103,8 @@ platform:
   orchestrator:
     max-tool-iterations: ${PLATFORM_MAX_TOOL_ITERATIONS:30}
     default-max-tokens: ${PLATFORM_DEFAULT_MAX_TOKENS:16000}
-  # ─── CR-050: Claude CLI LLM 어댑터 (PRD-306~309) ─────────────────────
-  # OAuth(Max/Pro 구독) 기반 CLI 워커 풀. 테넌트 피처 플래그는
-  # global_config 테이블 키 'llm.anthropic-cli.enabled-tenants' (CR-040)에서 읽는다.
-  # - 값 '*'          → 전체 테넌트 허용
-  # - 쉼표 구분 ID    → 해당 테넌트만
-  # - 빈 값/키 없음   → 전체 차단 (BIZ-099 기본값)
-  llm:
-    anthropic-cli:
-      enabled: ${ANTHROPIC_CLI_ENABLED:false}
-      timeout-seconds: ${ANTHROPIC_CLI_TIMEOUT:300}
-      max-workers-per-run: ${ANTHROPIC_CLI_MAX_WORKERS:5}
-      acquire-timeout-seconds: ${ANTHROPIC_CLI_ACQUIRE_TIMEOUT:60}
-      cli-binary-path: ${ANTHROPIC_CLI_BINARY:claude}
-      # CR-069: CLI 도구 노출 모드 (Worker / ClaudeCodeTool 양쪽 default).
-      # aimbase  - 네이티브 도구 봉인 + Aimbase MCP 만 노출 (default, 정책·감사 완전 경유)
-      # native   - CLI 본체 도구만 (MCP 미연결)
-      # hybrid   - 둘 다 (실험용, 운영 비권장)
-      # 에이전트 배포 시 환경변수 ANTHROPIC_CLI_TOOL_MODE 로 결정.
-      tool-mode: ${ANTHROPIC_CLI_TOOL_MODE:aimbase}
+  # ─── CR-071 Phase 1: platform.llm.anthropic-cli 블록 삭제 (in-process Worker 풀 제거) ─────
+  # Phase 4 ClaudeCliAdapter 는 connection.config + AgentRegistry 로 Runner 라우팅.
   # ─── 압축 임계값 (PRD-206, CR-030 Phase 5) ─────────────────────────
   # 퍼센트 단위 (70 = 70%). 환경변수 PLATFORM_*_PCT가 우선.
   compaction:

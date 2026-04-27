@@ -45,8 +45,6 @@ public class WorkflowEngine {
     private final PlatformMetrics platformMetrics;
     /** CR-058: 스텝/런 상태 전이 이벤트 브로드캐스터. null 이면 발행 스킵(테스트 편의). */
     private final com.platform.workflow.event.WorkflowEventPublisher eventPublisher;
-    /** CR-050 PRD-309: run 종료 시 CLI 워커 정리 (프로세스 누수 방지). null 허용 — 피처 비활성 환경. */
-    private final com.platform.llm.claudecli.ClaudeCliWorkerPool claudeCliWorkerPool;
 
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
@@ -54,8 +52,7 @@ public class WorkflowEngine {
                           ObjectMapper objectMapper,
                           List<StepExecutor> stepExecutors,
                           PlatformMetrics platformMetrics,
-                          com.platform.workflow.event.WorkflowEventPublisher eventPublisher,
-                          com.platform.llm.claudecli.ClaudeCliWorkerPool claudeCliWorkerPool) {
+                          com.platform.workflow.event.WorkflowEventPublisher eventPublisher) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -64,18 +61,15 @@ public class WorkflowEngine {
                 .collect(Collectors.toMap(StepExecutor::supports, e -> e));
         this.platformMetrics = platformMetrics;
         this.eventPublisher = eventPublisher;
-        this.claudeCliWorkerPool = claudeCliWorkerPool;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
-    /** CR-050: run 종료 시 CLI 워커를 반드시 정리. 실패해도 run 결과는 유지. */
+    /**
+     * CR-071 Phase 1: ClaudeCliWorkerPool 의존 제거. Phase 4 에서 ClaudeCliAdapter 가
+     * Runner 측 정리 책임을 가지므로 워크플로우 엔진은 더 이상 워커 라이프사이클을 관리하지 않는다.
+     */
     private void shutdownCliWorkers(String runId) {
-        if (claudeCliWorkerPool == null || runId == null) return;
-        try {
-            claudeCliWorkerPool.shutdownForRun(runId);
-        } catch (Exception e) {
-            log.warn("Run '{}': CLI worker shutdown failed: {}", runId, e.getMessage());
-        }
+        // no-op (CR-071)
     }
 
     // ─── 공개 API ─────────────────────────────────────────────────────────

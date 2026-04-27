@@ -18,8 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * - SSE는 네트워크 타이밍 이슈로 -p 모드에서 50% 연결 실패 (FlowGuard 동일 사례 확인)
  * - stdio는 Claude CLI가 자식 프로세스를 직접 관리 → 타이밍 이슈 없음
  *
- * jar 경로 결정 순서:
- * 1. ClaudeCodeToolConfig.mcpServerJar (application.yml: claude-code.mcp-server-jar)
+ * jar 경로 결정 순서 (CR-071: ClaudeCodeToolConfig 의존 제거):
+ * 1. {@link #configure(String)} 로 주입된 경로 (호출처: Phase 4 ClaudeCliAdapter)
  * 2. 환경변수 AIMBASE_MCP_JAR
  * 3. /opt/aimbase/aimbase-agent.jar (기본값)
  */
@@ -53,8 +53,7 @@ public class AimbaseMcpConfigGenerator {
     private AimbaseMcpConfigGenerator() {}
 
     /**
-     * ClaudeCodeToolConfig에서 jar 경로를 주입받아 초기화.
-     * ClaudeCodeTool 생성 시 호출.
+     * jar 경로를 주입받아 초기화. CR-071 Phase 4 ClaudeCliAdapter 등 호출처가 application 설정 값을 전달.
      */
     public static void configure(String mcpServerJar) {
         if (mcpServerJar != null && !mcpServerJar.isBlank()) {
@@ -95,8 +94,7 @@ public class AimbaseMcpConfigGenerator {
     }
 
     /**
-     * 세션 종료 시 수동으로 설정 파일을 삭제한다.
-     * ClaudeCodeTool 세션 정리 시점에 호출 가능 (선택적).
+     * 세션 종료 시 수동으로 설정 파일을 삭제한다. (선택적 호출).
      */
     public static void cleanupSession(String sessionId) {
         String path = sessionConfigCache.remove(sessionId);

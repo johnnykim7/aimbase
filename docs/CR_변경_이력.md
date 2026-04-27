@@ -60,6 +60,7 @@
 | CR-068 | API 어댑터 도구 호출 회귀 4종 정공 — (1) CR-048 filterActive 회귀 (2) HttpRequestTool body type 오타 (3) anti-hallucination 지시문 누락 (4) actions_executed 메타 누락. 작년 4월 정상 동작 동등 회복 | 버그수정 | High | v8.5.1 | ✅ 구현 완료 |
 | CR-069 | Claude CLI 호출 공통 빌더 — `ClaudeCliCommandBuilder` 신설 + ToolMode(AIMBASE/NATIVE/HYBRID) 단일 스위치. Worker / ClaudeCodeTool 양쪽 잠금 정책(strict-mcp-config / bypassPermissions / --tools "" sealing) 통일. application.yml `tool-mode` 외부화 | 변경 | Medium | v8.5.2 | ✅ 구현 완료 |
 | CR-070 | ClaudeCodeTool 실시간 스트리밍 중계 보강 — Phase A: stdout 라인 단위 스트림 + `STREAM_SINK` ThreadLocal 패턴 적용 (ClaudeCliWorker/SubagentRunner 패턴 차용). Phase B: Agent 실행 시 Agent → 서버 진행 이벤트 push 채널 추가. ToS 안전한 (3) 표준 경로 UX 완성 | 변경 | Medium | v8.5.3 | 📝 발번 |
+| CR-071 | ClaudeCliAdapter — 3경로(API/CLI어댑터/ClaudeCodeTool) 단일 LLMAdapter 통일. CLI 실행 주체(`ClaudeCliRunner`)를 connection 단위 자유 배치 (서버/사용자 PC). aimbase-agent Runner화 + ClaudeCliLlmAdapter→ClaudeCliAdapter 진화 + ClaudeCodeTool deprecate. ToolMode(CR-069) 재활용. API/CLI 어댑터 대칭(`AnthropicAdapter` vs `ClaudeCliAdapter`) | 변경 | High | v8.6.0 | 📐 설계 승인 |
 
 ---
 
@@ -1771,6 +1772,106 @@ Claude 사용 3가지 방식((1) API / (2) CLI 어댑터 / (3) ClaudeCodeTool) �
 - **요청자**: 사용자 (대화)
 - **승인자**: sykim
 - **적용 버전**: v8.5.3
+
+---
+
+### CR-071 | ClaudeCliAdapter — 3경로 통일 (API / CLI어댑터 / ClaudeCodeTool)
+
+- **변경 ID**: CR-071
+- **변경 타입**: 변경
+- **영향도**: High
+- **적용 버전**: v8.6.0
+- **상태**: 📐 설계 승인 (2026-04-27)
+- **설계서**: `docs/T3-12_CR-071_ClaudeCliAdapter_설계서.md`
+- **변경 일자**: 2026-04-27
+
+#### 발견 경위
+
+CR-070 진행 중 "Claude에게 작업 시키기"가 3개 경로((1) API / (2) CLI 어댑터 / (3) ClaudeCodeTool)로 분산되어 있다는 구조적 문제를 사용자가 지적. 인터페이스 3개 → 거버넌스(정책/Hook/max_iter/감사)가 경로마다 부분 적용. ToS 경계는 "어디서 CLI를 띄우는가"의 문제이지 "무엇을 호출하는가"가 아니므로, CLI 실행 주체(`ClaudeCliRunner`) 위치를 connection 설정으로 자유 배치하면 자연 해결됨. ClaudeCodeTool은 "ToS 우회로"라는 본질이라 도구가 아니라 LLM 어댑터로 재배치되어야 함.
+
+#### 변경 내용
+
+**핵심**: 모든 Claude 호출을 LLMAdapter 단일 인터페이스로 모은다. CLI를 띄우는 위치(=`ClaudeCliRunner`)를 connection 단위로 자유 배치.
+
+```
+OrchestratorEngine
+  ├─ AnthropicAdapter        (Anthropic REST API — 기존)
+  ├─ OpenAIAdapter
+  └─ ClaudeCliAdapter        ← 이번 CR (HTTP로 Runner 호출)
+       └─ ClaudeCliRunner HTTP API
+            ├─ POST /v1/chat
+            ├─ POST /v1/chat/stream  (NDJSON / SSE)
+            └─ POST /v1/cancel
+```
+
+**명명 체계**:
+- `ClaudeCliAdapter`: Aimbase 서버 in-process LLMAdapter 구현체. Runner를 HTTP로 호출.
+- `ClaudeCliRunner`: 별도 프로세스 (서버/사용자 PC). HTTP 서비스. 안에서 `ClaudeCliWorker`로 CLI 실행.
+- `ClaudeCliWorker` (CR-050) / `ClaudeCliCommandBuilder` (CR-069): Runner 내부 구현으로 이동.
+
+**네이밍 정책**: API/CLI 어댑터 대칭 — `AnthropicAdapter`(REST API) vs `ClaudeCliAdapter`(CLI). 향후 OpenAI Codex / Gemini CLI는 별도 어댑터(`CodexCliAdapter`, `GeminiCliAdapter`)로 추가. 공통 추상화는 YAGNI.
+
+**Runner 배치**:
+- 내부/벤치마크: 서버 자체 (localhost:8290)
+- 운영: 사용자 PC (aimbase-agent, 8190)
+- connection.runner-url 정적 매핑
+
+**CLI 모드 (CR-069 ToolMode 재활용)**: `AIMBASE` / `NATIVE` / `HYBRID` — connection 단위 선택.
+
+**주요 작업**:
+1. `ClaudeCliAdapter` 신설 (LLMAdapter 구현체)
+2. `ClaudeCliRunner` HTTP API 명세 (`/v1/chat`, `/v1/chat/stream`, `/v1/cancel`)
+3. aimbase-agent에 `--runner-mode` 추가 (LLM 호출 endpoint 노출)
+4. `ClaudeCliLlmAdapter` (CR-050) → `ClaudeCliAdapter`로 진화 (이름 단축, 서버 in-process → HTTP 클라이언트)
+5. `ClaudeCliWorker/Pool` (CR-050) + `ClaudeCliCommandBuilder` (CR-069) → Runner 내부 구현으로 이동
+6. `ClaudeCodeTool` (CR-044) deprecation 마킹 + 후속 제거 계획
+
+#### 영향 범위
+
+- CR-042 (aimbase-agent), CR-044 (ClaudeCodeTool), CR-050 (ClaudeCliLlmAdapter), CR-069 (ToolMode/CommandBuilder), CR-070 (스트리밍 중계)
+- BIZ-099 (정액 플랜 ToS 격리) / BIZ-100 (CLI 워커 상한) 재정의 — Runner 위치 기준으로 재서술
+- 워크플로우 LLM_CALL 호출처 — connection 설정만 바꿔 ClaudeCliAdapter로 라우팅
+
+#### 완료 기준
+
+- [ ] T3 설계서 작성 (`docs/T3-12_CR-071_ClaudeCliAdapter_설계서.md`)
+- [ ] `ClaudeCliRunner` HTTP API 명세 확정 (스트림/인증/취소)
+- [ ] aimbase-agent `--runner-mode` 골격 (LLM 호출 endpoint)
+- [ ] `ClaudeCliAdapter` 신설 + LLMAdapter 등록
+- [ ] `ClaudeCliLlmAdapter` → `ClaudeCliAdapter` 마이그레이션 (BIZ-099 피처 플래그 호환)
+- [ ] `ClaudeCodeTool` deprecation 마킹 + 후속 CR 발번
+- [ ] 회귀 테스트 (CR-067/068 어댑터 동등성 + CR-070 스트리밍)
+- [ ] 통합 테스트 (서버 Runner + 사용자 PC Runner 양 시나리오)
+
+#### 결정 사항 (2026-04-27 사용자 확정)
+
+- **인증**: `X-Api-Key` 헤더 (FlowGuard/Aimbase 기존 패턴 재활용). mTLS/JWT는 후속 강화로 보존.
+- **NAT 통과**: 기존 STUN/TURN + AgentRegistry 인프라 재활용 (CR-041/CR-042). 신규 작성 없음.
+- **라우팅**: `X-Aimbase-Agent-Id` 요청 헤더 필수. 호출자(소비자앱/Claude Code/기타 MCP 도구)가 명시. 누락 시 400 에러. 자동화(로컬 토큰/IP 보조/디스커버리)는 별도 CR.
+- **스트리밍**: 기존 SSE + STREAM_SINK + NDJSON 자산 재활용. 4단 파이프(ChatController SSE → Adapter → Runner NDJSON → CLI stream-json).
+
+#### 범위 외
+
+- 라우팅 자동화 — 로컬 토큰 자동 주입, IP 보조 매칭, 로컬 디스커버리 (별도 CR)
+- 자체 소비자앱 SDK 자동 헤더 주입 (별도 CR)
+- mTLS/JWT 보안 강화 (후속)
+- OpenAI Codex / Google Gemini CLI 어댑터 (별도 후속 CR)
+
+#### 원본 요구사항
+
+`docs/origins/원본_요구사항_CR071_ClaudeCliAdapter_3경로통일_20260427.md`
+
+#### Plan 파일
+
+T3 설계서: `docs/T3-12_CR-071_ClaudeCliAdapter_설계서.md` (사용자 승인 2026-04-27).
+Phase별 plan 파일은 각 Phase 시작 시 `~/.claude/plans/cr-071-phase-{n}.md` 로 생성.
+
+#### 요청자/승인자
+
+- **요청자**: 사용자 (대화)
+- **승인자**: sykim
+- **적용 버전**: v8.6.0
+- **설계 승인**: 2026-04-27
 
 ---
 
