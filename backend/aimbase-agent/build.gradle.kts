@@ -5,10 +5,19 @@ plugins {
 dependencies {
     implementation(project(":sdk:tool-sdk-mcp"))
 
+    // CR-071 Phase 2: ClaudeCliRunner — cli-runner 모듈에서 Worker/Pool/CommandBuilder 재사용
+    implementation(project(":cli-runner"))
+
     // Spring Boot starter (config binding, lifecycle, scheduling)
     implementation("org.springframework.boot:spring-boot-starter")
+    // CR-071 Phase 2: --runner-mode 진입 시 HTTP 서버 (RunnerController)
+    implementation("org.springframework.boot:spring-boot-starter-web")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // CR-071 Phase 2: RunnerController 단위 테스트
+    testImplementation("org.assertj:assertj-core:3.27.3")
+    testImplementation("org.mockito:mockito-core:5.14.2")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.14.2")
 }
 
 springBoot {

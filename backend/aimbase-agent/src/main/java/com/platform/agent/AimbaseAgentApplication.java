@@ -21,9 +21,12 @@ import java.util.List;
  * CR-044 PRD-282: --mcp-stdio 플래그로 stdio MCP 서버 모드 진입 가능.
  * Claude CLI가 --mcp-config로 이 jar를 자식 프로세스로 기동할 때 사용.
  * stdio 모드에서는 Aimbase 서버 연결 불필요 — 도구 실행만 담당.
+ *
+ * CR-071 Phase 2: --runner-mode 플래그로 ClaudeCliRunner HTTP 서비스 진입.
+ * Aimbase 서버의 ClaudeCliAdapter 가 HTTP(/v1/chat 등) 로 호출. 같은 PC 또는 사용자 PC 어디든 배치 가능.
  */
 @SpringBootApplication(
-        scanBasePackages = "com.platform.agent",
+        scanBasePackages = {"com.platform.agent"},
         exclude = {
                 DataSourceAutoConfiguration.class,
                 HibernateJpaAutoConfiguration.class
@@ -33,13 +36,23 @@ import java.util.List;
 public class AimbaseAgentApplication {
 
     public static void main(String[] args) {
+        List<String> argList = Arrays.asList(args);
         // CR-044: stdio MCP 모드 — Aimbase 서버 등록 없이 도구만 제공
-        if (Arrays.asList(args).contains("--mcp-stdio")) {
+        if (argList.contains("--mcp-stdio")) {
             runStdioMode();
             return;
         }
+
         SpringApplication app = new SpringApplication(AimbaseAgentApplication.class);
-        app.setWebApplicationType(WebApplicationType.NONE);
+
+        // CR-071 Phase 2: --runner-mode 진입 시 HTTP 서버 + RunnerController 활성화
+        if (argList.contains("--runner-mode")) {
+            System.setProperty("aimbase.runner.enabled", "true");
+            // 등록 모드(서버 push) 비활성 — Runner 단독 운용 시 Aimbase 서버 등록은 별도 시동 필요
+            app.setWebApplicationType(WebApplicationType.SERVLET);
+        } else {
+            app.setWebApplicationType(WebApplicationType.NONE);
+        }
         app.run(args);
     }
 
