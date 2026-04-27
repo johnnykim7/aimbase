@@ -3,14 +3,17 @@ package com.platform.agent.lifecycle;
 import com.platform.mcp.agent.AgentLifecycle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
 /**
  * CR-042: Spring 라이프사이클과 AgentLifecycle 연결.
+ * CR-071: Runner 모드(aimbase.runner.enabled=true)에서는 비활성.
  * 모든 Bean 준비 후 start, 종료 시 graceful close.
  */
 @Component
+@ConditionalOnProperty(prefix = "aimbase.runner", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class AgentServiceManager implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(AgentServiceManager.class);

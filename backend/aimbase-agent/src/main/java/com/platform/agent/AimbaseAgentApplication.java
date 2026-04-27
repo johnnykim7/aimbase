@@ -26,10 +26,34 @@ import java.util.List;
  * Aimbase 서버의 ClaudeCliAdapter 가 HTTP(/v1/chat 등) 로 호출. 같은 PC 또는 사용자 PC 어디든 배치 가능.
  */
 @SpringBootApplication(
-        scanBasePackages = {"com.platform.agent"},
+        scanBasePackages = {
+                "com.platform.agent.config",
+                "com.platform.agent.lifecycle",
+                "com.platform.agent.runner"   // CR-071 Phase 2: --runner-mode 컴포넌트
+        },
         exclude = {
                 DataSourceAutoConfiguration.class,
-                HibernateJpaAutoConfiguration.class
+                HibernateJpaAutoConfiguration.class,
+                // CR-071: platform-core 가 클래스패스에 들어와 Spring AI / Redis / RabbitMQ 등이
+                // 자동설정을 시도하지만, aimbase-agent 는 이 빈들을 사용하지 않는다.
+                org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration.class,
+                org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration.class,
+                org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration.class
+        },
+        // Spring AI / Spring Security 등 platform-core 가 전이로 끌어오는 starter 의 자동설정도 차단
+        excludeName = {
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration",
+                "org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration",
+                "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration",
+                "org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration",
+                "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration",
+                "org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration",
+                "org.springframework.boot.autoconfigure.batch.BatchAutoConfiguration"
         }
 )
 @EnableScheduling

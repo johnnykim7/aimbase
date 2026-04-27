@@ -77,13 +77,10 @@ public class RunnerService {
         }
         String model = (request.model() != null && !request.model().isBlank())
                 ? request.model() : defaultModel;
-        ClaudeCliWorker worker = workerPool.getOrCreateMain(runId, model, configDir);
-        if (toolMode != null) {
-            worker.setToolMode(toolMode);
-        }
-        if (systemPromptOverride != null && !systemPromptOverride.isBlank()) {
-            worker.setSystemPromptOverride(systemPromptOverride);
-        }
+        // Pool 의 4-인자 오버로드: spawn 시점에 systemPrompt/toolMode 모두 적용된다.
+        // 같은 runId 재호출 시 Worker 가 이미 살아있으면 두 인자는 무시 (Pool 정책).
+        ClaudeCliWorker worker = workerPool.getOrCreateMain(
+                runId, model, configDir, systemPromptOverride, toolMode);
 
         boolean isFirst = firstTurnDone.putIfAbsent(runId, Boolean.TRUE) == null;
         List<UnifiedMessage> messages = request.messages();

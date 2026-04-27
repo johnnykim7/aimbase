@@ -3,6 +3,7 @@ package com.platform.agent.lifecycle;
 import com.platform.mcp.agent.AgentLifecycle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -13,8 +14,10 @@ import java.time.Instant;
 
 /**
  * CR-042: 5분 주기 상태 로그 + status.json 기록.
+ * CR-071: Runner 모드(aimbase.runner.enabled=true)에서는 비활성.
  */
 @Component
+@ConditionalOnProperty(prefix = "aimbase.runner", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class AgentHealthReporter {
 
     private static final Logger log = LoggerFactory.getLogger(AgentHealthReporter.class);

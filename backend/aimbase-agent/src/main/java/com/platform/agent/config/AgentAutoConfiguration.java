@@ -7,6 +7,7 @@ import com.platform.tool.ToolExecutor;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,11 +18,13 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * CR-042: Agent Bean 조립.
+ * CR-042: Agent Bean 조립 — 등록 모드 전용.
+ * CR-071: Runner 모드(aimbase.runner.enabled=true)에서는 비활성 — 등록 채널 불필요.
  * SdkToolKit → ToolFilterService → AgentConfig → AgentLifecycle 순서로 구성.
  */
 @Configuration
 @EnableConfigurationProperties(AgentProperties.class)
+@ConditionalOnProperty(prefix = "aimbase.runner", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class AgentAutoConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(AgentAutoConfiguration.class);
