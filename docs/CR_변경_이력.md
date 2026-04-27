@@ -61,6 +61,7 @@
 | CR-069 | Claude CLI 호출 공통 빌더 — `ClaudeCliCommandBuilder` 신설 + ToolMode(AIMBASE/NATIVE/HYBRID) 단일 스위치. Worker / ClaudeCodeTool 양쪽 잠금 정책(strict-mcp-config / bypassPermissions / --tools "" sealing) 통일. application.yml `tool-mode` 외부화 | 변경 | Medium | v8.5.2 | ✅ 구현 완료 |
 | CR-070 | ClaudeCodeTool 실시간 스트리밍 중계 보강 — Phase A: stdout 라인 단위 스트림 + `STREAM_SINK` ThreadLocal 패턴 적용 (ClaudeCliWorker/SubagentRunner 패턴 차용). Phase B: Agent 실행 시 Agent → 서버 진행 이벤트 push 채널 추가. ToS 안전한 (3) 표준 경로 UX 완성 | 변경 | Medium | v8.5.3 | 📝 발번 |
 | CR-071 | ClaudeCliAdapter — 3경로(API/CLI어댑터/ClaudeCodeTool) 단일 LLMAdapter 통일. CLI 실행 주체(`ClaudeCliRunner`)를 connection 단위 자유 배치 (서버/사용자 PC). aimbase-agent Runner화 + ClaudeCliLlmAdapter→ClaudeCliAdapter 진화 + ClaudeCodeTool 즉시 삭제. ToolMode(CR-069) 재활용. API/CLI 어댑터 대칭(`AnthropicAdapter` vs `ClaudeCliAdapter`) | 변경 | High | v8.6.0 | ✅ 구현 완료 |
+| CR-072 | Aimbase 서버 도구 MCP endpoint 노출 — Claude CLI 가 사용자 PC aimbase-agent (SDK 14개) 외에 **서버 도구 30+개**(WebSearch / HttpRequest / SendMessage / ScheduleCron / Notebook / LSP 등) 도 MCP 채널로 호출할 수 있도록 서버에 `/mcp/sse` (또는 stdio bridge) endpoint 신설. AimbaseMcpConfigGenerator 가 다중 mcpServers (`aimbase-local` + `aimbase-server`) 박도록 확장. 권한/테넌트 격리/agent-id 라우팅 정책 같이 정리 | 신규 | High | v8.7.0 | 📝 발번 |
 
 ---
 
@@ -1874,6 +1875,91 @@ Phase별 plan 파일은 각 Phase 시작 시 `~/.claude/plans/cr-071-phase-{n}.m
 - **승인자**: sykim
 - **적용 버전**: v8.6.0
 - **설계 승인**: 2026-04-27
+
+---
+
+### CR-072 | Aimbase 서버 도구 MCP endpoint 노출 (CLI 직접 호출 경로)
+
+- **변경 ID**: CR-072
+- **변경 타입**: 신규
+- **영향도**: High
+- **적용 버전**: v8.7.0
+- **상태**: 📝 발번 (2026-04-27)
+- **변경 일자**: 2026-04-27
+- **관련 CR**: CR-041 (Agent Registry), CR-042 (aimbase-agent), CR-044 (CLI 두뇌 + Aimbase 손발), CR-071 (ClaudeCliAdapter — 3경로 통일)
+
+#### 발견 경위
+
+CR-071 마무리 단계에서 사용자 지적. CLI(Claude Code 등) 가 동작하는 동안 사용자 PC `aimbase-agent` 에 있는 **SDK 도구 14개**(FileRead/Bash/Glob/Grep 등) 외에 **Aimbase 서버에 있는 도구 30+개**(WebSearch / HttpRequest / SendMessage / ScheduleCron / NotebookEdit / LSP / Skill / Task* / Team* / RemoteTrigger / Brief / ImageAnalysis / Translation / SuggestBackgroundPR 등) 도 호출할 수 있어야 자연스럽다. 현재 `AimbaseMcpConfigGenerator` 가 생성하는 `--mcp-config` 는 `aimbase-agent --mcp-stdio` 1개만 박고 있어, CLI 가 서버 도구를 직접 호출할 채널이 없음.
+
+#### 변경 내용 (개요)
+
+1. **Aimbase 서버 측 MCP endpoint 신설** — `/mcp/sse` (Spring AI MCP server) 또는 stdio bridge 모드. 서버 ToolRegistry 에 등록된 도구를 MCP 도구로 자동 노출.
+2. **AimbaseMcpConfigGenerator 확장** — 다중 `mcpServers` 박기:
+   ```json
+   {
+     "mcpServers": {
+       "aimbase-local":  { "command": "java", "args": ["-jar", "aimbase-agent.jar", "--mcp-stdio"] },
+       "aimbase-server": { "url": "https://...../mcp/sse",
+                           "headers": {"X-API-Key": "...", "X-Aimbase-Agent-Id": "..."} }
+     }
+   }
+   ```
+3. **권한/테넌트 격리** — 서버 MCP endpoint 가 X-API-Key + X-Aimbase-Agent-Id 헤더로 호출 컨텍스트(테넌트/사용자) 식별 → 도구 실행 시 TenantContext 적용. 잘못된 헤더는 401/403.
+4. **도구 노출 정책** — 모든 30+ 도구를 무차별 노출하지 않고, "CLI 안에서 호출 가능한 도구" 화이트리스트 도입 (예: `mcp.cli-exposed-tools` 설정 또는 도구 메타데이터 플래그). 서버 측 관리 도구(예: TenantCreate 등)는 제외.
+5. **이름 충돌 회피** — `mcp__aimbase-local__file_read` vs `mcp__aimbase-server__web_search` 처럼 prefix 분리로 자동 해결. 같은 이름의 도구가 양쪽에 있으면 정책 결정 필요 (서버 우선 / agent 우선 / 명시 prefix).
+6. **Aimbase 서버 자체 OrchestratorEngine 도구 루프와의 일관성** — 같은 도구가 in-process(서버 직접 실행) 와 MCP(CLI → MCP → 서버 실행) 양쪽으로 호출 가능. 결과/감사 로그 동일 채널로 집계.
+
+#### 후속 논의 키워드
+
+- **MCP 서버 구현 방식**: Spring AI `mcp-spring-webmvc` 활용? 또는 자체 구현?
+- **인증 흐름**: CLI 사이드 → 서버 MCP endpoint 호출 시 헤더 그대로 전달되는가? (Claude CLI MCP 클라이언트의 헤더 처리 검증 필요)
+- **도구 화이트리스트 정책**: 자동 노출 vs 명시 등록 vs 도구 메타데이터(`@McpExposable` 등)
+- **AIMBASE/NATIVE/HYBRID ToolMode 와의 관계** — HYBRID 모드에서 다중 MCP 서버 의미 재정리
+- **TURN/STUN 경유 호출** (사용자 PC ↔ Aimbase 서버 통신 — 보통 서버는 공인 IP라 큰 문제 없음, 그러나 사용자가 사내망에서 SSE 연결 가능한지 검증)
+- **워크플로우 SUB_WORKFLOW 와의 분리** — 서버 도구를 워크플로우 단계로 호출 vs CLI 안에서 직접 호출 — 두 경로의 의도 구분
+- **CLI MCP 채널과 서버 OrchestratorEngine 도구 루프의 거버넌스 일관성** (정책 / max_iter / 감사 / Hook 적용)
+
+#### 영향 범위
+
+- `AimbaseMcpConfigGenerator` (다중 mcpServers 출력)
+- 서버 측 신규 MCP Controller / `mcp-spring-webmvc` 의존
+- ToolRegistry → MCP Tool 변환 어댑터 (이름 / 입력 스키마 / 출력 직렬화)
+- `aimbase-api-guide.md` (MCP endpoint 문서화)
+- `claudecode-mcp-setup.md` (다중 mcpServers 설정 예시 추가)
+
+#### 완료 기준
+
+- [ ] T3 설계서 작성 (`docs/T3-13_CR-072_Server_MCP_Endpoint_설계서.md`)
+- [ ] 서버 `/mcp/sse` endpoint + 인증 + 테넌트 라우팅
+- [ ] ToolRegistry → MCP 노출 어댑터 + 화이트리스트 정책
+- [ ] AimbaseMcpConfigGenerator 다중 mcpServers 출력
+- [ ] 단위 테스트 (MCP 핸들러 / 헤더 검증 / 도구 호출)
+- [ ] 통합 테스트 (Claude Code 실 사용 — 서버 도구 호출)
+- [ ] 가이드 문서 갱신 (api / claudecode-mcp-setup)
+
+#### 범위 외
+
+- 다른 CLI(Codex/Gemini) 의 MCP 클라이언트 호환성 (별도 후속)
+- TURN/STUN 경유 SSE — 일반적으로 서버 측은 공인 IP라 불필요. 필요해지면 별도 CR
+- ClaudeCliAdapter 의 in-process 도구 실행 폐기 (서버 도구 루프) — CR-072 결과에 따라 재정리
+
+#### 원본 요구사항
+
+CR-071 마무리 대화 (2026-04-27).
+> "그런데 노출될일도 있을거잖아요.. 하다못해 claude code도 그렇잖아요"
+
+→ CLI 가 서버 도구를 직접 호출하는 시나리오 (웹검색/외부 API/협업/스케줄/노트북 등) 가 자연스러운 사용 사례.
+
+#### Plan 파일
+
+미작성 (T3 설계서 진행 시 생성).
+
+#### 요청자/승인자
+
+- **요청자**: 사용자 (대화)
+- **승인자**: sykim
+- **적용 버전**: v8.7.0
 
 ---
 
