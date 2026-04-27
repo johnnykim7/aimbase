@@ -1857,6 +1857,7 @@ OrchestratorEngine
 - 자체 소비자앱 SDK 자동 헤더 주입 (별도 CR)
 - mTLS/JWT 보안 강화 (후속)
 - OpenAI Codex / Google Gemini CLI 어댑터 (별도 후속 CR)
+- **워크플로우 PARALLEL 스텝의 CLI 세션 fork/branch 라이프사이클** — `ClaudeCliWorkerPool.getOrSpawnBranchWorker / spawnForkedWorker / releaseBranchWorker / releaseForkedWorker` 는 cli-runner 모듈에 자산 그대로 보존되어 있으나, RunnerController API 로 노출되지 않았고 `ParallelStepExecutor` 의 `ClaudeCliBranchScope` 의존도 Phase 1 에서 제거됨. 영향: PARALLEL 스텝 안에서 `anthropic-cli` connection 사용 시 분기마다 같은 CLI 세션이 fork 되지 않고 별도 메인 워커가 사용됨 (느려지거나 맥락 분리). 시드 워크플로우 중 사용 사례 없음 + anthropic-cli 자체가 운영 미사용 → 실사용 영향 없음. 별도 CR 발번 (필요 시점에 메꾼다)
 
 #### 원본 요구사항
 
