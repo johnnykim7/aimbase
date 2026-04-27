@@ -214,12 +214,16 @@ public class ChatController {
             // CR-053 Phase 2: SubagentRunner가 emit()으로 발행한 이벤트가 같은 SSE emitter로 가도록 싱크 등록.
             // 백그라운드 서브에이전트는 자식 VT에서 Done을 발행하므로, 람다가 부모 emitter를 클로저로 캡처해서 전달.
             com.platform.agent.SubagentRunner.setStreamSink(sseSink);
+            // CR-070 Phase A: ClaudeCodeTool도 stream-json NDJSON 라인을 같은 sseSink로 흘리도록 등록.
+            // ToolRegistry/도구 dispatch 레이어가 별도 인자를 받지 않으므로 ThreadLocal로 전달.
+            com.platform.tool.builtin.ClaudeCodeTool.setStreamSink(sseSink);
             try {
                 orchestrator.chatStream(chatRequest, sseSink);
             } catch (Exception e) {
                 emitter.completeWithError(e);
             } finally {
                 com.platform.agent.SubagentRunner.clearStreamSink();
+                com.platform.tool.builtin.ClaudeCodeTool.clearStreamSink();
                 com.platform.tenant.TenantContext.clear();
                 org.springframework.security.core.context.SecurityContextHolder.clearContext();
             }

@@ -59,6 +59,7 @@
 | CR-067 | EnhancedToolExecutor default bridge 본문 노출 — `ToolResultRenderer` 신설 + bridge 정정 (CR-050 Phase 9 후속, MCP stdio 직접 검증으로 본문 노출 확인) | 버그수정 | High | v8.5.0 | ✅ 구현 완료 |
 | CR-068 | API 어댑터 도구 호출 회귀 4종 정공 — (1) CR-048 filterActive 회귀 (2) HttpRequestTool body type 오타 (3) anti-hallucination 지시문 누락 (4) actions_executed 메타 누락. 작년 4월 정상 동작 동등 회복 | 버그수정 | High | v8.5.1 | ✅ 구현 완료 |
 | CR-069 | Claude CLI 호출 공통 빌더 — `ClaudeCliCommandBuilder` 신설 + ToolMode(AIMBASE/NATIVE/HYBRID) 단일 스위치. Worker / ClaudeCodeTool 양쪽 잠금 정책(strict-mcp-config / bypassPermissions / --tools "" sealing) 통일. application.yml `tool-mode` 외부화 | 변경 | Medium | v8.5.2 | ✅ 구현 완료 |
+| CR-070 | ClaudeCodeTool 실시간 스트리밍 중계 보강 — Phase A: stdout 라인 단위 스트림 + `STREAM_SINK` ThreadLocal 패턴 적용 (ClaudeCliWorker/SubagentRunner 패턴 차용). Phase B: Agent 실행 시 Agent → 서버 진행 이벤트 push 채널 추가. ToS 안전한 (3) 표준 경로 UX 완성 | 변경 | Medium | v8.5.3 | 📝 발번 |
 
 ---
 
@@ -1701,6 +1702,75 @@
   - [x] 어댑터 비교로 빌더 출력 정확성 + CR-067/068 동등성 유지 검증
 - **원본 요구사항**: 본 카드 「발견 경위」 섹션 내장
 - **Plan 파일**: 없음
+
+---
+
+### CR-070 | ClaudeCodeTool 실시간 스트리밍 중계 보강
+
+- **변경 ID**: CR-070
+- **변경 타입**: 변경
+- **영향도**: Medium
+- **적용 버전**: v8.5.3
+- **상태**: 📝 발번
+- **변경 일자**: 2026-04-27
+
+#### 발견 경위
+
+Claude 사용 3가지 방식((1) API / (2) CLI 어댑터 / (3) ClaudeCodeTool) 비교 과정에서 정액 플랜 ToS 경계 식별. (2)는 서버에서 외부 테넌트에 노출 시 "정액 플랜 API 재판매" 형태로 ToS 위반 소지가 큰 반면, (3)은 사용자 PC aimbase-agent 실행이라 안전. (3)이 표준 경로로 결정되었고, 사용자 PC Agent 실행 모델("두뇌도 사용자 PC, 손발도 Aimbase Tool")의 UX 완성을 위해 실시간 스트리밍 중계가 필요.
+
+#### 변경 내용
+
+**Phase A — 로컬 서버 실행 케이스 (당장 가치 큼):**
+1. `ClaudeCodeTool.java:448-455` stdout 처리를 라인 단위 스트림으로 변경 (현재 통째로 누적 → 중간 이벤트 폐기)
+2. `STREAM_SINK` ThreadLocal 패턴을 ClaudeCodeTool에 적용 (SubagentRunner와 동일 메커니즘)
+3. ClaudeCliWorker의 `drainStdout()` 패턴 차용 (이미 라인 단위 NDJSON 처리 구현됨)
+
+**Phase B — Agent 실행 케이스:**
+4. Agent → 서버 진행 이벤트 push 채널 추가 (현재 동기 응답만 존재)
+5. 서버가 받은 이벤트를 ChatController SSE로 중계
+
+#### 참조 코드
+
+- `ClaudeCodeTool.java:448-455` (현재 stdout 누적 지점)
+- `ClaudeCodeTool.java:492-493` (`--output-format stream-json` 옵션)
+- `ClaudeCliWorker.java:521-540` (라인 단위 스트림 모범)
+- `SubagentRunner.java:45-64` (STREAM_SINK 패턴 모범)
+- `ChatController.java:142-227` (사용자 SSE 출력 채널)
+
+#### 영향 범위
+
+- CR-042 (aimbase-agent 모듈), CR-044 (CLI 두뇌 + Aimbase 손발), CR-053 (서브에이전트 SSE)
+- ClaudeCodeTool 호출처 (워크플로우 LLM_CALL, 직접 호출 등) — 스트리밍 사용은 옵션, 미사용 시 기존 동작 유지
+
+#### 완료 기준
+
+- [ ] Phase A.1 — ClaudeCodeTool stdout 라인 단위 reader로 변경
+- [ ] Phase A.2 — `STREAM_SINK` ThreadLocal 적용 + 중간 이벤트 emit
+- [ ] Phase A.3 — 단위 테스트 (스트림 이벤트 발행 검증)
+- [ ] Phase B.1 — Agent → 서버 push 채널 설계
+- [ ] Phase B.2 — 서버 수신 → ChatController SSE 중계
+- [ ] Phase B.3 — 통합 테스트 (Agent 실행 시 사용자 SSE 수신 확인)
+- [ ] 회귀 테스트 (CR-067/068 동등성 유지)
+
+#### 범위 외
+
+- 토큰 사용량·도구 호출 감사 로깅 보강 (후속 CR)
+- Agent의 Claude 키 인지 문제 (별건 작업, CR-070 다음 진행 예정)
+- (2) Claude CLI 어댑터 격리 (상용화 시점에 별도 처리)
+
+#### 원본 요구사항
+
+`docs/origins/원본_요구사항_CR070_ClaudeCodeTool_스트리밍중계_20260427.md`
+
+#### Plan 파일
+
+미작성 (Phase 별 작업 시작 시 생성)
+
+#### 요청자/승인자
+
+- **요청자**: 사용자 (대화)
+- **승인자**: sykim
+- **적용 버전**: v8.5.3
 
 ---
 

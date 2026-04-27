@@ -2,6 +2,7 @@ package com.platform.tool.builtin;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.orchestrator.stream.StreamEvent;
 import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.ToolExecutor;
 import org.slf4j.Logger;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * Claude Code CLI를 래핑하는 내장 도구.
@@ -58,6 +60,22 @@ public class ClaudeCodeTool implements ToolExecutor {
             "--dangerously-skip-permissions=true",
             "--dangerously-skip-permissions-with-classifiers"
     );
+
+    /**
+     * CR-070 Phase A: 현재 스트리밍 컨텍스트의 StreamEvent 싱크.
+     * ChatController.streamResponse() 같은 호출처가 Virtual Thread 시작 시 set, 종료 시 clear.
+     * stream-json 출력 포맷에서 NDJSON 라인이 들어올 때마다 ToolUseStart/TextDelta 이벤트를 발행.
+     * null이면 비스트리밍 경로 — 이벤트 발행 생략, 결과는 종전대로 통째로 반환.
+     */
+    private static final ThreadLocal<Consumer<StreamEvent>> STREAM_SINK = new ThreadLocal<>();
+
+    public static void setStreamSink(Consumer<StreamEvent> sink) {
+        STREAM_SINK.set(sink);
+    }
+
+    public static void clearStreamSink() {
+        STREAM_SINK.remove();
+    }
 
     private static final UnifiedToolDef DEFINITION = new UnifiedToolDef(
             "claude_code",
@@ -447,8 +465,15 @@ public class ClaudeCodeTool implements ToolExecutor {
 
             Process process = pb.start();
 
+            // CR-070 Phase A: stream-json 포맷이고 STREAM_SINK 가 등록된 경우 라인 단위로 NDJSON 이벤트를 emit.
+            // ThreadLocal 은 호출 스레드 (Virtual Thread) 에서 평가하고, supplyAsync 별도 스레드에는
+            // 캡처된 sink 를 직접 전달한다.
+            Consumer<StreamEvent> capturedSink =
+                    "stream-json".equals(outputFormat) ? STREAM_SINK.get() : null;
             CompletableFuture<String> stdoutFuture = CompletableFuture.supplyAsync(
-                    () -> readStream(process.getInputStream())
+                    () -> capturedSink != null
+                            ? readStreamWithSink(process.getInputStream(), capturedSink)
+                            : readStream(process.getInputStream())
             );
             CompletableFuture<String> stderrFuture = CompletableFuture.supplyAsync(
                     () -> readStream(process.getErrorStream())
@@ -846,6 +871,99 @@ public class ClaudeCodeTool implements ToolExecutor {
         } catch (IOException e) {
             log.error("스트림 읽기 실패: {}", e.getMessage());
             return "";
+        }
+    }
+
+    /**
+     * CR-070 Phase A: stream-json 포맷 stdout 라인 단위 처리 + sink 직접 emit.
+     *
+     * Claude Code CLI의 stream-json 이벤트 → Aimbase StreamEvent 매핑:
+     * - {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}  → TextDelta
+     * - {"type":"assistant","message":{"content":[{"type":"tool_use","id":"...","name":"...","input":{...}}]}} → ToolUseStart
+     * - {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"...","content":"..."}]}} → ToolResultEvent
+     * - {"type":"result", ...} → emit 안 함 (extractResultFromStreamJson에서 최종 추출)
+     *
+     * 누적 문자열은 그대로 반환 (extractResultFromStreamJson 호환 유지).
+     * sink 는 호출 스레드에서 캡처해서 전달 — supplyAsync 별도 스레드에서도 안전하게 emit 가능.
+     */
+    @SuppressWarnings("unchecked")
+    private String readStreamWithSink(InputStream inputStream, Consumer<StreamEvent> sink) {
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(line);
+
+                String trimmed = line.trim();
+                if (trimmed.isEmpty()) continue;
+                try {
+                    Map<String, Object> event = objectMapper.readValue(trimmed, Map.class);
+                    emitFromStreamJsonLine(event, sink);
+                } catch (Exception e) {
+                    log.trace("stream-json 라인 파싱 스킵 (sink): {}", trimmed);
+                }
+            }
+        } catch (IOException e) {
+            log.error("스트림 읽기 실패 (sink): {}", e.getMessage());
+        }
+        return sb.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void emitFromStreamJsonLine(Map<String, Object> event, Consumer<StreamEvent> sink) {
+        String type = (String) event.get("type");
+        if (type == null || sink == null) return;
+
+        if ("assistant".equals(type)) {
+            Object message = event.get("message");
+            if (!(message instanceof Map<?, ?> msgMap)) return;
+            Object content = msgMap.get("content");
+            if (!(content instanceof List<?> blocks)) return;
+            for (Object block : blocks) {
+                if (!(block instanceof Map<?, ?> blockMap)) continue;
+                String blockType = (String) blockMap.get("type");
+                if ("text".equals(blockType)) {
+                    Object text = blockMap.get("text");
+                    if (text instanceof String s && !s.isEmpty()) {
+                        emitTo(sink, new StreamEvent.TextDelta(s));
+                    }
+                } else if ("tool_use".equals(blockType)) {
+                    String id = (String) blockMap.get("id");
+                    String name = (String) blockMap.get("name");
+                    Object input = blockMap.get("input");
+                    Map<String, Object> inputMap = (input instanceof Map<?, ?> mp)
+                            ? (Map<String, Object>) mp : Map.of();
+                    if (name != null) {
+                        emitTo(sink, new StreamEvent.ToolUseStart(id != null ? id : "", name, inputMap));
+                    }
+                }
+            }
+        } else if ("user".equals(type)) {
+            Object message = event.get("message");
+            if (!(message instanceof Map<?, ?> msgMap)) return;
+            Object content = msgMap.get("content");
+            if (!(content instanceof List<?> blocks)) return;
+            for (Object block : blocks) {
+                if (!(block instanceof Map<?, ?> blockMap)) continue;
+                if (!"tool_result".equals(blockMap.get("type"))) continue;
+                String toolUseId = (String) blockMap.get("tool_use_id");
+                Object resultContent = blockMap.get("content");
+                String output = resultContent == null ? "" : resultContent.toString();
+                Object isError = blockMap.get("is_error");
+                boolean error = Boolean.TRUE.equals(isError);
+                emitTo(sink, new StreamEvent.ToolResultEvent(toolUseId != null ? toolUseId : "", output, error));
+            }
+        }
+        // "result", "system" 등은 emit 생략 (최종 결과는 extractResultFromStreamJson)
+    }
+
+    private static void emitTo(Consumer<StreamEvent> sink, StreamEvent event) {
+        try {
+            sink.accept(event);
+        } catch (Exception e) {
+            log.warn("ClaudeCodeTool stream emit 실패: {}", event.getClass().getSimpleName(), e);
         }
     }
 
