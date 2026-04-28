@@ -15,14 +15,22 @@ import java.security.MessageDigest;
 import java.util.Base64;
 
 /**
- * CR-041 후속: TURN Allocate Request로 릴레이 주소를 획득.
- * RFC 5766 최소 구현 — Allocate(TCP 릴레이)만 사용.
- * HMAC-SHA1 임시 인증 (shared secret 기반).
+ * CR-041 후속: TURN Allocate Request로 릴레이 주소를 획득 (UDP 전용).
+ * RFC 5766 최소 구현. HMAC-SHA1 임시 인증 (shared secret 기반).
  *
- * 흐름:
- * 1. Allocate Request (인증 없이) → 401 + nonce/realm
- * 2. Allocate Request (MESSAGE-INTEGRITY 포함) → 200 + XOR-RELAYED-ADDRESS
+ * <p>흐름:
+ * <ol>
+ *   <li>Allocate Request (인증 없이) → 401 + nonce/realm</li>
+ *   <li>Allocate Request (MESSAGE-INTEGRITY 포함) → 200 + XOR-RELAYED-ADDRESS</li>
+ * </ol>
+ *
+ * <p><b>Deprecated (CR-074)</b>: 본 클래스는 UDP DatagramSocket 기반이며
+ * REQUESTED-TRANSPORT=17(UDP) 로 Allocate 한다. BE→agent inbound HTTP 시나리오에는
+ * 부적합 (BE 의 ClaudeCliRunnerClient 는 TCP HTTP 클라이언트). 새 코드는
+ * {@link TurnTcpAllocator} + {@link TurnConnectionBindHandler} +
+ * {@link TurnLoopbackBridge} 조합을 사용해야 한다.
  */
+@Deprecated
 public final class TurnRelayClient {
 
     private static final Logger log = LoggerFactory.getLogger(TurnRelayClient.class);

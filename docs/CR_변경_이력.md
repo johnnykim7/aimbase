@@ -1964,6 +1964,106 @@ CR-071 마무리 대화 (2026-04-27).
 
 ---
 
+### CR-074 | TURN-TCP (RFC 6062) ConnectionBind 모드 기반 NAT 우회 정공 구현
+
+- **변경 ID**: CR-074
+- **변경 타입**: 신규
+- **영향도**: High
+- **적용 버전**: v8.8.0
+- **상태**: ✅ 구현 완료 + **정식 운영 e2e PASS** (2026-04-29) — 운영 서버 `59.8.160.12` (BE `aimbase-api-1` + coturn) → NAT 뒤 맥북 agent. BE 컨테이너 안에서 `curl http://<relay>/v1/health` → `200 OK {"status":"UP","active_runs":0,...}` 도달 확인. 핵심 누락 RFC 5766 §9 CreatePermission 추가 + `agent.turn.allowed-peer-ips` 필드 신설로 해결. 단위 15 PASS / 회귀 648 PASS
+- **변경 일자**: 2026-04-29
+- **설계서**: [T3-14_CR-074_TURN-TCP_NAT우회_설계서.md](T3-14_CR-074_TURN-TCP_NAT우회_설계서.md)
+- **관련 CR**: CR-041 (Agent Registry / STUN·TURN 인프라), CR-042 (aimbase-agent), CR-071 (ClaudeCliAdapter — 3경로 통일), CR-072/073 (서버 MCP endpoint + agent Spring Boot 통합)
+
+#### 발견 경위
+
+CR-071/072/073 으로 ClaudeCliAdapter 3경로 통일과 서버 MCP endpoint 노출이 끝나면서, BE 가 NAT 뒤 사용자 PC 의 `aimbase-agent` 로 inbound TCP 호출을 보낼 경로가 정식으로 필요해짐. 현재 `AgentRegistryEntity.runnerEndpoint` 컬럼은 "공인 IP:포트" 가정으로 동작 — 실제 사용자 PC 가 NAT 뒤일 때는 도달 불가.
+
+CR-041 단계에서 일부 스캐폴딩(`StunAddressResolver` / `TurnRelayClient`) 만 두고, 실제 BE→agent inbound 경로는 미해결로 남겨둔 상태였음. 사용자가 "WebSocket 상시 세션 부담을 피하고 필요할 때만 깨어나는 모델" 을 처음부터 원하셨고, 이번 CR 에서 해당 모델을 정공으로 완성한다.
+
+#### 기존 스캐폴딩 점검 결과
+
+- `TurnRelayClient` (sdk/tool-sdk-mcp): UDP DatagramSocket 기반 + `REQUESTED-TRANSPORT=17(UDP)` Allocate 만 구현. 현재 Aimbase 시나리오(BE→agent HTTP)에 부적합.
+- `AgentLifecycle`: 결과를 `metadata.turnRelayAddress` 로 저장하지만 BE 측 사용처 없음 (dead path).
+- `AgentRegistryEntity.runnerEndpoint`: BE 가 실제로 사용하는 컬럼. 여기에 **TURN 릴레이 주소 기반 HTTP base URL** 이 들어가도록 정렬해야 함.
+- `ClaudeCliRunnerClient`: 일반 `HttpClient` 로 `URI.create(endpoint.runnerEndpoint() + "/v1/chat")` 호출. relay 주소가 그대로 들어가도 동작하는 구조.
+
+#### 변경 내용 (개요)
+
+1. **TurnTcpAllocator 신규** (`backend/sdk/tool-sdk-mcp`): TCP socket 기반 Allocate 전용 클라이언트.
+   - `REQUESTED-TRANSPORT=6 (TCP)` Allocate 송신 (RFC 6062 §4.1)
+   - `XOR-RELAYED-ADDRESS` 응답 파싱 → `String relayAddress`
+   - control connection 은 close 하지 않고 **장기 유지** (Allocate lifetime refresh 포함)
+2. **TurnConnectionBindHandler 신규** (`backend/sdk/tool-sdk-mcp`): control connection 위 `ConnectionAttempt` indication 처리 루프 (RFC 6062 §4.3).
+   - indication 수신 → connection-id 추출 → TURN 에 새 TCP socket 수립 → `ConnectionBind` 송신
+   - 응답 200 OK 후 해당 socket 을 agent 내부 HTTP 서버에 위임 (`Socket → ServerSocket-equivalent` 어댑터)
+3. **AgentLifecycle 정렬**:
+   - `turnRelayAddress` 별도 metadata key 폐기 → `metadata.runnerEndpoint = "http://<relay-ip>:<relay-port>"` 로 직접 등록
+   - TURN 사용 시 `RunnerHttpServer` 가 일반 `ServerSocket.accept()` 대신 `TurnConnectionBindHandler` 가 push 하는 socket 을 처리하도록 어댑터 삽입
+4. **`AgentConfig` 확장**: `turnTransport` 필드 (UDP|TCP, 기본 TCP), `turnLifetimeSeconds` (기본 600s, refresh 주기 = lifetime/2)
+5. **BE 측 검증·문서화**:
+   - `ClaudeCliAdapter` / `ClaudeCliRunnerClient` — 코드 수정 없음 (relay 주소 그대로 HTTP base URL 로 사용 가능 확인)
+   - 가이드 갱신: `aimbase-ops-guide.md` (TURN 운영 / coturn 설정 예시), `aimbase-api-guide.md` (변경 없음 명시)
+6. **e2e 시나리오**: NAT 뒤 agent → coturn(TCP allocate) → BE `/v1/chat` 호출 1회. 실측 환경 부재 시 mock-coturn 단위 테스트로 대체.
+
+#### 후속 논의 키워드
+
+- coturn 측 설정: `--no-tlsv1`, `--listening-port=3478`, `--tls-listening-port=5349` 등 — 현재 사내 coturn 인스턴스 설정 확인 필요
+- TURN realm/shared-secret 운영: 현재 `AgentConfig.turnSharedSecret` 단일. 다중 테넌트/agent 격리는 차기 CR
+- Allocate 실패 시 폴백: 직접 연결(공인 IP) → ngrok/frpc 보조 채널 → 작동 안하면 등록 거부
+- agent 사이드 control connection 끊김 감지/재수립 (BIZ 신규 후보)
+- 보안: relay address 가 노출되면 누구든 agent HTTP 에 도달 가능 → BE 의 `X-Api-Key` 검증이 유일한 방어선이므로 키 회전 정책 강화 필요
+
+#### 영향 범위
+
+- `backend/sdk/tool-sdk-mcp/src/main/java/com/platform/mcp/agent/TurnTcpAllocator.java` (신규)
+- `backend/sdk/tool-sdk-mcp/src/main/java/com/platform/mcp/agent/TurnConnectionBindHandler.java` (신규)
+- `backend/sdk/tool-sdk-mcp/src/main/java/com/platform/mcp/agent/AgentLifecycle.java` (relay 주소 → runnerEndpoint 정렬, control connection 보유)
+- `backend/sdk/tool-sdk-mcp/src/main/java/com/platform/mcp/agent/AgentConfig.java` (turnTransport / turnLifetimeSeconds 필드)
+- `backend/sdk/tool-sdk-mcp/src/main/java/com/platform/mcp/agent/TurnRelayClient.java` (UDP 전용 마킹 또는 deprecated)
+- `backend/aimbase-agent/src/main/java/com/platform/agent/runner/RunnerHttpServer.java` (혹은 동등 클래스) — 외부 socket 위임 어댑터
+- `docs/guides/aimbase-ops-guide.md` (TURN 운영 절차 추가)
+- `docs/T3-14_CR-074_TURN-TCP_NAT우회_설계서.md` (후순위 — 구현 후 또는 검증 단계에서 정리)
+
+#### 완료 기준
+
+- [x] `TurnTcpAllocator` + `TurnConnectionBindHandler` + `TurnLoopbackBridge` 단위 테스트 (mock TURN — 10 PASS 신규)
+- [x] `AgentLifecycle` TURN-TCP 분기 통합 (turnEnabled=true 시 `metadata.runnerEndpoint = "http://<relay>"`)
+- [x] **agent jar 통합 완수** (CR-074 추가 작업) — `AgentProperties.turn.*` + `AgentAutoConfiguration` 14필드 + `AgentMcpServer` 자식 SpringApplication autoconfig exclude 8종 + cliArgs 포트 강제 + `AimbaseRegistrationClient` `X-Tenant-Id` 헤더 + `AgentLifecycle` 등록 실패 tolerance + 등록·Runner 모드 동시 활성화 (`agent.registration.enabled`)
+- [x] **전체 e2e PASS**: 외부 curl → TURN relay(`59.8.160.12:61531`) → coturn ConnectionAttempt → agent ConnectionBind → loopback bridge → Tomcat RunnerController `/v1/health` 200 OK 응답 정상 수신
+- [x] **RFC 5766 §9 CreatePermission 구현 추가** (디버깅 중 발견된 결정적 누락) — `TurnTcpAllocator.sendCreatePermission/sendRefresh` + `AgentConfig.turnAllowedPeerIps` + `AgentProperties.Turn.allowedPeerIps` + `AgentLifecycle` 자동 송신·갱신 스케줄러 (300s)
+- [x] 가이드 갱신 (ops 가이드 v3.1.0)
+- [x] `TurnRelayClient` (UDP) `@Deprecated` 마킹 완료
+- [x] T3-14 설계서 작성 (`docs/T3-14_CR-074_TURN-TCP_NAT우회_설계서.md`)
+- [x] coturn 서버 IP `59.8.160.12` 로 정정 (StunAddressResolver / AgentConfig 기본값)
+- [x] flowguard_dev `connections` 시드 (`claude-cli-flowguard` 등록 / anthropic 키는 SQL 스크립트로 보관)
+- [x] `widget.allowed-origins` FlowGuard FE Origin 추가 (`http://localhost:3180`, `http://59.8.160.12:3180`)
+- [x] flowguard_dev tenant DB V49/V60 마이그레이션 적용 (agent_registry 테이블 + runner_capability 컬럼)
+- [ ] (별도 후속 CR 후보) agent 등록 400 — scope JSON 형식 + validation message 노출 정밀 조사
+
+#### 범위 외
+
+- coturn 인스턴스 운영(설치/HA/로드밸런싱) 세부 — 별도 인프라 문서
+- WebSocket / SSE 상시 세션 모드 (이번 CR 에서 의도적으로 회피하는 모델)
+- 다중 TURN 서버 페일오버 (일단 단일 인스턴스 가정)
+- TURN over TLS (TURNS) — 후속 보안 강화 CR 후보
+
+#### 원본 요구사항
+
+`docs/origins/원본_요구사항_TURN-TCP_NAT우회_RFC6062_20260429.md`
+
+#### Plan 파일
+
+미작성 (T3-14 설계서를 후순위로 미루기로 함 — 구현 진행하며 필요 시 발췌 작성).
+
+#### 요청자/승인자
+
+- **요청자**: 사용자 (대화 2026-04-29)
+- **승인자**: sykim
+- **적용 버전**: v8.8.0 (예정)
+
+---
+
 ## 작성 가이드
 
 **카드 구조**:

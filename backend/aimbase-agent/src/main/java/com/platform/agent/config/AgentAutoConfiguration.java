@@ -18,13 +18,15 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * CR-042: Agent Bean 조립 — 등록 모드 전용.
- * CR-071: Runner 모드(aimbase.runner.enabled=true)에서는 비활성 — 등록 채널 불필요.
- * SdkToolKit → ToolFilterService → AgentConfig → AgentLifecycle 순서로 구성.
+ * CR-042: Agent Bean 조립 — 등록 모드.
+ * CR-074: Runner 모드와 동시 활성화 가능. 등록 채널은 {@code agent.registration.enabled} 로 단독 제어
+ * (기본값 true). Runner 모드만 단독으로 띄우려면 {@code agent.registration.enabled=false} 명시.
+ *
+ * <p>SdkToolKit → ToolFilterService → AgentConfig → AgentLifecycle 순서로 구성.
  */
 @Configuration
 @EnableConfigurationProperties(AgentProperties.class)
-@ConditionalOnProperty(prefix = "aimbase.runner", name = "enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "agent.registration", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AgentAutoConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(AgentAutoConfiguration.class);
@@ -61,6 +63,10 @@ public class AgentAutoConfiguration {
     @Bean
     public AgentConfig agentConfig() {
         String workspace = resolveWorkspace();
+        AgentProperties.Turn turn = props.getTurn();
+        AgentConfig.TurnTransport transport = "UDP".equalsIgnoreCase(turn.getTransport())
+                ? AgentConfig.TurnTransport.UDP
+                : AgentConfig.TurnTransport.TCP;
         return new AgentConfig(
                 props.getName(),
                 props.getAimbaseUrl(),
@@ -69,7 +75,16 @@ public class AgentAutoConfiguration {
                 workspace,
                 props.getHeartbeatIntervalMs(),
                 props.getStunServer(),
-                props.getStunPort()
+                props.getStunPort(),
+                turn.getServer(),
+                turn.getPort(),
+                turn.getRealm(),
+                turn.getSharedSecret(),
+                // CR-074
+                turn.isEnabled(),
+                transport,
+                turn.getRunnerPort(),
+                turn.getAllowedPeerIps()
         );
     }
 
@@ -77,7 +92,7 @@ public class AgentAutoConfiguration {
     public AgentLifecycle agentLifecycle(AgentConfig config, SdkToolKit kit,
                                          ToolFilterService filterService) {
         List<ToolExecutor> tools = filterService.filter(kit.getAllTools());
-        return new AgentLifecycle(config, tools);
+        return new AgentLifecycle(config, tools, props.getTenantId());
     }
 
     private String resolveWorkspace() {

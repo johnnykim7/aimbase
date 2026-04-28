@@ -14,10 +14,10 @@ import java.time.Instant;
 
 /**
  * CR-042: 5분 주기 상태 로그 + status.json 기록.
- * CR-071: Runner 모드(aimbase.runner.enabled=true)에서는 비활성.
+ * CR-074: 등록 모드와 동시 활성. {@code agent.registration.enabled=false} 면 비활성.
  */
 @Component
-@ConditionalOnProperty(prefix = "aimbase.runner", name = "enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "agent.registration", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AgentHealthReporter {
 
     private static final Logger log = LoggerFactory.getLogger(AgentHealthReporter.class);

@@ -23,16 +23,33 @@ public class AimbaseRegistrationClient {
 
     private final String aimbaseBaseUrl;
     private final String apiKey;
+    private final String tenantId;
     private final HttpClient httpClient;
 
     public AimbaseRegistrationClient(String aimbaseBaseUrl, String apiKey) {
+        this(aimbaseBaseUrl, apiKey, null);
+    }
+
+    /**
+     * CR-074: 테넌트 컨텍스트 명시 — 한 API key 가 여러 tenant 매핑되거나 BE 가 X-Tenant-Id 강제할 때 사용.
+     */
+    public AimbaseRegistrationClient(String aimbaseBaseUrl, String apiKey, String tenantId) {
         this.aimbaseBaseUrl = aimbaseBaseUrl.endsWith("/")
                 ? aimbaseBaseUrl.substring(0, aimbaseBaseUrl.length() - 1)
                 : aimbaseBaseUrl;
         this.apiKey = apiKey;
+        this.tenantId = tenantId;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
+    }
+
+    private HttpRequest.Builder withCommonHeaders(HttpRequest.Builder b) {
+        b.header("X-Api-Key", apiKey);
+        if (tenantId != null && !tenantId.isBlank()) {
+            b.header("X-Tenant-Id", tenantId);
+        }
+        return b;
     }
 
     /**
@@ -49,12 +66,11 @@ public class AimbaseRegistrationClient {
                     "metadata", metadata != null ? metadata : Map.of()
             );
 
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest request = withCommonHeaders(HttpRequest.newBuilder()
                     .uri(URI.create(aimbaseBaseUrl + "/api/v1/agents/register"))
                     .header("Content-Type", "application/json")
-                    .header("X-Api-Key", apiKey)
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                    .timeout(Duration.ofSeconds(15))
+                    .timeout(Duration.ofSeconds(15)))
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -82,11 +98,10 @@ public class AimbaseRegistrationClient {
      */
     public void deregister(String agentId) {
         try {
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest request = withCommonHeaders(HttpRequest.newBuilder()
                     .uri(URI.create(aimbaseBaseUrl + "/api/v1/agents/" + agentId))
-                    .header("X-Api-Key", apiKey)
                     .DELETE()
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(10)))
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -105,11 +120,10 @@ public class AimbaseRegistrationClient {
      */
     public void heartbeat(String agentId) {
         try {
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest request = withCommonHeaders(HttpRequest.newBuilder()
                     .uri(URI.create(aimbaseBaseUrl + "/api/v1/agents/" + agentId + "/heartbeat"))
-                    .header("X-Api-Key", apiKey)
                     .POST(HttpRequest.BodyPublishers.noBody())
-                    .timeout(Duration.ofSeconds(5))
+                    .timeout(Duration.ofSeconds(5)))
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());

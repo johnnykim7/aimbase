@@ -49,17 +49,43 @@ public class AgentMcpServer {
      */
     public void start() {
         SpringApplication app = new SpringApplication(AgentMcpServerApp.class);
+        // CR-074: 부모 SpringApplication 의 -Dserver.port 시스템 프로퍼티가 자식 컨텍스트에도
+        // 우선 적용되어 포트 충돌 → setDefaultProperties 만으로는 무력. command-line args 로 박아
+        // SpringApplication 우선순위 최상단에 둔다.
+        String[] cliArgs = new String[] { "--server.port=" + port };
         Map<String, Object> props = new HashMap<>();
         props.put("server.port", port);
         props.put("spring.main.web-application-type", "servlet");
         props.put("spring.main.banner-mode", "off");
         // CR-072: AgentMcpServerApp 의 @ConditionalOnProperty 활성화 (자체 모드로 띄울 때만).
         props.put("aimbase.agent.mcp-sse.enabled", "true");
+        // CR-074: 부모 컨텍스트(AimbaseAgentApplication) 가 끌고 들어온 platform-core 의 전이
+        // autoconfig (JPA/Flyway/Redis/Spring AI) 가 자식 SpringApplication 에서도 시도되어
+        // DataSource 미구성으로 부팅 실패. 자식 컨텍스트에서도 동일하게 차단.
+        props.put("spring.autoconfigure.exclude", String.join(",",
+                "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration",
+                "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration",
+                "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration",
+                "org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration",
+                "org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration",
+                "org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration",
+                "org.springframework.boot.autoconfigure.batch.BatchAutoConfiguration",
+                "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration",
+                "org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration",
+                "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration",
+                "org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration",
+                "org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration"
+        ));
         app.setDefaultProperties(props);
 
         AgentMcpServerApp.setToolExecutors(tools);
 
-        appContext = app.run();
+        appContext = app.run(cliArgs);
         log.info("Agent MCP server started on port {}, exposing {} tools", port, tools.size());
     }
 

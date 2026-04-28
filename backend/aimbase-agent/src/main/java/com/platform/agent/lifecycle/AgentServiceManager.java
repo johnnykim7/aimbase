@@ -9,11 +9,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * CR-042: Spring 라이프사이클과 AgentLifecycle 연결.
- * CR-071: Runner 모드(aimbase.runner.enabled=true)에서는 비활성.
- * 모든 Bean 준비 후 start, 종료 시 graceful close.
+ * CR-074: Runner 모드와 동시 활성화 가능. 등록 채널은 {@code agent.registration.enabled} 로 단독 제어
+ * (기본값 true). 모든 Bean 준비 후 start, 종료 시 graceful close.
  */
 @Component
-@ConditionalOnProperty(prefix = "aimbase.runner", name = "enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "agent.registration", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AgentServiceManager implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(AgentServiceManager.class);
