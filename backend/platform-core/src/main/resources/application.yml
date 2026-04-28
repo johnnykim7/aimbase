@@ -93,6 +93,17 @@ agent:
 # ─── CR-071 Phase 1: claude-code 블록 삭제 (ClaudeCodeTool / ClaudeCliLlmAdapter 즉시 제거) ─────
 # Claude CLI 호출은 Phase 4 ClaudeCliAdapter 가 connection.config 와 AgentRegistry 만으로 라우팅한다.
 
+# ─── CR-072: 서버 도구 MCP endpoint 노출 ────────────────────────────
+# /mcp/sse 로 서버 도구 26개를 MCP 채널로 외부(CLI 등)에 노출.
+# 도구 분류는 com.platform.mcp.server.McpExposurePolicy (CLI / NONE).
+# 인증: SecurityConfig 가 /mcp/** authenticated → ApiKeyAuthenticationFilter 가 X-API-Key 검증 + tenant 자동 결정.
+mcp:
+  server-exposure:
+    enabled: ${MCP_SERVER_EXPOSURE_ENABLED:true}
+  rate-limit:
+    # 분당 요청 수 (테넌트 단위, MCP 채널 한정 키 스코프 'mcp:{tenantId}'). 0 이면 무제한.
+    requests-per-minute: ${MCP_RATE_LIMIT_PER_MINUTE:60}
+
 # ─── Platform 설정 (테넌트 프로비저닝 기본값) ────────────────────────
 platform:
   default-db-host: ${TENANT_DB_HOST:localhost}

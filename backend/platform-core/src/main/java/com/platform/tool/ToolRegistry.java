@@ -60,6 +60,18 @@ public class ToolRegistry {
         return java.util.Collections.unmodifiableSet(executors.keySet());
     }
 
+    /**
+     * CR-072: 지정한 MCP 노출 레벨에 해당하는 도구 실행기 목록.
+     *
+     * <p>{@code McpExposurePolicy.resolve()} 가 결정한 레벨이 일치하는 도구만 반환.
+     * 서버 도구를 MCP endpoint(/mcp/sse) 로 외부 노출할 때 사용.</p>
+     */
+    public List<ToolExecutor> getMcpExposedExecutors(com.platform.tool.McpExposureLevel level) {
+        return executors.values().stream()
+                .filter(e -> com.platform.mcp.server.McpExposurePolicy.resolve(e) == level)
+                .toList();
+    }
+
     /** LLMRequest.tools에 전달할 모든 도구 정의 */
     public List<UnifiedToolDef> getToolDefs() {
         return executors.values().stream()

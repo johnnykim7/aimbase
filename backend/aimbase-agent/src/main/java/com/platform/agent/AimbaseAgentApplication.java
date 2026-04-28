@@ -24,6 +24,10 @@ import java.util.List;
  *
  * CR-071 Phase 2: --runner-mode 플래그로 ClaudeCliRunner HTTP 서비스 진입.
  * Aimbase 서버의 ClaudeCliAdapter 가 HTTP(/v1/chat 등) 로 호출. 같은 PC 또는 사용자 PC 어디든 배치 가능.
+ *
+ * CR-073 (2026-04-28): --runner-mode 플래그 제거. --mcp-stdio 가 아닌 모든 경우 = SERVLET 모드 단일 진입.
+ * RunnerAutoConfiguration 은 항상 활성화 (matchIfMissing=true). HTTP 포트는 항상 OPEN.
+ * 기존 --runner-mode 플래그는 후방 호환을 위해 인식만 하고 무시.
  */
 @SpringBootApplication(
         scanBasePackages = {
@@ -61,22 +65,19 @@ public class AimbaseAgentApplication {
 
     public static void main(String[] args) {
         List<String> argList = Arrays.asList(args);
-        // CR-044: stdio MCP 모드 — Aimbase 서버 등록 없이 도구만 제공
+        // CR-044: stdio MCP 모드 — Aimbase 서버 등록 없이 도구만 제공.
+        // stdin/stdout 이 MCP 채널이라 Spring Boot 띄우면 안 됨 → 별도 분기.
         if (argList.contains("--mcp-stdio")) {
             runStdioMode();
             return;
         }
 
-        SpringApplication app = new SpringApplication(AimbaseAgentApplication.class);
+        // CR-073: 항상 SERVLET 모드. Runner endpoint + (향후) MCP SSE endpoint 모두 메인 컨텍스트.
+        // RunnerAutoConfiguration 은 항상 활성화되도록 시스템 프로퍼티 셋 (matchIfMissing 보강).
+        System.setProperty("aimbase.runner.enabled", "true");
 
-        // CR-071 Phase 2: --runner-mode 진입 시 HTTP 서버 + RunnerController 활성화
-        if (argList.contains("--runner-mode")) {
-            System.setProperty("aimbase.runner.enabled", "true");
-            // 등록 모드(서버 push) 비활성 — Runner 단독 운용 시 Aimbase 서버 등록은 별도 시동 필요
-            app.setWebApplicationType(WebApplicationType.SERVLET);
-        } else {
-            app.setWebApplicationType(WebApplicationType.NONE);
-        }
+        SpringApplication app = new SpringApplication(AimbaseAgentApplication.class);
+        app.setWebApplicationType(WebApplicationType.SERVLET);
         app.run(args);
     }
 

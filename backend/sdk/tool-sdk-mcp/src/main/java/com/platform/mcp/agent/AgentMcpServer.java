@@ -53,6 +53,8 @@ public class AgentMcpServer {
         props.put("server.port", port);
         props.put("spring.main.web-application-type", "servlet");
         props.put("spring.main.banner-mode", "off");
+        // CR-072: AgentMcpServerApp 의 @ConditionalOnProperty 활성화 (자체 모드로 띄울 때만).
+        props.put("aimbase.agent.mcp-sse.enabled", "true");
         app.setDefaultProperties(props);
 
         AgentMcpServerApp.setToolExecutors(tools);
@@ -118,8 +120,7 @@ public class AgentMcpServer {
         List<McpServerFeatures.SyncToolSpecification> toolSpecs = new ArrayList<>();
         for (ToolExecutor tool : tools) {
             UnifiedToolDef def = tool.getDefinition();
-            var mcpTool = new McpSchema.Tool(def.name(), def.description(),
-                    AgentMcpServerApp.toJsonSchemaStatic(def.inputSchema()));
+            var mcpTool = McpToolConversion.toMcpTool(tool);
             toolSpecs.add(new McpServerFeatures.SyncToolSpecification(mcpTool,
                     (exchange, args) -> dispatch(tool, def.name(), args)));
         }
@@ -137,21 +138,20 @@ public class AgentMcpServer {
      * 그 후 {@link McpResultTruncator} 로 길이 제한 적용. 예외는 isError=true 로 패킹.
      */
     static McpSchema.CallToolResult dispatch(ToolExecutor tool, String name, Map<String, Object> args) {
-        try {
-            String result = tool.execute(args);
-            result = McpResultTruncator.truncate(name, result);
-            return new McpSchema.CallToolResult(result, false);
-        } catch (Exception e) {
-            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            return new McpSchema.CallToolResult(
-                    "{\"error\":\"" + msg.replace("\"", "\\\"") + "\"}", true);
-        }
+        return McpToolConversion.dispatch(tool, name, args);
     }
 
     /**
      * 내장 Spring Boot 앱 — MCP SSE 엔드포인트 제공.
+     *
+     * <p>CR-072 (2026-04-28): {@code @ConditionalOnProperty} 로 가드 추가. 이 nested 클래스 자체가
+     * {@code @SpringBootApplication} 이라 platform-core 의 component-scan 에 끌려와서 빈이 등록되며
+     * platform-core 의 {@code ServerMcpConfig.serverMcpTransport} 와 경로 (/mcp/sse) 충돌을 일으켰다.
+     * agent 가 SSE 모드를 명시적으로 띄우지 않으면 활성화되지 않도록 한다.</p>
      */
     @SpringBootApplication(scanBasePackages = "com.platform.mcp.agent.internal")
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            name = "aimbase.agent.mcp-sse.enabled", havingValue = "true")
     static class AgentMcpServerApp {
 
         private static List<ToolExecutor> toolExecutors;

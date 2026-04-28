@@ -1,5 +1,6 @@
 package com.platform.agent.runner;
 
+import com.platform.runner.claudecli.ClaudeCliAdapterConfig;
 import com.platform.runner.claudecli.ClaudeCliWorker;
 import com.platform.runner.claudecli.ClaudeCliWorkerPool;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -23,7 +24,25 @@ import java.time.Duration;
 public class RunnerAutoConfiguration {
 
     @Bean
-    public ClaudeCliWorkerPool claudeCliWorkerPool(RunnerProperties props) {
+    public ClaudeCliAdapterConfig claudeCliAdapterConfig(RunnerProperties props) {
+        ClaudeCliAdapterConfig cfg = new ClaudeCliAdapterConfig();
+        cfg.setEnabled(props.isEnabled());
+        cfg.setCliBinaryPath(props.getClaudeBinary());
+        cfg.setMaxWorkersPerRun(props.getMaxWorkers());
+        if (props.getAimbaseMcpJar() != null) {
+            cfg.setAimbaseAgentJar(props.getAimbaseMcpJar());
+        }
+        // CR-072: 서버 MCP endpoint 노출 활성 시 mcpServers 다중화
+        cfg.setServerMcpBaseUrl(props.getServerMcpBaseUrl());
+        cfg.setServerMcpApiKey(props.getServerMcpApiKey());
+        cfg.setServerMcpAgentId(props.getServerMcpAgentId());
+        return cfg;
+    }
+
+    @Bean
+    public ClaudeCliWorkerPool claudeCliWorkerPool(RunnerProperties props, ClaudeCliAdapterConfig adapterConfig) {
+        // CR-072: 빌드된 mcpConfigJson 을 Worker 에 주입 — AIMBASE/HYBRID 일 때 CommandBuilder 가 그대로 박음.
+        String mcpConfig = adapterConfig.resolveMcpConfigJson();
         ClaudeCliWorkerPool.WorkerFactory factory = (model, resumeSessionId, forkSession, configDir) ->
                 new ClaudeCliWorker(
                         props.getClaudeBinary(),
@@ -32,9 +51,7 @@ public class RunnerAutoConfiguration {
                         forkSession,
                         configDir,
                         Duration.ofSeconds(300),
-                        // mcpConfigJson 은 Pool 외부에서 주입 안 됨. AIMBASE/HYBRID 모드는 CommandBuilder 가
-                        // --mcp-config 인라인 처리하므로 Worker 의 mcpConfigJson 은 비워둔다.
-                        null);
+                        mcpConfig);
         return new ClaudeCliWorkerPool(factory, props.getMaxWorkers(), Duration.ofSeconds(60));
     }
 

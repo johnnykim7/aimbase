@@ -66,8 +66,10 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/**", "/swagger-ui/**", "/api-docs/**", "/ws/**").permitAll()
                 // CR-058: 위젯 번들·가이드 정적 리소스 — 인증 없이 공개 (소비앱이 CDN 처럼 소비)
                 .requestMatchers("/widget/**").permitAll()
-                // MCP SSE 엔드포인트
-                .requestMatchers("/sse/**", "/mcp/**", "/admin-mcp/**").permitAll()
+                // 기타 SSE / 관리 MCP — 인증 없음
+                .requestMatchers("/sse/**", "/admin-mcp/**").permitAll()
+                // CR-072: 서버 도구 MCP endpoint — X-API-Key 인증 (ApiKeyAuthenticationFilter 가 처리)
+                .requestMatchers("/mcp/**").authenticated()
                 // 인증 엔드포인트
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // 사이드카 토큰 조회 (인증 없이 접근 가능 — 사이드카 기동 시 호출)

@@ -6,6 +6,8 @@ plugins {
 dependencies {
     // ── Aimbase Tool SDK ──
     implementation(project(":sdk:tool-sdk-core"))
+    // CR-072: McpToolConversion 공유 (UnifiedToolDef → McpSchema.Tool)
+    implementation(project(":sdk:tool-sdk-mcp"))
 
     // ── Spring Boot Core ──
     implementation("org.springframework.boot:spring-boot-starter-web")

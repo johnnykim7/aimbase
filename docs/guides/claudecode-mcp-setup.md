@@ -73,11 +73,13 @@ curl -X POST https://aimbase.your-org.com/api/v1/agents/register \
 
 ---
 
-## 3. aimbase-agent `--runner-mode` 기동
+## 3. aimbase-agent 기동
+
+> **CR-073 (v8.7.0)** — `--runner-mode` 플래그 폐지. `--mcp-stdio` 외 모든 진입은 SERVLET 모드 (HTTP 포트 항상 OPEN).
+> `--runner-mode` 가 박혀있어도 무시되며 정상 기동된다 (후방 호환).
 
 ```bash
 java -jar aimbase-agent.jar \
-  --runner-mode \
   --aimbase.runner.api-key=<RUNNER_API_KEY> \
   --aimbase.runner.default-model=claude-sonnet-4-5 \
   --aimbase.runner.claude-binary=/usr/local/bin/claude \
@@ -90,12 +92,16 @@ java -jar aimbase-agent.jar \
 ```yaml
 aimbase:
   runner:
-    enabled: true
     api-key: <RUNNER_API_KEY>           # 호출자(Aimbase 서버) X-Api-Key 인증
     default-model: claude-sonnet-4-5
     claude-binary: /usr/local/bin/claude
     max-workers: 5
-    aimbase-mcp-jar: /opt/aimbase-agent/aimbase-agent.jar  # AIMBASE/HYBRID 도구 모드 시 MCP 서버 jar
+    aimbase-mcp-jar: /opt/aimbase-agent/aimbase-agent.jar  # AIMBASE/HYBRID 도구 모드 시 SDK MCP 서버 jar
+    # CR-072: 서버 도구 26개를 CLI 가 추가로 호출하도록 mcpServers 에 'aimbase-server' 박기.
+    # 미지정 시 기존 키 'aimbase' (SDK 만) 단독 출력 — 호환 모드.
+    server-mcp-base-url: https://aimbase.your-org.com
+    server-mcp-api-key: <테넌트 X-API-Key>
+    server-mcp-agent-id: <agent-id>
 server:
   port: 8290
 ```
@@ -110,25 +116,54 @@ curl http://localhost:8290/v1/health -H "X-Api-Key: <RUNNER_API_KEY>"
 
 ## 4. Claude Code 자체에서 Aimbase MCP 사용
 
-본인 PC Claude Code 가 Aimbase 서버의 MCP 도구를 호출할 때:
+> **CR-072 (v8.7.0)** — 단일 `aimbase` 키 → **다중 mcpServers** (`aimbase-local` + `aimbase-server`) 로 확장.
+> SDK 14개 (사용자 PC) + 서버 도구 26개 (`web_search`, `http_request`, `send_message`, `schedule_cron`, `notebook_edit`, `lsp` 등) 를 모두 CLI 에 노출.
+> 호환 모드: `aimbase-server` 미지정 시 기존 키 `aimbase` 단독 (SDK 만) — CLI 호출 prefix 깨짐 방지.
+
+본인 PC Claude Code 가 Aimbase SDK + 서버 도구를 모두 호출할 때:
 
 ```jsonc
 // ~/.claude/.mcp.json
 {
   "mcpServers": {
-    "aimbase": {
+    "aimbase-local": {
+      "command": "java",
+      "args": ["-jar", "/opt/aimbase-agent/aimbase-agent.jar", "--mcp-stdio"]
+    },
+    "aimbase-server": {
       "url": "https://aimbase.your-org.com/mcp/sse",
       "headers": {
         "X-API-Key": "<테넌트 키>",
-        "X-Aimbase-Agent-Id": "a3bc1..."  // ← 위에서 발급받은 agent-id
+        "X-Aimbase-Agent-Id": "a3bc1..."
       }
     }
   }
 }
 ```
 
-`X-Aimbase-Agent-Id` 헤더가 누락되면 `adapter=anthropic-cli` 의 워크플로우 호출은 400.
-일반 Aimbase API 호출(REST)도 가능. Anthropic/OpenAI 등 다른 어댑터는 헤더 없이 동작한다.
+CLI 가 두 서버 모두에 connect 후 도구 카탈로그를 prefix 분리해 합친다 — `mcp__aimbase-local__file_read` vs `mcp__aimbase-server__web_search`.
+
+`aimbase-server` 의 `/mcp/sse` 가 받는 인증/라우팅 헤더:
+
+| 헤더 | 처리 필터 | 용도 |
+|---|---|---|
+| `X-API-Key` | `ApiKeyAuthenticationFilter` | tenant_id 자동 결정 (필수) |
+| `X-Aimbase-Agent-Id` | `AgentIdRequestFilter` | 세션 식별 + Hook 컨텍스트 (선택) |
+
+서버 측 거버넌스 (`/mcp/sse` 진입 도구 호출):
+- **PRE/POST_TOOL_USE Hook** ✓ 적용
+- **Rate Limit** ✓ 적용 (`mcp.rate-limit.requests-per-minute`, 기본 60/min, 테넌트 단위)
+- **화이트리스트** ✓ `McpExposureLevel.CLI` 만 노출 (26개)
+- **PolicyEngine / max_iterations / 풀세트 Hook** ✗ CR-050 트레이드오프 계승
+
+도구 노출 on/off:
+```yaml
+mcp:
+  server-exposure:
+    enabled: true     # false 면 /mcp/sse 도구 0개 노출
+  rate-limit:
+    requests-per-minute: 60
+```
 
 ---
 
@@ -183,3 +218,4 @@ Connection 의 `config.tool_mode` 값에 따라 CLI 가 사용할 수 있는 도
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
 | v1.0.0 | 2026-04-27 | CR-071 초판 — Claude Code MCP 연동 + aimbase-agent `--runner-mode` 셋업 |
+| v1.1.0 | 2026-04-28 | CR-072 + CR-073 — 다중 mcpServers (`aimbase-local` + `aimbase-server`) 로 SDK 14개 + 서버 도구 26개 노출. `--runner-mode` 플래그 폐지 (후방 호환). `mcp.server-exposure.enabled` / `mcp.rate-limit.requests-per-minute` 키 추가 |
