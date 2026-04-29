@@ -10,6 +10,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,6 +22,7 @@ import static com.platform.mcp.agent.TurnTcpAllocator.readStunMessage;
 
 /**
  * CR-074: RFC 6062 §4.3 ConnectionAttempt 처리 + ConnectionBind 응답.
+ * CR-076: 438 Stale Nonce 처리 + ConnectionBind error 1회 재시도.
  *
  * <p>{@link TurnTcpAllocator#allocate} 가 반환한 control socket 을 위에서 받아 동작한다.
  * <ol>
@@ -30,7 +32,13 @@ import static com.platform.mcp.agent.TurnTcpAllocator.readStunMessage;
  *   <li>그 위로 {@code ConnectionBind request (0x000B)} 송신</li>
  *   <li>{@code ConnectionBind success (0x010B)} 수신 후 socket 을
  *       {@code acceptedSocketHandler} 콜백에 위임</li>
+ *   <li>(CR-076) {@code ConnectionBind error (0x011B)} 수신 시 ERROR-CODE 검사 —
+ *       438 이면 응답에 실린 NONCE 로 {@link TurnAuthSession} 갱신 후 1회 재시도</li>
  * </ol>
+ *
+ * <p>또한 receiveLoop 은 control socket 으로 들어오는 모든 응답에서 ERROR-CODE/NONCE 를
+ * 검사하여 nonce 가 갱신되면 즉시 {@link TurnAuthSession} 에 반영한다 — Refresh /
+ * CreatePermission 응답이 438 을 줘도 다음 ConnectionBind 가 새 nonce 로 나간다.
  *
  * <p>호출자(보통 {@link AgentLifecycle}) 는 콜백에서 그 socket 을 loopback bridge 로
  * Tomcat 의 RunnerController 에 그대로 흘려보낸다.
@@ -47,12 +55,18 @@ public class TurnConnectionBindHandler implements AutoCloseable {
 
     // Attribute types
     static final short ATTR_CONNECTION_ID = 0x002A;
+    static final short ATTR_ERROR_CODE    = 0x0009;
+    static final short ATTR_NONCE         = 0x0015;
+
+    // RFC 5389 — STUN error codes
+    static final int STALE_NONCE = 438;
+    static final int UNAUTHORIZED = 401;
 
     private final String turnServer;
     private final int turnPort;
     private final Socket controlSocket;
-    /** ConnectionBind 시 동일 인증 자료(username/realm/nonce/key) 가 필요하다. */
-    private final TurnAuthMaterial authMaterial;
+    /** ConnectionBind 시 동일 인증 자료(username/realm/nonce/key) 가 필요. nonce 갱신을 위해 mutable. */
+    private final TurnAuthSession authSession;
     /** ConnectionBind 까지 끝낸 socket 을 받아 처리할 콜백 (보통 loopback bridge 시작). */
     private final Consumer<Socket> acceptedSocketHandler;
 
@@ -62,12 +76,12 @@ public class TurnConnectionBindHandler implements AutoCloseable {
 
     public TurnConnectionBindHandler(String turnServer, int turnPort,
                                      Socket controlSocket,
-                                     TurnAuthMaterial authMaterial,
+                                     TurnAuthSession authSession,
                                      Consumer<Socket> acceptedSocketHandler) {
         this.turnServer = turnServer;
         this.turnPort = turnPort;
         this.controlSocket = controlSocket;
-        this.authMaterial = authMaterial;
+        this.authSession = authSession;
         this.acceptedSocketHandler = acceptedSocketHandler;
         this.bindExecutor = Executors.newCachedThreadPool(r -> {
             Thread t = new Thread(r, "turn-bind");
@@ -127,8 +141,19 @@ public class TurnConnectionBindHandler implements AutoCloseable {
                     log.info("ConnectionAttempt received: connection-id={}", connectionId);
                     bindExecutor.submit(() -> handleAttempt(connectionId));
                 } else {
-                    // refresh / data 등 — 본 핸들러에서는 무시 (refresh 는 별도 스케줄러로 보낼 예정 — 후속)
-                    log.debug("TURN control msg (skipped): type=0x{}", Integer.toHexString(msgType & 0xFFFF));
+                    // CR-076: control socket 에 도착한 응답이 438 (Stale Nonce) 이면 새 nonce 추출 후 갱신.
+                    // Allocate refresh / CreatePermission 응답이 여기로 옴. authSession=null (anonymous) 이면 무시.
+                    int errorCode = (authSession != null) ? extractErrorCode(msg, msgLen) : -1;
+                    if (errorCode == STALE_NONCE) {
+                        String newNonce = extractNonce(msg, msgLen);
+                        if (newNonce != null) {
+                            authSession.updateNonce(newNonce);
+                            log.info("TURN nonce refreshed via 438 response (type=0x{})",
+                                    Integer.toHexString(msgType & 0xFFFF));
+                        }
+                    } else {
+                        log.debug("TURN control msg (skipped): type=0x{}", Integer.toHexString(msgType & 0xFFFF));
+                    }
                 }
             }
         } catch (Exception e) {
@@ -137,41 +162,70 @@ public class TurnConnectionBindHandler implements AutoCloseable {
     }
 
     private void handleAttempt(int connectionId) {
+        // CR-076: ConnectionBind error (0x011B) 시 ERROR-CODE 검사. 438 이면 새 nonce 추출 후 1회 재시도.
+        int maxAttempts = 2;
         Socket dataSocket = null;
-        try {
-            dataSocket = new Socket();
-            dataSocket.connect(new InetSocketAddress(turnServer, turnPort), 5000);
-            dataSocket.setTcpNoDelay(true);
-            dataSocket.setKeepAlive(true);
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                dataSocket = new Socket();
+                dataSocket.connect(new InetSocketAddress(turnServer, turnPort), 5000);
+                dataSocket.setTcpNoDelay(true);
+                dataSocket.setKeepAlive(true);
 
-            OutputStream out = dataSocket.getOutputStream();
-            DataInputStream in = new DataInputStream(dataSocket.getInputStream());
+                OutputStream out = dataSocket.getOutputStream();
+                DataInputStream in = new DataInputStream(dataSocket.getInputStream());
 
-            byte[] txnId = generateTransactionId();
-            byte[] req = buildConnectionBindRequest(txnId, connectionId, authMaterial);
-            out.write(req);
-            out.flush();
+                byte[] txnId = generateTransactionId();
+                TurnAuthMaterial auth = (authSession != null) ? authSession.current() : null;
+                byte[] req = buildConnectionBindRequest(txnId, connectionId, auth);
+                out.write(req);
+                out.flush();
 
-            ByteBuffer resp = readStunMessage(in);
-            short type = resp.getShort();
-            resp.getShort();     // length
-            resp.getInt();       // magic
-            byte[] respTxn = new byte[12]; resp.get(respTxn);
+                ByteBuffer resp = readStunMessage(in);
+                short type = resp.getShort();
+                short respLen = resp.getShort();
+                resp.getInt();       // magic
+                byte[] respTxn = new byte[12]; resp.get(respTxn);
 
-            if (type == CONNECTION_BIND_SUCCESS) {
-                log.info("ConnectionBind success: connection-id={} → handing socket to handler", connectionId);
-                dataSocket.setSoTimeout(0);
-                acceptedSocketHandler.accept(dataSocket);
-                return;
-            }
+                if (type == CONNECTION_BIND_SUCCESS) {
+                    log.info("ConnectionBind success: connection-id={} (attempt={})", connectionId, attempt);
+                    dataSocket.setSoTimeout(0);
+                    acceptedSocketHandler.accept(dataSocket);
+                    return;
+                }
 
-            log.warn("ConnectionBind failed: connection-id={} type=0x{}",
-                    connectionId, Integer.toHexString(type & 0xFFFF));
-            try { dataSocket.close(); } catch (IOException ignore) {}
-        } catch (Exception e) {
-            log.warn("ConnectionBind handling failed (id={}): {}", connectionId, e.getMessage());
-            if (dataSocket != null) {
+                if (type == CONNECTION_BIND_ERROR) {
+                    int errorCode = extractErrorCode(resp, respLen);
+                    log.warn("ConnectionBind error: connection-id={} code={} (attempt={}/{})",
+                            connectionId, errorCode, attempt, maxAttempts);
+                    if (authSession != null
+                            && (errorCode == STALE_NONCE || errorCode == UNAUTHORIZED)
+                            && attempt < maxAttempts) {
+                        String newNonce = extractNonce(resp, respLen);
+                        if (newNonce != null) {
+                            authSession.updateNonce(newNonce);
+                            log.info("ConnectionBind retry with refreshed nonce");
+                        }
+                        try { dataSocket.close(); } catch (IOException ignore) {}
+                        dataSocket = null;
+                        continue;   // 새 socket 으로 재시도
+                    }
+                    try { dataSocket.close(); } catch (IOException ignore) {}
+                    return;
+                }
+
+                log.warn("ConnectionBind unexpected response: type=0x{}",
+                        Integer.toHexString(type & 0xFFFF));
                 try { dataSocket.close(); } catch (IOException ignore) {}
+                return;
+            } catch (Exception e) {
+                log.warn("ConnectionBind handling failed (id={}, attempt={}): {}",
+                        connectionId, attempt, e.getMessage());
+                if (dataSocket != null) {
+                    try { dataSocket.close(); } catch (IOException ignore) {}
+                    dataSocket = null;
+                }
+                if (attempt == maxAttempts) return;
             }
         }
     }
@@ -194,6 +248,65 @@ public class TurnConnectionBindHandler implements AutoCloseable {
             }
         }
         return -1;
+    }
+
+    /**
+     * RFC 5389 §15.6 ERROR-CODE attribute. value = 4 bytes 헤더(reserved + class + number) + reason phrase.
+     * code = class*100 + number.
+     */
+    static int extractErrorCode(ByteBuffer msg, short msgLen) {
+        int saved = msg.position();
+        try {
+            int endPos = 20 + msgLen;
+            msg.position(20);
+            while (msg.position() < endPos && msg.remaining() >= 4) {
+                short attrType = msg.getShort();
+                short attrLen = msg.getShort();
+                if (attrType == ATTR_ERROR_CODE && attrLen >= 4) {
+                    msg.getShort();                  // reserved (2 bytes)
+                    int errClass = msg.get() & 0x07;  // 3 bits
+                    int errNumber = msg.get() & 0xFF;
+                    return errClass * 100 + errNumber;
+                } else {
+                    int skip = attrLen + TurnTcpAllocator.paddingSize(attrLen);
+                    if (msg.remaining() >= skip) {
+                        msg.position(msg.position() + skip);
+                    } else {
+                        break;
+                    }
+                }
+            }
+            return -1;
+        } finally {
+            msg.position(saved);
+        }
+    }
+
+    static String extractNonce(ByteBuffer msg, short msgLen) {
+        int saved = msg.position();
+        try {
+            int endPos = 20 + msgLen;
+            msg.position(20);
+            while (msg.position() < endPos && msg.remaining() >= 4) {
+                short attrType = msg.getShort();
+                short attrLen = msg.getShort();
+                if (attrType == ATTR_NONCE) {
+                    byte[] nb = new byte[attrLen];
+                    msg.get(nb);
+                    return new String(nb, StandardCharsets.UTF_8);
+                } else {
+                    int skip = attrLen + TurnTcpAllocator.paddingSize(attrLen);
+                    if (msg.remaining() >= skip) {
+                        msg.position(msg.position() + skip);
+                    } else {
+                        break;
+                    }
+                }
+            }
+            return null;
+        } finally {
+            msg.position(saved);
+        }
     }
 
     static byte[] buildConnectionBindRequest(byte[] txnId, int connectionId, TurnAuthMaterial auth) {

@@ -1,14 +1,17 @@
 package com.platform.tenant;
 
+import com.platform.auth.JwtProvider;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -187,5 +190,102 @@ class TenantResolverTest {
 
         verify(chain).doFilter(request, response);
         assertThat(response.getStatus()).isNotEqualTo(400);
+    }
+
+    /**
+     * CR-058 후속: 위젯 JWT 의 tenant_id 클레임으로 TenantContext 가 설정되어야 한다.
+     * 위젯 패턴은 토큰 하나로 인증+테넌트 식별이 모두 끝난다 — X-Tenant-Id 헤더 강제 금지.
+     */
+    @Test
+    void doFilter_withWidgetTokenInBearer_shouldResolveTenantFromClaim() throws Exception {
+        JwtProvider jwtProvider = new JwtProvider(
+                "tenant-resolver-widget-test-secret-key-which-is-long-enough-1234", 1800_000L, 604800_000L);
+        String token = jwtProvider.generateWidgetToken(
+                "flowguard_dev", null, null, List.of("chat:stream"), null, 1800L);
+        TenantResolver widgetResolver = new TenantResolver(stubProvider(jwtProvider));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/v1/chat/completions");
+        request.addHeader("Authorization", "Bearer " + token);
+
+        doAnswer(inv -> {
+            assertThat(TenantContext.getTenantId()).isEqualTo("flowguard_dev");
+            return null;
+        }).when(chain).doFilter(request, response);
+
+        widgetResolver.doFilter(request, response, chain);
+        verify(chain).doFilter(request, response);
+        assertThat(response.getStatus()).isNotEqualTo(400);
+    }
+
+    @Test
+    void doFilter_withWidgetTokenInQueryParam_shouldResolveTenantFromClaim() throws Exception {
+        JwtProvider jwtProvider = new JwtProvider(
+                "tenant-resolver-widget-test-secret-key-which-is-long-enough-1234", 1800_000L, 604800_000L);
+        String token = jwtProvider.generateWidgetToken(
+                "flowguard_dev", null, null, List.of("chat:stream"), null, 1800L);
+        TenantResolver widgetResolver = new TenantResolver(stubProvider(jwtProvider));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/v1/chat/stream");
+        request.setParameter("access_token", token);
+
+        doAnswer(inv -> {
+            assertThat(TenantContext.getTenantId()).isEqualTo("flowguard_dev");
+            return null;
+        }).when(chain).doFilter(request, response);
+
+        widgetResolver.doFilter(request, response, chain);
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    void doFilter_withAccessToken_shouldNotFallbackToTokenClaim() throws Exception {
+        // access 토큰은 위젯 폴백 대상 아님 — JwtAuthenticationFilter 가 처리해야 한다.
+        // 헤더/쿼리/서브도메인 모두 없으므로 tenant 필수 경로에서 400 이 떨어져야 정상.
+        JwtProvider jwtProvider = new JwtProvider(
+                "tenant-resolver-widget-test-secret-key-which-is-long-enough-1234", 1800_000L, 604800_000L);
+        String accessToken = jwtProvider.generateAccessToken("u1", "a@b.com", "flowguard_dev", "USER");
+        TenantResolver widgetResolver = new TenantResolver(stubProvider(jwtProvider));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/v1/chat/completions");
+        request.addHeader("Authorization", "Bearer " + accessToken);
+
+        widgetResolver.doFilter(request, response, chain);
+
+        // tenant 필수 경로 + 헤더/쿼리/서브도메인/위젯토큰 모두 없음 → 400
+        assertThat(response.getStatus()).isEqualTo(400);
+        verify(chain, never()).doFilter(request, response);
+    }
+
+    @Test
+    void doFilter_widgetToken_headerTakesPrecedenceOverTokenClaim() throws Exception {
+        // X-Tenant-Id 헤더가 있으면 토큰 클레임보다 우선 (개발/테스트 편의).
+        JwtProvider jwtProvider = new JwtProvider(
+                "tenant-resolver-widget-test-secret-key-which-is-long-enough-1234", 1800_000L, 604800_000L);
+        String token = jwtProvider.generateWidgetToken(
+                "flowguard_dev", null, null, List.of("chat:stream"), null, 1800L);
+        TenantResolver widgetResolver = new TenantResolver(stubProvider(jwtProvider));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/api/v1/chat/completions");
+        request.addHeader("X-Tenant-Id", "header-wins");
+        request.addHeader("Authorization", "Bearer " + token);
+
+        doAnswer(inv -> {
+            assertThat(TenantContext.getTenantId()).isEqualTo("header-wins");
+            return null;
+        }).when(chain).doFilter(request, response);
+
+        widgetResolver.doFilter(request, response, chain);
+        verify(chain).doFilter(request, response);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<JwtProvider> stubProvider(JwtProvider jwtProvider) {
+        ObjectProvider<JwtProvider> op = mock(ObjectProvider.class);
+        when(op.getIfAvailable()).thenReturn(jwtProvider);
+        return op;
     }
 }

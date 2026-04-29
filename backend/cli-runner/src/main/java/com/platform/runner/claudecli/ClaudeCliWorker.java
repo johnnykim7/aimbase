@@ -502,7 +502,9 @@ public class ClaudeCliWorker implements AutoCloseable {
 
     /**
      * CR-069: 공통 ClaudeCliCommandBuilder 사용. Worker 는 stream-json + verbose 모드 +
-     * SYSTEM 메시지를 --append-system-prompt 로 통제 (CR-068 결정 유지).
+     * connection.config 의 {@code system_prompt_override} 를 CLI {@code --system-prompt}
+     * 로 완전 교체한다 (CR-075 보강 — append 만으로는 CLI 본래의 코딩 에이전트 행동을
+     * 못 덮으므로 override 가 필요).
      * tool_mode 는 application.yml 의 platform.llm.anthropic-cli.tool-mode 가 default,
      * 호출처가 setToolMode(...) 로 override.
      */
@@ -513,7 +515,7 @@ public class ClaudeCliWorker implements AutoCloseable {
                 .streamJson(true)
                 .verbose(true)
                 .resume(resumeSessionId, forkSession)
-                .appendSystemPrompt(systemPromptOverride)
+                .systemPromptOverride(systemPromptOverride)
                 .model(model)
                 .build();
     }

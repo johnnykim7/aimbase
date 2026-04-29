@@ -169,6 +169,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String userRef = claims.get("user_ref", String.class);
         String subject = claims.getSubject();
         String principalId = userRef != null ? userRef : (subject != null ? subject : "widget");
+
+        // CR-075: ClaudeCliAdapter 자동 라우팅용 — 토큰의 user_ref 를 ThreadLocal 에 주입.
+        // AgentIdRequestFilter 의 finally 가 요청 종료 시 clear 한다.
+        if (userRef != null && !userRef.isBlank()) {
+            com.platform.llm.adapter.RequestContext.setUserRef(userRef);
+        }
+
         UserPrincipal principal = new UserPrincipal(
                 principalId, principalId, tenantId, "WIDGET", Map.of());
 

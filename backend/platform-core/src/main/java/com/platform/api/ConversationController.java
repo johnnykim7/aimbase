@@ -158,24 +158,35 @@ public class ConversationController {
      * 빈 세션을 pre-create. 첫 메시지 전송 전에도 conversation_sessions row가 존재.
      */
     @PostMapping
-    @Transactional
     @Operation(summary = "빈 대화 세션 사전 생성 (FE 새 대화 모달에서 호출)")
     public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
         String sessionId = (String) body.get("sessionId");
         if (sessionId == null || sessionId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId is required");
         }
-        ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
-                .orElseGet(() -> {
-                    ConversationSessionEntity s = new ConversationSessionEntity();
-                    s.setSessionId(sessionId);
-                    return s;
-                });
-        if (body.containsKey("title")) session.setTitle((String) body.get("title"));
-        if (body.containsKey("workspaceRef")) session.setWorkspaceRef((String) body.get("workspaceRef"));
-        if (body.containsKey("scopeType")) session.setScopeType((String) body.get("scopeType"));
-        if (session.getScopeType() == null) session.setScopeType("chat");
-        sessionRepository.save(session);
+        // CR-077: 위젯이 같은 sessionId로 pre-create와 첫 메시지를 거의 동시에 보내면
+        // 비동기 SessionStore.persistToDb와 race가 발생하여 UNIQUE 위반 가능. 3회 재시도.
+        // 각 attempt 안에서 Repository.save가 자체 트랜잭션을 열고, 충돌 시 다음 attempt의
+        // findBySessionId가 race-winner row를 찾아 update path로 진입한다.
+        int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId)
+                        .orElseGet(() -> {
+                            ConversationSessionEntity s = new ConversationSessionEntity();
+                            s.setSessionId(sessionId);
+                            return s;
+                        });
+                if (body.containsKey("title")) session.setTitle((String) body.get("title"));
+                if (body.containsKey("workspaceRef")) session.setWorkspaceRef((String) body.get("workspaceRef"));
+                if (body.containsKey("scopeType")) session.setScopeType((String) body.get("scopeType"));
+                if (session.getScopeType() == null) session.setScopeType("chat");
+                sessionRepository.save(session);
+                return ApiResponse.ok(Map.of("sessionId", sessionId, "created", true));
+            } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                if (attempt == maxAttempts) throw e;
+            }
+        }
         return ApiResponse.ok(Map.of("sessionId", sessionId, "created", true));
     }
 }

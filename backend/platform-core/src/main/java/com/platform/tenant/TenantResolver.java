@@ -1,11 +1,15 @@
 package com.platform.tenant;
 
 import com.platform.app.AppContext;
+import com.platform.auth.JwtProvider;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -19,8 +23,9 @@ import java.util.regex.Pattern;
  *
  * 추출 우선순위:
  *   1. X-Tenant-Id 헤더 (개발/테스트 편의)
- *   2. 서브도메인 (예: acme.platform.com → tenant_id = "acme")
- *   3. JWT tenant_id claim (Phase 5 인증 강화 시 활성화)
+ *   2. 쿼리 파라미터 tenant_id (MCP SSE 클라이언트용)
+ *   3. 위젯 JWT tenant_id 클레임 (CR-058, type=widget 인 경우)
+ *   4. 서브도메인 (예: acme.platform.com → tenant_id = "acme")
  *
  * 경로별 동작:
  *   /api/v1/platform/**              → Master DB만 (TenantContext/AppContext 미설정)
@@ -38,7 +43,20 @@ public class TenantResolver implements Filter {
     private static final String AUTH_API_PREFIX = "/api/v1/auth";
     private static final String ADMIN_API_PREFIX = "/api/v1/admin";
     private static final String API_PREFIX = "/api/v1/";
+    private static final String BEARER_PREFIX = "Bearer ";
     private static final Pattern APP_API_PATTERN = Pattern.compile("^/api/v1/apps/([^/]+)(/.*)?$");
+
+    private final ObjectProvider<JwtProvider> jwtProviderProvider;
+
+    @Autowired
+    public TenantResolver(ObjectProvider<JwtProvider> jwtProviderProvider) {
+        this.jwtProviderProvider = jwtProviderProvider;
+    }
+
+    /** 테스트용 — Spring 빈 주입 흐름이 아닐 때 위젯 폴백 비활성. */
+    public TenantResolver() {
+        this.jwtProviderProvider = null;
+    }
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
@@ -124,13 +142,21 @@ public class TenantResolver implements Filter {
             return queryTenantId.trim();
         }
 
+        // 3. 위젯 JWT tenant_id 클레임 (CR-058)
+        // 위젯 패턴은 토큰 하나로 인증+테넌트 식별이 모두 끝나야 한다.
+        // type=widget 토큰만 폴백 대상 — access 토큰은 JwtAuthenticationFilter 가 처리.
+        String widgetTenantId = resolveTenantIdFromWidgetToken(request);
+        if (widgetTenantId != null) {
+            return widgetTenantId;
+        }
+
         // /api/v1/auth/login은 이메일로 tenant를 자동 resolve하므로
         // 서브도메인 fallback을 적용하면 안 됨 (예: IP 접속 시 '59.8.160.12' → '59'로 오판)
         if ("/api/v1/auth/login".equals(request.getRequestURI())) {
             return null;
         }
 
-        // 3. 서브도메인 (예: acme.platform.com)
+        // 4. 서브도메인 (예: acme.platform.com)
         String host = request.getServerName();
         if (host != null && host.contains(".") && !isIpAddress(host)) {
             String subdomain = host.split("\\.")[0];
@@ -139,11 +165,42 @@ public class TenantResolver implements Filter {
             }
         }
 
-        // 4. JWT tenant_id claim (Phase 5에서 구현)
-        // String authHeader = request.getHeader("Authorization");
-        // if (authHeader != null && authHeader.startsWith("Bearer ")) { ... }
-
         return null;
+    }
+
+    /**
+     * 위젯 토큰(type=widget)에서 tenant_id 클레임을 추출.
+     * Authorization: Bearer {token} 또는 ?access_token= 쿼리에서 토큰을 찾는다.
+     * 검증 실패/non-widget 토큰/JwtProvider 미주입 시 null.
+     */
+    private String resolveTenantIdFromWidgetToken(HttpServletRequest request) {
+        if (jwtProviderProvider == null) return null;
+        JwtProvider jwtProvider = jwtProviderProvider.getIfAvailable();
+        if (jwtProvider == null) return null;
+
+        String token = null;
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith(BEARER_PREFIX)) {
+            token = authHeader.substring(BEARER_PREFIX.length()).trim();
+        } else {
+            String queryToken = request.getParameter("access_token");
+            if (queryToken != null && !queryToken.isBlank()) {
+                token = queryToken.trim();
+            }
+        }
+        if (token == null || token.isEmpty()) return null;
+        if (!jwtProvider.validateToken(token)) return null;
+
+        try {
+            Claims claims = jwtProvider.extractClaims(token);
+            if (!"widget".equals(claims.get("type", String.class))) return null;
+            String tid = claims.get("tenant_id", String.class);
+            if (tid == null || tid.isBlank()) return null;
+            return tid.trim();
+        } catch (Exception e) {
+            log.debug("Widget token tenant_id extraction failed: {}", e.getMessage());
+            return null;
+        }
     }
 
     private static final Pattern IPV4_PATTERN = Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");

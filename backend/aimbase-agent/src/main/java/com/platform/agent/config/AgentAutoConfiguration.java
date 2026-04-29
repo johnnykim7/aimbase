@@ -84,7 +84,9 @@ public class AgentAutoConfiguration {
                 turn.isEnabled(),
                 transport,
                 turn.getRunnerPort(),
-                turn.getAllowedPeerIps()
+                turn.getAllowedPeerIps(),
+                // CR-075
+                props.getUserId()
         );
     }
 

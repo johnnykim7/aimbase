@@ -2064,6 +2064,64 @@ CR-041 단계에서 일부 스캐폴딩(`StunAddressResolver` / `TurnRelayClient
 
 ---
 
+### CR-075 | ClaudeCliAdapter agent 라우팅 자동화 (user_ref 기반)
+
+- **변경 ID**: CR-075
+- **변경 타입**: 변경
+- **영향도**: Medium
+- **적용 버전**: v8.9.0
+- **상태**: 구현 중
+- **변경 일자**: 2026-04-29
+
+#### 발단
+
+CR-071 단계에서 `X-Aimbase-Agent-Id` 헤더를 호출자 책임으로 두고 자동화는 후속 CR로 분리(BIZ-101). 본 CR이 그 후속.
+
+CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명시는 운영상 부적합:
+- agent UUID는 **변동 식별자** (재기동 시 변경) — 매번 소비앱에 알릴 수 없음
+- 위젯/소비앱이 인프라 식별자를 알아야 하는 건 추상화 깨짐
+
+본질 정의: **agent = (사용자 PC × 사용자 세션)**. 사용자 본인이 자기 PC에서 자기 산출물을 작업하는 단위. 따라서 라우팅 키는 인프라 UUID가 아니라 **사용자 ID**(`user_ref`)가 자연스럽다.
+
+#### 변경 내용
+
+1. **agent 등록 페이로드에 `userId` 필드 추가**
+   - `AgentRegisterRequest` DTO + `AimbaseRegistrationClient.register()` 시그니처 + `AgentProperties.userId` 필드
+2. **같은 `userId`로 신규 등록 시 이전 ACTIVE 자동 DEREGISTER** — 사용자당 활성 agent 항상 0 또는 1
+3. **`AgentRegistryService.resolveActiveByUserRef(userRef)`** — userId로 활성+runner 가용 agent 조회
+4. **`RequestContext.userRef` ThreadLocal** — `JwtAuthenticationFilter.authenticateWidget()`에서 토큰 클레임에서 추출해 주입
+5. **`ClaudeCliAdapter.resolveEndpoint()`** — 헤더 → 토큰 user_ref → 400 순으로 폴백 (헤더 명시는 디버깅 호환용 보존)
+
+#### 변경 사유
+
+- 운영에서 위젯/소비앱이 매번 헤더 박는 구조 비합리 (사용자 직접 지적)
+- agent_id 변동성을 BE 내부에 캡슐화 → 외부 API 안정성 확보
+- 위젯 토큰 user_ref 클레임 이미 존재 → 추가 인프라 불필요
+
+#### 영향 모듈
+
+- `platform-core`: `AgentRegistryService`, `AgentRegistryController`, `ClaudeCliAdapter`, `RequestContext`, `JwtAuthenticationFilter`
+- `aimbase-agent`: `AgentProperties`, `AgentLifecycle`, `AimbaseRegistrationClient`
+
+#### 영향 범위
+
+- BIZ-099 (CLI ToS 경계) — 변경 없음
+- BIZ-101 (CR-071에서 발번된 헤더 의무) — 본 CR로 자동화 완성
+- 익명 위젯 사용자(user_ref 없음) → CLI 라우팅 불가, API 어댑터 폴백 (정책 확정)
+- 한 사용자 = 활성 agent 1개 (덮어쓰기 정책 확정)
+
+#### 원본 요구사항
+
+`docs/origins/원본_요구사항_CR075_agent라우팅자동화_20260429.md`
+
+#### 요청자/승인자
+
+- **요청자**: 사용자 (대화 2026-04-29 — "별도 cr이에요? 이미 완료된 토론이 아니고?")
+- **승인자**: sykim
+- **적용 버전**: v8.9.0
+
+---
+
 ## 작성 가이드
 
 **카드 구조**:

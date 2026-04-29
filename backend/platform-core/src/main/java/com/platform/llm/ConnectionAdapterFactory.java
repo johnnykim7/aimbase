@@ -140,6 +140,25 @@ public class ConnectionAdapterFactory {
     }
 
     /**
+     * CR-075: connection_id 미지정 호출에 대해 현재 테넌트의 기본 anthropic-cli connection 을 반환.
+     * 조건:
+     *   1) {@link #isCliEnabledForCurrentTenant()} — 피처 플래그 통과
+     *   2) tenant DB 에 adapter='anthropic-cli' 인 connection 존재
+     * 둘 중 하나라도 안 되면 null — OrchestratorEngine 이 기존 modelRouter 폴백으로 진행.
+     */
+    public String findDefaultCliConnectionForCurrentTenant() {
+        if (!isCliEnabledForCurrentTenant()) return null;
+        // anthropic-cli 어댑터 connection 조회 (가장 최근 connected 우선, 없으면 첫 row)
+        java.util.List<ConnectionEntity> cliConns = connectionRepository.findByAdapter("anthropic-cli");
+        if (cliConns.isEmpty()) return null;
+        return cliConns.stream()
+                .filter(c -> "connected".equalsIgnoreCase(c.getStatus()))
+                .findFirst()
+                .orElse(cliConns.get(0))
+                .getId();
+    }
+
+    /**
      * CR-008: LLM 연결 테스트 — 실제 API 호출로 API Key 유효성 및 네트워크 연결 검증.
      * max_tokens=1의 최소 요청을 보내 응답을 확인한다.
      */

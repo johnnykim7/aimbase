@@ -33,7 +33,7 @@ public class AgentRegistryController {
     @ResponseStatus(HttpStatus.CREATED)
     public Map<String, Object> register(@Valid @RequestBody AgentRegisterRequest request) {
         AgentRegistryEntity entity = agentRegistryService.register(
-                request.agentName(), request.publicAddress(), request.mcpPort(),
+                request.agentName(), request.userId(), request.publicAddress(), request.mcpPort(),
                 request.toolNames(), request.metadata());
         return Map.of("data", entityToMap(entity));
     }
@@ -82,8 +82,14 @@ public class AgentRegistryController {
     /**
      * 에이전트 등록 요청 DTO.
      */
+    /**
+     * 에이전트 등록 요청 DTO.
+     * CR-075: userId 필드 추가 — 위젯 토큰 user_ref 매칭용 라우팅 키.
+     * 같은 userId 의 이전 ACTIVE agent 는 신규 등록 시 자동 DEREGISTER 됨.
+     */
     public record AgentRegisterRequest(
             @NotBlank String agentName,
+            String userId,
             @NotBlank String publicAddress,
             @NotNull Integer mcpPort,
             List<String> toolNames,

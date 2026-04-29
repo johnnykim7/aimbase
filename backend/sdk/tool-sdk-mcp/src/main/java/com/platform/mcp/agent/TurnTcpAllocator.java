@@ -69,13 +69,17 @@ public final class TurnTcpAllocator {
      * Allocate 결과 — control socket(open 상태) + relay 주소 + 재사용 가능한 인증 자료.
      *
      * <p>호출자는 control socket 을 close 할 책임이 있다 (보통 {@link TurnConnectionBindHandler}
-     * 가 close 시 함께 정리). authMaterial 은 anonymous 허용 서버에서는 null.
+     * 가 close 시 함께 정리).
+     *
+     * <p>CR-076: authSession 은 mutable holder. 438 Stale Nonce 응답을 받으면
+     * {@link TurnConnectionBindHandler} 가 새 nonce 로 갱신한다.
+     * anonymous 허용 서버에서는 null.
      */
     public record Allocation(
             Socket controlSocket,
             String relayAddress,
             int lifetimeSeconds,
-            TurnAuthMaterial authMaterial
+            TurnAuthSession authSession
     ) {}
 
     /**
@@ -182,8 +186,8 @@ public final class TurnTcpAllocator {
                     log.info("TURN-TCP allocate success: relay={} lifetime={}s (via {}:{})",
                             relayAddr, lifetime, turnServer, turnPort);
                     socket.setSoTimeout(0); // long-lived control connection — block-read
-                    TurnAuthMaterial auth = TurnAuthMaterial.of(username, effectiveRealm, nonce, key);
-                    return new Allocation(socket, relayAddr, lifetime, auth);
+                    TurnAuthSession authSession = TurnAuthSession.of(username, effectiveRealm, nonce, key);
+                    return new Allocation(socket, relayAddr, lifetime, authSession);
                 }
             }
 
@@ -375,6 +379,15 @@ public final class TurnTcpAllocator {
     }
 
     /**
+     * CR-076: TurnAuthSession 오버로드 — 매 호출 시 최신 nonce 사용.
+     */
+    public static boolean sendCreatePermission(Socket controlSocket, String peerIp,
+                                               TurnAuthSession session) {
+        return sendCreatePermission(controlSocket, peerIp,
+                session != null ? session.current() : null);
+    }
+
+    /**
      * RFC 5766 §7 — Allocate lifetime refresh.
      * 기본 lifetime 600s 만료 전에 주기적으로 호출.
      */
@@ -391,6 +404,15 @@ public final class TurnTcpAllocator {
             log.warn("Refresh failed: {}", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * CR-076: TurnAuthSession 오버로드 — 매 호출 시 최신 nonce 사용.
+     */
+    public static boolean sendRefresh(Socket controlSocket, int lifetimeSeconds,
+                                      TurnAuthSession session) {
+        return sendRefresh(controlSocket, lifetimeSeconds,
+                session != null ? session.current() : null);
     }
 
     static byte[] buildCreatePermissionRequest(byte[] txnId, String peerIp, TurnAuthMaterial auth) {

@@ -20,10 +20,11 @@ import java.util.function.Consumer;
 /**
  * CR-071 Phase 4: LLMAdapter 구현 — ClaudeCliRunner HTTP 호출 경로.
  *
- * <p>호출 흐름:
+ * <p>호출 흐름 (CR-075 — 라우팅 우선순위 폴백):
  * <ol>
- *   <li>{@link RequestContext#requireAgentId()} — 헤더 X-Aimbase-Agent-Id 확인 (없으면 400)</li>
- *   <li>{@link AgentRegistryService#resolveActiveRunner(String)} — agent → AgentEndpoint</li>
+ *   <li>헤더 {@code X-Aimbase-Agent-Id} 명시 → {@link AgentRegistryService#resolveActiveRunner(String)}</li>
+ *   <li>위젯 토큰 user_ref 클레임 → {@link AgentRegistryService#resolveActiveByUserRef(String)} (정상 흐름)</li>
+ *   <li>둘 다 없으면 400</li>
  *   <li>{@link ClaudeCliRunnerClient} 로 Runner 호출</li>
  * </ol>
  *
@@ -118,15 +119,40 @@ public class ClaudeCliAdapter implements LLMAdapter {
 
     // ─── 내부 ─────────────────────────────────────────────────────────────
 
+    /**
+     * CR-075: 라우팅 우선순위
+     *   1) {@code X-Aimbase-Agent-Id} 헤더 명시 (디버깅/특수 케이스 호환)
+     *   2) 위젯 토큰 {@code user_ref} 클레임 (운영 정상 흐름)
+     *   3) 둘 다 없으면 400
+     */
     private AgentEndpoint resolveEndpoint() {
-        String agentId = RequestContext.requireAgentId();
-        Optional<AgentEndpoint> endpoint = agentRegistry.resolveActiveRunner(agentId);
-        if (endpoint.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "No active ClaudeCliRunner for agent-id: " + agentId
-                    + " (agent inactive 또는 runner_capability=false)");
+        // 1) 헤더 명시 우선
+        String agentId = RequestContext.getAgentId();
+        if (agentId != null && !agentId.isBlank()) {
+            Optional<AgentEndpoint> ep = agentRegistry.resolveActiveRunner(agentId);
+            if (ep.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "No active ClaudeCliRunner for agent-id: " + agentId
+                        + " (agent inactive 또는 runner_capability=false)");
+            }
+            return ep.get();
         }
-        return endpoint.get();
+
+        // 2) user_ref 자동 라우팅 (CR-075)
+        String userRef = RequestContext.getUserRef();
+        if (userRef != null && !userRef.isBlank()) {
+            Optional<AgentEndpoint> ep = agentRegistry.resolveActiveByUserRef(userRef);
+            if (ep.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "No active ClaudeCliRunner registered for user: " + userRef
+                        + " (사용자 PC 의 aimbase-agent 가 기동되지 않았거나 runner_capability=false)");
+            }
+            return ep.get();
+        }
+
+        // 3) 둘 다 없으면 400
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "ClaudeCliAdapter: X-Aimbase-Agent-Id 헤더 또는 위젯 토큰 user_ref 클레임이 필요합니다");
     }
 
     private LLMRequest ensureModel(LLMRequest request) {

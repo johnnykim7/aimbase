@@ -104,7 +104,7 @@ public class AgentLifecycle implements AutoCloseable {
         List<String> toolNames = mcpServer.getToolNames();
         try {
             agentId = registrationClient.register(
-                    config.agentName(), publicAddress, config.mcpPort(),
+                    config.agentName(), config.userId(), publicAddress, config.mcpPort(),
                     toolNames, metadata);
             log.info("Registered with Aimbase: agentId={}", agentId);
         } catch (Exception e) {
@@ -163,9 +163,10 @@ public class AgentLifecycle implements AutoCloseable {
         this.loopbackBridge = new TurnLoopbackBridge(config.runnerPort());
 
         // ConnectionBind handler — control socket 위 ConnectionAttempt 처리
+        // CR-076: authSession 은 mutable holder — receiveLoop 가 438 응답에서 새 nonce 추출 시 갱신.
         this.bindHandler = new TurnConnectionBindHandler(
                 config.turnServer(), config.turnPort(),
-                alloc.controlSocket(), alloc.authMaterial(),
+                alloc.controlSocket(), alloc.authSession(),
                 loopbackBridge::bridge);
         bindHandler.start();
 
@@ -175,7 +176,7 @@ public class AgentLifecycle implements AutoCloseable {
             for (String peerIp : config.turnAllowedPeerIps().split(",")) {
                 String ip = peerIp.trim();
                 if (ip.isEmpty()) continue;
-                TurnTcpAllocator.sendCreatePermission(alloc.controlSocket(), ip, alloc.authMaterial());
+                TurnTcpAllocator.sendCreatePermission(alloc.controlSocket(), ip, alloc.authSession());
             }
         } else {
             log.warn("TURN-TCP: turnAllowedPeerIps is empty — incoming TCP from external clients will be rejected by TURN server");
@@ -183,6 +184,7 @@ public class AgentLifecycle implements AutoCloseable {
 
         // CR-074: RFC 5766 §7 — Allocate lifetime refresh.
         // lifetime 만료 전에 갱신. lifetime/2 주기로 보냄.
+        // CR-076: 매 호출 시 authSession.current() 로 최신 nonce 사용.
         int lifetime = alloc.lifetimeSeconds();
         long refreshIntervalSec = Math.max(60L, lifetime / 2L);
         this.turnRefreshScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -191,13 +193,13 @@ public class AgentLifecycle implements AutoCloseable {
             return t;
         });
         turnRefreshScheduler.scheduleAtFixedRate(() -> {
-            TurnTcpAllocator.sendRefresh(alloc.controlSocket(), lifetime, alloc.authMaterial());
+            TurnTcpAllocator.sendRefresh(alloc.controlSocket(), lifetime, alloc.authSession());
             // Refresh 시 permission 도 함께 (TURN 권한도 만료될 수 있음)
             if (config.turnAllowedPeerIps() != null && !config.turnAllowedPeerIps().isBlank()) {
                 for (String peerIp : config.turnAllowedPeerIps().split(",")) {
                     String ip = peerIp.trim();
                     if (ip.isEmpty()) continue;
-                    TurnTcpAllocator.sendCreatePermission(alloc.controlSocket(), ip, alloc.authMaterial());
+                    TurnTcpAllocator.sendCreatePermission(alloc.controlSocket(), ip, alloc.authSession());
                 }
             }
         }, refreshIntervalSec, refreshIntervalSec, TimeUnit.SECONDS);

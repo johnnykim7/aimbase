@@ -165,14 +165,29 @@ public class SessionStore {
      * 세션이 없으면 생성, 있으면 메시지 카운트/토큰 업데이트.
      */
     private void persistToDb(String sessionId, List<UnifiedMessage> messages) {
-        // CR-052: 세션 upsert는 경쟁 1회 재시도, 메시지는 append-only로 신규분만 insert.
-        try {
-            upsertSession(sessionId, messages);
-        } catch (org.springframework.dao.DataIntegrityViolationException e) {
-            log.debug("Session {} insert race detected, retrying as update", sessionId);
-            upsertSession(sessionId, messages);
-        }
+        // CR-077: 세션 upsert는 동시 INSERT race 대비 최대 3회 재시도.
+        // 위젯 SDK가 같은 session_id로 메시지 #1/#2/#3을 거의 동시에 보내면
+        // 비동기 VT 3개가 병렬로 첫 진입하여 1회 retry로는 부족할 수 있다.
+        upsertSessionWithRetry(sessionId, messages);
         appendNewMessages(sessionId, messages);
+    }
+
+    private void upsertSessionWithRetry(String sessionId, List<UnifiedMessage> messages) {
+        int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                upsertSession(sessionId, messages);
+                return;
+            } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                if (attempt == maxAttempts) {
+                    log.warn("Session {} upsert failed after {} attempts: {}",
+                            sessionId, maxAttempts, e.getMessage());
+                    throw e;
+                }
+                log.debug("Session {} insert race (attempt {}/{}), retrying",
+                        sessionId, attempt, maxAttempts);
+            }
+        }
     }
 
     private void upsertSession(String sessionId, List<UnifiedMessage> messages) {
@@ -241,6 +256,26 @@ public class SessionStore {
      */
     public void setWorkspaceRefIfAbsent(String sessionId, String workspaceRef) {
         if (workspaceRef == null || workspaceRef.isBlank()) return;
+        // CR-077: 동시 첫 메시지 흐름에서 setWorkspaceRefIfAbsent와 persistToDb가
+        // 같은 session_id를 동시에 INSERT 시도할 수 있어 1회 race retry 추가.
+        int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                doSetWorkspaceRefIfAbsent(sessionId, workspaceRef);
+                return;
+            } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                if (attempt == maxAttempts) {
+                    log.warn("setWorkspaceRefIfAbsent {} failed after {} attempts: {}",
+                            sessionId, maxAttempts, e.getMessage());
+                    throw e;
+                }
+                log.debug("setWorkspaceRefIfAbsent {} race (attempt {}/{}), retrying",
+                        sessionId, attempt, maxAttempts);
+            }
+        }
+    }
+
+    private void doSetWorkspaceRefIfAbsent(String sessionId, String workspaceRef) {
         transactionTemplate.executeWithoutResult(status -> {
             // CR-046: soft-deleted row 포함 조회로 UNIQUE 충돌 회피.
             ConversationSessionEntity session = sessionRepository.findBySessionIdIncludingDeleted(sessionId)

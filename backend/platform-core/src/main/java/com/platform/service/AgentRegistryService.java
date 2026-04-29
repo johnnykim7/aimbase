@@ -41,16 +41,33 @@ public class AgentRegistryService {
     /**
      * 에이전트 등록.
      * 같은 주소:포트로 이미 ACTIVE 에이전트가 있으면 재등록(갱신).
+     * CR-075: userId 가 주어지면 같은 userId 의 다른 ACTIVE agent 를 자동 DEREGISTER (사용자당 활성 1개 정책).
      * MCP 연결하여 도구 목록을 탐색 후 캐시에 저장.
      */
-    public AgentRegistryEntity register(String agentName, String publicAddress, int mcpPort,
+    public AgentRegistryEntity register(String agentName, String userId, String publicAddress, int mcpPort,
                                          List<String> toolNames, Map<String, Object> metadata) {
         // 기존 등록 확인 → 재등록
         Optional<AgentRegistryEntity> existing = repository
                 .findByPublicAddressAndMcpPortAndStatus(publicAddress, mcpPort, "ACTIVE");
         AgentRegistryEntity entity = existing.orElseGet(AgentRegistryEntity::new);
 
+        // CR-075: 같은 userId 의 이전 ACTIVE agent 자동 DEREGISTER (덮어쓰기 정책)
+        // 본인 entity (재등록 케이스) 는 제외.
+        if (userId != null && !userId.isBlank()) {
+            for (AgentRegistryEntity prior : repository.findByUserId(userId)) {
+                if ("ACTIVE".equals(prior.getStatus())
+                        && (entity.getId() == null || !prior.getId().equals(entity.getId()))) {
+                    prior.setStatus("DEREGISTERED");
+                    prior.setDeregisteredAt(OffsetDateTime.now());
+                    repository.save(prior);
+                    log.info("CR-075: prior ACTIVE agent superseded by new registration — userId={}, oldId={}",
+                            userId, prior.getId());
+                }
+            }
+        }
+
         entity.setAgentName(agentName);
+        entity.setUserId(userId);
         entity.setPublicAddress(publicAddress);
         entity.setMcpPort(mcpPort);
         entity.setStatus("ACTIVE");
@@ -113,6 +130,28 @@ public class AgentRegistryService {
                 .filter(a -> "ACTIVE".equals(a.getStatus()))
                 .filter(AgentRegistryEntity::isRunnerCapability)
                 .filter(a -> a.getRunnerEndpoint() != null && !a.getRunnerEndpoint().isBlank())
+                .map(a -> new AgentEndpoint(
+                        a.getId().toString(),
+                        a.getRunnerEndpoint(),
+                        a.getRunnerApiKeyHash()));
+    }
+
+    /**
+     * CR-075: user_ref 기반 자동 라우팅.
+     * 위젯 토큰의 user_ref 클레임으로 활성 + runner_capability=true agent 의 endpoint 를 반환.
+     * 사용자당 활성 1개 정책({@link #register}) 으로 결과는 0 또는 1 건.
+     *
+     * @param userRef 위젯 토큰의 user_ref (사용자 ID)
+     * @return AgentEndpoint (없거나 비활성/Runner 미지원이면 빈 Optional)
+     */
+    public Optional<AgentEndpoint> resolveActiveByUserRef(String userRef) {
+        if (userRef == null || userRef.isBlank()) return Optional.empty();
+        return repository.findByUserId(userRef).stream()
+                .filter(a -> "ACTIVE".equals(a.getStatus()))
+                .filter(AgentRegistryEntity::isRunnerCapability)
+                .filter(a -> a.getRunnerEndpoint() != null && !a.getRunnerEndpoint().isBlank())
+                // 다중 활성이 들어와도 안전하게 — 가장 최근 heartbeat 우선 (정상 케이스 1건)
+                .max((a, b) -> a.getLastHeartbeatAt().compareTo(b.getLastHeartbeatAt()))
                 .map(a -> new AgentEndpoint(
                         a.getId().toString(),
                         a.getRunnerEndpoint(),

@@ -161,4 +161,75 @@ class ClaudeCliAdapterTest {
                 eq(endpoint), any(), eq("AIMBASE"), eq("/path/.claude"),
                 any(), eq("runner-key-xyz"), any());
     }
+
+    // ─── CR-075: user_ref 자동 라우팅 폴백 ───
+
+    @Test
+    @DisplayName("CR-075: 헤더 없을 때 user_ref → resolveActiveByUserRef 로 라우팅")
+    void chatFallbackToUserRef() throws Exception {
+        // 헤더 없음, user_ref 만 있음
+        RequestContext.setUserRef("alice@example.com");
+        AgentEndpoint endpoint = new AgentEndpoint("agent-7", "http://host:8290", "hash");
+        when(agentRegistry.resolveActiveByUserRef("alice@example.com")).thenReturn(Optional.of(endpoint));
+
+        LLMResponse expected = new LLMResponse(
+                "run-1", "claude-sonnet-4-5",
+                List.of(new ContentBlock.Text("ok")),
+                List.of(), new TokenUsage(0, 0),
+                LLMResponse.FinishReason.END, 1L, 0.0);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any())).thenReturn(expected);
+
+        LLMResponse resp = adapter.chat(sampleRequest()).get();
+        assertThat(resp.textContent()).isEqualTo("ok");
+        // resolveActiveRunner 는 호출되지 않아야 한다 (헤더 없음)
+        verify(agentRegistry, times(0)).resolveActiveRunner(any());
+        verify(agentRegistry, times(1)).resolveActiveByUserRef("alice@example.com");
+    }
+
+    @Test
+    @DisplayName("CR-075: 헤더와 user_ref 모두 없으면 400")
+    void chatNoHeaderNoUserRef() {
+        // RequestContext 완전 빈 상태
+        var future = adapter.chat(sampleRequest());
+        assertThatThrownBy(future::get)
+                .isInstanceOf(ExecutionException.class)
+                .hasCauseInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("X-Aimbase-Agent-Id 헤더 또는 위젯 토큰 user_ref 클레임이 필요");
+    }
+
+    @Test
+    @DisplayName("CR-075: user_ref 폴백 — 활성 agent 0건이면 400")
+    void chatUserRefNoActiveAgent() {
+        RequestContext.setUserRef("bob@example.com");
+        when(agentRegistry.resolveActiveByUserRef("bob@example.com")).thenReturn(Optional.empty());
+
+        var future = adapter.chat(sampleRequest());
+        assertThatThrownBy(future::get)
+                .isInstanceOf(ExecutionException.class)
+                .hasCauseInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("No active ClaudeCliRunner registered for user: bob@example.com");
+    }
+
+    @Test
+    @DisplayName("CR-075: 헤더 명시가 user_ref 보다 우선 — 디버깅 호환")
+    void chatHeaderTakesPrecedenceOverUserRef() throws Exception {
+        // 둘 다 세팅 — 헤더가 이겨야 한다
+        RequestContext.setAgentId("explicit-agent");
+        RequestContext.setUserRef("alice@example.com");
+        AgentEndpoint endpoint = new AgentEndpoint("explicit-agent", "http://host:8290", null);
+        when(agentRegistry.resolveActiveRunner("explicit-agent")).thenReturn(Optional.of(endpoint));
+
+        LLMResponse expected = new LLMResponse(
+                "run-1", "claude-sonnet-4-5",
+                List.of(new ContentBlock.Text("ok")),
+                List.of(), new TokenUsage(0, 0),
+                LLMResponse.FinishReason.END, 1L, 0.0);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any())).thenReturn(expected);
+
+        adapter.chat(sampleRequest()).get();
+
+        verify(agentRegistry, times(1)).resolveActiveRunner("explicit-agent");
+        // user_ref 폴백 분기는 호출되지 않아야 한다
+        verify(agentRegistry, times(0)).resolveActiveByUserRef(any());
+    }
 }

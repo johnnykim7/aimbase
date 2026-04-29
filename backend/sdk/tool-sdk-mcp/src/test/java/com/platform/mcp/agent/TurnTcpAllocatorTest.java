@@ -111,7 +111,7 @@ class TurnTcpAllocatorTest {
         assertThat(alloc.relayAddress()).isEqualTo("203.0.113.7:50000");
         assertThat(alloc.lifetimeSeconds()).isEqualTo(600);
         assertThat(alloc.controlSocket().isClosed()).isFalse();
-        assertThat(alloc.authMaterial()).isNull();
+        assertThat(alloc.authSession()).isNull();
         alloc.controlSocket().close();
     }
 

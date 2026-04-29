@@ -165,4 +165,185 @@ class TurnConnectionBindHandlerTest {
         buf.putInt(connectionId);
         return buf.array();
     }
+
+    // ── CR-076: ERROR-CODE / NONCE 추출 + 438 재시도 ───────────────────
+
+    @Test
+    void extractErrorCode_parsesStaleNonce438() {
+        // ERROR-CODE TLV: 4 byte value (2 reserved + 1 class + 1 number) + reason phrase
+        // 438 = class 4, number 38
+        byte[] reason = "Stale Nonce".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        int valueLen = 4 + reason.length;
+        int padding = (4 - (valueLen % 4)) % 4;
+        int totalAttrSize = 4 + valueLen + padding;
+
+        ByteBuffer msg = ByteBuffer.allocate(20 + totalAttrSize);
+        msg.putShort((short) 0x011B);  // CONNECTION_BIND_ERROR
+        msg.putShort((short) totalAttrSize);
+        msg.putInt(TurnTcpAllocator.MAGIC_COOKIE);
+        for (int i = 0; i < 12; i++) msg.put((byte) i);
+        msg.putShort(TurnConnectionBindHandler.ATTR_ERROR_CODE);
+        msg.putShort((short) valueLen);
+        msg.putShort((short) 0);          // reserved
+        msg.put((byte) 4);                // class
+        msg.put((byte) 38);               // number → 438
+        msg.put(reason);
+        for (int i = 0; i < padding; i++) msg.put((byte) 0);
+        msg.position(20);
+
+        int code = TurnConnectionBindHandler.extractErrorCode(msg, (short) totalAttrSize);
+        assertThat(code).isEqualTo(438);
+    }
+
+    @Test
+    void extractNonce_findsAttribute() {
+        String nonce = "fresh-nonce-xyz";
+        byte[] nb = nonce.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        int padding = (4 - (nb.length % 4)) % 4;
+        int totalAttrSize = 4 + nb.length + padding;
+
+        ByteBuffer msg = ByteBuffer.allocate(20 + totalAttrSize);
+        msg.putShort((short) 0x011B);
+        msg.putShort((short) totalAttrSize);
+        msg.putInt(TurnTcpAllocator.MAGIC_COOKIE);
+        for (int i = 0; i < 12; i++) msg.put((byte) i);
+        msg.putShort(TurnConnectionBindHandler.ATTR_NONCE);
+        msg.putShort((short) nb.length);
+        msg.put(nb);
+        for (int i = 0; i < padding; i++) msg.put((byte) 0);
+        msg.position(20);
+
+        String extracted = TurnConnectionBindHandler.extractNonce(msg, (short) totalAttrSize);
+        assertThat(extracted).isEqualTo(nonce);
+    }
+
+    @Test
+    void connectionBind_438_triggersNonceRefreshAndRetry() throws Exception {
+        fakeTurn = new ServerSocket(0);
+        int port = fakeTurn.getLocalPort();
+        executor = Executors.newCachedThreadPool();
+
+        AtomicReference<byte[]> firstBindBody = new AtomicReference<>();
+        AtomicReference<byte[]> secondBindBody = new AtomicReference<>();
+        CountDownLatch secondBindReceived = new CountDownLatch(1);
+        String freshNonce = "refreshed-nonce-001";
+
+        // (1) control connection 수락 → ConnectionAttempt 송신
+        // (2) 첫 data conn → ConnectionBind 받고 → 438 응답 (NONCE 포함)
+        // (3) 두 번째 data conn → ConnectionBind 받고 → success 응답
+        executor.submit(() -> {
+            try {
+                Socket controlConn = fakeTurn.accept();
+                int connectionId = 0xCAFEBABE;
+                controlConn.getOutputStream().write(buildConnectionAttempt(connectionId));
+                controlConn.getOutputStream().flush();
+
+                // 첫 번째 data connection
+                Socket data1 = fakeTurn.accept();
+                DataInputStream in1 = new DataInputStream(data1.getInputStream());
+                ByteBuffer req1 = TurnTcpAllocator.readStunMessage(in1);
+                firstBindBody.set(req1.array());
+
+                req1.position(8);
+                byte[] txn1 = new byte[12];
+                req1.get(txn1);
+
+                // ConnectionBind ERROR 응답: 438 + new NONCE
+                byte[] errResp = buildConnectionBindError438(txn1, freshNonce);
+                data1.getOutputStream().write(errResp);
+                data1.getOutputStream().flush();
+                data1.close();
+
+                // 두 번째 data connection — 재시도
+                Socket data2 = fakeTurn.accept();
+                DataInputStream in2 = new DataInputStream(data2.getInputStream());
+                ByteBuffer req2 = TurnTcpAllocator.readStunMessage(in2);
+                secondBindBody.set(req2.array());
+                secondBindReceived.countDown();
+
+                req2.position(8);
+                byte[] txn2 = new byte[12];
+                req2.get(txn2);
+
+                // success 응답
+                ByteBuffer resp = ByteBuffer.allocate(20);
+                resp.putShort(TurnConnectionBindHandler.CONNECTION_BIND_SUCCESS);
+                resp.putShort((short) 0);
+                resp.putInt(TurnTcpAllocator.MAGIC_COOKIE);
+                resp.put(txn2);
+                data2.getOutputStream().write(resp.array());
+                data2.getOutputStream().flush();
+                Thread.sleep(200);
+                data2.close();
+                controlConn.close();
+            } catch (Exception ignore) {
+                // 종료
+            }
+        });
+
+        Socket controlClient = new Socket("127.0.0.1", port);
+
+        // 인증 자료 보유한 session — 438 응답 후 nonce 가 갱신되어야 함
+        TurnAuthSession session = TurnAuthSession.of("user", "realm", "old-nonce", new byte[16]);
+
+        AtomicReference<Socket> handedSocket = new AtomicReference<>();
+        CountDownLatch handlerCalled = new CountDownLatch(1);
+
+        handler = new TurnConnectionBindHandler(
+                "127.0.0.1", port, controlClient,
+                session,
+                s -> { handedSocket.set(s); handlerCalled.countDown(); }
+        );
+        handler.start();
+
+        assertThat(secondBindReceived.await(5, TimeUnit.SECONDS)).as("retry sent").isTrue();
+        assertThat(handlerCalled.await(5, TimeUnit.SECONDS)).as("success accepted").isTrue();
+        assertThat(handedSocket.get()).isNotNull();
+
+        // session 의 nonce 가 freshNonce 로 갱신됨
+        String currentNonce = new String(session.current().nonceBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(currentNonce).isEqualTo(freshNonce);
+
+        // 두 번째 ConnectionBind 요청에 fresh nonce 가 들어있는지 확인
+        assertThat(secondBindBody.get()).isNotNull();
+        // 메시지에 freshNonce 문자열이 포함됐는지 (NONCE attribute 안에 들어감)
+        String secondReqAsString = new String(secondBindBody.get(), java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(secondReqAsString).contains(freshNonce);
+    }
+
+    private static byte[] buildConnectionBindError438(byte[] txn, String newNonce) {
+        byte[] reason = "Stale Nonce".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] nb = newNonce.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        int errValueLen = 4 + reason.length;
+        int errPad = (4 - (errValueLen % 4)) % 4;
+        int errTlvSize = 4 + errValueLen + errPad;
+
+        int noncePad = (4 - (nb.length % 4)) % 4;
+        int nonceTlvSize = 4 + nb.length + noncePad;
+
+        int totalAttrSize = errTlvSize + nonceTlvSize;
+        ByteBuffer buf = ByteBuffer.allocate(20 + totalAttrSize);
+        buf.putShort(TurnConnectionBindHandler.CONNECTION_BIND_ERROR);
+        buf.putShort((short) totalAttrSize);
+        buf.putInt(TurnTcpAllocator.MAGIC_COOKIE);
+        buf.put(txn);
+
+        // ERROR-CODE
+        buf.putShort(TurnConnectionBindHandler.ATTR_ERROR_CODE);
+        buf.putShort((short) errValueLen);
+        buf.putShort((short) 0);
+        buf.put((byte) 4);
+        buf.put((byte) 38);
+        buf.put(reason);
+        for (int i = 0; i < errPad; i++) buf.put((byte) 0);
+
+        // NONCE
+        buf.putShort(TurnConnectionBindHandler.ATTR_NONCE);
+        buf.putShort((short) nb.length);
+        buf.put(nb);
+        for (int i = 0; i < noncePad; i++) buf.put((byte) 0);
+
+        return buf.array();
+    }
 }

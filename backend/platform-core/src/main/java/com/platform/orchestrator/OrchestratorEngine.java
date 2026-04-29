@@ -272,8 +272,16 @@ public class OrchestratorEngine {
             adapter = connectionAdapterFactory.getAdapter(request.connectionId());
             resolvedModel = connectionAdapterFactory.resolveModel(request.connectionId(), request.model());
         } else if (!useConnectionGroup) {
-            adapter = modelRouter.route(new LLMRequest(request.model(), trimmedMessages));
-            resolvedModel = modelRouter.resolveModelId(request.model());
+            // CR-075: connection_id 미지정 + 테넌트 CLI 활성 + anthropic-cli connection 존재 → 자동 선택.
+            // 소비앱이 인프라 식별자(connection_id, agent_id) 모두 모르고도 CLI 라우팅되도록.
+            String defaultCliConn = connectionAdapterFactory.findDefaultCliConnectionForCurrentTenant();
+            if (defaultCliConn != null) {
+                adapter = connectionAdapterFactory.getAdapter(defaultCliConn);
+                resolvedModel = connectionAdapterFactory.resolveModel(defaultCliConn, request.model());
+            } else {
+                adapter = modelRouter.route(new LLMRequest(request.model(), trimmedMessages));
+                resolvedModel = modelRouter.resolveModelId(request.model());
+            }
         } else {
             // connectionGroupId 사용 시: resolvedModel은 그룹 내부에서 결정되므로 요청 모델 기준
             resolvedModel = request.model() != null ? request.model() : "auto";
@@ -546,8 +554,15 @@ public class OrchestratorEngine {
             adapter = connectionAdapterFactory.getAdapter(request.connectionId());
             resolvedModel = connectionAdapterFactory.resolveModel(request.connectionId(), request.model());
         } else {
-            adapter = modelRouter.route(new LLMRequest(request.model(), trimmedMessages));
-            resolvedModel = modelRouter.resolveModelId(request.model());
+            // CR-075: connection_id 미지정 시 테넌트 기본 anthropic-cli 자동 선택 (스트리밍 경로 동일)
+            String defaultCliConn = connectionAdapterFactory.findDefaultCliConnectionForCurrentTenant();
+            if (defaultCliConn != null) {
+                adapter = connectionAdapterFactory.getAdapter(defaultCliConn);
+                resolvedModel = connectionAdapterFactory.resolveModel(defaultCliConn, request.model());
+            } else {
+                adapter = modelRouter.route(new LLMRequest(request.model(), trimmedMessages));
+                resolvedModel = modelRouter.resolveModelId(request.model());
+            }
         }
 
         ModelConfig streamModelConfig = (request.connectionId() != null && !request.connectionId().isBlank())

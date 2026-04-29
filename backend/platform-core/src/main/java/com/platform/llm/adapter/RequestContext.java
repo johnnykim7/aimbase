@@ -13,6 +13,8 @@ import org.springframework.web.server.ResponseStatusException;
 public final class RequestContext {
 
     private static final ThreadLocal<String> AGENT_ID = new ThreadLocal<>();
+    /** CR-075: 위젯 토큰의 user_ref — 헤더 누락 시 자동 라우팅 키. */
+    private static final ThreadLocal<String> USER_REF = new ThreadLocal<>();
 
     private RequestContext() {}
 
@@ -20,9 +22,16 @@ public final class RequestContext {
 
     public static String getAgentId() { return AGENT_ID.get(); }
 
+    /** CR-075: JwtAuthenticationFilter 가 widget 토큰 인증 시 set. */
+    public static void setUserRef(String ref) { USER_REF.set(ref); }
+
+    public static String getUserRef() { return USER_REF.get(); }
+
     /**
      * agent-id 없으면 400. ClaudeCliAdapter 가 호출.
+     * @deprecated CR-075 이후 헤더 누락 시 user_ref 폴백 사용. 직접 호출 지양.
      */
+    @Deprecated
     public static String requireAgentId() {
         String id = AGENT_ID.get();
         if (id == null || id.isBlank()) {
@@ -32,5 +41,8 @@ public final class RequestContext {
         return id;
     }
 
-    public static void clear() { AGENT_ID.remove(); }
+    public static void clear() {
+        AGENT_ID.remove();
+        USER_REF.remove();
+    }
 }

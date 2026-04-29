@@ -24,6 +24,13 @@ public class AgentProperties {
     /** CR-074: Aimbase tenant id (X-Tenant-Id 헤더로 송신). domain_app 동일 시 명시 필수. */
     private String tenantId;
 
+    /**
+     * CR-075: 위젯 토큰 user_ref 와 매칭될 사용자 ID.
+     * 등록 페이로드의 userId 로 송신 — Aimbase 가 이 키로 자동 라우팅.
+     * 비어있으면 라우팅 자동화 비활성 (헤더 명시만 가능).
+     */
+    private String userId;
+
     /** MCP 서버 포트 */
     private int mcpPort = 8190;
 
@@ -106,6 +113,9 @@ public class AgentProperties {
 
     public String getTenantId() { return tenantId; }
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
 
     public int getMcpPort() { return mcpPort; }
     public void setMcpPort(int mcpPort) { this.mcpPort = mcpPort; }

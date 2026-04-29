@@ -77,7 +77,6 @@ public class ChatController {
     }
 
     @PostMapping("/completions")
-    @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     @Operation(summary = "채팅 완성 요청", description = "LLM 모델에 메시지를 전송하고 응답을 받는다. stream=true이면 SSE로 응답.")
     public Object completions(@Valid @RequestBody ChatCompletionRequest request) {
         // CR-045 L0: working_directory 화이트리스트 조기 차단 (400)
@@ -146,11 +145,20 @@ public class ChatController {
         final String propagatedTenantId = com.platform.tenant.TenantContext.getTenantId();
         final org.springframework.security.core.context.SecurityContext propagatedSecurityContext =
                 org.springframework.security.core.context.SecurityContextHolder.getContext();
+        // CR-075: ClaudeCliAdapter 자동 라우팅에 필요한 user_ref / agent_id 도 VT 로 전파.
+        final String propagatedAgentId = com.platform.llm.adapter.RequestContext.getAgentId();
+        final String propagatedUserRef = com.platform.llm.adapter.RequestContext.getUserRef();
         Thread.ofVirtual().start(() -> {
             if (propagatedTenantId != null) {
                 com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
             }
             org.springframework.security.core.context.SecurityContextHolder.setContext(propagatedSecurityContext);
+            if (propagatedAgentId != null) {
+                com.platform.llm.adapter.RequestContext.setAgentId(propagatedAgentId);
+            }
+            if (propagatedUserRef != null) {
+                com.platform.llm.adapter.RequestContext.setUserRef(propagatedUserRef);
+            }
 
             // 단일 SSE 송출 람다 — orchestrator.chatStream과 SubagentRunner가 공유.
             // CR-053 Phase 2: SubagentStart/Done도 같은 emitter로 송출한다.
@@ -222,6 +230,7 @@ public class ChatController {
                 com.platform.agent.SubagentRunner.clearStreamSink();
                 com.platform.tenant.TenantContext.clear();
                 org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                com.platform.llm.adapter.RequestContext.clear();
             }
         });
         return emitter;

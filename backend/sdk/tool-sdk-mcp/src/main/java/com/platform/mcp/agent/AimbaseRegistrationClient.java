@@ -54,17 +54,18 @@ public class AimbaseRegistrationClient {
 
     /**
      * 에이전트 등록. 성공 시 agentId 반환.
+     * CR-075: userId 추가 — 위젯 토큰 user_ref 매칭용 라우팅 키.
      */
-    public String register(String agentName, String publicAddress, int mcpPort,
+    public String register(String agentName, String userId, String publicAddress, int mcpPort,
                            List<String> toolNames, Map<String, Object> metadata) {
         try {
-            Map<String, Object> body = Map.of(
-                    "agentName", agentName,
-                    "publicAddress", publicAddress,
-                    "mcpPort", mcpPort,
-                    "toolNames", toolNames != null ? toolNames : List.of(),
-                    "metadata", metadata != null ? metadata : Map.of()
-            );
+            java.util.LinkedHashMap<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("agentName", agentName);
+            if (userId != null && !userId.isBlank()) body.put("userId", userId);
+            body.put("publicAddress", publicAddress);
+            body.put("mcpPort", mcpPort);
+            body.put("toolNames", toolNames != null ? toolNames : List.of());
+            body.put("metadata", metadata != null ? metadata : Map.of());
 
             HttpRequest request = withCommonHeaders(HttpRequest.newBuilder()
                     .uri(URI.create(aimbaseBaseUrl + "/api/v1/agents/register"))
