@@ -225,12 +225,18 @@ public class ChatController {
             try {
                 orchestrator.chatStream(chatRequest, sseSink);
             } catch (Exception e) {
+                // CR-082 (HOTFIX 2026-04-30): ResponseStatusException 도 일단 completeWithError 로 처리.
+                // emitter.complete() 흐름이 ASYNC dispatch 시 Spring Security 권한 재검사 통과 못 하는 케이스 관찰됨.
+                // SSE error event 표준화는 SecurityContext 흐름 정리 후 별도 작업.
                 emitter.completeWithError(e);
             } finally {
                 com.platform.agent.SubagentRunner.clearStreamSink();
                 com.platform.tenant.TenantContext.clear();
-                org.springframework.security.core.context.SecurityContextHolder.clearContext();
-                com.platform.llm.adapter.RequestContext.clear();
+                // CR-082 root fix (2026-04-30): SecurityContextHolder.clearContext() 를 호출하면
+                // emitter.completeWithError(e) 가 트리거하는 Spring async dispatch 가
+                // 빈 SecurityContext 로 진입해 AuthorizationFilter 에서 거부 → 위젯에 403 으로 표시되는 race.
+                // VT 가 종료되면 ThreadLocal 은 자동 회수되므로 명시 clear 는 불필요. 같은 이유로 RequestContext.clear() 도 보류.
+                // Tenant 는 다음 요청 진입 시 TenantResolver 가 다시 채워주므로 clear 안전.
             }
         });
         return emitter;

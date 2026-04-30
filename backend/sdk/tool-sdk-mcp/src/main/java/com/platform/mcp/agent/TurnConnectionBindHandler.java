@@ -71,6 +71,14 @@ public class TurnConnectionBindHandler implements AutoCloseable {
     private final Consumer<Socket> acceptedSocketHandler;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
+    /** CR-079 보강: receiveLoop 가 외부 RST/EOF 로 종료된 것을 외부에 알리는 플래그. */
+    private final AtomicBoolean controlBroken = new AtomicBoolean(false);
+    /** CR-079 보강 +1: ConnectionBind 가 연속 실패한 횟수. 임계 도달 시 broken signal. */
+    private final java.util.concurrent.atomic.AtomicInteger connectionBindFailures = new java.util.concurrent.atomic.AtomicInteger(0);
+    /** ConnectionBind 누적 실패가 이 임계 이상이면 control 측에 문제가 있다고 보고 reallocate. */
+    private static final int BIND_FAILURE_THRESHOLD = 2;
+    /** CR-079 보강: control socket broken 감지 즉시 호출되는 콜백 (AgentLifecycle 의 reallocate 트리거). */
+    private volatile Runnable onControlBroken;
     private final ExecutorService bindExecutor;
     private Thread receiveLoop;
 
@@ -120,10 +128,17 @@ public class TurnConnectionBindHandler implements AutoCloseable {
                 try {
                     msg = readStunMessage(in);
                 } catch (SocketException se) {
-                    if (running.get()) log.warn("TURN control socket closed: {}", se.getMessage());
+                    // CR-079 보강: 외부 RST/EOF — controlBroken 으로 외부에 알림. AgentLifecycle.refresh tick 이 보고 reallocate.
+                    if (running.get()) {
+                        log.warn("TURN control socket closed: {}", se.getMessage());
+                        signalBroken();
+                    }
                     return;
                 } catch (IOException ioe) {
-                    if (running.get()) log.warn("TURN control read failed: {}", ioe.getMessage());
+                    if (running.get()) {
+                        log.warn("TURN control read failed: {}", ioe.getMessage());
+                        signalBroken();
+                    }
                     return;
                 }
 
@@ -157,11 +172,52 @@ public class TurnConnectionBindHandler implements AutoCloseable {
                 }
             }
         } catch (Exception e) {
+            // CR-079 보강: 예외로 인한 종료도 broken 으로 신호.
             log.warn("TURN control receive loop failed: {}", e.getMessage(), e);
+            if (running.get()) signalBroken();
+        }
+    }
+
+    /** CR-079 보강: 외부에서 control socket 의 RST/EOF 감지 여부 확인. */
+    public boolean isControlBroken() {
+        return controlBroken.get();
+    }
+
+    /** CR-079 보강: broken 감지 즉시 실행될 콜백 등록 (한 번만 호출됨). */
+    public void setOnControlBroken(Runnable cb) {
+        this.onControlBroken = cb;
+    }
+
+    /** broken 신호와 콜백을 한 번에 처리 (중복 호출 방지). */
+    private void signalBroken() {
+        if (controlBroken.compareAndSet(false, true)) {
+            Runnable cb = this.onControlBroken;
+            if (cb != null) {
+                try { cb.run(); } catch (Throwable t) { log.warn("onControlBroken callback failed: {}", t.getMessage()); }
+            }
         }
     }
 
     private void handleAttempt(int connectionId) {
+        boolean succeeded = false;
+        try {
+            succeeded = handleAttemptInner(connectionId);
+        } finally {
+            if (!succeeded) {
+                // CR-079 보강 +1: ConnectionBind 가 모두 실패하면 누적. 임계 도달 시 broken signal.
+                int failures = connectionBindFailures.incrementAndGet();
+                if (failures >= BIND_FAILURE_THRESHOLD) {
+                    log.warn("ConnectionBind 연속 실패 {}회 — broken signal 발행 (control 측 채널 회복 필요)", failures);
+                    signalBroken();
+                }
+            }
+        }
+    }
+
+    /**
+     * ConnectionBind 흐름 본체. 성공 시 true 반환.
+     */
+    private boolean handleAttemptInner(int connectionId) {
         // CR-076: ConnectionBind error (0x011B) 시 ERROR-CODE 검사. 438 이면 새 nonce 추출 후 1회 재시도.
         int maxAttempts = 2;
         Socket dataSocket = null;
@@ -190,8 +246,10 @@ public class TurnConnectionBindHandler implements AutoCloseable {
                 if (type == CONNECTION_BIND_SUCCESS) {
                     log.info("ConnectionBind success: connection-id={} (attempt={})", connectionId, attempt);
                     dataSocket.setSoTimeout(0);
+                    // CR-079 보강 +1: 성공 시 누적 실패 카운터 리셋.
+                    connectionBindFailures.set(0);
                     acceptedSocketHandler.accept(dataSocket);
-                    return;
+                    return true;
                 }
 
                 if (type == CONNECTION_BIND_ERROR) {
@@ -211,13 +269,13 @@ public class TurnConnectionBindHandler implements AutoCloseable {
                         continue;   // 새 socket 으로 재시도
                     }
                     try { dataSocket.close(); } catch (IOException ignore) {}
-                    return;
+                    return false;
                 }
 
                 log.warn("ConnectionBind unexpected response: type=0x{}",
                         Integer.toHexString(type & 0xFFFF));
                 try { dataSocket.close(); } catch (IOException ignore) {}
-                return;
+                return false;
             } catch (Exception e) {
                 log.warn("ConnectionBind handling failed (id={}, attempt={}): {}",
                         connectionId, attempt, e.getMessage());
@@ -225,9 +283,15 @@ public class TurnConnectionBindHandler implements AutoCloseable {
                     try { dataSocket.close(); } catch (IOException ignore) {}
                     dataSocket = null;
                 }
-                if (attempt == maxAttempts) return;
+                // CR-079 보강 +1: 1차 실패 후 잠깐 대기 — 이 사이 control socket 의 receiveLoop 가
+                // 다른 응답에서 nonce 를 갱신할 기회. 그러면 2차 시도가 fresh nonce 로 나간다.
+                if (attempt < maxAttempts) {
+                    try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return false; }
+                }
+                if (attempt == maxAttempts) return false;
             }
         }
+        return false;
     }
 
     static int extractConnectionId(ByteBuffer msg, short msgLen) {

@@ -191,23 +191,22 @@ public class SessionStore {
     }
 
     private void upsertSession(String sessionId, List<UnifiedMessage> messages) {
+        // CR-083: native ON CONFLICT 로 race-safe 처리. JPA save() 는 동시 INSERT 시 commit 시점에
+        // UNIQUE 충돌이 나면 retry 로도 안정적으로 회복 안 됨 (transactionTemplate 안 commit/rollback 경계).
+        // Postgres ON CONFLICT(session_id) DO UPDATE 로 단일 statement 에서 끝낸다.
+        String title = messages.stream()
+                .filter(m -> m.role() == UnifiedMessage.Role.USER)
+                .findFirst()
+                .map(this::extractText)
+                .map(t -> t.length() > 500 ? t.substring(0, 500) : t)
+                .orElse(null);
         transactionTemplate.executeWithoutResult(status -> {
-            // CR-046: 영속 시 soft-deleted row를 발견하면 그 row를 그대로 사용해야 UNIQUE 충돌 회피.
-            ConversationSessionEntity session = sessionRepository.findBySessionIdIncludingDeleted(sessionId)
-                    .orElseGet(() -> {
-                        ConversationSessionEntity newSession = new ConversationSessionEntity();
-                        newSession.setSessionId(sessionId);
-                        messages.stream()
-                                .filter(m -> m.role() == UnifiedMessage.Role.USER)
-                                .findFirst()
-                                .ifPresent(m -> {
-                                    String text = extractText(m);
-                                    newSession.setTitle(text.length() > 500 ? text.substring(0, 500) : text);
-                                });
-                        return newSession;
-                    });
-            session.setMessageCount(messages.size());
-            sessionRepository.save(session);
+            sessionRepository.upsertSession(
+                    java.util.UUID.randomUUID(),
+                    sessionId,
+                    title,
+                    messages.size(),
+                    "chat");
         });
     }
 

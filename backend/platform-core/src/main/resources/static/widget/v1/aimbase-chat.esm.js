@@ -114,9 +114,10 @@ var ChatClient = class {
    * 이벤트가 나올 때마다 onDelta 콜백 호출.
    */
   async sendMessage(args, onDelta) {
-    this.currentAbort?.abort();
+    const prev = this.currentAbort;
     const ac = new AbortController();
     this.currentAbort = ac;
+    prev?.abort();
     const token = await this.tokens.getToken();
     const userContent = [];
     for (const att of args.attachments ?? []) {
@@ -150,61 +151,72 @@ ${JSON.stringify(args.context, null, 2)}`
     };
     if (args.ragSourceId) body.rag_source_id = args.ragSourceId;
     if (args.connectionId) body.connection_id = args.connectionId;
-    const res = await fetch(`${args.baseUrl}/api/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream"
-      },
-      body: JSON.stringify(body),
-      signal: ac.signal
-    });
+    let res;
+    try {
+      res = await fetch(`${args.baseUrl}/api/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream"
+        },
+        body: JSON.stringify(body),
+        signal: ac.signal
+      });
+    } catch (e) {
+      if (e?.name === "AbortError" || ac.signal.aborted) return;
+      throw e;
+    }
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       throw new Error(`chat/completions ${res.status}: ${errText.slice(0, 200)}`);
     }
-    for await (const ev of parseSseStream(res, ac.signal)) {
-      try {
-        const payload = JSON.parse(ev.data);
-        switch (ev.name) {
-          case "delta":
-            onDelta({ type: "delta", text: payload.delta ?? "" });
-            break;
-          case "thinking":
-            onDelta({ type: "thinking", text: payload.delta ?? "" });
-            break;
-          case "tool_use_start":
-            onDelta({
-              type: "tool_use_start",
-              tool: { id: payload.id, name: payload.name, input: payload.input }
-            });
-            break;
-          case "tool_result":
-            onDelta({
-              type: "tool_result",
-              toolResult: {
-                tool_use_id: payload.tool_use_id,
-                output: payload.output,
-                is_error: !!payload.is_error
-              }
-            });
-            break;
-          case "done":
-            onDelta({
-              type: "done",
-              done: {
-                rag_used: !!payload.rag_used,
-                citations: Array.isArray(payload.citations) ? payload.citations : []
-              }
-            });
-            break;
-          default:
-            break;
+    try {
+      for await (const ev of parseSseStream(res, ac.signal)) {
+        try {
+          const payload = JSON.parse(ev.data);
+          switch (ev.name) {
+            case "delta":
+              onDelta({ type: "delta", text: payload.delta ?? "" });
+              break;
+            case "thinking":
+              onDelta({ type: "thinking", text: payload.delta ?? "" });
+              break;
+            case "tool_use_start":
+              onDelta({
+                type: "tool_use_start",
+                tool: { id: payload.id, name: payload.name, input: payload.input }
+              });
+              break;
+            case "tool_result":
+              onDelta({
+                type: "tool_result",
+                toolResult: {
+                  tool_use_id: payload.tool_use_id,
+                  output: payload.output,
+                  is_error: !!payload.is_error
+                }
+              });
+              break;
+            case "done":
+              onDelta({
+                type: "done",
+                done: {
+                  rag_used: !!payload.rag_used,
+                  citations: Array.isArray(payload.citations) ? payload.citations : []
+                }
+              });
+              break;
+            default:
+              break;
+          }
+        } catch (e) {
+          onDelta({ type: "error", error: `parse error: ${e.message}` });
         }
-      } catch (e) {
-        onDelta({ type: "error", error: `parse error: ${e.message}` });
       }
+    } catch (e) {
+      if (e?.name === "AbortError" || ac.signal.aborted) return;
+      throw e;
     }
   }
   async abort(baseUrl, sessionId) {
@@ -1256,8 +1268,11 @@ function createWidget(options) {
         }
       );
     } catch (e) {
-      appendMessage("error", e.message);
-      options.on?.onError?.(e);
+      const err = e;
+      if (err?.name !== "AbortError") {
+        appendMessage("error", err.message);
+        options.on?.onError?.(err);
+      }
     } finally {
       sendBtn.removeAttribute("disabled");
     }
@@ -1268,6 +1283,7 @@ function createWidget(options) {
     updateSendDisabled();
   });
   textarea.addEventListener("keydown", (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void sendMessage(textarea.value);

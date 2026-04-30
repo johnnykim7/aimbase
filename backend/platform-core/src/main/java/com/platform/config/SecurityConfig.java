@@ -18,6 +18,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
 
 /**
  * Sprint 22: JWT + API Key 인증, RBAC 적용.
@@ -63,6 +64,11 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // CR-082 root fix (2026-04-30): ASYNC dispatch (SseEmitter.complete/completeWithError 후의 재진입)
+                // 는 권한 재검사를 건너뛴다. 이미 첫 진입 시 jwtFilter 가 인증 통과한 동일 요청이며,
+                // VT 종료 시점의 SecurityContextHolder 가 비어 있어 AuthorizationFilter 가 거부 → 403 으로 응답하는
+                // race 가 위젯에 "network error" 로 노출되는 문제를 차단한다.
+                .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                 .requestMatchers("/actuator/**", "/swagger-ui/**", "/api-docs/**", "/ws/**").permitAll()
                 // CR-058: 위젯 번들·가이드 정적 리소스 — 인증 없이 공개 (소비앱이 CDN 처럼 소비)
                 .requestMatchers("/widget/**").permitAll()

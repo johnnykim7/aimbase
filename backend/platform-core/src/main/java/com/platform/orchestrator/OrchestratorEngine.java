@@ -341,14 +341,23 @@ public class OrchestratorEngine {
                         llmResponse = connectionGroupSelector.executeWithGroup(
                                 request.connectionGroupId(), llmRequest);
                     } else if (request.connectionId() == null || request.connectionId().isBlank()) {
-                        // PRD-122: Fallback Chain — 모델 레벨 폴백
-                        llmResponse = fallbackChainExecutor.execute(
-                                llmRequest, adapter, resolvedModel, modelRouter.getFallbackChain());
+                        // CR-082: CLI adapter 는 fallback chain 우회 — 다른 provider 로 떨어지면
+                        // 소비앱이 401/403 같은 정체불명 에러를 받게 되어 진단 불가.
+                        // 실패 사유는 ClaudeCliAdapter 가 명확히 전달한다 (AGENT_OFFLINE / RUNNER_UNREACHABLE 등).
+                        if (com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider())) {
+                            llmResponse = adapter.chat(llmRequest).get();
+                        } else {
+                            // PRD-122: Fallback Chain — 모델 레벨 폴백 (비-CLI provider 만)
+                            llmResponse = fallbackChainExecutor.execute(
+                                    llmRequest, adapter, resolvedModel, modelRouter.getFallbackChain());
+                        }
                     } else {
                         // 단일 connectionId 직접 지정 — 폴백 없음
                         llmResponse = adapter.chat(llmRequest).get();
                     }
                 } catch (Exception e) {
+                    // CR-082: CLI adapter 실패는 RuntimeException 으로 일관 (ResponseStatusException SSE ASYNC dispatch 회피).
+                    // 메시지 prefix(`cli_agent_offline:` / `cli_runner_unreachable:`) 로 진단 가능성 유지.
                     log.error("LLM call failed", e);
                     throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
                 }
@@ -840,4 +849,5 @@ public class OrchestratorEngine {
         }
         return requested;
     }
+
 }

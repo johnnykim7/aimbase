@@ -24,9 +24,12 @@ export class ChatClient {
    * 이벤트가 나올 때마다 onDelta 콜백 호출.
    */
   async sendMessage(args: SendMessageArgs, onDelta: (d: ChatDelta) => void): Promise<void> {
-    this.currentAbort?.abort();
+    // 직전 호출이 진행 중이면 silent abort (사용자가 새 메시지 보낸 housekeeping).
+    // 그 abort 의 결과로 발생하는 AbortError 는 직전 호출의 sendMessage 가 catch 해서 silent 처리해야 한다.
+    const prev = this.currentAbort;
     const ac = new AbortController();
     this.currentAbort = ac;
+    prev?.abort();
 
     const token = await this.tokens.getToken();
 
@@ -65,64 +68,77 @@ export class ChatClient {
     if (args.ragSourceId) body.rag_source_id = args.ragSourceId;
     if (args.connectionId) body.connection_id = args.connectionId;
 
-    const res = await fetch(`${args.baseUrl}/api/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-      },
-      body: JSON.stringify(body),
-      signal: ac.signal,
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${args.baseUrl}/api/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+        },
+        body: JSON.stringify(body),
+        signal: ac.signal,
+      });
+    } catch (e) {
+      // 새 sendMessage 에 의해 abort 된 경우 — UI 에 노출하지 않는다 (housekeeping).
+      if ((e as Error)?.name === "AbortError" || ac.signal.aborted) return;
+      throw e;
+    }
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       throw new Error(`chat/completions ${res.status}: ${errText.slice(0, 200)}`);
     }
 
-    for await (const ev of parseSseStream(res, ac.signal)) {
-      try {
-        const payload = JSON.parse(ev.data);
-        switch (ev.name) {
-          case "delta":
-            onDelta({ type: "delta", text: payload.delta ?? "" });
-            break;
-          case "thinking":
-            onDelta({ type: "thinking", text: payload.delta ?? "" });
-            break;
-          case "tool_use_start":
-            onDelta({
-              type: "tool_use_start",
-              tool: { id: payload.id, name: payload.name, input: payload.input },
-            });
-            break;
-          case "tool_result":
-            onDelta({
-              type: "tool_result",
-              toolResult: {
-                tool_use_id: payload.tool_use_id,
-                output: payload.output,
-                is_error: !!payload.is_error,
-              },
-            });
-            break;
-          case "done":
-            onDelta({
-              type: "done",
-              done: {
-                rag_used: !!payload.rag_used,
-                citations: Array.isArray(payload.citations) ? payload.citations : [],
-              },
-            });
-            break;
-          default:
-            // 알 수 없는 이벤트는 무시
-            break;
+    try {
+      for await (const ev of parseSseStream(res, ac.signal)) {
+        try {
+          const payload = JSON.parse(ev.data);
+          switch (ev.name) {
+            case "delta":
+              onDelta({ type: "delta", text: payload.delta ?? "" });
+              break;
+            case "thinking":
+              onDelta({ type: "thinking", text: payload.delta ?? "" });
+              break;
+            case "tool_use_start":
+              onDelta({
+                type: "tool_use_start",
+                tool: { id: payload.id, name: payload.name, input: payload.input },
+              });
+              break;
+            case "tool_result":
+              onDelta({
+                type: "tool_result",
+                toolResult: {
+                  tool_use_id: payload.tool_use_id,
+                  output: payload.output,
+                  is_error: !!payload.is_error,
+                },
+              });
+              break;
+            case "done":
+              onDelta({
+                type: "done",
+                done: {
+                  rag_used: !!payload.rag_used,
+                  citations: Array.isArray(payload.citations) ? payload.citations : [],
+                },
+              });
+              break;
+            default:
+              // 알 수 없는 이벤트는 무시
+              break;
+          }
+        } catch (e) {
+          onDelta({ type: "error", error: `parse error: ${(e as Error).message}` });
         }
-      } catch (e) {
-        onDelta({ type: "error", error: `parse error: ${(e as Error).message}` });
       }
+    } catch (e) {
+      // SSE 스트림 도중 abort 발생 — silent (사용자 housekeeping). 그 외 네트워크 오류는 throw.
+      if ((e as Error)?.name === "AbortError" || ac.signal.aborted) return;
+      throw e;
     }
   }
 

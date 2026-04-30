@@ -83,9 +83,20 @@ public class ClaudeCliAdapter implements LLMAdapter {
         try {
             AgentEndpoint endpoint = resolveEndpoint();
             LLMRequest effective = ensureModel(request);
-            LLMResponse resp = runnerClient.chat(
-                    endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey);
-            return CompletableFuture.completedFuture(resp);
+            try {
+                LLMResponse resp = runnerClient.chat(
+                        endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey);
+                return CompletableFuture.completedFuture(resp);
+            } catch (RuntimeException re) {
+                // CR-082: runner 호출 자체 실패 — 사유를 식별 가능한 prefix 로 감싸 RuntimeException 전파.
+                // ResponseStatusException 을 던지면 Spring 이 ASYNC dispatch 를 통해 SecurityContext 재검사를 일으켜
+                // 위젯에 "network error" 로 보이는 부수효과 발생 (운영 검증). 따라서 단순 RuntimeException 으로.
+                String classified = classifyRunnerFailure(re);
+                log.warn("CLI runner unreachable: {} ({})", classified, re.getMessage());
+                throw new RuntimeException("cli_runner_unreachable:" + classified + ":" + re.getMessage(), re);
+            }
+        } catch (ResponseStatusException rse) {
+            return CompletableFuture.failedFuture(rse);
         } catch (RuntimeException e) {
             return CompletableFuture.failedFuture(e);
         }
@@ -95,8 +106,40 @@ public class ClaudeCliAdapter implements LLMAdapter {
     public void chatStream(LLMRequest request, Consumer<LLMStreamChunk> chunkConsumer) {
         AgentEndpoint endpoint = resolveEndpoint();
         LLMRequest effective = ensureModel(request);
-        runnerClient.chatStream(
-                endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey, chunkConsumer);
+        try {
+            runnerClient.chatStream(
+                    endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey, chunkConsumer);
+        } catch (RuntimeException re) {
+            // CR-082: stream 경로도 동일 — RuntimeException 으로 일관.
+            String classified = classifyRunnerFailure(re);
+            log.warn("CLI runner unreachable (stream): {} ({})", classified, re.getMessage());
+            throw new RuntimeException("cli_runner_unreachable:" + classified + ":" + re.getMessage(), re);
+        }
+    }
+
+    /**
+     * CR-082: runner 호출 실패의 원인을 진단 로그/에러 메시지에 식별 가능한 사유 코드로 분류.
+     * 정확한 사유보다 "어디서 끊겼는지" 단서 하나가 운영 진단을 빠르게 한다.
+     */
+    private static String classifyRunnerFailure(Throwable t) {
+        Throwable cur = t;
+        for (int i = 0; i < 5 && cur != null; i++) {
+            String msg = cur.getMessage();
+            String type = cur.getClass().getSimpleName();
+            if (cur instanceof java.net.ConnectException) return "AGENT_OFFLINE";
+            if (cur instanceof java.net.SocketTimeoutException) return "AGENT_TIMEOUT";
+            if (cur instanceof java.net.http.HttpTimeoutException) return "AGENT_TIMEOUT";
+            if (cur instanceof java.net.NoRouteToHostException) return "TURN_RELAY_DEAD";
+            if (msg != null) {
+                String lower = msg.toLowerCase();
+                if (lower.contains("broken pipe") || lower.contains("connection reset")) return "TURN_BROKEN_PIPE";
+                if (lower.contains("connection refused")) return "AGENT_OFFLINE";
+            }
+            // 마지막 fallback — 클래스명 노출
+            if (cur.getCause() == null) return type;
+            cur = cur.getCause();
+        }
+        return "UNKNOWN";
     }
 
     /**
@@ -131,8 +174,10 @@ public class ClaudeCliAdapter implements LLMAdapter {
         if (agentId != null && !agentId.isBlank()) {
             Optional<AgentEndpoint> ep = agentRegistry.resolveActiveRunner(agentId);
             if (ep.isEmpty()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "No active ClaudeCliRunner for agent-id: " + agentId
+                // CR-082: 인프라 문제(agent down/STALE) — RuntimeException 으로 일관.
+                // ResponseStatusException 을 SSE catch 흐름에 던지면 Spring 이 ASYNC dispatch 로
+                // SecurityContext 권한 재검사를 일으켜 위젯에 "network error" 발생 (운영 검증).
+                throw new RuntimeException("cli_agent_offline:agent-id=" + agentId
                         + " (agent inactive 또는 runner_capability=false)");
             }
             return ep.get();
@@ -143,16 +188,16 @@ public class ClaudeCliAdapter implements LLMAdapter {
         if (userRef != null && !userRef.isBlank()) {
             Optional<AgentEndpoint> ep = agentRegistry.resolveActiveByUserRef(userRef);
             if (ep.isEmpty()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "No active ClaudeCliRunner registered for user: " + userRef
+                throw new RuntimeException("cli_agent_offline:user=" + userRef
                         + " (사용자 PC 의 aimbase-agent 가 기동되지 않았거나 runner_capability=false)");
             }
             return ep.get();
         }
 
-        // 3) 둘 다 없으면 400
+        // 3) 둘 다 없으면 400 — 클라이언트가 토큰/헤더 자체를 안 보냄. 컨트롤러 진입 전 검증과 동일 의미.
+        // 이 케이스는 stream:false sync 핸들러에서 자연스럽게 400 매핑되는 게 의도. SSE 진입 전이라 ASYNC dispatch 위험 없음.
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "ClaudeCliAdapter: X-Aimbase-Agent-Id 헤더 또는 위젯 토큰 user_ref 클레임이 필요합니다");
+                "cli_routing_missing: X-Aimbase-Agent-Id 헤더 또는 위젯 토큰 user_ref 클레임이 필요합니다");
     }
 
     private LLMRequest ensureModel(LLMRequest request) {

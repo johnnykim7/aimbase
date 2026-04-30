@@ -78,7 +78,7 @@ class ClaudeCliAdapterTest {
     }
 
     @Test
-    @DisplayName("chat — agent 비활성/runner 미지원 시 400")
+    @DisplayName("CR-082: agent 비활성/runner 미지원 시 RuntimeException(cli_agent_offline) — SSE ASYNC dispatch 회피")
     void chatInactiveAgent() {
         RequestContext.setAgentId("agent-1");
         when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.empty());
@@ -86,8 +86,8 @@ class ClaudeCliAdapterTest {
         var future = adapter.chat(sampleRequest());
         assertThatThrownBy(future::get)
                 .isInstanceOf(ExecutionException.class)
-                .hasCauseInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("No active ClaudeCliRunner");
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasMessageContaining("cli_agent_offline");
     }
 
     @Test
@@ -138,14 +138,14 @@ class ClaudeCliAdapterTest {
     }
 
     @Test
-    @DisplayName("chatStream — agent 비활성 시 즉시 예외")
+    @DisplayName("CR-082: chatStream agent 비활성 시 RuntimeException(cli_agent_offline)")
     void streamInactiveAgent() {
         RequestContext.setAgentId("agent-1");
         when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> adapter.chatStream(sampleRequest(), c -> {}))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("No active ClaudeCliRunner");
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("cli_agent_offline");
     }
 
     @Test
@@ -187,18 +187,18 @@ class ClaudeCliAdapterTest {
     }
 
     @Test
-    @DisplayName("CR-075: 헤더와 user_ref 모두 없으면 400")
+    @DisplayName("CR-075: 헤더와 user_ref 모두 없으면 400 (클라이언트 잘못 — 그대로 유지)")
     void chatNoHeaderNoUserRef() {
         // RequestContext 완전 빈 상태
         var future = adapter.chat(sampleRequest());
         assertThatThrownBy(future::get)
                 .isInstanceOf(ExecutionException.class)
                 .hasCauseInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("X-Aimbase-Agent-Id 헤더 또는 위젯 토큰 user_ref 클레임이 필요");
+                .hasMessageContaining("cli_routing_missing");
     }
 
     @Test
-    @DisplayName("CR-075: user_ref 폴백 — 활성 agent 0건이면 400")
+    @DisplayName("CR-082: user_ref 폴백 — 활성 agent 0건이면 RuntimeException(cli_agent_offline)")
     void chatUserRefNoActiveAgent() {
         RequestContext.setUserRef("bob@example.com");
         when(agentRegistry.resolveActiveByUserRef("bob@example.com")).thenReturn(Optional.empty());
@@ -206,8 +206,9 @@ class ClaudeCliAdapterTest {
         var future = adapter.chat(sampleRequest());
         assertThatThrownBy(future::get)
                 .isInstanceOf(ExecutionException.class)
-                .hasCauseInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("No active ClaudeCliRunner registered for user: bob@example.com");
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasMessageContaining("cli_agent_offline")
+                .hasMessageContaining("user=bob@example.com");
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.platform.tenant.TenantDataSourceManager;
 import com.platform.tool.model.UnifiedToolDef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -31,11 +32,15 @@ public class AgentRegistryService {
 
     private final AgentRegistryRepository repository;
     private final TenantDataSourceManager tenantDataSourceManager;
+    /** CR-081: agent 등록 시 다운스트림 (CB reset 등) 에 알리기 위한 이벤트 퍼블리셔. */
+    private final ApplicationEventPublisher eventPublisher;
 
     public AgentRegistryService(AgentRegistryRepository repository,
-                                TenantDataSourceManager tenantDataSourceManager) {
+                                TenantDataSourceManager tenantDataSourceManager,
+                                ApplicationEventPublisher eventPublisher) {
         this.repository = repository;
         this.tenantDataSourceManager = tenantDataSourceManager;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -103,10 +108,21 @@ public class AgentRegistryService {
                     .toList());
         }
 
+        boolean wasReregister = existing.isPresent();
         entity = repository.save(entity);
-        log.info("Agent registered: id={}, name={}, address={}:{}, tools={}",
+        log.info("Agent registered: id={}, name={}, address={}:{}, tools={}, reregister={}",
                 entity.getId(), agentName, publicAddress, mcpPort,
-                entity.getToolsCache().size());
+                entity.getToolsCache().size(), wasReregister);
+
+        // CR-081: 등록 이벤트 발행 — FallbackChainExecutor 등 다운스트림이 CB reset 등 회복 동작.
+        // 발행 실패는 등록 자체에 영향 없도록 try-catch.
+        try {
+            eventPublisher.publishEvent(new AgentRegisteredEvent(
+                    entity.getId().toString(), userId,
+                    TenantContext.getTenantId(), wasReregister));
+        } catch (Exception e) {
+            log.warn("AgentRegisteredEvent 발행 실패 (무시): {}", e.getMessage());
+        }
         return entity;
     }
 

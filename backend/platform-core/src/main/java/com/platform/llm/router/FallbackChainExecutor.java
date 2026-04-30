@@ -5,8 +5,10 @@ import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.LLMRequest;
 import com.platform.llm.model.LLMResponse;
 import com.platform.orchestrator.GenericCircuitBreaker;
+import com.platform.service.AgentRegisteredEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -101,5 +103,33 @@ public class FallbackChainExecutor {
     private GenericCircuitBreaker getCircuitBreaker(String model) {
         return circuitBreakers.computeIfAbsent(model,
                 k -> new GenericCircuitBreaker(k, CB_FAILURE_THRESHOLD, CB_OPEN_DURATION_MS));
+    }
+
+    /**
+     * CR-081: agent 가 새로 등록(또는 재등록)되면 누적된 모든 LLM 모델 CB 를 reset.
+     *
+     * <p>이전 세션 회고: agent 가 죽었다 살아났을 때 BE 의 CB 가 OPEN 상태로 남아 있어
+     * 새 endpoint 로도 호출 시도조차 안 되는 케이스가 관찰됐다. 이로 인해 사용자가
+     * BE 까지 재기동해야 회복되는 패턴이 발생.
+     *
+     * <p>agent 등록은 명시적인 회복 신호이므로, 이 이벤트로 모든 모델 CB 를 일괄 reset 한다.
+     * CR-082 로 CLI provider 가 더 이상 fallback chain 에 진입하지 않으므로 anthropic-cli
+     * 모델 CB 는 OPEN 되지 않지만, 다른 모델로의 운영 중 누적된 OPEN 도 함께 풀어준다 —
+     * agent 부활은 인프라 회복의 신호로 보수적으로 가정.
+     */
+    @EventListener
+    public void onAgentRegistered(AgentRegisteredEvent event) {
+        if (circuitBreakers.isEmpty()) return;
+        int reset = 0;
+        for (GenericCircuitBreaker cb : circuitBreakers.values()) {
+            if (cb.getState() != GenericCircuitBreaker.State.CLOSED) {
+                cb.reset();
+                reset++;
+            }
+        }
+        if (reset > 0) {
+            log.info("CR-081: agent 등록 이벤트로 OPEN/HALF_OPEN CB {}개 reset (agentId={}, userId={}, reregister={})",
+                    reset, event.agentId(), event.userId(), event.wasReregister());
+        }
     }
 }

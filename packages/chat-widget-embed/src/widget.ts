@@ -703,8 +703,12 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
         },
       );
     } catch (e) {
-      appendMessage("error", (e as Error).message);
-      options.on?.onError?.(e as Error);
+      // chat-client 가 housekeeping abort 는 silent return 하지만, 안전망으로 한 번 더 필터.
+      const err = e as Error;
+      if (err?.name !== "AbortError") {
+        appendMessage("error", err.message);
+        options.on?.onError?.(err);
+      }
     } finally {
       sendBtn.removeAttribute("disabled");
     }
@@ -716,6 +720,11 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     updateSendDisabled();
   });
   textarea.addEventListener("keydown", (e) => {
+    // CR-080: IME 조합 중인 Enter 무시 — 한글/일본어/중국어 입력기에서
+    // 조합 종료용 Enter 가 keydown 으로도 발화하여 더블 송신 발생.
+    // isComposing(W3C) + keyCode 229(legacy WebKit/Gecko) 양쪽 체크.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((e as any).isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void sendMessage(textarea.value);
