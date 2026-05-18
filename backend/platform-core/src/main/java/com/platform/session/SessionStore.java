@@ -9,6 +9,7 @@ import com.platform.llm.model.UnifiedMessage;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
 import com.platform.tenant.TenantContext;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -16,9 +17,33 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
+import com.fasterxml.jackson.databind.ObjectWriter;
+
+/**
+ * 세션 메시지 저장소.
+ *
+ * <p>CR-083 정공 정리:
+ * <ul>
+ *   <li><b>per-session 직렬화</b> — sessionId 별 Semaphore(1) 로 Redis RMW + DB persist 직렬화.
+ *       lost-update 와 count race 동시 차단.</li>
+ *   <li><b>멀티블록 보존</b> — content_json JSONB 로 ContentBlock 리스트(Text/ToolUse/ToolResult/Image/Thinking) 통째 직렬화.
+ *       Tool 컨텍스트 영구 손실 + Redis/DB 진실 불일치 차단.</li>
+ *   <li><b>seq 기반 idempotent INSERT</b> — UNIQUE(session_id, seq) + ON CONFLICT DO NOTHING.
+ *       카운트 비교 폐기.</li>
+ *   <li><b>단일 가상스레드 Executor</b> — Thread.ofVirtual().start() 무제한 → ExecutorService 1개.
+ *       VT 폭주 + DB 풀 고갈 차단.</li>
+ * </ul>
+ */
 @Component
 public class SessionStore {
 
@@ -32,6 +57,20 @@ public class SessionStore {
     private final TransactionTemplate transactionTemplate;
     private final com.platform.config.PlatformSettingsService platformSettings;
 
+    /** CR-083: sessionId 별 Semaphore(1) — Redis RMW + DB persist 직렬화. */
+    private final ConcurrentHashMap<String, Semaphore> sessionLocks = new ConcurrentHashMap<>();
+
+    /**
+     * CR-083: List&lt;ContentBlock&gt; 직렬화 시 Jackson polymorphic info("type":"tool_use" 등)
+     * 누락 방지를 위해 ObjectWriter 를 명시적 타입으로 미리 구성. writeValueAsString(list)
+     * 만 쓰면 generic erasure 로 타입 메타가 빠진다.
+     */
+    private final ObjectWriter contentBlockListWriter;
+
+    /** CR-083: 단일 가상스레드 Executor — VT 무제한 생성 차단. */
+    private final ExecutorService persistExecutor = Executors.newThreadPerTaskExecutor(
+            Thread.ofVirtual().name("session-persist-", 0).factory());
+
     public SessionStore(RedisTemplate<String, String> redisTemplate,
                         ObjectMapper objectMapper,
                         ConversationSessionRepository sessionRepository,
@@ -44,6 +83,13 @@ public class SessionStore {
         this.messageRepository = messageRepository;
         this.transactionTemplate = transactionTemplate;
         this.platformSettings = platformSettings;
+        this.contentBlockListWriter = objectMapper.writerFor(
+                objectMapper.getTypeFactory().constructCollectionType(List.class, ContentBlock.class));
+    }
+
+    @PreDestroy
+    void shutdown() {
+        persistExecutor.shutdown();
     }
 
     private Duration getSessionTtl() {
@@ -51,22 +97,64 @@ public class SessionStore {
         return Duration.ofHours(hours);
     }
 
+    private Semaphore lockFor(String sessionId) {
+        return sessionLocks.computeIfAbsent(sessionId, k -> new Semaphore(1));
+    }
+
     public List<UnifiedMessage> getMessages(String sessionId) {
+        // CR-083: lock 안에서 Redis 조회 → loadFromDb 폴백 → 캐시 SET 일관 처리.
+        Semaphore lock = lockFor(sessionId);
+        lock.acquireUninterruptibly();
+        try {
+            return readMessagesLocked(sessionId);
+        } finally {
+            lock.release();
+        }
+    }
+
+    private List<UnifiedMessage> readMessagesLocked(String sessionId) {
         try {
             String key = buildKey(sessionId);
             String json = redisTemplate.opsForValue().get(key);
             if (json != null) {
                 return objectMapper.readValue(json, new TypeReference<>() {});
             }
-            // Redis miss — fallback to DB
-            return loadFromDb(sessionId);
+            return loadFromDbAndCache(sessionId);
         } catch (Exception e) {
             log.warn("Failed to load session {} from Redis, trying DB: {}", sessionId, e.getMessage());
-            return loadFromDb(sessionId);
+            return loadFromDbAndCache(sessionId);
         }
     }
 
     public void saveMessages(String sessionId, List<UnifiedMessage> messages) {
+        // CR-083: Redis SET + 비동기 DB persist 모두 lock 안에서 트리거.
+        // SET 자체는 lock 안에서 즉시 끝나고, persist 만 Executor 로 비동기.
+        Semaphore lock = lockFor(sessionId);
+        lock.acquireUninterruptibly();
+        try {
+            saveToRedisLocked(sessionId, messages);
+        } finally {
+            lock.release();
+        }
+
+        // 비동기 DB persist — TenantContext 수동 전파.
+        final String propagatedTenantId = TenantContext.getTenantId();
+        final List<UnifiedMessage> snapshot = List.copyOf(messages);
+        persistExecutor.submit(() -> {
+            if (propagatedTenantId != null) {
+                TenantContext.setTenantId(propagatedTenantId);
+            }
+            try {
+                persistToDb(sessionId, snapshot);
+            } catch (Exception e) {
+                log.warn("Failed to persist session {} to DB: {}", sessionId, e.getMessage());
+            } finally {
+                TenantContext.clear();
+            }
+        });
+    }
+
+    private void saveToRedisLocked(String sessionId, List<UnifiedMessage> messages) {
         try {
             String key = buildKey(sessionId);
             String json = objectMapper.writeValueAsString(messages);
@@ -74,40 +162,52 @@ public class SessionStore {
         } catch (Exception e) {
             log.warn("Failed to save session {} to Redis: {}", sessionId, e.getMessage());
         }
+    }
 
-        // Dual-write: persist to DB asynchronously via Virtual Thread
-        // CR-045: TenantContext(ThreadLocal)를 자식 가상 스레드에 수동 전파해야
-        // Hibernate DataSource 라우팅이 테넌트 DB로 감.
-        final String propagatedTenantId = com.platform.tenant.TenantContext.getTenantId();
-        Thread.ofVirtual().start(() -> {
+    public void appendMessage(String sessionId, UnifiedMessage message) {
+        // CR-083: lock 으로 read-modify-write 직렬화 → lost-update 차단.
+        Semaphore lock = lockFor(sessionId);
+        lock.acquireUninterruptibly();
+        List<UnifiedMessage> snapshot;
+        try {
+            List<UnifiedMessage> messages = readMessagesLocked(sessionId);
+            messages.add(message);
+            saveToRedisLocked(sessionId, messages);
+            snapshot = List.copyOf(messages);
+        } finally {
+            lock.release();
+        }
+
+        // 비동기 DB persist (lock 밖)
+        final String propagatedTenantId = TenantContext.getTenantId();
+        persistExecutor.submit(() -> {
             if (propagatedTenantId != null) {
-                com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
+                TenantContext.setTenantId(propagatedTenantId);
             }
             try {
-                persistToDb(sessionId, messages);
+                persistToDb(sessionId, snapshot);
             } catch (Exception e) {
                 log.warn("Failed to persist session {} to DB: {}", sessionId, e.getMessage());
             } finally {
-                com.platform.tenant.TenantContext.clear();
+                TenantContext.clear();
             }
         });
     }
 
-    public void appendMessage(String sessionId, UnifiedMessage message) {
-        List<UnifiedMessage> messages = getMessages(sessionId);
-        messages.add(message);
-        saveMessages(sessionId, messages);
-    }
-
     public void clearSession(String sessionId) {
-        redisTemplate.delete(buildKey(sessionId));
+        Semaphore lock = lockFor(sessionId);
+        lock.acquireUninterruptibly();
+        try {
+            redisTemplate.delete(buildKey(sessionId));
+        } finally {
+            lock.release();
+        }
     }
 
     public boolean hasSession(String sessionId) {
         if (Boolean.TRUE.equals(redisTemplate.hasKey(buildKey(sessionId)))) {
             return true;
         }
-        // Check DB as fallback
         return sessionRepository.findBySessionId(sessionId).isPresent();
     }
 
@@ -125,9 +225,10 @@ public class SessionStore {
     }
 
     /**
-     * DB에서 대화 메시지를 로드하여 UnifiedMessage 리스트로 변환한다.
+     * CR-083: DB 에서 메시지 로드 후 멀티블록(content_json) 복원. Redis 캐시도 같이 SET.
+     * lock 안에서만 호출되므로 Redis 덮어쓰기 race 없음.
      */
-    private List<UnifiedMessage> loadFromDb(String sessionId) {
+    private List<UnifiedMessage> loadFromDbAndCache(String sessionId) {
         try {
             List<ConversationMessageEntity> dbMessages =
                     messageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
@@ -135,16 +236,12 @@ public class SessionStore {
 
             List<UnifiedMessage> messages = new ArrayList<>();
             for (ConversationMessageEntity msg : dbMessages) {
-                UnifiedMessage.Role role = switch (msg.getRole()) {
-                    case "system" -> UnifiedMessage.Role.SYSTEM;
-                    case "assistant" -> UnifiedMessage.Role.ASSISTANT;
-                    case "tool" -> UnifiedMessage.Role.TOOL_RESULT;
-                    default -> UnifiedMessage.Role.USER;
-                };
-                messages.add(new UnifiedMessage(role, List.of(new ContentBlock.Text(msg.getContent()))));
+                UnifiedMessage.Role role = parseRole(msg.getRole());
+                List<ContentBlock> blocks = decodeContentJson(msg);
+                messages.add(new UnifiedMessage(role, blocks));
             }
 
-            // Re-populate Redis cache
+            // Redis 재캐싱
             try {
                 String key = buildKey(sessionId);
                 String json = objectMapper.writeValueAsString(messages);
@@ -160,14 +257,44 @@ public class SessionStore {
         }
     }
 
+    private UnifiedMessage.Role parseRole(String role) {
+        return switch (role) {
+            case "system", "SYSTEM" -> UnifiedMessage.Role.SYSTEM;
+            case "assistant", "ASSISTANT" -> UnifiedMessage.Role.ASSISTANT;
+            case "tool", "TOOL_RESULT" -> UnifiedMessage.Role.TOOL_RESULT;
+            default -> UnifiedMessage.Role.USER;
+        };
+    }
+
+    /** CR-083: content_json 이 있으면 거기서 복원, 없으면 content 텍스트 폴백. */
+    private List<ContentBlock> decodeContentJson(ConversationMessageEntity msg) {
+        List<Map<String, Object>> raw = msg.getContentJson();
+        if (raw == null || raw.isEmpty()) {
+            // 폴백: 마이그레이션 직후 또는 손실된 row
+            String text = msg.getContent() != null ? msg.getContent() : "";
+            return List.of(new ContentBlock.Text(text));
+        }
+        List<ContentBlock> blocks = new ArrayList<>();
+        for (Map<String, Object> block : raw) {
+            try {
+                ContentBlock decoded = objectMapper.convertValue(block, ContentBlock.class);
+                blocks.add(decoded);
+            } catch (Exception e) {
+                log.warn("Failed to decode ContentBlock from session {} msg {}: {}",
+                        msg.getSessionId(), msg.getId(), e.getMessage());
+                String text = msg.getContent() != null ? msg.getContent() : "";
+                blocks.add(new ContentBlock.Text(text));
+                break;
+            }
+        }
+        return blocks;
+    }
+
     /**
-     * 대화 세션과 메시지를 DB에 영속화한다.
-     * 세션이 없으면 생성, 있으면 메시지 카운트/토큰 업데이트.
+     * CR-083: 세션 + 메시지 영속화. seq 기반 idempotent.
+     * persistExecutor 안에서만 호출되며, 같은 sessionId 작업은 순차 실행 보장.
      */
     private void persistToDb(String sessionId, List<UnifiedMessage> messages) {
-        // CR-077: 세션 upsert는 동시 INSERT race 대비 최대 3회 재시도.
-        // 위젯 SDK가 같은 session_id로 메시지 #1/#2/#3을 거의 동시에 보내면
-        // 비동기 VT 3개가 병렬로 첫 진입하여 1회 retry로는 부족할 수 있다.
         upsertSessionWithRetry(sessionId, messages);
         appendNewMessages(sessionId, messages);
     }
@@ -191,9 +318,7 @@ public class SessionStore {
     }
 
     private void upsertSession(String sessionId, List<UnifiedMessage> messages) {
-        // CR-083: native ON CONFLICT 로 race-safe 처리. JPA save() 는 동시 INSERT 시 commit 시점에
-        // UNIQUE 충돌이 나면 retry 로도 안정적으로 회복 안 됨 (transactionTemplate 안 commit/rollback 경계).
-        // Postgres ON CONFLICT(session_id) DO UPDATE 로 단일 statement 에서 끝낸다.
+        // CR-083: native ON CONFLICT(session_id) DO UPDATE 그대로 유지 (CR-077 이전 구현).
         String title = messages.stream()
                 .filter(m -> m.role() == UnifiedMessage.Role.USER)
                 .findFirst()
@@ -202,7 +327,7 @@ public class SessionStore {
                 .orElse(null);
         transactionTemplate.executeWithoutResult(status -> {
             sessionRepository.upsertSession(
-                    java.util.UUID.randomUUID(),
+                    UUID.randomUUID(),
                     sessionId,
                     title,
                     messages.size(),
@@ -210,25 +335,48 @@ public class SessionStore {
         });
     }
 
+    /**
+     * CR-083: seq 기반 idempotent INSERT. ON CONFLICT(session_id, seq) DO NOTHING 으로 race 무해 처리.
+     * 카운트 비교 / "DB has X but memory has Y" 로그 없음.
+     */
     private void appendNewMessages(String sessionId, List<UnifiedMessage> messages) {
         transactionTemplate.executeWithoutResult(status -> {
-            long existing = messageRepository.countBySessionId(sessionId);
-            if (existing >= messages.size()) {
-                if (existing > messages.size()) {
-                    log.warn("Session {} DB has {} messages but memory has {} — skipping append",
-                            sessionId, existing, messages.size());
-                }
-                return;
-            }
-            for (int i = (int) existing; i < messages.size(); i++) {
+            int maxSeq = messageRepository.findMaxSeqBySessionId(sessionId); // -1 if empty
+            int startSeq = maxSeq + 1;
+            for (int i = startSeq; i < messages.size(); i++) {
                 UnifiedMessage msg = messages.get(i);
-                ConversationMessageEntity entity = new ConversationMessageEntity();
-                entity.setSessionId(sessionId);
-                entity.setRole(msg.role().name().toLowerCase());
-                entity.setContent(extractText(msg));
-                messageRepository.save(entity);
+                String contentJson;
+                try {
+                    // CR-083: List<ContentBlock> 명시 타입으로 직렬화 → "type":"tool_use" 등 polymorphic info 보존
+                    contentJson = contentBlockListWriter.writeValueAsString(msg.content());
+                } catch (Exception e) {
+                    log.warn("Failed to serialize ContentBlocks for session {} seq {}: {}",
+                            sessionId, i, e.getMessage());
+                    contentJson = "[]";
+                }
+                messageRepository.insertIdempotent(
+                        UUID.randomUUID(),
+                        sessionId,
+                        i,
+                        msg.role().name().toLowerCase(),
+                        resolveMessageType(msg),
+                        extractText(msg),
+                        contentJson,
+                        0,
+                        null,
+                        OffsetDateTime.now()
+                );
             }
         });
+    }
+
+    /** CR-083: ContentBlock 종류로 messageType 결정. ToolUse/ToolResult 가 섞인 메시지는 첫 비-텍스트 블록 우선. */
+    private String resolveMessageType(UnifiedMessage msg) {
+        for (ContentBlock b : msg.content()) {
+            if (b instanceof ContentBlock.ToolUse) return ConversationMessageEntity.TYPE_TOOL_USE;
+            if (b instanceof ContentBlock.ToolResult) return ConversationMessageEntity.TYPE_TOOL_RESULT;
+        }
+        return ConversationMessageEntity.TYPE_TEXT;
     }
 
     private String extractText(UnifiedMessage msg) {

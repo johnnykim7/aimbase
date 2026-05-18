@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.Type;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -26,6 +27,10 @@ public class ConversationMessageEntity {
     @Column(name = "session_id", length = 100, nullable = false)
     private String sessionId;
 
+    /** CR-083: 세션 내 메시지 순번 (0부터). UNIQUE(session_id, seq) 로 idempotent INSERT 보장. */
+    @Column(name = "seq", nullable = false)
+    private int seq;
+
     @Column(length = 20, nullable = false)
     private String role;
 
@@ -35,6 +40,11 @@ public class ConversationMessageEntity {
 
     @Column(columnDefinition = "TEXT", nullable = false)
     private String content;
+
+    /** CR-083: ContentBlock 리스트 (Text/ToolUse/ToolResult/Image/Thinking) JSONB 직렬화. content 컬럼은 검색용 텍스트 캐시. */
+    @Type(JsonBinaryType.class)
+    @Column(name = "content_json", columnDefinition = "jsonb", nullable = false)
+    private List<Map<String, Object>> contentJson;
 
     @Column
     private int tokens = 0;
@@ -58,12 +68,16 @@ public class ConversationMessageEntity {
     public void setId(UUID id) { this.id = id; }
     public String getSessionId() { return sessionId; }
     public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+    public int getSeq() { return seq; }
+    public void setSeq(int seq) { this.seq = seq; }
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
     public String getMessageType() { return messageType; }
     public void setMessageType(String messageType) { this.messageType = messageType; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public List<Map<String, Object>> getContentJson() { return contentJson; }
+    public void setContentJson(List<Map<String, Object>> contentJson) { this.contentJson = contentJson; }
     public int getTokens() { return tokens; }
     public void setTokens(int tokens) { this.tokens = tokens; }
     public String getModel() { return model; }

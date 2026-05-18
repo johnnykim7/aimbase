@@ -95,9 +95,11 @@ public class SessionResumeController {
     private static Map<String, Object> toMessageDto(ConversationMessageEntity m) {
         Map<String, Object> dto = new LinkedHashMap<>();
         dto.put("id", m.getId());
+        dto.put("seq", m.getSeq());                // CR-083: 순번 노출
         dto.put("role", m.getRole());
         dto.put("message_type", m.getMessageType());
         dto.put("content", m.getContent());
+        dto.put("content_json", m.getContentJson()); // CR-083: 멀티블록 노출 (Tool/Image 복원용)
         dto.put("tokens", m.getTokens());
         dto.put("created_at", m.getCreatedAt());
         if (ConversationMessageEntity.TYPE_COMPACT_BOUNDARY.equals(m.getMessageType())) {

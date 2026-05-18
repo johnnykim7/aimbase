@@ -232,9 +232,15 @@ public class ContextWindowManager {
             com.platform.domain.ConversationMessageEntity entity =
                     new com.platform.domain.ConversationMessageEntity();
             entity.setSessionId(sessionId);
+            // CR-083: seq NOT NULL — 마지막 seq + 1 부여
+            int nextSeq = conversationMessageRepository.findMaxSeqBySessionId(sessionId) + 1;
+            entity.setSeq(nextSeq);
             entity.setRole("system");
             entity.setMessageType(com.platform.domain.ConversationMessageEntity.TYPE_COMPACT_BOUNDARY);
-            entity.setContent(summary != null ? summary : "[compact boundary]");
+            String body = summary != null ? summary : "[compact boundary]";
+            entity.setContent(body);
+            // CR-083: content_json NOT NULL — boundary 는 본문이 LLM 에 안 가지만 Entity 제약 충족
+            entity.setContentJson(java.util.List.of(java.util.Map.of("type", "text", "text", body)));
             entity.setTokens(0);
             Map<String, Object> meta = new java.util.LinkedHashMap<>();
             meta.put("summary", summary);
