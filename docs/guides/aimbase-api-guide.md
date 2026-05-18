@@ -321,6 +321,7 @@ curl -X POST /api/v1/workflows \
 | `outputSchema` | object | X | 출력 스키마 |
 | `errorHandling` | object | X | 에러 전략 (`strategy`, `maxRetries`) |
 | `projectId` | string | X | 프로젝트 귀속 (생략 시 `X-Project-Id` 헤더) |
+| `graphMode` | string | X | 실행 모드. `dag`(기본, 생략 시) = 위상정렬 1-pass. `cyclic` = 워크리스트 스케줄러, 임의 노드 순환 + ROUTER N-way 분기 추종 (CR-084) |
 
 **스텝 타입과 config**:
 
@@ -329,11 +330,34 @@ curl -X POST /api/v1/workflows \
 | `LLM_CALL` | `connection_id`, `system`, `prompt`, `response_schema`, `max_tokens` | LLM 호출 (토큰 초과 시 자동 에스컬레이션+분할, CR-028) |
 | `TOOL_CALL` | `tool`, `input` | 도구 호출 (ToolRegistry 등록 도구) |
 | `ACTION` | `actionType`, `config` | 액션 실행 (write, notify) |
-| `CONDITION` | `expression` | 조건 분기 |
+| `CONDITION` | `expression`, `true_step`, `false_step` | 2갈래 조건 분기 |
+| `ROUTER` | `routes` | N-way 동적 라우팅 (CR-084). 표현식/LLM 출력으로 N개 후보 중 1개 선택 |
 | `PARALLEL` | `branches` | 병렬 실행 |
 | `HUMAN_INPUT` | `message` | 사람 승인 대기 |
+| `EVALUATOR_LOOP` | `generator`, `evaluator`, `pass_criteria`, `max_iterations` | 생성→평가 반복 (CR-055) |
 
 > **주의**: 스텝 타입은 `TOOL_CALL`입니다 (`TOOL_USE` 아님). config에서 도구 이름은 `tool` (`tool_name` 아님), 입력은 `input` (`arguments` 아님).
+
+**ROUTER 스텝 (N-way 동적 라우팅, CR-084)** — `CONDITION`의 true/false 2갈래를 일반화. `routes` 배열을 정의 순서대로 평가해 `when` 표현식이 참인 첫 route의 `to`로 분기, 모두 실패 시 `default:true` route 사용:
+
+```json
+{
+  "id": "route_by_intent",
+  "type": "ROUTER",
+  "config": {
+    "routes": [
+      { "when": "{{classify.output}} equals 'refund'",  "to": "refund_step" },
+      { "when": "{{classify.output}} contains 'urgent'", "to": "urgent_step" },
+      { "default": true, "to": "fallback_step" }
+    ]
+  }
+}
+```
+
+- `when` 표현식 문법은 `CONDITION`과 동일 (`contains`/`equals`/숫자비교/불리언)
+- 각 route는 `when` 또는 `default:true` 중 정확히 하나 + `to`(대상 스텝 id) 필수
+- `default:true` route는 최대 1개. 정의 순서와 무관하게 `when` route가 모두 실패할 때만 채택
+- **임의 순환은 `graphMode:"cyclic"`에서만 동작** — DAG 모드에선 ROUTER 스텝이 실행은 되나 `next_step` 추종 분기는 cyclic 모드 전용
 
 **스텝 간 데이터 참조**:
 
@@ -1510,6 +1534,7 @@ try {
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.1.0 | 2026-05-16 | **CR-084 — 워크플로우 임의 cycle + N-way 라우팅**. 워크플로우 생성 파라미터에 `graphMode`(`dag` 기본 / `cyclic`) 추가. 신규 스텝 타입 `ROUTER`(`routes` config — `when`/`default:true` + `to`). `graphMode:cyclic` 시 워크리스트 스케줄러로 임의 노드 순환 + ROUTER `next_step` 추종, run 당 step budget(기본 50, 절대 200, `triggerConfig.max_total_steps`로 조정) 무한루프 방어. HUMAN_INPUT 중단→resume 시 worklist 자동 복원. **기존 DAG 워크플로우는 무변경(하위호환)** — `graphMode` 생략 = 기존 1-pass. SSE 스텝 이벤트에 nullable `iterationIndex` 추가(cyclic 회차 구분, DAG 는 null) |
 | v3.0.0 | 2026-04-28 | **CR-072 — 서버 도구 MCP endpoint 노출** (`/mcp/sse`, `/mcp/message`). 인증: `X-API-Key` 필수 (tenant 자동 결정), `X-Aimbase-Agent-Id` 선택. MCP SSE 트랜스포트로 `WebSearch / HttpRequest / SendMessage / Notification / Brief / ImageAnalysis / Translation / NotebookEdit / LSP / Skill / ToolSearch / ListMcpResources / ReadMcpResource / RemoteTrigger / ScheduleCron / CronList / CronDelete / Task* 6종 / TodoWrite / SuggestBackgroundPR` (총 26개) 노출. 거버넌스: PRE/POST_TOOL_USE Hook ✓ + Rate Limit (테넌트 단위 분당 60, 키 스코프 `mcp:{tenantId}`) ✓ + 화이트리스트 이중 방어 ✓. `team_create / team_delete / enter_plan_mode / exit_plan_mode / verify_plan_execution / temp_cleanup` 은 `McpExposureLevel.NONE` 으로 미노출. SecurityConfig `/mcp/**` permitAll → authenticated. 끔 옵션: `mcp.server-exposure.enabled=false`. **CR-073 — `aimbase-agent --runner-mode` 플래그 폐지** (BREAKING) — `--mcp-stdio` 외 모든 진입은 SERVLET 단일 컨텍스트. 후방 호환: 플래그 박혀있어도 무시 |
 | v2.9.0 | 2026-04-27 | **CR-071 ClaudeCliAdapter — 3경로 통일** (BREAKING). 기존 `ClaudeCliLlmAdapter`(서버 in-process CLI, CR-050) + `ClaudeCodeTool`(워크플로우 도구, CR-044) 모두 삭제. Anthropic Claude Code CLI 호출은 별도 프로세스 `ClaudeCliRunner`(aimbase-agent `--runner-mode`)로 분리되어 HTTP API 로 통신. **호출자 변경 사항**: `adapter=anthropic-cli` connection 사용 시 모든 요청 헤더에 `X-Aimbase-Agent-Id: <agent-id>` 필수 (누락 시 400). agent 는 `runner_capability=true`로 등록되어야 함 (`POST /api/v1/agents/register` 시 `metadata.runnerEndpoint`/`runnerApiKeyHash` 포함). `connection.config` 필드: `model` / `tool_mode`(AIMBASE/NATIVE/HYBRID, CR-069) / `config_dir` / `runner_api_key`. `tool: "claude_code"` 워크플로우는 모두 제거됨 — `LLM_CALL` 노드에서 anthropic-cli connection 으로 대체. BIZ-099 의미 변경(ToS 경계는 Runner 위치로 자연 해결) |
 | v2.8.0 | 2026-04-24 | CR-060 위젯 STT 추가 — `POST /api/v1/chat/stt` (multipart, scope=chat:stt). Whisper 일괄 전송(실시간 스트리밍 없음). 녹음시간 60s / 파일 25MB / 세션당 10/min 제한(BIZ-102~104, `widget.stt.*` 로 조정). 기존 `POST /api/v1/speech/stt` 응답에 `language/duration` 필드 추가(backward compatible, `SpeechService` 로 로직 추출). `widget.allowed-scopes` 기본값에 `chat:stt` 추가 (§ 19) |

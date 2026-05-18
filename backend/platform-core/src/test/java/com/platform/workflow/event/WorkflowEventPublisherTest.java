@@ -92,6 +92,55 @@ class WorkflowEventPublisherTest {
         assertThat(ev.policyId()).isEqualTo("refund_policy");
     }
 
+    // ─── CR-084 P4: iterationIndex 하위호환 + cyclic 회차 ──────────────
+
+    @Test
+    void stepRunning_legacyOverload_iterationIndexNull() {
+        // 기존 4-arg 호출은 iterationIndex=null (DAG 동작 불변)
+        publisher.stepRunning(UUID.randomUUID(), null, "s1", Instant.now());
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(springPublisher).publishEvent(captor.capture());
+        WorkflowEvents.StepStatusChanged ev = (WorkflowEvents.StepStatusChanged) captor.getValue();
+        assertThat(ev.iterationIndex()).isNull();
+    }
+
+    @Test
+    void stepRunning_cyclicOverload_carriesIterationIndex() {
+        publisher.stepRunning(UUID.randomUUID(), null, "loop_node", Instant.now(), 3);
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(springPublisher).publishEvent(captor.capture());
+        WorkflowEvents.StepStatusChanged ev = (WorkflowEvents.StepStatusChanged) captor.getValue();
+        assertThat(ev.iterationIndex()).isEqualTo(3);
+        assertThat(ev.status()).isEqualTo("running");
+    }
+
+    @Test
+    void stepCompleted_cyclicOverload_carriesIterationIndex() {
+        Instant start = Instant.now();
+        publisher.stepCompleted(UUID.randomUUID(), null, "loop_node",
+                start, start.plusMillis(10), null, Map.of("o", 1), 2);
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(springPublisher).publishEvent(captor.capture());
+        WorkflowEvents.StepStatusChanged ev = (WorkflowEvents.StepStatusChanged) captor.getValue();
+        assertThat(ev.iterationIndex()).isEqualTo(2);
+        assertThat(ev.status()).isEqualTo("completed");
+    }
+
+    @Test
+    void stepCompleted_legacyOverload_iterationIndexNull() {
+        Instant start = Instant.now();
+        publisher.stepCompleted(UUID.randomUUID(), null, "s1",
+                start, start.plusMillis(5), null, Map.of());
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(springPublisher).publishEvent(captor.capture());
+        WorkflowEvents.StepStatusChanged ev = (WorkflowEvents.StepStatusChanged) captor.getValue();
+        assertThat(ev.iterationIndex()).isNull();
+    }
+
     @Test
     void runCompleted_publishesWithStatusAndDuration() {
         UUID runId = UUID.randomUUID();

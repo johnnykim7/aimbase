@@ -38,7 +38,7 @@ class WorkflowRunSubscriberRegistryTest {
 
         registry.onStepStatus(new WorkflowEvents.StepStatusChanged(
                 runId, null, "s1", "running", Instant.now(),
-                null, null, null, null, null));
+                null, null, null, null, null, null));
 
         assertThat(emitter.sendCount).isEqualTo(1);
     }
@@ -52,7 +52,7 @@ class WorkflowRunSubscriberRegistryTest {
 
         registry.onStepStatus(new WorkflowEvents.StepStatusChanged(
                 otherRun, null, "s1", "running", Instant.now(),
-                null, null, null, null, null));
+                null, null, null, null, null, null));
 
         assertThat(emitter.sendCount).isZero();
     }
@@ -66,7 +66,7 @@ class WorkflowRunSubscriberRegistryTest {
 
         registry.onStepStatus(new WorkflowEvents.StepStatusChanged(
                 childRun, parentRun, "sub_step_1", "completed",
-                Instant.now(), Instant.now(), 10L, null, null, null));
+                Instant.now(), Instant.now(), 10L, null, null, null, null));
 
         assertThat(parentEmitter.sendCount).isEqualTo(1);
     }
@@ -82,7 +82,7 @@ class WorkflowRunSubscriberRegistryTest {
 
         registry.onStepStatus(new WorkflowEvents.StepStatusChanged(
                 childRun, parentRun, "s", "running", Instant.now(),
-                null, null, null, null, null));
+                null, null, null, null, null, null));
 
         assertThat(parentEmitter.sendCount).isEqualTo(1);
         assertThat(childEmitter.sendCount).isEqualTo(1);

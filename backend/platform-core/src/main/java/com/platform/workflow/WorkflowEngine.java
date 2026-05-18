@@ -260,6 +260,13 @@ public class WorkflowEngine {
                 injectOutputSchemaToLastLlmStep(steps, workflowEntity.getOutputSchema());
             }
 
+            // CR-084 P3: graph_mode 분기. "cyclic" 명시 시에만 워크리스트 스케줄러.
+            // null/"dag" 는 아래 기존 1-pass 로직 그대로 — 하위호환 절대 보장.
+            if (isCyclicMode(workflowEntity)) {
+                executeCyclic(workflowEntity, run, steps, errorHandling);
+                return;
+            }
+
             Map<String, WorkflowStep> stepMap = steps.stream()
                     .collect(Collectors.toMap(WorkflowStep::id, s -> s, (a, b) -> a, LinkedHashMap::new));
 
@@ -487,6 +494,265 @@ public class WorkflowEngine {
         throw new RuntimeException(
                 "Step '" + step.id() + "' failed after " + maxAttempts + " attempt(s): " + lastException.getMessage(),
                 lastException);
+    }
+
+    // ─── CR-084 P3: Cyclic 워크리스트 스케줄러 ────────────────────────────
+
+    /** 그래프 레벨 무한루프 방어 — run 당 총 스텝 실행 절대 상한 (config override 불가). */
+    static final int STEP_BUDGET_CEILING = 200;
+    /** config.max_total_steps 미지정 시 기본값. */
+    static final int STEP_BUDGET_DEFAULT = 50;
+
+    boolean isCyclicMode(WorkflowEntity entity) {
+        return "cyclic".equalsIgnoreCase(entity.getGraphMode());
+    }
+
+    /**
+     * CR-084 P3: graph_mode=cyclic 워크플로우 실행기.
+     *
+     * <p>기존 DAG 1-pass(doExecuteAsync 본문)와 완전 분리된 별도 경로다. 위상정렬 대신
+     * 워크리스트(worklist)로 노드를 하나씩 실행하며, 각 노드 실행 후 "다음 노드"를
+     * 결정해 worklist 에 push 한다. 같은 노드가 여러 번 실행될 수 있어 임의 cycle 지원.
+     *
+     * <p>다음 노드 결정 규칙:
+     * <ul>
+     *   <li>CONDITION / ROUTER → 실행 결과의 {@code next_step} (N-way 분기)</li>
+     *   <li>그 외 스텝 → {@code onSuccess} (WorkflowStep 기존 필드를 그래프 엣지로 재사용)</li>
+     *   <li>다음 노드가 없거나 "__end__" → 해당 경로 종료</li>
+     * </ul>
+     *
+     * <p>무한루프 방어: run 당 총 스텝 실행 횟수가 budget 초과 시 failed
+     * ({@code error.reason=step_budget_exceeded}). budget = config.max_total_steps
+     * (기본 {@value #STEP_BUDGET_DEFAULT}, 절대 상한 {@value #STEP_BUDGET_CEILING}).
+     * EVALUATOR_LOOP 의 MAX_ITERATIONS_CEILING 과는 독립된 그래프 레벨 방어선.
+     *
+     * <p><b>P3 범위 한정</b>: HUMAN_INPUT 일시중단 후 재개(resume) 시 worklist 복원은
+     * P4 범위. P3 의 cyclic 워크플로우가 HUMAN_INPUT 을 만나면 일시중단까지만 동작하고
+     * resume 은 P4 까지 미지원(주석으로 명시).
+     */
+    private void executeCyclic(WorkflowEntity workflowEntity, WorkflowRunEntity run,
+                               List<WorkflowStep> steps, ErrorHandling errorHandling) {
+        try {
+            Map<String, WorkflowStep> stepMap = steps.stream()
+                    .collect(Collectors.toMap(WorkflowStep::id, s -> s, (a, b) -> a, LinkedHashMap::new));
+
+            int budget = resolveStepBudget(workflowEntity);
+
+            Map<String, Object> savedResults = run.getStepResults() != null
+                    ? new LinkedHashMap<>(run.getStepResults()) : new LinkedHashMap<>();
+            StepContext context = new StepContext(
+                    run.getId().toString(),
+                    workflowEntity.getId(),
+                    run.getSessionId(),
+                    run.getInputData() != null ? run.getInputData() : Map.of(),
+                    savedResults);
+
+            Deque<String> worklist = new ArrayDeque<>();
+            int executed;
+
+            // CR-084 P4: HUMAN_INPUT 중단 후 재개 — pending_worklist 복원 (처음부터 다시 돌지 않음).
+            Map<String, Object> pending = run.getPendingWorklist();
+            if (pending != null && pending.get("worklist") instanceof List<?> savedList) {
+                for (Object n : savedList) worklist.add(String.valueOf(n));
+                Object ex = pending.get("executed");
+                executed = ex instanceof Number num ? num.intValue() : 0;
+                run.setPendingWorklist(null); // 복원 후 소거 (재중단 시 새로 저장)
+                log.info("Cyclic run '{}': resumed from pending_worklist (worklist={}, executed={})",
+                        run.getId(), worklist, executed);
+            } else {
+                // 신규 실행 — 시작 노드: 명시 entry_step → dependsOn 없는 첫 스텝 → steps[0]
+                String entry = resolveEntryStep(workflowEntity, steps);
+                if (entry == null) {
+                    log.warn("Cyclic run '{}': no entry step resolvable", run.getId());
+                    completeRun(run, context, "completed");
+                    return;
+                }
+                worklist.add(entry);
+                executed = 0;
+            }
+
+            // CR-084 P4: stepId 별 cyclic 실행 회차 (이벤트 iterationIndex 용).
+            Map<String, Integer> iterationCounts = new HashMap<>();
+
+            while (!worklist.isEmpty()) {
+                String stepId = worklist.poll();
+                if ("__end__".equals(stepId)) break;
+                WorkflowStep step = stepMap.get(stepId);
+                if (step == null) {
+                    log.warn("Cyclic run '{}': step '{}' not found, ending path", run.getId(), stepId);
+                    continue;
+                }
+
+                // 글로벌 step budget — 무한루프 방어
+                if (executed >= budget) {
+                    log.warn("Cyclic run '{}': step budget {} exceeded at step '{}'",
+                            run.getId(), budget, stepId);
+                    run.setStatus("failed");
+                    run.setError(Map.of(
+                            "reason", "step_budget_exceeded",
+                            "budget", budget,
+                            "lastStep", stepId));
+                    run.setCompletedAt(OffsetDateTime.now());
+                    workflowRunRepository.saveAndFlush(run);
+                    platformMetrics.recordWorkflowExecution("failed");
+                    if (eventPublisher != null) {
+                        long d = runDurationMs(run);
+                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", d);
+                    }
+                    return;
+                }
+
+                // CR-084 P4: 재개 직후 — 이 HUMAN_INPUT 은 resume() 이 이미 승인 결과를
+                // stepResults 에 기록했으므로 재중단하지 않고 다음 노드로 진행.
+                if (step.type() == WorkflowStep.StepType.HUMAN_INPUT
+                        && context.stepResults().containsKey(step.id())) {
+                    String next = resolveNextStep(step, asMap(context.stepResults().get(step.id())));
+                    if (next != null && !next.isBlank()) worklist.add(next);
+                    continue;
+                }
+
+                // HUMAN_INPUT — CR-084 P4: worklist+executed 보존 후 일시중단.
+                // 재개 시 이 HUMAN_INPUT 스텝부터 이어가도록 맨 앞에 자신을 다시 넣어 저장.
+                if (step.type() == WorkflowStep.StepType.HUMAN_INPUT) {
+                    log.info("Cyclic run '{}': HUMAN_INPUT at '{}' — pause, persisting worklist",
+                            run.getId(), step.id());
+                    List<String> remaining = new ArrayList<>();
+                    remaining.add(step.id());            // 재개 시 이 스텝부터 (handleHumanInput 결과는 resume 이 stepResults 에 기록)
+                    remaining.addAll(worklist);          // 아직 미실행 후속 노드들
+                    Map<String, Object> snapshot = new LinkedHashMap<>();
+                    snapshot.put("worklist", remaining);
+                    snapshot.put("executed", executed);
+                    run.setPendingWorklist(snapshot);
+                    handleHumanInput(step, run, context); // 내부 save 가 pendingWorklist 포함하여 영속
+                    return;
+                }
+
+                run.setCurrentStep(step.id());
+                workflowRunRepository.save(run);
+
+                // CR-084 P4: 같은 stepId 의 cyclic 회차 (0-based). DAG 경로는 이 코드 미경유.
+                int iterationIndex = iterationCounts.merge(step.id(), 1, Integer::sum) - 1;
+
+                long stepStart = System.currentTimeMillis();
+                Instant startedAt = Instant.ofEpochMilli(stepStart);
+                if (eventPublisher != null) {
+                    eventPublisher.stepRunning(run.getId(), run.getParentRunId(), step.id(),
+                            startedAt, iterationIndex);
+                }
+
+                Map<String, Object> result;
+                try {
+                    result = executeWithRetry(step, context, errorHandling);
+                } catch (Exception e) {
+                    log.error("Cyclic run '{}': step '{}' failed: {}", run.getId(), step.id(), e.getMessage());
+                    long failedAtMs = System.currentTimeMillis();
+                    run.setStatus("failed");
+                    run.setError(Map.of("step", step.id(), "error", e.getMessage()));
+                    run.setCompletedAt(OffsetDateTime.now());
+                    workflowRunRepository.saveAndFlush(run);
+                    platformMetrics.recordWorkflowExecution("failed");
+                    if (eventPublisher != null) {
+                        eventPublisher.stepFailed(run.getId(), run.getParentRunId(), step.id(),
+                                null, Instant.ofEpochMilli(failedAtMs), e.getMessage());
+                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", runDurationMs(run));
+                    }
+                    return;
+                }
+                long stepEnd = System.currentTimeMillis();
+                Instant completedAt = Instant.ofEpochMilli(stepEnd);
+                executed++;
+
+                Map<String, Object> enriched = new LinkedHashMap<>(result);
+                enriched.put("_startedAt", startedAt.toString());
+                enriched.put("_completedAt", completedAt.toString());
+                enriched.put("_durationMs", stepEnd - stepStart);
+                context = context.withStepResult(step.id(), enriched);
+                run.setStepResults(new LinkedHashMap<>(context.stepResults()));
+                workflowRunRepository.save(run);
+
+                if (eventPublisher != null) {
+                    Object subRef = step.type() == WorkflowStep.StepType.SUB_WORKFLOW
+                            ? result.get("sub_workflow_id") : null;
+                    eventPublisher.stepCompleted(run.getId(), run.getParentRunId(), step.id(),
+                            startedAt, completedAt,
+                            subRef != null ? subRef.toString() : null,
+                            previewOutput(result), iterationIndex);
+                }
+
+                // 다음 노드 결정 → worklist push
+                String next = resolveNextStep(step, result);
+                if (next != null && !next.isBlank()) {
+                    worklist.add(next);
+                }
+                // next 없음 + worklist 비었으면 루프 자연 종료
+            }
+
+            completeRun(run, context, "completed");
+
+        } catch (Exception e) {
+            log.error("Cyclic run '{}' unexpected error: {}", run.getId(), e.getMessage(), e);
+            run.setStatus("failed");
+            run.setError(Map.of("error", e.getMessage()));
+            run.setCompletedAt(OffsetDateTime.now());
+            workflowRunRepository.saveAndFlush(run);
+            if (eventPublisher != null) {
+                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", runDurationMs(run));
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(Object o) {
+        return o instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+    }
+
+    /** CONDITION/ROUTER 는 next_step, 그 외는 onSuccess 를 그래프 엣지로 사용. */
+    String resolveNextStep(WorkflowStep step, Map<String, Object> result) {
+        if (step.type() == WorkflowStep.StepType.CONDITION
+                || step.type() == WorkflowStep.StepType.ROUTER) {
+            Object ns = result.get("next_step");
+            return ns instanceof String s ? s : null;
+        }
+        return step.onSuccess();
+    }
+
+    String resolveEntryStep(WorkflowEntity entity, List<WorkflowStep> steps) {
+        Object explicit = entity.getTriggerConfig() != null
+                ? entity.getTriggerConfig().get("entry_step") : null;
+        if (explicit instanceof String s && !s.isBlank()) return s;
+        for (WorkflowStep st : steps) {
+            if (st.dependsOn() == null || st.dependsOn().isEmpty()) return st.id();
+        }
+        return steps.isEmpty() ? null : steps.get(0).id();
+    }
+
+    int resolveStepBudget(WorkflowEntity entity) {
+        // 워크플로우 errorHandling 옆 graph 설정이 아닌, steps 와 무관한 워크플로우 레벨 설정.
+        // triggerConfig 내 max_total_steps 키로 override (없으면 기본). 절대 상한으로 clamp.
+        Object v = entity.getTriggerConfig() != null
+                ? entity.getTriggerConfig().get("max_total_steps") : null;
+        int budget = STEP_BUDGET_DEFAULT;
+        if (v instanceof Number n) budget = n.intValue();
+        if (budget < 1) budget = STEP_BUDGET_DEFAULT;
+        return Math.min(budget, STEP_BUDGET_CEILING);
+    }
+
+    private long runDurationMs(WorkflowRunEntity run) {
+        if (run.getCompletedAt() == null || run.getStartedAt() == null) return 0L;
+        return run.getCompletedAt().toInstant().toEpochMilli()
+                - run.getStartedAt().toInstant().toEpochMilli();
+    }
+
+    private void completeRun(WorkflowRunEntity run, StepContext context, String status) {
+        run.setStatus(status);
+        run.setCompletedAt(OffsetDateTime.now());
+        run.setStepResults(new LinkedHashMap<>(context.stepResults()));
+        workflowRunRepository.saveAndFlush(run);
+        platformMetrics.recordWorkflowExecution(status);
+        if (eventPublisher != null) {
+            eventPublisher.runCompleted(run.getId(), run.getParentRunId(), status, runDurationMs(run));
+        }
+        log.info("Cyclic run '{}' completed: {} step results", run.getId(), context.stepResults().size());
     }
 
     /**

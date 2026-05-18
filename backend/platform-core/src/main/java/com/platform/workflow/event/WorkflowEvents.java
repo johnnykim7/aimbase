@@ -26,7 +26,10 @@ public final class WorkflowEvents {
             Long durationMs,
             String subWorkflowId,              // SUB_WORKFLOW 스텝일 때 자식 runId (null 허용)
             Map<String, Object> outputPreview, // completed 시 소량 미리보기 (null 허용)
-            String errorMessage                // failed 시에만
+            String errorMessage,               // failed 시에만
+            // CR-084 P4: cyclic 그래프에서 같은 stepId 가 N회 실행될 때 회차 구분.
+            // DAG 모드/기존 호출은 null (하위호환 — 0-based, null=비순환).
+            Integer iterationIndex
     ) {}
 
     /** HUMAN_INPUT (REQUIRE_APPROVAL) 대기 알림. */

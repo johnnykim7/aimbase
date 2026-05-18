@@ -515,6 +515,22 @@ DAG 기반 워크플로우를 설계하고 실행합니다. Workflow Studio(비�
 **노드 타입** (Studio 팔레트):
 - `LLM_CALL` / `TOOL_CALL` / `CONDITION` / `PARALLEL` / `HUMAN_INPUT` / `ACTION` / `AGENT_CALL` — 기존
 - `EVALUATOR_LOOP` (v7.10, CR-055) — 아래 별도 설명
+- `ROUTER` (CR-084) — N-way 동적 라우팅, 아래 그래프 모드 설명 참조
+
+**그래프 모드 (`graphMode`) [CR-084]**
+
+워크플로우 생성/수정 시 `graphMode`로 실행 방식을 선택한다:
+
+| 모드 | 동작 | 용도 |
+|------|------|------|
+| `dag` (기본, 생략 시) | Kahn 위상정렬 후 1-pass 실행. 기존 모든 워크플로우 동작 그대로 | 선형/분기 파이프라인 (대다수) |
+| `cyclic` | 워크리스트 스케줄러. 임의 노드 순환 + `ROUTER`/`CONDITION`의 `next_step` 추종 | 에이전트가 조건 만족까지 루프 도는 오픈엔드 흐름 |
+
+- **기존 워크플로우는 영향 없음** — `graphMode` 미지정 = `dag`. cyclic은 명시한 워크플로우에서만 가동
+- **무한루프 방어 (step budget)**: cyclic run당 총 스텝 실행 횟수 상한. 기본 50, 절대 상한 200. `triggerConfig.max_total_steps`로 조정(상한 초과 시 200으로 clamp). 초과 시 run이 `failed` + `error.reason=step_budget_exceeded`로 종료 — **운영 점검**: cyclic 워크플로우가 자주 `step_budget_exceeded`로 실패하면 ROUTER 종료 조건(default route → `__end__` 또는 종료 스텝)이 누락됐는지 확인
+- **HUMAN_INPUT 재개**: cyclic 워크플로우가 HUMAN_INPUT에서 중단되면 worklist+실행 회차가 `workflow_runs.pending_worklist`에 보존되어, resume 시 처음부터 다시 돌지 않고 이어 실행
+- **ROUTER 종료**: 무한루프를 막으려면 cyclic 그래프에 반드시 종료 경로 필요 — ROUTER `to`를 `__end__`로 두거나, 다음 노드 없는(=`onSuccess` 미지정) 스텝으로 수렴시킨다
+- **SSE 모니터링**: cyclic은 같은 스텝이 N회 실행되므로 워크플로우 SSE 스텝 이벤트에 `iterationIndex`(0-based)가 동반된다. DAG 모드는 `null`
 
 **EVALUATOR_LOOP (평가-최적화 루프)** [CR-055]
 
@@ -1303,6 +1319,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.2.0 | 2026-05-16 | **CR-084 — 워크플로우 그래프 모드 + ROUTER**. § 3-5 워크플로우 관리에 `graphMode`(dag 기본 / cyclic) 표 + 운영 점검 항목 추가. 신규 노드 타입 `ROUTER`(N-way 동적 라우팅). cyclic 모드 운영 가이드: step budget(기본 50/절대 200, `triggerConfig.max_total_steps` 조정, `step_budget_exceeded` 진단), HUMAN_INPUT 재개 시 `workflow_runs.pending_worklist` 자동 복원, ROUTER 종료 경로(`__end__`/onSuccess 미지정 수렴) 필수, SSE `iterationIndex` 모니터링. **기존 DAG 워크플로우 무변경(하위호환)**. Flyway tenant V62(workflows.graph_mode) + V63(workflow_runs.pending_worklist) 자동 적용 |
 | v3.1.0 | 2026-04-29 | **CR-074 — TURN-TCP (RFC 6062) NAT 우회**. agent 부팅 시 `AgentConfig.turnEnabled=true` 면 coturn(`59.8.160.12:3478`)에 **TCP Allocate** → relay 주소를 `metadata.runnerEndpoint = "http://<relay-ip>:<relay-port>"` 로 등록 → BE `ClaudeCliRunnerClient` 가 그대로 HTTP TCP connect. agent 사이드는 `TurnConnectionBindHandler` 가 control connection 위 ConnectionAttempt indication 수신 → 새 TCP socket → ConnectionBind 송신, 성공 후 `TurnLoopbackBridge` 가 외부 socket ↔ `localhost:8290` Tomcat 양방향 byte pump (RunnerController 무수정). **coturn 측 요건**: `static-auth-secret` + `realm` 기존 자료 그대로, **TCP listen 활성화 필수** (`no-tcp=false`, `listening-port=3478`). **운영 변경**: agent 호스트 application 에서 `AgentConfig` 생성 시 `turnEnabled=true` + `turnTransport=TCP` 명시. 기본값 false 라 후방호환 (기존 공인 IP 직접 등록 환경 그대로 동작). `flowguard_dev` 테넌트 connection 시드 (`claude-cli-flowguard`) + `widget.allowed-origins` 에 FlowGuard FE Origin 2개 추가 (`http://localhost:3180`, `http://59.8.160.12:3180`) 동시 적용. UDP 전용 `TurnRelayClient` `@Deprecated`. 단위 테스트 10 신규 PASS / 백엔드 회귀 646 PASS. 실측 e2e 다음 턴 (coturn TCP listen 검증 후) |
 | v3.0.0 | 2026-04-28 | **CR-072 + CR-073 — 서버 도구 MCP endpoint 노출 + agent Spring Boot 통합**. (1) `/mcp/sse` 가 서버 도구 26개를 MCP 채널로 노출 — 화이트리스트는 `McpExposurePolicy` (CLI 26 / NONE 6). 인증: `X-API-Key` (tenant 자동) + `X-Aimbase-Agent-Id` (선택). 거버넌스: PRE/POST_TOOL_USE Hook + Rate Limit (테넌트 단위, 분당 60) ✓ 적용. PolicyEngine / max_iter / 풀세트 Hook ✗ (CR-050 트레이드오프 계승). (2) `application.yml mcp.server-exposure.enabled` (기본 true) + `mcp.rate-limit.requests-per-minute` (기본 60). (3) **`--runner-mode` 플래그 폐지** (BREAKING) — `aimbase-agent` 는 `--mcp-stdio` 외 모든 진입에서 SERVLET 단일 컨텍스트. 후방 호환: 플래그 박혀있어도 무시. (4) `RunnerProperties` 에 `serverMcpBaseUrl/ApiKey/AgentId` 3종 추가 — 사용자 PC agent 가 mcpServers 에 `aimbase-server` 항목을 박아 CLI 가 직접 호출 |
 | v2.9.0 | 2026-04-27 | **CR-071 ClaudeCliAdapter 운영 — 3경로 통일** (BREAKING). 기존 v2.6.0 의 `application.yml platform.llm.anthropic-cli.*` 5 설정과 in-process Worker Pool 운영 절차는 **모두 제거**. ClaudeCli 호출은 별도 프로세스 `aimbase-agent --runner-mode` (HTTP 서버, `aimbase.runner.*` 5 설정) 로 옮겨감. 운영 절차 변경: (1) **각 사용자 PC 또는 사내 서버에 aimbase-agent 설치 + `--runner-mode` 기동** (`--runner-api-key`, `--max-workers`, `--claude-binary` 옵션), (2) **agent 등록 시 metadata 에 `runnerEndpoint` + `runnerApiKeyHash` 포함** → `runner_capability=true` 자동 마킹 (V60 tenant 마이그레이션 자동 적용), (3) Connection `adapter=anthropic-cli` 사용 시 `tool_mode`(AIMBASE/NATIVE/HYBRID) 명시. 호출 시 `X-Aimbase-Agent-Id` 헤더로 라우팅, 누락 시 400. 테넌트 피처 플래그 `global_config.llm.anthropic-cli.enabled-tenants` 는 라우팅 정책 게이트로 의미 변경 (값 형식은 동일). BIZ-099 의미 변경(ToS 경계는 Runner 위치로 자연 해결), BIZ-100 (워커 5개 상한)은 Runner 내부에서 동일 적용 |

@@ -2122,6 +2122,157 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 
 ---
 
+### CR-083 | SessionStore 정합성 정공 정리 (멀티블록 보존 + seq 기반 idempotent)
+
+- **변경 ID**: CR-083
+- **변경 타입**: 변경
+- **영향도**: High (대화 컨텍스트 손실 + LLM 누락 차단)
+- **적용 버전**: v8.10.0 (예정)
+- **상태**: 발번
+- **변경 일자**: 2026-04-30
+
+#### 발단
+
+운영 로그 `Session {sid} DB has 6 messages but memory has 4 — skipping append` 로 두 번째 turn 메시지가 LLM에 전달 안 되는 보고. SessionStore 전수 점검 결과 race 외에 6개 추가 정합성 이슈 발견 — 사용자 결정 "정본으로 가시죠".
+
+#### 7개 이슈
+
+1. **🟠 appendNewMessages count race** — `existing < messages.size()` 후 INSERT 동안 다른 VT 끼어들기 → 카운트 비대칭
+2. **🟠 appendMessage RMW race** — Redis read-modify-write lost-update → 메시지 자체 분실 (LLM 누락 진짜 원인)
+3. **🔴 Tool/Image 블록 lossy 저장** — `extractText`로 Text 만 보존, ToolUse/ToolResult/Image/Thinking 영구 손실 → 환각 유발
+4. **🔴 Redis/DB 진실 불일치** — TTL 만료 후 다른 세션처럼 동작
+5. **🟡 VT 무제한 생성** — DB 풀 고갈 위험
+6. **🟡 loadFromDb 캐시 덮어쓰기 race** — TTL 직후 첫 메시지 분실
+7. **🟡 createdAt 정렬 비결정성** — 같은 ms 메시지 순서 뒤섞임
+
+#### 변경 내용
+
+**스키마 (Flyway V61)**:
+- `conversation_messages` 에 `seq INTEGER NOT NULL` + `content_json JSONB NOT NULL` 추가
+- `UNIQUE (session_id, seq)` 제약 + `idx_conv_msg_session_seq` 인덱스
+- 기존 row backfill: `ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at, id) - 1` 로 seq 부여, content → `[{type:text, text:content}]` 로 변환
+
+**SessionStore 재작성**:
+- `ConcurrentHashMap<String, Semaphore>` 로 sessionId 별 직렬화 (Semaphore(1))
+- 단일 가상스레드 Executor 1개 (Thread.ofVirtual().start 무제한 → ExecutorService 단일)
+- `content_json` JSONB 로 ContentBlock 리스트 보존 (Text/ToolUse/ToolResult/Image/Thinking 모두)
+- `messageType` 정확히 셋팅 (ToolUse → tool_use 등)
+- `INSERT ... ON CONFLICT (session_id, seq) DO NOTHING` 로 idempotent
+- `loadFromDb` 캐시 SET 도 lock 안에서만 → race 차단
+- `extractText` 는 검색 용도로만 유지 (DB `content` 컬럼 동기화)
+
+**Repository**:
+- `findBySessionIdOrderByCreatedAtAsc` → `findBySessionIdOrderBySeqAsc` 로 교체 (createdAt fallback 제거)
+
+**OrchestratorEngine**:
+- 호출 측 변경 없음 (`appendMessage` 시그니처 동일)
+
+#### 변경 사유
+
+- 운영 로그 직접 원인 차단 (이슈 1, 2)
+- 멀티모달 대화 컨텍스트 영구 손실 차단 (이슈 3, 4) — CR-061 첨부 이미지·CR-054 HttpRequestTool 결과 등
+- VT 폭주 + 캐시 덮어쓰기 race + 정렬 비결정성 같은 잠재 결함 일괄 정리
+
+#### 영향 모듈
+
+- `platform-core`:
+  - `domain/ConversationMessageEntity` (seq, content_json 필드 추가)
+  - `repository/ConversationMessageRepository` (seq 기반 쿼리 + ON CONFLICT)
+  - `session/SessionStore` (재작성)
+  - `db/migration/tenant/V61__cr083_session_store_seq_jsonb.sql` (신규)
+- 회귀 영향:
+  - `api/ConversationController` (메시지 응답 DTO 변경 가능 — content_json 노출 여부 결정)
+  - `api/SessionResumeController` (세션 복원 시 멀티블록 반환 형식)
+  - `session/SessionBriefService`, `context/ContextAssemblyEngine` (메시지 로드 경로)
+
+#### 영향 범위
+
+- BIZ-002 (세션 TTL 24h) — 변경 없음, 단 TTL 만료 후 정상 복원이 새로 가능
+- BIZ-057 (메시지 본문 32KB / 세션당 500개) — 유지
+- CR-045 (대화형 채팅 UI) — 멀티모달 메시지 정상 복원 효과
+- CR-046 (Soft Delete) — 영향 없음, deletedAt 조건 유지
+- CR-049 (세션 복원·지침) — 복원 정확도 향상
+- CR-061 (위젯 파일 업로드) — 첨부 이미지 컨텍스트 보존
+- CR-077 (세션 race retry) — 본 CR 로 흡수, retry 메커니즘은 ON CONFLICT 로 단순화
+
+#### 영향 설계서
+
+- T3-3 (세션·대화 저장) — content_json 컬럼·seq UNIQUE 반영 필요
+- T3-6 (실행 지시서) — SessionStore 직렬화 정책 추가
+
+#### 운영 데이터 backfill
+
+- 기존 ToolUse/ToolResult/Image 메시지는 이미 손실됨 — 복원 불가, 텍스트만 jsonb 변환 (수용)
+- backfill 후 `seq IS NOT NULL` 검증
+
+#### 추정
+
+5MD — 마이그레이션 1MD + SessionStore 재작성 2MD + 테스트 1MD + 회귀/배포 1MD
+
+#### 범위 밖 (후속 별도 CR)
+
+- 위젯 ChatRecipe 통합 (project_widget_chat_recipe_idea.md 보관 중)
+- 세션 관리 UX 정책 (selector / 제목 / 새 대화) — ChatRecipe 안에 흡수
+
+#### 원본 요구사항
+
+`docs/origins/원본_요구사항_SessionStore_정합성_정공_20260430.md`
+
+#### 요청자/승인자
+
+- **요청자**: 사용자 (대화 2026-04-30 — "SessionStore append race 부터 잡고", "정본으로 가시죠")
+- **승인자**: sykim
+- **적용 버전**: v8.10.0 (예정)
+
+---
+
+### CR-084 | WorkflowEngine 임의 cycle + 동적 N-way 라우팅
+
+- **대상 기능 ID**: BIZ-009 (워크플로우 DAG 실행)
+- **변경 타입**: 신규
+- **변경 내용**:
+  - 워크플로우 레벨 `graph_mode` 속성 (`dag` 기본 / `cyclic`). cyclic 명시 시에만 워크리스트 스케줄러 가동, DAG 는 기존 1-pass 무변경
+  - `executeCyclic` 신설 — 워크리스트(worklist) 기반 스케줄러로 임의 노드 간 순환 지원 (agent↔tool 반복 등)
+  - 신규 `ROUTER` StepType + `RouterStepExecutor` — 런타임 표현식/LLM 출력으로 N개 후보 중 1개 동적 선택
+  - `ExpressionEvaluator` 추출 (CONDITION 평가기 분리, ROUTER 공유)
+  - 그래프 레벨 무한루프 방어: run 당 총 스텝 실행 상한 (기본 50, 절대 200) — EVALUATOR_LOOP MAX_ITERATIONS_CEILING 과 별개
+  - resume 시 worklist 상태 복원 (`pending_worklist` JSONB), 이벤트에 iteration index 추가
+- **변경 사유**: LangGraph 격차 분석 결과, 임의 cycle 미지원(EVALUATOR_LOOP 한 패턴 한정) + CONDITION 2갈래 고정이 오픈엔드 에이전트 표현력의 핵심 격차로 확인
+- **영향 모듈**: workflow (WorkflowEngine, ConditionStepExecutor, WorkflowValidator, WorkflowStep, WorkflowRunEntity, WorkflowEventPublisher), Flyway tenant V62
+- **영향도**: High (엔진 실행 루프 재설계)
+- **영향 범위**: BIZ-009, CR-049(resume), CR-058(이벤트), CR-055(EVALUATOR_LOOP 공존)
+- **영향 설계서**: T3-7 (신규)
+- **원본 요구사항**: `docs/origins/원본_요구사항_LangGraph격차_WorkflowEngine보강_20260516.md`
+- **요청자**: 사용자 (대화 2026-05-16 — LangGraph 격차 비교 후 "부족한 부분 채우려고 합니다", "2개 CR 분할", "옥인 graph_mode 플래그")
+- **승인자**: sykim
+- **적용 버전**: v8.11.0 (예정)
+- **변경 일자**: 2026-05-16
+- **구현 상태**: ✅ **P1~P5 구현 완료** (2026-05-16, dev 브랜치). P1 ExpressionEvaluator 추출 / P2 ROUTER StepType+Executor+Validator / P3 V62 graph_mode + executeCyclic 워크리스트 스케줄러 + step budget(50/200) / P4 V63 pending_worklist + cyclic resume 복원 + 이벤트 iterationIndex(nullable) / P5 api-guide v3.1.0 + ops-guide v3.2.0. **platform-core 전체 664 테스트 PASS (0 fail/error)**. DAG 경로 무변경(하위호환 단위 입증). 한계: cyclic 실 DB e2e 미검증(IT 후속), V62/V63 운영 적용·커밋 미수행. 상세 — `docs/T3-7_..._설계서.md` § 6
+
+---
+
+### CR-085 | WorkflowEngine State 타입드 채널/reducer + 노드 내부 토큰 스트리밍
+
+- **대상 기능 ID**: BIZ-009 (워크플로우 State 관리)
+- **변경 타입**: 신규
+- **변경 내용**:
+  - `StepContext` 변수 접근을 중첩 경로(`{{step.a.b[0]}}`)로 확장 — 1뎁스/실패 폴백 동작은 기존 보존 (하위호환)
+  - 채널 reducer (opt-in): `output_channel` + `reduce`(replace 기본 / append / merge). 미지정 = 현행 덮어쓰기 100% 보존
+  - 메시지 누적 채널 (LangGraph add_messages 대응) — cyclic 그래프 대화 누적
+  - `WorkflowEventPublisher.stepToken` 추가 — 노드 내부 LLM 토큰 단위 스트리밍 (opt-in `stream_tokens`, 기본 off). orchestrator SSE 공용 어댑터 콜백 재사용 (중복 구현 금지)
+- **변경 사유**: LangGraph 격차 분석 결과, State 평면 문자열 치환(reducer/누적채널 부재) + 워크플로우 이벤트 step 단위 한정이 격차로 확인
+- **영향 모듈**: workflow (StepContext, WorkflowEventPublisher, LlmCallStepExecutor + 9 executor 회귀)
+- **영향도**: Medium (StepContext API 개편, 하위호환 보장)
+- **영향 범위**: BIZ-009, 전 StepExecutor 9종, CR-084(append reducer 시너지/이벤트 iteration 합류)
+- **영향 설계서**: T3-7 (신규)
+- **원본 요구사항**: `docs/origins/원본_요구사항_LangGraph격차_WorkflowEngine보강_20260516.md`
+- **요청자**: 사용자 (대화 2026-05-16 — "2개 CR 분할")
+- **승인자**: sykim
+- **적용 버전**: v8.11.0 (예정)
+- **변경 일자**: 2026-05-16
+
+---
+
 ## 작성 가이드
 
 **카드 구조**:

@@ -41,6 +41,11 @@ public class WorkflowValidator {
             if (WorkflowStep.StepType.EVALUATOR_LOOP.name().equals(type)) {
                 validateEvaluatorLoop(location, asMap(step.get("config"), location));
             }
+
+            // CR-084 P2: ROUTER config 구조 검증 (저장 단계 차단 — 실행 시점 오류 방지)
+            if (WorkflowStep.StepType.ROUTER.name().equals(type)) {
+                validateRouter(location, asMap(step.get("config"), location));
+            }
         }
     }
 
@@ -127,6 +132,58 @@ public class WorkflowValidator {
             if (path == null || path.isBlank()) {
                 throw bad(location + ": pass_criteria.jsonpath is required for JSONPATH_MATCH");
             }
+        }
+    }
+
+    // ═══════════════════════════════════════════════
+    // ROUTER 검증 규칙 (CR-084 P2, 설계서 T3-7 § 3.3)
+    // ═══════════════════════════════════════════════
+
+    @SuppressWarnings("unchecked")
+    void validateRouter(String location, Map<String, Object> config) {
+        if (config == null) {
+            throw bad(location + ": ROUTER requires config");
+        }
+
+        // 1) routes 배열 존재 + 비어있지 않음
+        Object rawRoutes = config.get("routes");
+        if (!(rawRoutes instanceof List<?> routes)) {
+            throw bad(location + ": config.routes must be an array");
+        }
+        if (routes.isEmpty()) {
+            throw bad(location + ": config.routes must not be empty");
+        }
+
+        int defaultCount = 0;
+        for (int i = 0; i < routes.size(); i++) {
+            Object rawRoute = routes.get(i);
+            String routeLoc = location + ".routes[" + i + "]";
+            if (!(rawRoute instanceof Map<?, ?> m)) {
+                throw bad(routeLoc + " must be an object");
+            }
+            Map<String, Object> route = (Map<String, Object>) m;
+
+            boolean isDefault = Boolean.TRUE.equals(route.get("default"))
+                    || "true".equalsIgnoreCase(String.valueOf(route.get("default")));
+            String when = asString(route.get("when"));
+            boolean hasWhen = when != null && !when.isBlank();
+
+            // 2) 각 route 는 when XOR default (정확히 하나)
+            if (isDefault == hasWhen) {
+                throw bad(routeLoc + ": exactly one of 'when' or 'default:true' required");
+            }
+            if (isDefault) defaultCount++;
+
+            // 3) to 필수 + 비어있지 않음
+            String to = asString(route.get("to"));
+            if (to == null || to.isBlank()) {
+                throw bad(routeLoc + ": 'to' (target step id) must not be empty");
+            }
+        }
+
+        // 4) default route 는 최대 1개
+        if (defaultCount > 1) {
+            throw bad(location + ": at most one 'default:true' route allowed (got " + defaultCount + ")");
         }
     }
 

@@ -32,19 +32,34 @@ public class WorkflowEventPublisher {
     }
 
     public void stepRunning(UUID runId, UUID parentRunId, String stepId, Instant startedAt) {
+        stepRunning(runId, parentRunId, stepId, startedAt, null);
+    }
+
+    /** CR-084 P4: cyclic 회차 구분 포함. iterationIndex=null 이면 기존(DAG) 동작과 동일. */
+    public void stepRunning(UUID runId, UUID parentRunId, String stepId,
+                            Instant startedAt, Integer iterationIndex) {
         safePublish(new WorkflowEvents.StepStatusChanged(
                 runId, parentRunId, stepId, "running",
-                startedAt, null, null, null, null, null));
+                startedAt, null, null, null, null, null, iterationIndex));
     }
 
     public void stepCompleted(UUID runId, UUID parentRunId, String stepId,
                               Instant startedAt, Instant completedAt,
                               String subWorkflowId, Map<String, Object> outputPreview) {
+        stepCompleted(runId, parentRunId, stepId, startedAt, completedAt,
+                subWorkflowId, outputPreview, null);
+    }
+
+    /** CR-084 P4: cyclic 회차 구분 포함. iterationIndex=null 이면 기존(DAG) 동작과 동일. */
+    public void stepCompleted(UUID runId, UUID parentRunId, String stepId,
+                              Instant startedAt, Instant completedAt,
+                              String subWorkflowId, Map<String, Object> outputPreview,
+                              Integer iterationIndex) {
         long duration = (startedAt != null && completedAt != null)
                 ? (completedAt.toEpochMilli() - startedAt.toEpochMilli()) : 0L;
         safePublish(new WorkflowEvents.StepStatusChanged(
                 runId, parentRunId, stepId, "completed",
-                startedAt, completedAt, duration, subWorkflowId, outputPreview, null));
+                startedAt, completedAt, duration, subWorkflowId, outputPreview, null, iterationIndex));
     }
 
     public void stepFailed(UUID runId, UUID parentRunId, String stepId,
@@ -53,7 +68,7 @@ public class WorkflowEventPublisher {
                 ? (failedAt.toEpochMilli() - startedAt.toEpochMilli()) : 0L;
         safePublish(new WorkflowEvents.StepStatusChanged(
                 runId, parentRunId, stepId, "failed",
-                startedAt, failedAt, duration, null, null, errorMessage));
+                startedAt, failedAt, duration, null, null, errorMessage, null));
     }
 
     public void approvalRequired(UUID runId, UUID parentRunId, String stepId, String policyId,

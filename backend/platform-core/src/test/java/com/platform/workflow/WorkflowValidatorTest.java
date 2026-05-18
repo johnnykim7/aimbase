@@ -318,4 +318,115 @@ class WorkflowValidatorTest {
         assertThatThrownBy(() -> validator.validate(List.of(step)))
                 .hasMessageContaining("loop-1");
     }
+
+    // ═══════════════════════════════════════════════
+    // CR-084 P2 — ROUTER 검증 규칙 (설계서 T3-7 § 3.3)
+    // ═══════════════════════════════════════════════
+
+    /** 기본 valid ROUTER 스텝 (검증 통과). 모든 중첩은 mutable. */
+    private Map<String, Object> validRouter() {
+        Map<String, Object> route1 = new LinkedHashMap<>();
+        route1.put("when", "{{c.output}} equals 'a'");
+        route1.put("to", "step_a");
+
+        Map<String, Object> route2 = new LinkedHashMap<>();
+        route2.put("default", true);
+        route2.put("to", "fallback");
+
+        List<Map<String, Object>> routes = new java.util.ArrayList<>();
+        routes.add(route1);
+        routes.add(route2);
+
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("routes", routes);
+
+        Map<String, Object> step = new LinkedHashMap<>();
+        step.put("id", "router-1");
+        step.put("type", "ROUTER");
+        step.put("config", config);
+        return step;
+    }
+
+    @Test
+    @DisplayName("유효한 ROUTER 스텝은 예외 없이 통과")
+    void validRouter_passes() {
+        assertThatCode(() -> validator.validate(List.of(validRouter())))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("config 없으면 거부")
+    void router_noConfig_rejected() {
+        Map<String, Object> step = validRouter();
+        step.remove("config");
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("ROUTER requires config");
+    }
+
+    @Test
+    @DisplayName("routes 비어있으면 거부")
+    void router_emptyRoutes_rejected() {
+        Map<String, Object> step = validRouter();
+        mutate(step, "config.routes", new java.util.ArrayList<>());
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("routes must not be empty");
+    }
+
+    @Test
+    @DisplayName("when 과 default 둘 다 없는 route 거부")
+    void router_routeWithoutWhenOrDefault_rejected() {
+        Map<String, Object> step = validRouter();
+        Map<String, Object> bad = new LinkedHashMap<>();
+        bad.put("to", "x");
+        mutate(step, "config.routes", new java.util.ArrayList<>(List.of(bad)));
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("exactly one of 'when' or 'default:true'");
+    }
+
+    @Test
+    @DisplayName("when 과 default 둘 다 있는 route 거부")
+    void router_routeWithBothWhenAndDefault_rejected() {
+        Map<String, Object> step = validRouter();
+        Map<String, Object> bad = new LinkedHashMap<>();
+        bad.put("when", "{{c.x}} equals 'y'");
+        bad.put("default", true);
+        bad.put("to", "x");
+        mutate(step, "config.routes", new java.util.ArrayList<>(List.of(bad)));
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("exactly one of 'when' or 'default:true'");
+    }
+
+    @Test
+    @DisplayName("to 비어있으면 거부")
+    void router_emptyTo_rejected() {
+        Map<String, Object> step = validRouter();
+        Map<String, Object> bad = new LinkedHashMap<>();
+        bad.put("when", "{{c.x}} equals 'y'");
+        bad.put("to", "");
+        mutate(step, "config.routes", new java.util.ArrayList<>(List.of(bad)));
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("'to' (target step id) must not be empty");
+    }
+
+    @Test
+    @DisplayName("default route 2개 이상이면 거부")
+    void router_multipleDefaults_rejected() {
+        Map<String, Object> step = validRouter();
+        Map<String, Object> d1 = new LinkedHashMap<>();
+        d1.put("default", true);
+        d1.put("to", "f1");
+        Map<String, Object> d2 = new LinkedHashMap<>();
+        d2.put("default", true);
+        d2.put("to", "f2");
+        mutate(step, "config.routes", new java.util.ArrayList<>(List.of(d1, d2)));
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("at most one 'default:true' route allowed");
+    }
+
+    @Test
+    @DisplayName("ROUTER 가 아닌 기존 스텝(EVALUATOR_LOOP)은 ROUTER 검증 영향 없음")
+    void router_doesNotAffectOtherStepTypes() {
+        assertThatCode(() -> validator.validate(List.of(validStep())))
+                .doesNotThrowAnyException();
+    }
 }

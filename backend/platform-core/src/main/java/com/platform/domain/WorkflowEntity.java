@@ -46,6 +46,10 @@ public class WorkflowEntity {
     @Column(name = "input_schema", columnDefinition = "jsonb")
     private Map<String, Object> inputSchema;
 
+    /** CR-084: 워크플로우 실행 모드. "dag"(기존 1-pass, 기본) | "cyclic"(워크리스트 스케줄러). null=dag. */
+    @Column(name = "graph_mode", length = 20)
+    private String graphMode;
+
     @Column(name = "created_by", length = 100)
     private String createdBy;
 
@@ -81,6 +85,8 @@ public class WorkflowEntity {
     public void setOutputSchema(Map<String, Object> outputSchema) { this.outputSchema = outputSchema; }
     public Map<String, Object> getInputSchema() { return inputSchema; }
     public void setInputSchema(Map<String, Object> inputSchema) { this.inputSchema = inputSchema; }
+    public String getGraphMode() { return graphMode; }
+    public void setGraphMode(String graphMode) { this.graphMode = graphMode; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public boolean isActive() { return isActive; }

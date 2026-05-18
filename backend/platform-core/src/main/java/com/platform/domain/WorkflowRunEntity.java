@@ -54,6 +54,14 @@ public class WorkflowRunEntity {
     @Column(name = "parent_step_id", length = 255)
     private String parentStepId;
 
+    /**
+     * CR-084 P4: cyclic 워크플로우가 HUMAN_INPUT 에서 중단될 때 보존하는 재개 상태.
+     * {@code {"worklist": [...], "executed": N}}. NULL = DAG 모드 또는 cyclic 미중단.
+     */
+    @Type(JsonBinaryType.class)
+    @Column(name = "pending_worklist", columnDefinition = "jsonb")
+    private Map<String, Object> pendingWorklist;
+
     public UUID getId() { return id; }
     /** CR-058: 테스트/SubWorkflowStepExecutor 용 setter — JPA 가 UUID 자동 발급을 지원하나 명시 설정이 필요한 경우 대비. */
     public void setId(UUID id) { this.id = id; }
@@ -79,4 +87,6 @@ public class WorkflowRunEntity {
     public void setParentRunId(UUID parentRunId) { this.parentRunId = parentRunId; }
     public String getParentStepId() { return parentStepId; }
     public void setParentStepId(String parentStepId) { this.parentStepId = parentStepId; }
+    public Map<String, Object> getPendingWorklist() { return pendingWorklist; }
+    public void setPendingWorklist(Map<String, Object> pendingWorklist) { this.pendingWorklist = pendingWorklist; }
 }
