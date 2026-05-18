@@ -329,7 +329,7 @@ public class WorkflowEngine {
                     enriched.put("_completedAt", completedAt.toString());
                     enriched.put("_durationMs", stepEnd - stepStart);
 
-                    context = context.withStepResult(step.id(), enriched);
+                    context = applyStepResult(step, context, enriched);  // CR-085 P2: 채널 reducer
 
                     // 진행 상태 DB에 저장
                     run.setStepResults(new LinkedHashMap<>(context.stepResults()));
@@ -461,6 +461,23 @@ public class WorkflowEngine {
             }
         }
         return preview.isEmpty() ? null : preview;
+    }
+
+    /**
+     * CR-085 P2: 스텝 결과를 컨텍스트에 병합하되 step.config 의 채널 reducer 를 적용.
+     *
+     * <p>{@code config.output_channel} 미지정 시 기존 {@link StepContext#withStepResult(String, Map)}
+     * 와 100% 동일 동작 — DAG/cyclic 어느 경로든 reducer 미사용 워크플로우는 바이트 동일.
+     */
+    private StepContext applyStepResult(WorkflowStep step, StepContext context, Map<String, Object> enriched) {
+        Map<String, Object> cfg = step.config();
+        Object channel = cfg != null ? cfg.get("output_channel") : null;
+        if (cfg == null || channel == null || channel.toString().isBlank()) {
+            return context.withStepResult(step.id(), enriched);  // 기존 경로 — 동작 변화 0
+        }
+        Object reduce = cfg.get("reduce");
+        return context.withStepResult(step.id(), enriched,
+                channel.toString(), reduce != null ? reduce.toString() : "replace");
     }
 
     private Map<String, Object> executeWithRetry(WorkflowStep step, StepContext context, ErrorHandling errorHandling) {
@@ -666,7 +683,7 @@ public class WorkflowEngine {
                 enriched.put("_startedAt", startedAt.toString());
                 enriched.put("_completedAt", completedAt.toString());
                 enriched.put("_durationMs", stepEnd - stepStart);
-                context = context.withStepResult(step.id(), enriched);
+                context = applyStepResult(step, context, enriched);  // CR-085 P2: 채널 reducer
                 run.setStepResults(new LinkedHashMap<>(context.stepResults()));
                 workflowRunRepository.save(run);
 

@@ -532,6 +532,19 @@ DAG 기반 워크플로우를 설계하고 실행합니다. Workflow Studio(비�
 - **ROUTER 종료**: 무한루프를 막으려면 cyclic 그래프에 반드시 종료 경로 필요 — ROUTER `to`를 `__end__`로 두거나, 다음 노드 없는(=`onSuccess` 미지정) 스텝으로 수렴시킨다
 - **SSE 모니터링**: cyclic은 같은 스텝이 N회 실행되므로 워크플로우 SSE 스텝 이벤트에 `iterationIndex`(0-based)가 동반된다. DAG 모드는 `null`
 
+**State 채널 reducer + 중첩 경로 + 토큰 스트리밍 [CR-085]**
+
+세 기능 모두 opt-in — 미지정 시 기존 동작 100% 보존(하위호환). 운영자 관점 점검 항목:
+
+| 기능 | 활성 조건 | 운영 점검 |
+|------|----------|----------|
+| 중첩 경로 참조 (`{{s.a[0].b}}`) | 자동 (표현력 확장) | 경로가 끊기면 빈 문자열 — 워크플로우 결과가 비면 참조 경로/실제 결과 구조 대조 |
+| 채널 reducer (`output_channel`+`reduce`) | 스텝 config 명시 시 | `append` 채널은 cyclic에서 무한 누적 가능 — step budget과 함께 메모리/`stepResults` 크기 모니터링. `workflow_runs.step_results` JSONB 비대 주의 |
+| 노드 토큰 스트리밍 (`stream_tokens:true`) | `LLM_CALL` config 명시 + `response_schema` 없을 때만 | SSE `step_token` 이벤트량 증가 — 구독자 없는 run은 fire-and-forget으로 유실(정상). `response_schema` 지정 스텝은 자동 비활성(구조화 출력 우선) |
+
+- **append 채널 비대 방어**: cyclic + `reduce:append` 조합은 회차마다 채널 List가 늘어난다. step budget(기본 50)이 1차 방어선이지만, `workflow_runs.step_results` JSONB가 커지면 조회/저장 지연 — 장기 루프 워크플로우는 채널 누적 대신 요약 스텝을 중간에 두도록 설계 검토
+- **스트리밍 타임아웃**: 노드 토큰 스트리밍은 내부적으로 300초 상한. 초과 시 부분 응답으로 진행하고 경고 로그(`토큰 스트리밍 타임아웃`) — 장시간 LLM_CALL은 step `timeoutMs`와 별개로 이 상한 인지
+
 **EVALUATOR_LOOP (평가-최적화 루프)** [CR-055]
 
 한 노드 내부에서 생성 → 평가 → 재생성 루프를 반복. Anthropic "Evaluator-Optimizer" 패턴.
@@ -1319,6 +1332,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.3.0 | 2026-05-18 | **CR-085 — State 채널 reducer + 중첩 경로 + 노드 토큰 스트리밍**. § 3-5 워크플로우 관리에 CR-085 운영 점검표 추가. 중첩 경로 참조(자동, 폴백 빈 문자열) / 채널 reducer(`output_channel`+`reduce`, opt-in, `append` 채널 비대 방어 — `workflow_runs.step_results` JSONB 크기 모니터링) / 노드 토큰 스트리밍(`stream_tokens:true`, `response_schema` 없을 때만, SSE `step_token`, 내부 300초 상한). 세 기능 모두 opt-in — 미지정 시 기존 동작 100% 보존. 신규 마이그레이션 없음(StepContext/이벤트 계약 확장만). platform-core 653 회귀 GREEN |
 | v3.2.0 | 2026-05-16 | **CR-084 — 워크플로우 그래프 모드 + ROUTER**. § 3-5 워크플로우 관리에 `graphMode`(dag 기본 / cyclic) 표 + 운영 점검 항목 추가. 신규 노드 타입 `ROUTER`(N-way 동적 라우팅). cyclic 모드 운영 가이드: step budget(기본 50/절대 200, `triggerConfig.max_total_steps` 조정, `step_budget_exceeded` 진단), HUMAN_INPUT 재개 시 `workflow_runs.pending_worklist` 자동 복원, ROUTER 종료 경로(`__end__`/onSuccess 미지정 수렴) 필수, SSE `iterationIndex` 모니터링. **기존 DAG 워크플로우 무변경(하위호환)**. Flyway tenant V62(workflows.graph_mode) + V63(workflow_runs.pending_worklist) 자동 적용 |
 | v3.1.0 | 2026-04-29 | **CR-074 — TURN-TCP (RFC 6062) NAT 우회**. agent 부팅 시 `AgentConfig.turnEnabled=true` 면 coturn(`59.8.160.12:3478`)에 **TCP Allocate** → relay 주소를 `metadata.runnerEndpoint = "http://<relay-ip>:<relay-port>"` 로 등록 → BE `ClaudeCliRunnerClient` 가 그대로 HTTP TCP connect. agent 사이드는 `TurnConnectionBindHandler` 가 control connection 위 ConnectionAttempt indication 수신 → 새 TCP socket → ConnectionBind 송신, 성공 후 `TurnLoopbackBridge` 가 외부 socket ↔ `localhost:8290` Tomcat 양방향 byte pump (RunnerController 무수정). **coturn 측 요건**: `static-auth-secret` + `realm` 기존 자료 그대로, **TCP listen 활성화 필수** (`no-tcp=false`, `listening-port=3478`). **운영 변경**: agent 호스트 application 에서 `AgentConfig` 생성 시 `turnEnabled=true` + `turnTransport=TCP` 명시. 기본값 false 라 후방호환 (기존 공인 IP 직접 등록 환경 그대로 동작). `flowguard_dev` 테넌트 connection 시드 (`claude-cli-flowguard`) + `widget.allowed-origins` 에 FlowGuard FE Origin 2개 추가 (`http://localhost:3180`, `http://59.8.160.12:3180`) 동시 적용. UDP 전용 `TurnRelayClient` `@Deprecated`. 단위 테스트 10 신규 PASS / 백엔드 회귀 646 PASS. 실측 e2e 다음 턴 (coturn TCP listen 검증 후) |
 | v3.0.0 | 2026-04-28 | **CR-072 + CR-073 — 서버 도구 MCP endpoint 노출 + agent Spring Boot 통합**. (1) `/mcp/sse` 가 서버 도구 26개를 MCP 채널로 노출 — 화이트리스트는 `McpExposurePolicy` (CLI 26 / NONE 6). 인증: `X-API-Key` (tenant 자동) + `X-Aimbase-Agent-Id` (선택). 거버넌스: PRE/POST_TOOL_USE Hook + Rate Limit (테넌트 단위, 분당 60) ✓ 적용. PolicyEngine / max_iter / 풀세트 Hook ✗ (CR-050 트레이드오프 계승). (2) `application.yml mcp.server-exposure.enabled` (기본 true) + `mcp.rate-limit.requests-per-minute` (기본 60). (3) **`--runner-mode` 플래그 폐지** (BREAKING) — `aimbase-agent` 는 `--mcp-stdio` 외 모든 진입에서 SERVLET 단일 컨텍스트. 후방 호환: 플래그 박혀있어도 무시. (4) `RunnerProperties` 에 `serverMcpBaseUrl/ApiKey/AgentId` 3종 추가 — 사용자 PC agent 가 mcpServers 에 `aimbase-server` 항목을 박아 CLI 가 직접 호출 |

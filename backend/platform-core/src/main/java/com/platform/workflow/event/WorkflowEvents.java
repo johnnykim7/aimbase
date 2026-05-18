@@ -32,6 +32,23 @@ public final class WorkflowEvents {
             Integer iterationIndex
     ) {}
 
+    /**
+     * CR-085 P3: 노드 내부 LLM 토큰 델타 스트리밍.
+     *
+     * <p>opt-in (스텝 config {@code stream_tokens:true}) 일 때만 발행. 미지정 시 기존
+     * step 단위 {@link StepStatusChanged} 이벤트만 — 하위호환. cyclic 그래프에서 같은
+     * 노드가 N회 실행되므로 {@code iterationIndex} 로 회차 구분 (DAG/null=비순환,
+     * {@link StepStatusChanged#iterationIndex} 와 동일 계약).
+     */
+    public record StepToken(
+            UUID runId,
+            UUID parentRunId,
+            String stepId,
+            Integer iterationIndex,   // DAG/기존 = null
+            String tokenDelta,        // 누적 텍스트가 아닌 증분 델타
+            String type               // "text" | "thinking" (LLMStreamChunk.type 그대로)
+    ) {}
+
     /** HUMAN_INPUT (REQUIRE_APPROVAL) 대기 알림. */
     public record ApprovalRequired(
             UUID runId,

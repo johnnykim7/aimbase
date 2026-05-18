@@ -78,6 +78,19 @@ public class WorkflowEventPublisher {
                 approvers != null ? approvers : List.of(), timeoutAt));
     }
 
+    /**
+     * CR-085 P3: 노드 내부 LLM 토큰 델타 발행 (opt-in, fire-and-forget).
+     *
+     * <p>호출부(LlmCallStepExecutor)가 스텝 config {@code stream_tokens:true} 일 때만
+     * 호출한다. iterationIndex=null 이면 DAG/기존 동작과 동일 (비순환).
+     */
+    public void stepToken(UUID runId, UUID parentRunId, String stepId,
+                          Integer iterationIndex, String tokenDelta, String type) {
+        if (tokenDelta == null || tokenDelta.isEmpty()) return;  // 빈 델타 노이즈 차단
+        safePublish(new WorkflowEvents.StepToken(
+                runId, parentRunId, stepId, iterationIndex, tokenDelta, type));
+    }
+
     public void runCompleted(UUID runId, UUID parentRunId, String status, long durationMs) {
         safePublish(new WorkflowEvents.RunCompleted(runId, parentRunId, status, durationMs));
     }

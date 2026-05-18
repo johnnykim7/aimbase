@@ -327,7 +327,7 @@ curl -X POST /api/v1/workflows \
 
 | type | config 키 | 설명 |
 |------|----------|------|
-| `LLM_CALL` | `connection_id`, `system`, `prompt`, `response_schema`, `max_tokens` | LLM 호출 (토큰 초과 시 자동 에스컬레이션+분할, CR-028) |
+| `LLM_CALL` | `connection_id`, `system`, `prompt`, `response_schema`, `max_tokens`, `stream_tokens`(CR-085), `output_channel`/`reduce`(CR-085) | LLM 호출 (토큰 초과 시 자동 에스컬레이션+분할, CR-028) |
 | `TOOL_CALL` | `tool`, `input` | 도구 호출 (ToolRegistry 등록 도구) |
 | `ACTION` | `actionType`, `config` | 액션 실행 (write, notify) |
 | `CONDITION` | `expression`, `true_step`, `false_step` | 2갈래 조건 분기 |
@@ -373,6 +373,44 @@ curl -X POST /api/v1/workflows \
   "depends_on": ["search"]
 }
 ```
+
+**중첩 경로 참조 (CR-085)** — `{{ns.key}}` 1뎁스 외에 Map/List 중첩 경로를 지원합니다. 기존 1뎁스 참조와 실패 시 빈 문자열 폴백 동작은 그대로 유지됩니다(하위호환).
+
+| 형식 | 의미 |
+|------|------|
+| `{{step.a.b.c}}` | 중첩 Map 경로 |
+| `{{step.items[1]}}` | List 인덱스 접근 (0-based) |
+| `{{step.rows[0].name}}` | List → Map 혼합 경로 |
+| `{{input.cfg.timeout}}` | input 도 중첩 경로 지원 |
+
+경로가 중간에 끊기거나(예: String에 더 들어감) 인덱스 범위를 벗어나면 기존과 동일하게 빈 문자열로 치환됩니다.
+
+**채널 reducer (CR-085)** — 스텝 config에 `output_channel` + `reduce`를 지정하면 결과를 채널에 누적할 수 있습니다. 미지정 시 기존 동작(스텝 결과 덮어쓰기) 100% 보존. `{{stepId.field}}` 참조는 reducer 사용 여부와 무관하게 항상 동작합니다.
+
+| `reduce` | 동작 |
+|----------|------|
+| `replace` (기본) | 채널을 결과로 덮어쓰기 (현행 동작) |
+| `append` | 채널을 List로 보고 결과를 원소로 추가 — cyclic 그래프 메시지 누적 (LangGraph `add_messages` 대응) |
+| `merge` | 채널을 Map으로 보고 결과 키들을 얕은 병합 |
+
+```json
+{
+  "id": "turn",
+  "type": "LLM_CALL",
+  "config": {
+    "prompt": "이전 대화: {{messages}}\n사용자: {{input.msg}}",
+    "output_channel": "messages",
+    "reduce": "append"
+  }
+}
+```
+> cyclic 그래프에서 `turn` 노드가 N회 실행되면 `{{messages[0].msg}}` … `{{messages[n].msg}}`로 누적 대화를 참조할 수 있습니다 (CR-084 cyclic + CR-085 append 시너지).
+
+**노드 내부 토큰 스트리밍 (CR-085)** — `LLM_CALL` 스텝 config에 `stream_tokens: true`를 지정하면 노드 내부 LLM 토큰 델타가 SSE로 스트리밍됩니다(opt-in). 미지정 시 기존 step 단위 이벤트만 발행(하위호환).
+
+- 적용 조건: `response_schema`가 없는 텍스트 응답 스텝에만 (구조화 출력/자동분할과 충돌하므로 schema 지정 시 자동 비활성)
+- SSE 이벤트: `step_token` (`stepId`, `tokenDelta`, `type`=`text`|`thinking`, `iterationIndex` nullable)
+- orchestrator(채팅) SSE와 동일한 공용 스트리밍 경로 재사용 — 별도 구현 없음
 
 ### 4-2. 워크플로우 수정
 
@@ -1534,6 +1572,7 @@ try {
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.2.0 | 2026-05-18 | **CR-085 — State 채널 reducer + 중첩 경로 + 노드 토큰 스트리밍**. 변수 참조에 중첩 경로(`{{step.a.b[0].c}}`, List 인덱스/Map 혼합) 추가 — 기존 1뎁스 참조·실패 폴백(빈 문자열) 동작 100% 보존. 스텝 config에 `output_channel`+`reduce`(`replace` 기본 / `append`=List 누적, LangGraph `add_messages` 대응 / `merge`=Map 얕은 병합) opt-in — 미지정 시 기존 덮어쓰기 동작 그대로, `{{stepId.field}}` 참조는 항상 유지. `LLM_CALL` config에 `stream_tokens:true` opt-in 시 노드 내부 LLM 토큰 델타를 SSE `step_token`(`tokenDelta`/`type`/`iterationIndex` nullable)로 발행 — `response_schema` 없는 텍스트 응답에만 적용, orchestrator SSE 공용 스트리밍 경로 재사용. **기존 워크플로우 무변경(하위호환)** — platform-core 653 회귀 GREEN |
 | v3.1.0 | 2026-05-16 | **CR-084 — 워크플로우 임의 cycle + N-way 라우팅**. 워크플로우 생성 파라미터에 `graphMode`(`dag` 기본 / `cyclic`) 추가. 신규 스텝 타입 `ROUTER`(`routes` config — `when`/`default:true` + `to`). `graphMode:cyclic` 시 워크리스트 스케줄러로 임의 노드 순환 + ROUTER `next_step` 추종, run 당 step budget(기본 50, 절대 200, `triggerConfig.max_total_steps`로 조정) 무한루프 방어. HUMAN_INPUT 중단→resume 시 worklist 자동 복원. **기존 DAG 워크플로우는 무변경(하위호환)** — `graphMode` 생략 = 기존 1-pass. SSE 스텝 이벤트에 nullable `iterationIndex` 추가(cyclic 회차 구분, DAG 는 null) |
 | v3.0.0 | 2026-04-28 | **CR-072 — 서버 도구 MCP endpoint 노출** (`/mcp/sse`, `/mcp/message`). 인증: `X-API-Key` 필수 (tenant 자동 결정), `X-Aimbase-Agent-Id` 선택. MCP SSE 트랜스포트로 `WebSearch / HttpRequest / SendMessage / Notification / Brief / ImageAnalysis / Translation / NotebookEdit / LSP / Skill / ToolSearch / ListMcpResources / ReadMcpResource / RemoteTrigger / ScheduleCron / CronList / CronDelete / Task* 6종 / TodoWrite / SuggestBackgroundPR` (총 26개) 노출. 거버넌스: PRE/POST_TOOL_USE Hook ✓ + Rate Limit (테넌트 단위 분당 60, 키 스코프 `mcp:{tenantId}`) ✓ + 화이트리스트 이중 방어 ✓. `team_create / team_delete / enter_plan_mode / exit_plan_mode / verify_plan_execution / temp_cleanup` 은 `McpExposureLevel.NONE` 으로 미노출. SecurityConfig `/mcp/**` permitAll → authenticated. 끔 옵션: `mcp.server-exposure.enabled=false`. **CR-073 — `aimbase-agent --runner-mode` 플래그 폐지** (BREAKING) — `--mcp-stdio` 외 모든 진입은 SERVLET 단일 컨텍스트. 후방 호환: 플래그 박혀있어도 무시 |
 | v2.9.0 | 2026-04-27 | **CR-071 ClaudeCliAdapter — 3경로 통일** (BREAKING). 기존 `ClaudeCliLlmAdapter`(서버 in-process CLI, CR-050) + `ClaudeCodeTool`(워크플로우 도구, CR-044) 모두 삭제. Anthropic Claude Code CLI 호출은 별도 프로세스 `ClaudeCliRunner`(aimbase-agent `--runner-mode`)로 분리되어 HTTP API 로 통신. **호출자 변경 사항**: `adapter=anthropic-cli` connection 사용 시 모든 요청 헤더에 `X-Aimbase-Agent-Id: <agent-id>` 필수 (누락 시 400). agent 는 `runner_capability=true`로 등록되어야 함 (`POST /api/v1/agents/register` 시 `metadata.runnerEndpoint`/`runnerApiKeyHash` 포함). `connection.config` 필드: `model` / `tool_mode`(AIMBASE/NATIVE/HYBRID, CR-069) / `config_dir` / `runner_api_key`. `tool: "claude_code"` 워크플로우는 모두 제거됨 — `LLM_CALL` 노드에서 anthropic-cli connection 으로 대체. BIZ-099 의미 변경(ToS 경계는 Runner 위치로 자연 해결) |

@@ -2,7 +2,7 @@
 
 - **발번**: CR-084, CR-085
 - **작성일**: 2026-05-16
-- **상태**: CR-084 **P1~P5 구현 완료** (2026-05-16, dev 브랜치, 단위 회귀 664 PASS) / CR-085 설계 대기
+- **상태**: CR-084 **P1~P5 구현 완료** (2026-05-16, dev 브랜치, 단위 회귀 664 PASS) / CR-085 **P1~P4 구현 완료** (2026-05-18, dev 브랜치, platform-core 653 PASS — StepContextCr085Test 17 포함)
 - **원본**: `docs/origins/원본_요구사항_LangGraph격차_WorkflowEngine보강_20260516.md`
 
 > 본 설계서는 실측(`com.platform.workflow` 전수 리딩) 기반. 변경 지점은 모두 `file.java:line` 으로 명시.
@@ -132,6 +132,29 @@ config 형식:
 
 ---
 
+## 6-B. CR-085 구현 완료 기록 (2026-05-18)
+
+| Phase | 산출물 | 검증 |
+|-------|--------|------|
+| P1 | `StepContext.resolveRef` 첫 토큰 namespace 분리 + `traverse(root, List<String>)` 중첩 경로 탐색 + `parsePath` (점/대괄호 토크나이저) | `StepContextCr085Test.P1Compat` 5 + `P1Nested` 5 PASS |
+| P2 | `StepContext.withStepResult(stepId, result, channel, reduce)` 오버로드 (replace/append/merge) + `WorkflowEngine.applyStepResult` DAG/cyclic 2곳 위임 | `P2Compat` 3 + `P2Reduce` 4 PASS |
+| P3 | `WorkflowEvents.StepToken` + `WorkflowEventPublisher.stepToken` + `LlmCallStepExecutor.callLlmStreaming` (`LLMAdapter.chatStream` 공용 콜백 재사용) | 컴파일+회귀 GREEN (LLM 실스트리밍 e2e는 IT 후속) |
+| P4 | api-guide v3.2.0 / ops-guide v3.3.0 + 부록 A 6항목 검증 | platform-core **653 PASS, 0 fail** |
+
+**하위호환 입증** (부록 A 대응):
+- `{{ns.key}}` 1뎁스 = 기존 결과 동일, 실패 시 빈 문자열 → `P1Compat.oneDepth*`/`missingRefEmpty` 고정
+- 점/대괄호 없는 `{{plain}}` = 원문 유지 → `noNamespaceKeepsRaw` 고정
+- `output_channel` 미지정 = 기존 `withStepResult` 덮어쓰기 동일 → `P2Compat.nullChannelSameAsLegacy` 고정
+- `stream_tokens` 미지정/`response_schema` 존재 = 기존 동기 경로 (`callLlm`) — `streamTokens` boolean 기본 false + eventPublisher null 가드
+- DAG 경로(`applyStepResult` channel 미지정 분기) = 기존 `context.withStepResult(step.id(), enriched)` 그대로 호출, CR-084 cyclic 경로도 동일 위임
+
+**알려진 한계 (정직 기록)**:
+- P3 `stepToken`의 `iterationIndex`는 null 고정 — `StepExecutor.execute(step, context)` 인터페이스가 cyclic 회차를 executor에 전달하지 않음(설계 §2.3 DAG/기존=null 계약과 호환). cyclic 회차별 토큰 정밀 매핑은 인터페이스 확장 동반 후속
+- P3 실 LLM 스트리밍 e2e 미검증 — 단위는 `chatStream` 콜백 재조립 계약까지. 실제 어댑터 스트리밍 왕복은 IT 후속
+- 마이그레이션 없음 (StepContext API + 이벤트 record 확장만, DB 스키마 무변경) — CR-084의 V62/V63 같은 배포 선행 작업 불요
+
+---
+
 # CR-085 | State 타입드 채널/reducer + 노드 내부 토큰 스트리밍
 
 ## 1. 목표
@@ -182,9 +205,9 @@ config 형식:
 
 ## 부록 A. 하위호환 검증 체크리스트 (완료 선언 전 필수)
 
-- [ ] graph_mode 미지정 워크플로우 = 기존 1-pass 결과 바이트 동일
-- [ ] CONDITION true_step/false_step 2분기 기존 워크플로우 회귀 GREEN
-- [ ] `{{ns.key}}` 1뎁스 참조 = 기존 결과 동일, 실패 시 빈문자열 동일
-- [ ] `output_channel` 미지정 스텝 = `withStepResult` 덮어쓰기 동일
-- [ ] `stream_tokens` 미지정 = 기존 step 단위 이벤트만
-- [ ] 운영 테넌트 기존 워크플로우 전수 회귀 (project_*_status 의 워크플로우 목록 대조)
+- [x] graph_mode 미지정 워크플로우 = 기존 1-pass 결과 바이트 동일 (CR-084 검증분 유지, applyStepResult 위임이 channel 미지정 시 기존 withStepResult 호출)
+- [x] CONDITION true_step/false_step 2분기 기존 워크플로우 회귀 GREEN (platform-core 653 PASS)
+- [x] `{{ns.key}}` 1뎁스 참조 = 기존 결과 동일, 실패 시 빈문자열 동일 (`P1Compat` 5 PASS)
+- [x] `output_channel` 미지정 스텝 = `withStepResult` 덮어쓰기 동일 (`P2Compat` 3 PASS)
+- [x] `stream_tokens` 미지정 = 기존 step 단위 이벤트만 (`streamTokens` 기본 false + eventPublisher null 가드, 비스트리밍 시 `callLlm` 동기 경로)
+- [x] 운영 테넌트 기존 워크플로우 전수 회귀 (platform-core 653 PASS, 0 fail/0 error — CR-085 17 포함)

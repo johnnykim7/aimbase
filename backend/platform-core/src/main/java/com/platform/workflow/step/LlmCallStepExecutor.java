@@ -7,6 +7,7 @@ import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
 import com.platform.llm.router.ModelRouter;
 import com.platform.workflow.StepContext;
+import com.platform.workflow.event.WorkflowEventPublisher;
 import com.platform.workflow.model.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,12 +42,27 @@ public class LlmCallStepExecutor implements StepExecutor {
     private final ModelRouter modelRouter;
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final com.platform.service.PromptTemplateService promptTemplateService;
+    // CR-085 P3: 노드 내부 토큰 스트리밍 발행 (opt-in). null 허용 — 기존 테스트/비스트리밍 경로 무영향.
+    private final WorkflowEventPublisher eventPublisher;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
+                                com.platform.service.PromptTemplateService promptTemplateService,
+                                org.springframework.beans.factory.ObjectProvider<WorkflowEventPublisher> eventPublisherProvider) {
+        this.modelRouter = modelRouter;
+        this.promptTemplateService = promptTemplateService;
+        this.connectionAdapterFactory = connectionAdapterFactory;
+        // ObjectProvider 로 순환참조 회피 (WorkflowEventPublisher 는 워크플로우 패키지 컴포넌트)
+        this.eventPublisher = eventPublisherProvider != null ? eventPublisherProvider.getIfAvailable() : null;
+    }
+
+    /** 하위 호환: eventPublisher 없는 3-arg 생성자 (기존 테스트/비스트리밍 사용처). */
     public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
                                 com.platform.service.PromptTemplateService promptTemplateService) {
         this.modelRouter = modelRouter;
         this.promptTemplateService = promptTemplateService;
         this.connectionAdapterFactory = connectionAdapterFactory;
+        this.eventPublisher = null;
     }
 
     @Override
@@ -96,10 +112,20 @@ public class LlmCallStepExecutor implements StepExecutor {
         Integer thinkingBudget = config.containsKey("thinking_budget_tokens")
                 ? ((Number) config.get("thinking_budget_tokens")).intValue() : null;
 
+        // CR-085 P3: opt-in 노드 내부 토큰 스트리밍. response_schema 있으면 구조화 출력이라
+        // 토큰 단위 의미가 없고 자동분할(Phase 3)과 충돌 → 텍스트 응답일 때만 스트리밍.
+        boolean streamTokens = Boolean.parseBoolean(
+                String.valueOf(config.getOrDefault("stream_tokens", "false")))
+                && (responseSchema == null || responseSchema.isEmpty())
+                && eventPublisher != null;
+
         // ── Phase 1: 일반 호출 ──
         int phase1Tokens = configCeiling != null ? Math.min(INITIAL_MAX_TOKENS, configCeiling) : INITIAL_MAX_TOKENS;
-        LLMResponse response = callLlm(adapter, resolvedModel, system, prompt, responseSchema,
-                phase1Tokens, context, extThinking, thinkingBudget);
+        LLMResponse response = streamTokens
+                ? callLlmStreaming(adapter, resolvedModel, system, prompt, phase1Tokens, context,
+                        extThinking, thinkingBudget, step.id())
+                : callLlm(adapter, resolvedModel, system, prompt, responseSchema,
+                        phase1Tokens, context, extThinking, thinkingBudget);
 
         if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
             return buildResult(response, resolvedModel);
@@ -381,6 +407,96 @@ public class LlmCallStepExecutor implements StepExecutor {
                                  int maxTokens, StepContext context) {
         return callLlm(adapter, resolvedModel, system, prompt, responseSchema,
                 maxTokens, context, null, null);
+    }
+
+    /**
+     * CR-085 P3: 공용 {@link LLMAdapter#chatStream} 콜백을 재사용해 토큰 델타를
+     * {@code WorkflowEventPublisher.stepToken} 으로 발행하면서 전체 응답을 재조립한다.
+     *
+     * <p>orchestrator(ChatController SSE)의 스트리밍 경로와 동일한 chatStream 공용 API 를
+     * 재사용 — 별도 스트리밍 구현 없음 (설계 §2.3 "중복 구현 금지"). 응답 재조립 결과는
+     * 기존 동기 {@link #callLlm} 과 동일 형태({@link LLMResponse})라 이후 Phase 2/3 분기 무영향.
+     *
+     * <p>iterationIndex 는 null 고정 — StepExecutor 인터페이스가 cyclic 회차를 전달하지 않으므로
+     * (설계의 DAG/기존=null 계약과 호환). cyclic 회차 정밀 매핑은 알려진 한계.
+     */
+    private LLMResponse callLlmStreaming(LLMAdapter adapter, String resolvedModel,
+                                         String system, String prompt,
+                                         int maxTokens, StepContext context,
+                                         Boolean extendedThinking, Integer thinkingBudgetTokens,
+                                         String stepId) {
+        List<UnifiedMessage> messages = new ArrayList<>();
+        if (system != null && !system.isBlank()) {
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, system));
+        }
+        messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt));
+
+        ModelConfig modelConfig = new ModelConfig(null, maxTokens, null, null,
+                extendedThinking, thinkingBudgetTokens);
+        LLMRequest request = new LLMRequest(resolvedModel, messages, null,
+                modelConfig, true, context.workflowRunId(), null, null);
+
+        StringBuilder textBuf = new StringBuilder();
+        java.util.concurrent.atomic.AtomicReference<TokenUsage> usageRef = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<LLMResponse.FinishReason> finishRef =
+                new java.util.concurrent.atomic.AtomicReference<>(LLMResponse.FinishReason.END);
+        String[] idRef = {""};
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> errRef = new java.util.concurrent.atomic.AtomicReference<>();
+
+        UUID runId = parseUuid(context.workflowRunId());
+        try {
+            // CR-045 패턴: chatStream 은 fire-and-forget(가상 스레드) → CountDownLatch 로 완료 대기.
+            adapter.chatStream(request, chunk -> {
+                try {
+                    if (idRef[0].isEmpty() && chunk.id() != null) idRef[0] = chunk.id();
+                    if (chunk.done()) {
+                        if (chunk.usage() != null) usageRef.set(chunk.usage());
+                        if (chunk.finishReason() != null) finishRef.set(chunk.finishReason());
+                        latch.countDown();
+                        return;
+                    }
+                    if (chunk.delta() == null) return;
+                    if (!"thinking".equals(chunk.type())) {
+                        textBuf.append(chunk.delta());  // thinking 델타는 본문 재조립에서 제외 (기존 buildResult 와 동일)
+                    }
+                    // opt-in 토큰 이벤트 발행 (iterationIndex=null — 인터페이스 미전달)
+                    eventPublisher.stepToken(runId, null, stepId, null,
+                            chunk.delta(), chunk.type() != null ? chunk.type() : "text");
+                } catch (Exception inner) {
+                    errRef.set(inner);
+                    latch.countDown();
+                }
+            });
+            // 스텝 timeout 과 별개 — 합리적 상한 (Phase 1 max_tokens 기준). 미완료 시 폴백.
+            if (!latch.await(300, java.util.concurrent.TimeUnit.SECONDS)) {
+                log.warn("LLM_CALL step '{}': 토큰 스트리밍 타임아웃 — 부분 응답으로 진행", stepId);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("LLM streaming call failed: " + e.getMessage(), e);
+        }
+        if (errRef.get() != null) {
+            throw new RuntimeException("LLM streaming call failed: " + errRef.get().getMessage(), errRef.get());
+        }
+
+        TokenUsage usage = usageRef.get() != null ? usageRef.get() : new TokenUsage(0, 0);
+        return new LLMResponse(
+                idRef[0].isEmpty() ? UUID.randomUUID().toString() : idRef[0],
+                resolvedModel,
+                List.of(new ContentBlock.Text(textBuf.toString())),
+                null,            // toolCalls — 스트리밍 텍스트 응답엔 도구 없음
+                usage,
+                finishRef.get(),
+                0L,              // latencyMs (스트리밍은 누적 측정 안 함)
+                0.0);            // costUsd
+    }
+
+    private static UUID parseUuid(String s) {
+        try {
+            return s != null ? UUID.fromString(s) : null;
+        } catch (IllegalArgumentException e) {
+            return null;  // 테스트/비표준 runId — 이벤트 runId=null 허용
+        }
     }
 
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,
