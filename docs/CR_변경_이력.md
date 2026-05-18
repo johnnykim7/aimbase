@@ -2275,9 +2275,9 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   - P2: `StepContext.withStepResult(stepId, result, outputChannel, reduce)` 오버로드 + `WorkflowEngine.applyStepResult` (DAG/cyclic 2개 호출처 위임). channel 미지정 시 기존 3-arg 그대로
   - P3: `WorkflowEvents.StepToken` + `WorkflowEventPublisher.stepToken` + `LlmCallStepExecutor.callLlmStreaming` (공용 `LLMAdapter.chatStream` 콜백 재사용, CountDownLatch 패턴은 OrchestratorEngine과 동일). `stream_tokens:true` + `response_schema` 없을 때만 활성. 3-arg 생성자 유지(기존 테스트 호환)
   - P4: api-guide v3.2.0 / ops-guide v3.3.0 갱신 + 부록 A 하위호환 6항목 검증
-  - **검증**: `StepContextCr085Test` 17 PASS (하위호환 8 + 표현력 확장 9), platform-core 전체 **653 PASS, 0 fail/0 error**
+  - **검증**: `StepContextCr085Test` 17 PASS (하위호환 8 + 표현력 확장 9) + `LlmCallStreamingCr085IT` 5 PASS+1 SKIP(env 게이트) — P3 스트리밍 e2e (mock chatStream → 실 WorkflowEventPublisher → StepToken 도달 + 하위호환 4종), platform-core 전체 **659 PASS, 0 fail/0 error, 1 SKIP**
   - **마이그레이션 없음**: StepContext API + 이벤트 record 확장만 (DB 스키마 무변경)
-- **알려진 한계 (정직 기록)**: P3 토큰 스트리밍의 `iterationIndex`는 null 고정 — `StepExecutor.execute(step, context)` 인터페이스가 cyclic 회차를 전달하지 않음(설계의 DAG/기존=null 계약과 호환). cyclic 회차별 토큰 정밀 매핑은 인터페이스 확장 동반 후속 영역. 실 LLM 스트리밍 e2e는 IT 후속(단위는 chatStream 콜백 계약만 검증)
+- **알려진 한계 (정직 기록)**: P3 토큰 스트리밍의 `iterationIndex`는 null 고정 — `StepExecutor.execute(step, context)` 인터페이스가 cyclic 회차를 전달하지 않음(설계의 DAG/기존=null 계약과 호환). cyclic 회차별 토큰 정밀 매핑은 인터페이스 확장 동반 후속 영역(별도 CR). **P3 스트리밍 e2e는 `LlmCallStreamingCr085IT`로 검증 완료** (chatStream 콜백 → 실 publisher → StepToken 도달 전 경로 + 하위호환 4종 + iterationIndex=null 고정). 실 LLM 어댑터 왕복 변형은 `CR085_REAL_LLM_IT=true` 환경 게이트로 분리(스테이징 Connection 환경에서 본문 구성 시 활성)
 
 ---
 

@@ -138,7 +138,7 @@ config 형식:
 |-------|--------|------|
 | P1 | `StepContext.resolveRef` 첫 토큰 namespace 분리 + `traverse(root, List<String>)` 중첩 경로 탐색 + `parsePath` (점/대괄호 토크나이저) | `StepContextCr085Test.P1Compat` 5 + `P1Nested` 5 PASS |
 | P2 | `StepContext.withStepResult(stepId, result, channel, reduce)` 오버로드 (replace/append/merge) + `WorkflowEngine.applyStepResult` DAG/cyclic 2곳 위임 | `P2Compat` 3 + `P2Reduce` 4 PASS |
-| P3 | `WorkflowEvents.StepToken` + `WorkflowEventPublisher.stepToken` + `LlmCallStepExecutor.callLlmStreaming` (`LLMAdapter.chatStream` 공용 콜백 재사용) | 컴파일+회귀 GREEN (LLM 실스트리밍 e2e는 IT 후속) |
+| P3 | `WorkflowEvents.StepToken` + `WorkflowEventPublisher.stepToken` + `LlmCallStepExecutor.callLlmStreaming` (`LLMAdapter.chatStream` 공용 콜백 재사용) | `LlmCallStreamingCr085IT` 5 PASS+1 SKIP — mock chatStream→실 publisher→StepToken 도달 + 하위호환 4종. 실 어댑터 변형은 `CR085_REAL_LLM_IT` 게이트 |
 | P4 | api-guide v3.2.0 / ops-guide v3.3.0 + 부록 A 6항목 검증 | platform-core **653 PASS, 0 fail** |
 
 **하위호환 입증** (부록 A 대응):
@@ -150,7 +150,7 @@ config 형식:
 
 **알려진 한계 (정직 기록)**:
 - P3 `stepToken`의 `iterationIndex`는 null 고정 — `StepExecutor.execute(step, context)` 인터페이스가 cyclic 회차를 executor에 전달하지 않음(설계 §2.3 DAG/기존=null 계약과 호환). cyclic 회차별 토큰 정밀 매핑은 인터페이스 확장 동반 후속
-- P3 실 LLM 스트리밍 e2e 미검증 — 단위는 `chatStream` 콜백 재조립 계약까지. 실제 어댑터 스트리밍 왕복은 IT 후속
+- P3 스트리밍 e2e 검증 완료 — `LlmCallStreamingCr085IT`가 mock `chatStream` 델타 → 실 `WorkflowEventPublisher`(실 이벤트 버스) → `StepToken` 도달 전 경로 + 하위호환 4종(미지정/schema존재/publisher부재/동기폴백) + iterationIndex=null 고정. **실 LLM 어댑터 왕복**만 `CR085_REAL_LLM_IT=true` 게이트로 분리(스테이징 Connection 환경 필요, 기본 SKIP)
 - 마이그레이션 없음 (StepContext API + 이벤트 record 확장만, DB 스키마 무변경) — CR-084의 V62/V63 같은 배포 선행 작업 불요
 
 ---
