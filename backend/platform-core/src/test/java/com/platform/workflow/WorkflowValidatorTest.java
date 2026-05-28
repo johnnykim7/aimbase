@@ -429,4 +429,91 @@ class WorkflowValidatorTest {
         assertThatCode(() -> validator.validate(List.of(validStep())))
                 .doesNotThrowAnyException();
     }
+
+    // ═══════════════════════════════════════════════
+    // CR-087 FOREACH 검증
+    // ═══════════════════════════════════════════════
+
+    private Map<String, Object> validForeach() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", "TOOL_CALL");
+        body.put("config", new LinkedHashMap<>(Map.of("tool", "parse_document")));
+
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("items", "{{input.samples}}");
+        config.put("body", body);
+        config.put("mode", "parallel");
+        config.put("collect", "append");
+        config.put("on_item_error", "continue");
+        config.put("max_items", 50);
+        config.put("max_concurrency", 3);
+
+        Map<String, Object> step = new LinkedHashMap<>();
+        step.put("id", "fe");
+        step.put("type", "FOREACH");
+        step.put("config", config);
+        return step;
+    }
+
+    @Test
+    @DisplayName("FOREACH 유효 config 통과")
+    void foreach_valid_passes() {
+        assertThatCode(() -> validator.validate(List.of(validForeach())))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("items 누락이면 거부")
+    void foreach_missingItems_rejected() {
+        Map<String, Object> step = validForeach();
+        ((Map<?, ?>) step.get("config")).remove("items");
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("config.items is required");
+    }
+
+    @Test
+    @DisplayName("body 누락이면 거부")
+    void foreach_missingBody_rejected() {
+        Map<String, Object> step = validForeach();
+        ((Map<?, ?>) step.get("config")).remove("body");
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("config.body is required");
+    }
+
+    @Test
+    @DisplayName("body.type 누락이면 거부")
+    void foreach_missingBodyType_rejected() {
+        Map<String, Object> step = validForeach();
+        mutate(step, "config.body", new LinkedHashMap<>(Map.of("config", Map.of())));
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("config.body.type is required");
+    }
+
+    @Test
+    @DisplayName("중첩 FOREACH body 거부")
+    void foreach_nestedForeach_rejected() {
+        Map<String, Object> step = validForeach();
+        mutate(step, "config.body", new LinkedHashMap<>(Map.of("type", "FOREACH")));
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("nested FOREACH");
+    }
+
+    @Test
+    @DisplayName("잘못된 mode 거부")
+    void foreach_invalidMode_rejected() {
+        Map<String, Object> step = validForeach();
+        mutate(step, "config.mode", "turbo");
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("config.mode must be one of");
+    }
+
+    @Test
+    @DisplayName("max_items 0 이하 거부")
+    void foreach_nonPositiveMaxItems_rejected() {
+        Map<String, Object> step = validForeach();
+        mutate(step, "config.max_items", 0);
+        assertThatThrownBy(() -> validator.validate(List.of(step)))
+                .hasMessageContaining("config.max_items must be >= 1");
+    }
 }

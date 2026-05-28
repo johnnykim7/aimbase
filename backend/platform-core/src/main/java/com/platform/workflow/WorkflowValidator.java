@@ -46,6 +46,11 @@ public class WorkflowValidator {
             if (WorkflowStep.StepType.ROUTER.name().equals(type)) {
                 validateRouter(location, asMap(step.get("config"), location));
             }
+
+            // CR-087: FOREACH config 구조 검증
+            if (WorkflowStep.StepType.FOREACH.name().equals(type)) {
+                validateForeach(location, asMap(step.get("config"), location));
+            }
         }
     }
 
@@ -184,6 +189,75 @@ public class WorkflowValidator {
         // 4) default route 는 최대 1개
         if (defaultCount > 1) {
             throw bad(location + ": at most one 'default:true' route allowed (got " + defaultCount + ")");
+        }
+    }
+
+    // ═══════════════════════════════════════════════
+    // FOREACH 검증 규칙 (CR-087)
+    // ═══════════════════════════════════════════════
+
+    private static final Set<String> FOREACH_MODES = Set.of("sequential", "parallel");
+    private static final Set<String> FOREACH_COLLECT = Set.of("append", "merge", "none");
+    private static final Set<String> FOREACH_ON_ITEM_ERROR = Set.of("fail", "continue");
+
+    void validateForeach(String location, Map<String, Object> config) {
+        if (config == null) {
+            throw bad(location + ": FOREACH requires config");
+        }
+
+        // 1) items 필수 (변수 참조 문자열 또는 인라인 List)
+        Object items = config.get("items");
+        if (items == null) {
+            throw bad(location + ": config.items is required (collection reference or inline list)");
+        }
+        if (!(items instanceof String) && !(items instanceof List)) {
+            throw bad(location + ": config.items must be a {{...}} reference string or a list");
+        }
+
+        // 2) body 필수 — step 정의 객체 + type 존재 + FOREACH 직접 중첩 금지
+        Object bodyObj = config.get("body");
+        if (!(bodyObj instanceof Map<?, ?> body)) {
+            throw bad(location + ": config.body is required (a step definition object)");
+        }
+        Object bodyType = body.get("type");
+        if (bodyType == null || bodyType.toString().isBlank()) {
+            throw bad(location + ": config.body.type is required");
+        }
+        boolean validType = false;
+        for (WorkflowStep.StepType t : WorkflowStep.StepType.values()) {
+            if (t.name().equals(bodyType.toString())) { validType = true; break; }
+        }
+        if (!validType) {
+            throw bad(location + ": config.body.type '" + bodyType + "' is not a valid step type");
+        }
+        if (WorkflowStep.StepType.FOREACH.name().equals(bodyType.toString())) {
+            throw bad(location + ": nested FOREACH body is not allowed (use SUB_WORKFLOW for nesting)");
+        }
+
+        // 3) mode / collect / on_item_error 화이트리스트
+        validateEnum(location, "mode", config.get("mode"), FOREACH_MODES);
+        validateEnum(location, "collect", config.get("collect"), FOREACH_COLLECT);
+        validateEnum(location, "on_item_error", config.get("on_item_error"), FOREACH_ON_ITEM_ERROR);
+
+        // 4) max_items / max_concurrency 양수
+        validatePositive(location, "max_items", config.get("max_items"));
+        validatePositive(location, "max_concurrency", config.get("max_concurrency"));
+    }
+
+    private void validateEnum(String location, String key, Object value, Set<String> allowed) {
+        if (value == null) return; // 미지정 = 기본값
+        if (!allowed.contains(value.toString().toLowerCase())) {
+            throw bad(location + ": config." + key + " must be one of " + allowed + " (got '" + value + "')");
+        }
+    }
+
+    private void validatePositive(String location, String key, Object value) {
+        if (value == null) return; // 미지정 = 기본값
+        if (!(value instanceof Number n)) {
+            throw bad(location + ": config." + key + " must be a number");
+        }
+        if (n.intValue() < 1) {
+            throw bad(location + ": config." + key + " must be >= 1 (got " + n.intValue() + ")");
         }
     }
 

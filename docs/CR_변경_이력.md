@@ -63,6 +63,8 @@
 | CR-071 | ClaudeCliAdapter — 3경로(API/CLI어댑터/ClaudeCodeTool) 단일 LLMAdapter 통일. CLI 실행 주체(`ClaudeCliRunner`)를 connection 단위 자유 배치 (서버/사용자 PC). aimbase-agent Runner화 + ClaudeCliLlmAdapter→ClaudeCliAdapter 진화 + ClaudeCodeTool 즉시 삭제. ToolMode(CR-069) 재활용. API/CLI 어댑터 대칭(`AnthropicAdapter` vs `ClaudeCliAdapter`) | 변경 | High | v8.6.0 | ✅ 구현 완료 |
 | CR-072 | Aimbase 서버 도구 MCP endpoint 노출 — Claude CLI 가 사용자 PC aimbase-agent (SDK 14개) 외에 **서버 도구 26개**(WebSearch / HttpRequest / SendMessage / ScheduleCron / Notebook / LSP 등) 도 MCP 채널로 호출할 수 있도록 서버에 `/mcp/sse` endpoint 신설. McpExposureLevel 메타데이터 + McpExposurePolicy 화이트리스트 (CLI 26 / NONE 6). ServerMcpConfig + ServerMcpToolDispatcher (PRE/POST_TOOL_USE Hook + Rate Limit). ClaudeCliAdapterConfig 다중 mcpServers (`aimbase-local` stdio + `aimbase-server` SSE w/ `type:"sse"`) 출력. SecurityConfig `/mcp/**` authenticated. McpToolConversion sdk-mcp/platform-core 공유. 단위 16 PASS + 회귀 PASS + **풀 e2e 검증 완료** (Claude CLI 가 `mcp__aimbase-server__web_search` 실호출 → Wikipedia 결과 반환 → 모델 답변 생성). 검증 중 발견·수정 7건 (핵심: SSE 트랜스포트 `type` 필드 누락) | 신규 | High | v8.7.0 | ✅ 구현 + e2e 검증 완료 |
 | CR-073 | aimbase-agent Spring Boot 인스턴스 통합 + `--runner-mode` 플래그 제거 — `--mcp-stdio` 외 모든 진입은 SERVLET 단일 컨텍스트. RunnerProperties 에 server MCP 헤더 3종 추가. RunnerAutoConfiguration 이 ClaudeCliAdapterConfig 빈 통해 mcpConfigJson 빌드 후 Worker 에 주입 (CR-072 mcpServers 전파 경로). 단위 PASS + aimbase-agent 회귀 PASS | 변경 | Medium | v8.7.0 | ✅ 구현 완료 |
+| CR-086 | X-Tenant-Id 헤더 신뢰 경계 강화 — JWT `tenant_id` claim ↔ `X-Tenant-Id` 헤더 일치 강제 (cross-tenant 사칭 차단). 소비앱 외부 '격리 안됨' 보고는 실측 반증(mcp/workflow DB-per-Tenant 물리격리·master 테이블 없음·운영 403), 진짜 약점=TenantResolver 헤더 무검증 신뢰 + JwtAuthenticationFilter claim 미대조 | 신규 | High | (미정) | 📝 발번 |
+| CR-087 | 워크플로우 FOREACH step (동적 컬렉션 fan-out) — 신규 `FOREACH` StepType. 런타임 컬렉션 각 원소에 body step(LLM_CALL/TOOL_CALL/SUB_WORKFLOW 등) 위임 실행. sequential/parallel(VT) + max_concurrency + max_items 방어 + collect reducer(CR-085 append/merge 재사용) + on_item_error(fail/continue). EVALUATOR_LOOP/SUB_WORKFLOW 패턴의 형제 — 단일 노드 내부 루프이므로 DAG/cyclic 양 스케줄러 무변경. LangGraph Send/map 대응 | 신규 | High | (미정) | 📝 발번 |
 
 ---
 
@@ -2278,6 +2280,57 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   - **검증**: `StepContextCr085Test` 17 PASS (하위호환 8 + 표현력 확장 9) + `LlmCallStreamingCr085IT` 5 PASS+1 SKIP(env 게이트) — P3 스트리밍 e2e (mock chatStream → 실 WorkflowEventPublisher → StepToken 도달 + 하위호환 4종), platform-core 전체 **659 PASS, 0 fail/0 error, 1 SKIP**
   - **마이그레이션 없음**: StepContext API + 이벤트 record 확장만 (DB 스키마 무변경)
 - **알려진 한계 (정직 기록)**: P3 토큰 스트리밍의 `iterationIndex`는 null 고정 — `StepExecutor.execute(step, context)` 인터페이스가 cyclic 회차를 전달하지 않음(설계의 DAG/기존=null 계약과 호환). cyclic 회차별 토큰 정밀 매핑은 인터페이스 확장 동반 후속 영역(별도 CR). **P3 스트리밍 e2e는 `LlmCallStreamingCr085IT`로 검증 완료** (chatStream 콜백 → 실 publisher → StepToken 도달 전 경로 + 하위호환 4종 + iterationIndex=null 고정). 실 LLM 어댑터 왕복 변형은 `CR085_REAL_LLM_IT=true` 환경 게이트로 분리(스테이징 Connection 환경에서 본문 구성 시 활성)
+
+### CR-086 | X-Tenant-Id 헤더 신뢰 경계 강화 (헤더-토큰 테넌트 일치 강제)
+- **대상 기능 ID**: BIZ-003 (Database-per-Tenant 격리), TenantResolver, JwtAuthenticationFilter
+- **변경 타입**: 신규
+- **변경 내용**:
+  - JWT access 토큰의 `tenant_id` claim 과 요청 `X-Tenant-Id` 헤더(또는 `tenant_id` 쿼리) 값이 불일치하면 거부 (cross-tenant 사칭 차단)
+  - 위젯 토큰은 기존대로 토큰 claim 단독 신뢰 유지 (헤더 미사용 경로)
+  - 불일치 거부 시 명확한 4xx 응답 + 감사 로깅 (BIZ-020)
+  - 단위/통합 테스트: 토큰=헤더 일치 통과 / 불일치 거부 / 헤더 누락 시 토큰 claim fallback
+- **변경 사유**: 소비앱(bidding-agency) 팀이 "mcp-servers/workflows 테넌트 격리 안 됨(tenant_id 컬럼 누락 전역 공유)" 보고. **실측 검증 결과 외부 진단은 반증** — mcp/workflow 는 `TenantRepositoryConfig` 로 테넌트 라우팅 DataSource 에 바인딩되어 Database-per-Tenant 물리 격리, `aimbase_master` 에 해당 테이블 자체 없음, 운영 DB 에서 테넌트마다 행 상이(bidding_system mcp1/wf2 · axopm_companyA mcp4/wf15 · 등). 운영 prod 인증 ON 으로 토큰 없이 헤더만 호출 시 HTTP 403. 다만 실측 중 **진짜 약점 발견**: `TenantResolver` 가 `X-Tenant-Id` 헤더를 무검증 신뢰하고 `JwtAuthenticationFilter` 가 토큰 `tenant_id` claim 과 대조하지 않아, A 테넌트 토큰 + `X-Tenant-Id: B` 로 cross-tenant 라우팅 가능.
+- **영향 모듈**: TenantResolver, JwtAuthenticationFilter, SecurityConfig (검토)
+- **영향도**: High (멀티테넌시 보안 경계)
+- **영향 범위**: BIZ-003, BIZ-020, 모든 테넌트 스코프 API (`/api/v1/**`, master 제외)
+- **영향 설계서**: T3-2 (API 설계) — 검토 대상
+- **원본 요구사항**: `docs/origins/원본_요구사항_테넌트격리_헤더신뢰경계_20260529.md`
+- **요청자**: 사용자 (소비앱 외부 보고 전달) | **승인자**: (대기) | **적용 버전**: (미정)
+- **변경 일자**: 2026-05-29 (발번)
+- **구현 상태**: 📝 발번 완료 (실측·진단 완료, 구현 대기 — 코드 수정은 사용자 승인 후)
+- **실측 근거 (요약)**:
+  - 외부 진단 반증: `backend/platform-core/src/main/java/com/platform/config/TenantRepositoryConfig.java:11-19` (mcp/wf = 테넌트 DataSource 바인딩), `aimbase_master` 에 mcp_servers/workflows 테이블 없음, 테넌트별 행 상이
+  - 운영 런타임: http://59.8.160.12:8280 토큰 없이 `X-Tenant-Id` 헤더만 → HTTP 403 (헤더 자체 없으면 400). 운영 prod 프로파일에서 인증 동작 — "헤더만으로 200" 재현 불가
+  - 진짜 약점: `TenantResolver.java:134-136` (헤더 무검증 신뢰), `JwtAuthenticationFilter.java:99` (claim 추출하나 헤더 대조 없음)
+- **미해결**: 외부에서 200 받았다는 정확한 호출 로그(Authorization 헤더 포함 여부 + 정확 엔드포인트 경로) 확보 시 외부 관찰 재현 경로 100% 확정 가능
+
+---
+
+### CR-087 | 워크플로우 FOREACH step (동적 컬렉션 fan-out)
+- **대상 기능 ID**: BIZ-009 (워크플로우 DAG 실행), WorkflowStep.StepType, 신규 ForeachStepExecutor
+- **변경 타입**: 신규
+- **변경 내용**:
+  - 신규 `FOREACH` StepType — 런타임에 정해지는 컬렉션의 각 원소에 동일 body step을 적용(map/fan-out)
+  - body 는 임의 StepExecutor 위임 (LLM_CALL/TOOL_CALL/SUB_WORKFLOW/ACTION/AGENT_CALL) — `SubWorkflowStepExecutor.getExecutors()` 패턴 재사용
+  - 각 원소를 `item_var`(기본 `item`) 로 stepResults 에 임시 주입 → body 에서 `{{item}}`/`{{item.field}}`/`{{index}}` 참조 (StepContext resolve 무변경, withStepResult 재사용)
+  - 실행 모드 `mode: sequential(기본) | parallel` — parallel 은 PARALLEL 선례대로 Virtual Thread, `max_concurrency`(기본 5, BIZ-100 정신) 로 동시성 상한
+  - 무한 방어 `max_items`(기본 100, cyclic step budget 정신) — 초과 시 step FAIL
+  - 결과 수집: `collect: append(기본) | merge | none` — CR-085 reducer 의미 재사용. step output 은 `{ output: [...], results: [...], item_count: N }`
+  - 부분 실패: `on_item_error: fail(기본) | continue` — continue 시 실패 원소는 `{error, status:"failed"}` 기록 후 계속(PARALLEL 선례 동형)
+  - 중첩: body=SUB_WORKFLOW 로 자연 중첩 지원(budget 부모-자식 독립). FOREACH 직접 중첩(body=FOREACH)은 1차 범위 제외 — WorkflowValidator 에서 차단
+- **변경 사유**: bidding-agency CR-013(슬롯에 모인 N개 제안서 파일 각각 parse → 합쳐 패턴 추출) 구현 중 "동적 컬렉션 fan-out" 빌딩블록 부재 발견. 실측 결과 `PARALLEL`=정적 step ID 목록(런타임 N 원소 map 아님), `ROUTER`=N중 1택, `cyclic`=노드 단위 수동 배선 + ExpressionEvaluator 에 size/index/카운터 연산 부재로 컬렉션 순회 선언적 표현 불가. fan-out 은 LLM 오케스트레이션 기본 빌딩블록(LangGraph Send/map 대응)이며 Java 로 풀면 소비앱마다 재구현 → 재사용 안 됨. 워크플로우 step 으로 두어 모든 소비앱이 선언적 공유.
+- **영향 모듈**: WorkflowStep(StepType enum), ForeachStepExecutor(신규), WorkflowValidator(validateForeach), WorkflowEngine(스케줄러 무변경 — 단일 노드)
+- **영향도**: High (워크플로우 엔진 핵심 빌딩블록)
+- **영향 범위**: BIZ-009, 전 StepExecutor(body 위임), CR-084(cyclic — FOREACH 가 cyclic/DAG 양쪽 단일 노드로 동작), CR-085(collect reducer 재사용)
+- **영향 설계서**: T3-7(EVALUATOR_LOOP/cyclic 설계 계열) — 후속 보정 대상
+- **원본 요구사항**: `docs/origins/원본_요구사항_워크플로우_FOREACH_MAP_step_20260529.md`
+- **요청자**: 사용자 (bidding-agency CR-013 패턴 추출 중 식별) | **승인자**: (대기) | **적용 버전**: (미정)
+- **변경 일자**: 2026-05-29 (발번)
+- **구현 상태**: 📝 발번 완료 (설계 확정, 구현 착수 — 코드 수정은 사용자 승인 후, 빌드/배포 별도 승인)
+- **마이그레이션**: 불필요 — StepType 은 JSONB `steps[].type` 문자열 (ROUTER/EVALUATOR_LOOP 선례와 동일, DB 스키마 무변경)
+- **설계 결정 (열린 질문 확정)**:
+  - 중첩 fan-out: body=SUB_WORKFLOW 허용(자연 중첩), max_items budget 부모-자식 독립 적용. FOREACH 직접 중첩은 1차 범위 제외(검증기 차단)
+  - 부분 실패: `on_item_error` config — 기본 `fail`, `continue` 시 실패 원소 기록 후 계속
 
 ---
 

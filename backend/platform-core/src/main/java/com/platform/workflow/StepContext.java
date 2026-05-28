@@ -82,6 +82,54 @@ public record StepContext(
         return resolved;
     }
 
+    /**
+     * CR-087: 단일 {@code {{ref}}} 참조를 <b>객체 그대로</b> 해석한다 (toString 안 함).
+     *
+     * <p>{@link #resolve(String)} 는 항상 문자열을 돌려주므로 List/Map 컬렉션을 받을 수 없다.
+     * FOREACH 의 {@code items} 처럼 컬렉션을 그대로 얻어야 하는 경우 이 메서드를 쓴다.
+     *
+     * <p>동작:
+     * <ul>
+     *   <li>{@code ref} 가 정확히 {@code {{단일참조}}} 형태면 → 그 참조를 traverse 한 <b>원본 객체</b> 반환
+     *       (input/loop/stepId 네임스페이스 + 중첩 경로 모두 {@link #resolveRef} 와 동일 규칙)</li>
+     *   <li>이미 객체(List/Map 등)면 → 그대로 반환 (config 에 인라인 리스트를 넣은 경우)</li>
+     *   <li>그 외(템플릿 아님/혼합 문자열/해석 불가) → null</li>
+     * </ul>
+     * 기존 resolve/resolveRef 동작은 전혀 건드리지 않는다 — 신규 경로 추가만.
+     */
+    public Object resolveObject(Object refOrValue) {
+        if (refOrValue == null) return null;
+        if (!(refOrValue instanceof String s)) return refOrValue; // 이미 객체(인라인 리스트 등)
+        String trimmed = s.trim();
+        Matcher m = TEMPLATE_PATTERN.matcher(trimmed);
+        if (!m.matches()) return null; // 단일 {{...}} 참조가 아니면 객체 해석 불가
+        String ref = m.group(1).trim();
+        if (ref.indexOf('.') < 0 && ref.indexOf('[') < 0) {
+            // 점/대괄호 없는 단일 토큰 — 네임스페이스 단독. stepId 단독 참조는 그 step 결과 Map 반환.
+            Object stepResult = stepResults != null ? stepResults.get(ref) : null;
+            if (stepResult != null) return stepResult;
+            Object inputVal = inputData != null ? inputData.get(ref) : null;
+            return inputVal; // 없으면 null
+        }
+        List<String> tokens = parsePath(ref);
+        if (tokens.isEmpty()) return null;
+        String namespace = tokens.get(0);
+        if (namespace.startsWith("[")) return null;
+        List<String> pathTokens = tokens.subList(1, tokens.size());
+        if ("input".equals(namespace)) {
+            Object val = inputData != null ? traverse(inputData, pathTokens) : null;
+            if (val == null && inputData != null && inputData.get("input") instanceof Map nestedInput) {
+                val = traverse(nestedInput, pathTokens);
+            }
+            return val;
+        }
+        if ("loop".equals(namespace)) {
+            return loopData != null ? traverse(loopData, pathTokens) : null;
+        }
+        Object stepResult = stepResults != null ? stepResults.get(namespace) : null;
+        return stepResult != null ? traverse(stepResult, pathTokens) : null;
+    }
+
     // ─── 내부 변수 참조 해석 ──────────────────────────────────────────────
 
     private String resolveRef(String ref) {

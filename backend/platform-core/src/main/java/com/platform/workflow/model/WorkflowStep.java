@@ -18,6 +18,8 @@ public record WorkflowStep(
         LLM_CALL, TOOL_CALL, ACTION, CONDITION, PARALLEL, HUMAN_INPUT, SUB_WORKFLOW, AGENT_CALL,
         EVALUATOR_LOOP,
         // CR-084 P2: 런타임 표현식/LLM 출력으로 N개 후보 중 1개 동적 선택 (CONDITION 2갈래 일반화)
-        ROUTER
+        ROUTER,
+        // CR-087: 런타임 컬렉션의 각 원소에 body step 을 적용 (동적 fan-out, LangGraph Send/map 대응)
+        FOREACH
     }
 }
