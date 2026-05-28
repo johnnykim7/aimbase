@@ -335,6 +335,7 @@ curl -X POST /api/v1/workflows \
 | `PARALLEL` | `branches` | 병렬 실행 |
 | `HUMAN_INPUT` | `message` | 사람 승인 대기 |
 | `EVALUATOR_LOOP` | `generator`, `evaluator`, `pass_criteria`, `max_iterations` | 생성→평가 반복 (CR-055) |
+| `FOREACH` | `items`, `body`, `item_var`, `mode`, `max_concurrency`, `max_items`, `collect`, `on_item_error` | 동적 컬렉션 fan-out (CR-087). 런타임 컬렉션의 각 원소에 body step 적용 (map) |
 
 > **주의**: 스텝 타입은 `TOOL_CALL`입니다 (`TOOL_USE` 아님). config에서 도구 이름은 `tool` (`tool_name` 아님), 입력은 `input` (`arguments` 아님).
 
@@ -358,6 +359,44 @@ curl -X POST /api/v1/workflows \
 - 각 route는 `when` 또는 `default:true` 중 정확히 하나 + `to`(대상 스텝 id) 필수
 - `default:true` route는 최대 1개. 정의 순서와 무관하게 `when` route가 모두 실패할 때만 채택
 - **임의 순환은 `graphMode:"cyclic"`에서만 동작** — DAG 모드에선 ROUTER 스텝이 실행은 되나 `next_step` 추종 분기는 cyclic 모드 전용
+
+**FOREACH 스텝 (동적 컬렉션 fan-out, CR-087)** — 런타임에 정해지는 컬렉션의 각 원소에 동일한 `body` 스텝을 적용(map)합니다. `PARALLEL`(정적 branch)·`ROUTER`(N중 1택)로는 표현할 수 없던 "각 원소에 같은 처리"를 단일 노드로 선언합니다. LangGraph의 `Send`/map에 대응합니다.
+
+```json
+{
+  "id": "parse_each_sample",
+  "type": "FOREACH",
+  "config": {
+    "items": "{{fetch_samples.output}}",
+    "item_var": "item",
+    "mode": "parallel",
+    "max_concurrency": 5,
+    "max_items": 100,
+    "collect": "append",
+    "on_item_error": "continue",
+    "body": {
+      "type": "TOOL_CALL",
+      "config": { "tool": "parse_document", "input": { "url": "{{item.downloadUrl}}" } }
+    }
+  },
+  "depends_on": ["fetch_samples"]
+}
+```
+
+| config 키 | 기본값 | 설명 |
+|-----------|--------|------|
+| `items` | (필수) | 반복할 컬렉션. `{{step.output}}` 등 List를 가리키는 단일 참조, 또는 인라인 List |
+| `body` | (필수) | 각 원소에 적용할 스텝 정의(`type`+`config`). `LLM_CALL`/`TOOL_CALL`/`SUB_WORKFLOW`/`ACTION`/`AGENT_CALL` 등. **`FOREACH` 직접 중첩 불가** — 중첩이 필요하면 body=`SUB_WORKFLOW` |
+| `item_var` | `item` | 각 원소를 바인딩할 변수명. body에서 `{{item.field}}`(원소가 Map) 또는 `{{item.value}}`(원소가 스칼라)로 참조 |
+| `mode` | `sequential` | `sequential`(순차) \| `parallel`(Virtual Thread 병렬) |
+| `max_concurrency` | `5` | `parallel` 시 동시 실행 상한 |
+| `max_items` | `100` | 처리 상한. 컬렉션이 초과하면 스텝 FAIL(무한 방어) |
+| `collect` | `append` | 결과 수집: `append`(List 누적) \| `merge`(Map 병합) \| `none`(미수집) |
+| `on_item_error` | `fail` | 원소 실패 시: `fail`(전체 중단) \| `continue`(실패 원소를 `{status:"failed", error}` 기록 후 계속) |
+
+- body에서 현재 인덱스는 `{{index.value}}`로 참조 (0-based)
+- 출력: `{ "output": [...], "results": [...], "item_count": N, "failed_count": M }` — 이후 스텝에서 `{{parse_each_sample.output}}`로 N개 결과 List 참조 (예: LLM_CALL에 합쳐 패턴 추출)
+- **단일 노드**라 DAG/cyclic 양 모드에서 동일하게 동작. 마이그레이션 불필요(StepType은 JSONB 문자열)
 
 **스텝 간 데이터 참조**:
 
@@ -1572,6 +1611,7 @@ try {
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.3.0 | 2026-05-29 | **CR-087 — 워크플로우 FOREACH step (동적 컬렉션 fan-out)**. 신규 스텝 타입 `FOREACH` — 런타임 컬렉션(`items`)의 각 원소에 `body` 스텝(`LLM_CALL`/`TOOL_CALL`/`SUB_WORKFLOW` 등)을 적용(map). body에서 `{{item.field}}`(Map)·`{{item.value}}`(스칼라)·`{{index.value}}`(0-based) 참조. `mode`(`sequential` 기본 / `parallel`=Virtual Thread + `max_concurrency` 기본 5), `max_items`(기본 100, 초과 시 FAIL), `collect`(`append` 기본 / `merge` / `none`), `on_item_error`(`fail` 기본 / `continue`). 출력 `{output:[...], results:[...], item_count, failed_count}`. `PARALLEL`(정적 branch)·`ROUTER`(N중 1택)로 표현 못하던 map/fan-out을 단일 노드로 선언 (LangGraph `Send`/map 대응). FOREACH 직접 중첩은 차단(body=`SUB_WORKFLOW`로 중첩). **단일 노드라 DAG/cyclic 양 모드 동일 동작, 마이그레이션 불필요(StepType JSONB 문자열), 기존 워크플로우 무변경(하위호환)** — platform-core 전체 회귀 GREEN |
 | v3.2.0 | 2026-05-18 | **CR-085 — State 채널 reducer + 중첩 경로 + 노드 토큰 스트리밍**. 변수 참조에 중첩 경로(`{{step.a.b[0].c}}`, List 인덱스/Map 혼합) 추가 — 기존 1뎁스 참조·실패 폴백(빈 문자열) 동작 100% 보존. 스텝 config에 `output_channel`+`reduce`(`replace` 기본 / `append`=List 누적, LangGraph `add_messages` 대응 / `merge`=Map 얕은 병합) opt-in — 미지정 시 기존 덮어쓰기 동작 그대로, `{{stepId.field}}` 참조는 항상 유지. `LLM_CALL` config에 `stream_tokens:true` opt-in 시 노드 내부 LLM 토큰 델타를 SSE `step_token`(`tokenDelta`/`type`/`iterationIndex` nullable)로 발행 — `response_schema` 없는 텍스트 응답에만 적용, orchestrator SSE 공용 스트리밍 경로 재사용. **기존 워크플로우 무변경(하위호환)** — platform-core 653 회귀 GREEN |
 | v3.1.0 | 2026-05-16 | **CR-084 — 워크플로우 임의 cycle + N-way 라우팅**. 워크플로우 생성 파라미터에 `graphMode`(`dag` 기본 / `cyclic`) 추가. 신규 스텝 타입 `ROUTER`(`routes` config — `when`/`default:true` + `to`). `graphMode:cyclic` 시 워크리스트 스케줄러로 임의 노드 순환 + ROUTER `next_step` 추종, run 당 step budget(기본 50, 절대 200, `triggerConfig.max_total_steps`로 조정) 무한루프 방어. HUMAN_INPUT 중단→resume 시 worklist 자동 복원. **기존 DAG 워크플로우는 무변경(하위호환)** — `graphMode` 생략 = 기존 1-pass. SSE 스텝 이벤트에 nullable `iterationIndex` 추가(cyclic 회차 구분, DAG 는 null) |
 | v3.0.0 | 2026-04-28 | **CR-072 — 서버 도구 MCP endpoint 노출** (`/mcp/sse`, `/mcp/message`). 인증: `X-API-Key` 필수 (tenant 자동 결정), `X-Aimbase-Agent-Id` 선택. MCP SSE 트랜스포트로 `WebSearch / HttpRequest / SendMessage / Notification / Brief / ImageAnalysis / Translation / NotebookEdit / LSP / Skill / ToolSearch / ListMcpResources / ReadMcpResource / RemoteTrigger / ScheduleCron / CronList / CronDelete / Task* 6종 / TodoWrite / SuggestBackgroundPR` (총 26개) 노출. 거버넌스: PRE/POST_TOOL_USE Hook ✓ + Rate Limit (테넌트 단위 분당 60, 키 스코프 `mcp:{tenantId}`) ✓ + 화이트리스트 이중 방어 ✓. `team_create / team_delete / enter_plan_mode / exit_plan_mode / verify_plan_execution / temp_cleanup` 은 `McpExposureLevel.NONE` 으로 미노출. SecurityConfig `/mcp/**` permitAll → authenticated. 끔 옵션: `mcp.server-exposure.enabled=false`. **CR-073 — `aimbase-agent --runner-mode` 플래그 폐지** (BREAKING) — `--mcp-stdio` 외 모든 진입은 SERVLET 단일 컨텍스트. 후방 호환: 플래그 박혀있어도 무시 |
