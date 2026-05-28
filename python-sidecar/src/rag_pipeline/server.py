@@ -243,21 +243,24 @@ def finetune_embeddings(
 
 @mcp.tool()
 def parse_document(
-    file_content: str,
+    file_content: str = "",
     file_type: str = "",
+    url: str = "",
 ) -> str:
-    """Parse a base64-encoded document file into plain text + metadata (PY-013).
+    """Parse a document file into plain text + metadata (PY-013).
 
     Supports: PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT, Markdown.
-    Input must be base64-encoded file bytes.
+    Source is either base64 (file_content) OR a URL to download.
 
     Args:
-        file_content: Base64-encoded file bytes
+        file_content: Base64-encoded file bytes (required if url omitted)
         file_type: File type hint (e.g. "pdf", "docx"). If empty, auto-detected.
+        url: File URL to download (http/https). When set, bytes are fetched
+             directly and parsed without base64 round-trip; file_content is ignored.
     """
     from rag_pipeline.tools.parser import parse_document as do_parse
 
-    result = do_parse(file_content, file_type)
+    result = do_parse(file_content=file_content, file_type=file_type, url=url)
     return json.dumps(result, ensure_ascii=False)
 
 

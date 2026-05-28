@@ -13,6 +13,25 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# 다운로드 안전 한계
+_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100MB
+_DOWNLOAD_TIMEOUT_SEC = 60
+
+
+def _download_bytes(url: str) -> bytes:
+    """URL에서 파일 바이트를 직접 받는다 (base64 왕복 없이 파싱에 바로 사용)."""
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; Aimbase/1.0)"
+    })
+    with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_SEC) as resp:
+        data = resp.read(_MAX_DOWNLOAD_BYTES + 1)
+    if len(data) > _MAX_DOWNLOAD_BYTES:
+        raise ValueError(f"File exceeds max size {_MAX_DOWNLOAD_BYTES} bytes")
+    logger.info("parse_document: downloaded %d bytes from %s", len(data), url)
+    return data
+
 # file_type -> (unstructured partition function name, file extension)
 _TYPE_MAP: dict[str, tuple[str, str]] = {
     "pdf": ("partition_pdf", ".pdf"),
@@ -29,27 +48,47 @@ _TYPE_MAP: dict[str, tuple[str, str]] = {
 
 
 def parse_document(
-    file_content: str,
+    file_content: str = "",
     file_type: str = "",
+    url: str = "",
 ) -> dict[str, Any]:
-    """Parse a base64-encoded document file into plain text + metadata.
+    """Parse a document file into plain text + metadata.
+
+    소스는 둘 중 하나: base64(file_content) 또는 url(다운로드). url이 주어지면
+    바이트를 직접 받아 파싱한다(base64 왕복 없음).
 
     Args:
-        file_content: Base64-encoded file bytes.
-        file_type: File type hint (e.g. "pdf", "docx"). If empty, auto-detected.
+        file_content: Base64-encoded file bytes. (url 미지정 시 필수)
+        file_type: File type hint (e.g. "pdf", "docx"). If empty, auto-detected from url ext.
+        url: 다운로드할 파일 URL (http/https). 지정 시 file_content 무시.
 
     Returns:
         {"text": str, "metadata": {"pages": int, "elements": int, "file_type": str, ...}}
     """
     file_type = file_type.lower().strip().lstrip(".")
 
-    try:
-        raw_bytes = base64.b64decode(file_content)
-    except Exception as exc:
-        return {
-            "text": "",
-            "metadata": {"error": f"Base64 decoding failed: {exc}"},
-        }
+    if url and url.strip():
+        try:
+            raw_bytes = _download_bytes(url.strip())
+        except Exception as exc:
+            return {
+                "text": "",
+                "metadata": {"error": f"Download failed: {exc}", "url": url},
+            }
+        # url 확장자로 file_type 자동 추정 (미지정 시)
+        if not file_type:
+            from urllib.parse import urlparse
+            ext = urlparse(url).path.rsplit(".", 1)
+            if len(ext) == 2:
+                file_type = ext[1].lower().strip()
+    else:
+        try:
+            raw_bytes = base64.b64decode(file_content)
+        except Exception as exc:
+            return {
+                "text": "",
+                "metadata": {"error": f"Base64 decoding failed: {exc}"},
+            }
 
     # Determine partition function
     if file_type and file_type in _TYPE_MAP:

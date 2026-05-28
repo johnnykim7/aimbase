@@ -8,6 +8,7 @@ dependencies = [
     "fastmcp>=2.0.0",
     # Document Parsing
     "unstructured[all-docs]>=0.16.0",
+    "pdfplumber>=0.11.0",
     # Semantic Chunking
     "llama-index-core>=0.12.0",
     "llama-index-embeddings-huggingface>=0.4.0",
