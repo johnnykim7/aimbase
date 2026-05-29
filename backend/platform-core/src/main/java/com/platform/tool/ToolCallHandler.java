@@ -267,8 +267,7 @@ public class ToolCallHandler {
     }
 
     /**
-     * CR-029: ToolContext 기반 실행 루프.
-     * 기존 executeLoop와 동일하되, EnhancedToolExecutor 분기 + lineage 기록.
+     * CR-029: ToolContext 기반 실행 루프 (기존 호환용 — schema 없음).
      */
     public LLMResponse executeLoop(
             LLMAdapter adapter,
@@ -280,6 +279,29 @@ public class ToolCallHandler {
             ToolFilterContext toolFilter,
             String toolChoice,
             ToolContext toolContext) {
+        return executeLoop(adapter, resolvedModel, messages, config, sessionId,
+                toolRegistry, toolFilter, toolChoice, toolContext, null);
+    }
+
+    /**
+     * CR-088: ToolContext 기반 실행 루프 + responseSchema 전달.
+     *
+     * <p>responseSchema 가 있으면 매 회차 LLMRequest 에 함께 실어 어댑터에 전달한다.
+     * 어댑터는 진짜 도구 + structured_output 가상 tool 을 한 배열에 합쳐 전달한다
+     * (AnthropicAdapter CR-088 결합 분기). 모델이 structured_output tool 을 호출하면
+     * 그 입력을 구조화 결과로 캡처하고 루프를 즉시 종료한다.
+     */
+    public LLMResponse executeLoop(
+            LLMAdapter adapter,
+            String resolvedModel,
+            List<UnifiedMessage> messages,
+            ModelConfig config,
+            String sessionId,
+            ToolRegistry toolRegistry,
+            ToolFilterContext toolFilter,
+            String toolChoice,
+            ToolContext toolContext,
+            Map<String, Object> responseSchema) {
 
         List<UnifiedMessage> mutableMessages = new ArrayList<>(messages);
         LLMResponse response = null;
@@ -291,7 +313,7 @@ public class ToolCallHandler {
         if (filteredTools.isEmpty()) {
             log.debug("No tools available after filtering, executing without tools");
             LLMRequest request = new LLMRequest(
-                    resolvedModel, mutableMessages, null, config, false, sessionId, null);
+                    resolvedModel, mutableMessages, null, config, false, sessionId, null, responseSchema);
             try {
                 return adapter.chat(request).get();
             } catch (Exception e) {
@@ -302,13 +324,30 @@ public class ToolCallHandler {
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             LLMRequest request = new LLMRequest(
                     resolvedModel, mutableMessages, filteredTools,
-                    config, false, sessionId, toolChoice);
+                    config, false, sessionId, toolChoice, responseSchema);
 
             try {
                 response = adapter.chat(request).get();
             } catch (Exception e) {
                 log.error("LLM call failed during tool loop (iteration {})", iteration, e);
                 throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
+            }
+
+            // CR-088: structured_output tool 호출이 도착했으면 그 입력을 구조화 결과로 캡처하고 종료.
+            // (어댑터가 진짜 도구 + structured_output 가상 tool 결합으로 전달한 경우)
+            if (responseSchema != null && response.hasToolCalls()) {
+                for (ToolCall tc : response.toolCalls()) {
+                    if (com.platform.llm.adapter.AnthropicAdapter.STRUCTURED_OUTPUT_TOOL_NAME.equals(tc.name())) {
+                        log.debug("CR-088: structured_output tool detected, capturing schema result and terminating loop");
+                        java.util.List<ContentBlock> blocks = new ArrayList<>(response.content());
+                        blocks.add(new ContentBlock.Structured(null, tc.input()));
+                        return new LLMResponse(
+                                response.id(), response.model(), blocks,
+                                java.util.List.of(),
+                                response.usage(), LLMResponse.FinishReason.END,
+                                response.latencyMs(), response.costUsd());
+                    }
+                }
             }
 
             if (response.finishReason() != LLMResponse.FinishReason.TOOL_USE

@@ -228,6 +228,17 @@ public class SubagentRunner {
         }
         messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, req.prompt()));
 
+        // CR-088: config.response_schema → ChatRequest.ResponseFormat 변환.
+        // OrchestratorEngine 이 resolveResponseFormat → resolvedSchema 로 풀어 도구 루프에 전달한다
+        // (ToolCallHandler.executeLoop CR-088 오버로드). null 이면 기존 동작 그대로.
+        ChatRequest.ResponseFormat responseFormat = null;
+        Object schemaObj = req.config() != null ? req.config().get("response_schema") : null;
+        if (schemaObj instanceof java.util.Map<?, ?> schemaMap) {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> schema = (java.util.Map<String, Object>) schemaMap;
+            responseFormat = new ChatRequest.ResponseFormat("json_schema", null, schema);
+        }
+
         // OrchestratorEngine에 ChatRequest 위임
         ChatRequest chatRequest = new ChatRequest(
                 req.model(),
@@ -235,7 +246,9 @@ public class SubagentRunner {
                 messages,
                 false, true,
                 null, null,
-                req.connectionId()
+                req.connectionId(),
+                null, null,
+                responseFormat
         );
 
         ChatResponse response = orchestratorEngine.chat(chatRequest);

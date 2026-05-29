@@ -71,6 +71,9 @@ public class AnthropicAdapter implements LLMAdapter {
     private static final CacheControlEphemeral CACHE_SYSTEM = CacheControlStrategy.SYSTEM_PROMPT.resolve();
     private static final CacheControlEphemeral CACHE_TOOLS  = CacheControlStrategy.TOOL_SCHEMA.resolve();
 
+    /** CR-088: 구조화 출력 가상 tool 이름 — ToolCallHandler 가 루프 종료 시그널로 사용 */
+    public static final String STRUCTURED_OUTPUT_TOOL_NAME = "structured_output";
+
     public AnthropicAdapter(AnthropicClient client,
                            @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.default-max-tokens:16000}") int defaultMaxTokens,
                            com.platform.llm.thinking.AdaptiveThinkingPolicy adaptiveThinkingPolicy) {
@@ -166,38 +169,50 @@ public class AnthropicAdapter implements LLMAdapter {
                 builder.temperature(request.config().temperature());
             }
 
-            // CR-007: structured mode → 가상 tool 정의 + tool_choice: any
-            if (structuredMode) {
-                Map<String, JsonValue> schemaProps = request.responseSchema().entrySet().stream()
-                        .collect(Collectors.toMap(Map.Entry::getKey, e -> JsonValue.from(e.getValue())));
-                Tool structuredTool = Tool.builder()
-                        .name("structured_output")
-                        .description("Return structured data matching the requested JSON Schema")
-                        .inputSchema(Tool.InputSchema.builder()
-                                .type(JsonValue.from("object"))
-                                .putAllAdditionalProperties(schemaProps)
-                                .build())
-                        .build();
-                builder.tools(List.of(ToolUnion.Companion.ofTool(structuredTool)));
-                builder.toolChoice(ToolChoice.ofAny(ToolChoiceAny.builder().build()));
-            } else if (request.tools() != null && !request.tools().isEmpty()) {
-                @SuppressWarnings("unchecked")
-                List<Tool> anthropicTools = (List<Tool>) transformToolDefs(request.tools());
-                // CR-047 PRD-300: Tool schemas → 5m TTL (도구 추가/제거 시 자연스러운 invalidation)
-                List<Tool> cachedTools = new ArrayList<>(anthropicTools);
-                if (!cachedTools.isEmpty()) {
-                    int last = cachedTools.size() - 1;
-                    cachedTools.set(last, cachedTools.get(last).toBuilder()
-                            .cacheControl(CACHE_TOOLS)
-                            .build());
+            // CR-088: structured tool + 진짜 도구 결합 — 두 종류를 한 ToolUnion 배열에 합쳐 전달.
+            // 단독 structured 모드는 기존 CR-007 동작(tool_choice: any) 유지.
+            // 결합 모드는 모델이 도구 자율 사용 후 마지막에 structured_output 으로 마무리하도록 prompt 가이드 + tool_choice: auto.
+            boolean hasRealTools = request.tools() != null && !request.tools().isEmpty();
+            if (structuredMode || hasRealTools) {
+                List<ToolUnion> toolUnions = new ArrayList<>();
+
+                if (hasRealTools) {
+                    @SuppressWarnings("unchecked")
+                    List<Tool> anthropicTools = (List<Tool>) transformToolDefs(request.tools());
+                    // CR-047 PRD-300: Tool schemas → 5m TTL (도구 추가/제거 시 자연스러운 invalidation)
+                    List<Tool> cachedTools = new ArrayList<>(anthropicTools);
+                    if (!cachedTools.isEmpty()) {
+                        int last = cachedTools.size() - 1;
+                        cachedTools.set(last, cachedTools.get(last).toBuilder()
+                                .cacheControl(CACHE_TOOLS)
+                                .build());
+                    }
+                    cachedTools.forEach(t -> toolUnions.add(ToolUnion.Companion.ofTool(t)));
                 }
-                List<ToolUnion> toolUnions = cachedTools.stream()
-                        .map(t -> ToolUnion.Companion.ofTool(t))
-                        .toList();
+
+                if (structuredMode) {
+                    Map<String, JsonValue> schemaProps = request.responseSchema().entrySet().stream()
+                            .collect(Collectors.toMap(Map.Entry::getKey, e -> JsonValue.from(e.getValue())));
+                    Tool structuredTool = Tool.builder()
+                            .name(STRUCTURED_OUTPUT_TOOL_NAME)
+                            .description("Return structured data matching the requested JSON Schema. Call this once you have all the information needed to produce the final structured output.")
+                            .inputSchema(Tool.InputSchema.builder()
+                                    .type(JsonValue.from("object"))
+                                    .putAllAdditionalProperties(schemaProps)
+                                    .build())
+                            .build();
+                    toolUnions.add(ToolUnion.Companion.ofTool(structuredTool));
+                }
+
                 builder.tools(toolUnions);
 
-                // CR-006: tool_choice 매핑
-                if (request.toolChoice() != null) {
+                // tool_choice 정책:
+                // - structured 단독: any 강제 (CR-007 기존 동작)
+                // - 결합(structured + 진짜 도구): auto — 모델이 도구 사용 마치면 structured_output 호출하도록 prompt 가이드에 의존
+                // - 진짜 도구 단독: 요청 toolChoice 매핑 (CR-006)
+                if (structuredMode && !hasRealTools) {
+                    builder.toolChoice(ToolChoice.ofAny(ToolChoiceAny.builder().build()));
+                } else if (hasRealTools && request.toolChoice() != null) {
                     ToolChoice choice = mapToolChoice(request.toolChoice());
                     if (choice != null) {
                         builder.toolChoice(choice);

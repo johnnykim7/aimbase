@@ -324,10 +324,12 @@ public class OrchestratorEngine {
                 // Tool use 루프 — 최대 5회 반복 (CR-006 + CR-029: ToolContext + lineage)
                 com.platform.tool.ToolCallHandler.beginActionTracking();
                 try {
+                    // CR-088: 도구 루프에 resolvedSchema 전달 (AGENT_CALL response_schema 지원)
                     llmResponse = toolCallHandler.executeLoop(
                             adapter, resolvedModel, trimmedMessages,
                             modelConfig, sessionId, toolRegistry,
-                            request.toolFilter(), request.toolChoice(), toolContext);
+                            request.toolFilter(), request.toolChoice(), toolContext,
+                            resolvedSchema);
                 } finally {
                     actionsExecuted = com.platform.tool.ToolCallHandler.drainActionTracking();
                 }

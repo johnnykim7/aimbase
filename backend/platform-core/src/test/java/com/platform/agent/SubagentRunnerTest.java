@@ -222,6 +222,83 @@ class SubagentRunnerTest {
     }
 
     @Test
+    void cr088_responseSchema_inConfig_propagatesToChatRequest() {
+        // CR-088: SubagentRequest.config.response_schema → ChatRequest.responseFormat 변환 검증.
+        // 이로써 OrchestratorEngine.resolveResponseFormat → resolvedSchema 로 풀려 도구 루프
+        // (ToolCallHandler.executeLoop CR-088 오버로드) → AnthropicAdapter 결합 분기까지 흐른다.
+        ChatResponse chatResponse = new ChatResponse(
+                "resp-cr088", "claude-sonnet", "child-sess",
+                List.of(new ContentBlock.Text("ok")),
+                List.of(), new TokenUsage(10, 20), 0.001);
+        when(orchestratorEngine.chat(any())).thenReturn(chatResponse);
+
+        Map<String, Object> schema = Map.of(
+                "type", "object",
+                "properties", Map.of("title", Map.of("type", "string")));
+
+        SubagentRequest request = new SubagentRequest(
+                "schema agent", "구조화 출력 작업", null, null,
+                SubagentRequest.IsolationMode.NONE, false, 30_000,
+                Map.of("response_schema", schema), "parent-sess-1");
+
+        runner.run(request);
+
+        ArgumentCaptor<com.platform.orchestrator.ChatRequest> reqCaptor =
+                ArgumentCaptor.forClass(com.platform.orchestrator.ChatRequest.class);
+        verify(orchestratorEngine).chat(reqCaptor.capture());
+
+        com.platform.orchestrator.ChatRequest captured = reqCaptor.getValue();
+        assertThat(captured.responseFormat()).isNotNull();
+        assertThat(captured.responseFormat().type()).isEqualTo("json_schema");
+        assertThat(captured.responseFormat().schema()).isEqualTo(schema);
+        assertThat(captured.responseFormat().schemaRef()).isNull();
+    }
+
+    @Test
+    void cr088_noResponseSchema_chatRequestResponseFormatRemainsNull() {
+        // CR-088: config 에 response_schema 없으면 responseFormat=null — 기존 동작 보존.
+        ChatResponse chatResponse = new ChatResponse(
+                "resp-noschema", "claude-sonnet", "child-sess",
+                List.of(new ContentBlock.Text("plain")),
+                List.of(), new TokenUsage(10, 20), 0.001);
+        when(orchestratorEngine.chat(any())).thenReturn(chatResponse);
+
+        SubagentRequest request = new SubagentRequest(
+                "plain agent", "텍스트 작업", null, null,
+                SubagentRequest.IsolationMode.NONE, false, 30_000,
+                Map.of(), "parent-sess-1");
+
+        runner.run(request);
+
+        ArgumentCaptor<com.platform.orchestrator.ChatRequest> reqCaptor =
+                ArgumentCaptor.forClass(com.platform.orchestrator.ChatRequest.class);
+        verify(orchestratorEngine).chat(reqCaptor.capture());
+        assertThat(reqCaptor.getValue().responseFormat()).isNull();
+    }
+
+    @Test
+    void cr088_responseSchema_nonMap_isIgnored() {
+        // CR-088: config.response_schema 가 Map 이 아니면 무시 (방어적). responseFormat=null.
+        ChatResponse chatResponse = new ChatResponse(
+                "resp-bad", "claude-sonnet", "child-sess",
+                List.of(new ContentBlock.Text("ignored")),
+                List.of(), new TokenUsage(10, 20), 0.001);
+        when(orchestratorEngine.chat(any())).thenReturn(chatResponse);
+
+        SubagentRequest request = new SubagentRequest(
+                "bad schema agent", "잘못된 스키마 입력", null, null,
+                SubagentRequest.IsolationMode.NONE, false, 30_000,
+                Map.of("response_schema", "not a map"), "parent-sess-1");
+
+        runner.run(request);
+
+        ArgumentCaptor<com.platform.orchestrator.ChatRequest> reqCaptor =
+                ArgumentCaptor.forClass(com.platform.orchestrator.ChatRequest.class);
+        verify(orchestratorEngine).chat(reqCaptor.capture());
+        assertThat(reqCaptor.getValue().responseFormat()).isNull();
+    }
+
+    @Test
     void hookEvents_dispatched() {
         ChatResponse chatResponse = new ChatResponse(
                 "resp-6", "claude-sonnet", "child-sess",
