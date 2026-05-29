@@ -2296,8 +2296,11 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 설계서**: T3-2 (API 설계) — 검토 대상
 - **원본 요구사항**: `docs/origins/원본_요구사항_테넌트격리_헤더신뢰경계_20260529.md`
 - **요청자**: 사용자 (소비앱 외부 보고 전달) | **승인자**: (대기) | **적용 버전**: (미정)
-- **변경 일자**: 2026-05-29 (발번)
-- **구현 상태**: 📝 발번 완료 (실측·진단 완료, 구현 대기 — 코드 수정은 사용자 승인 후)
+- **변경 일자**: 2026-05-29 (발번) / 2026-05-29 (코드 구현)
+- **구현 상태**: ✅ 코드 구현 + 테스트 통과 완료, 운영 배포 대기 (사용자 "403 즉시 차단" 정책 선택)
+  - 가드: `JwtAuthenticationFilter.java:111-122` — access 토큰 일반 테넌트 경로에서 `TenantContext`(TenantResolver가 헤더/쿼리로 설정) ↔ 토큰 `tenant_id` claim 불일치 시 403 + WARN 로그. platform/apps·widget·헤더미지정은 제외(기존 동작 보존)
+  - 테스트: `JwtAuthenticationFilterTenantMatchTest.java` 4케이스 (일치 통과 / 불일치 403 / 헤더없음 토큰신뢰 / platform 스킵). 실제 JwtProvider 토큰 생성 방식
+  - **검증**: platform-core 전체 회귀 **681 PASS, 0 fail/0 error, 1 skip** (기존 677 무유발). 배포(`./deploy.sh be`)는 별도 승인 필요
 - **실측 근거 (요약)**:
   - 외부 진단 반증: `backend/platform-core/src/main/java/com/platform/config/TenantRepositoryConfig.java:11-19` (mcp/wf = 테넌트 DataSource 바인딩), `aimbase_master` 에 mcp_servers/workflows 테이블 없음, 테넌트별 행 상이
   - 운영 런타임: http://59.8.160.12:8280 토큰 없이 `X-Tenant-Id` 헤더만 → HTTP 403 (헤더 자체 없으면 400). 운영 prod 프로파일에서 인증 동작 — "헤더만으로 200" 재현 불가

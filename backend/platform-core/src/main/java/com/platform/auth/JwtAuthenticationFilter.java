@@ -109,6 +109,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             } else {
+                // CR-086: cross-tenant 사칭 차단. TenantResolver(@Order(-200))가 X-Tenant-Id 헤더/
+                // tenant_id 쿼리에서 먼저 채운 TenantContext 와 access 토큰 tenant_id claim 이 불일치하면 거부.
+                // 헤더 미지정(context==null) 시에는 토큰 claim 을 신뢰(기존 동작 보존).
+                String contextTenant = TenantContext.getTenantId();
+                if (contextTenant != null && tenantId != null && !contextTenant.equals(tenantId)) {
+                    log.warn("Tenant mismatch — token claim='{}', X-Tenant-Id/context='{}', path={}",
+                            tenantId, contextTenant, path);
+                    response.sendError(HttpServletResponse.SC_FORBIDDEN,
+                            "Tenant mismatch between access token and X-Tenant-Id header");
+                    return;
+                }
                 UserEntity user = userRepository.findById(userId).orElse(null);
                 if (user == null || !user.isActive()) {
                     filterChain.doFilter(request, response);
