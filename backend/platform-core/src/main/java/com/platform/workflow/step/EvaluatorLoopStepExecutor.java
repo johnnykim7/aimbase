@@ -99,6 +99,7 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
         String prevFeedback = null;
         Map<String, Object> finalVerdict = null;
         String finalOutput = null;
+        Object finalStructuredData = null;
         boolean loopExhausted = true;
         int finalIteration = -1;
         int genFailureStreak = 0;
@@ -139,6 +140,7 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
 
             String genOutput = genResult.getOrDefault("output", "").toString();
             iterRecord.put("generator_output", genOutput);
+            iterRecord.put("generator_structured_data", genResult.get("structured_data"));
             totalInputTokens += asInt(genResult.get("input_tokens"));
             totalOutputTokens += asInt(genResult.get("output_tokens"));
 
@@ -192,6 +194,7 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
                 log.info("EVALUATOR_LOOP[{}] passed at iteration {}/{} (retried={})",
                         step.id(), i, maxIterations - 1, retried);
                 finalOutput = genOutput;
+                finalStructuredData = genResult.get("structured_data");
                 finalVerdict = verdict;
                 loopExhausted = false;
                 break;
@@ -208,6 +211,7 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
                 Object gen = iterations.get(i).get("generator_output");
                 if (gen != null) {
                     finalOutput = gen.toString();
+                    finalStructuredData = iterations.get(i).get("generator_structured_data");
                     finalIteration = (int) iterations.get(i).get("index");
                     break;
                 }
@@ -225,6 +229,9 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("output", finalOutput);
+        if (finalStructuredData != null) {
+            result.put("structured_data", finalStructuredData);
+        }
         if (finalVerdict != null) {
             result.put("final_verdict", finalVerdict);
         }

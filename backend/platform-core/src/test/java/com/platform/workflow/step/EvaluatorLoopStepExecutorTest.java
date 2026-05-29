@@ -310,6 +310,70 @@ class EvaluatorLoopStepExecutorTest {
     }
 
     // ═══════════════════════════════════════════════
+    // 11. generator structured_data 보존 (B안)
+    // ═══════════════════════════════════════════════
+
+    @Test
+    @DisplayName("pass 통과 시 generator의 structured_data를 최종 결과에 보존")
+    @SuppressWarnings("unchecked")
+    void preservesGeneratorStructuredData_onPass() {
+        WorkflowStep step = buildStep(3, "SCORE_THRESHOLD");
+
+        Map<String, Object> doc = Map.of("type", "doc",
+                "content", List.of(Map.of("type", "paragraph", "text", "section A")));
+
+        when(llmCallStepExecutor.execute(any(), any()))
+                .thenReturn(llmResult("text draft", doc))                          // gen #0 — structured 포함
+                .thenReturn(llmResult("verdict", verdict(9.0, true, "excellent"))); // eval #0 — 통과
+
+        Map<String, Object> result = executor.execute(step, defaultContext());
+
+        assertThat(result.get("output")).isEqualTo("text draft");
+        assertThat(result.get("structured_data")).isEqualTo(doc);
+        // 회차 기록에도 보존
+        List<Map<String, Object>> iterations = (List<Map<String, Object>>) result.get("iterations");
+        assertThat(iterations.get(0).get("generator_structured_data")).isEqualTo(doc);
+    }
+
+    @Test
+    @DisplayName("루프 소진 폴백 시에도 마지막 회차 structured_data를 보존")
+    @SuppressWarnings("unchecked")
+    void preservesGeneratorStructuredData_onExhaust() {
+        WorkflowStep step = buildStep(2, "SCORE_THRESHOLD");
+
+        Map<String, Object> doc1 = Map.of("type", "doc", "content", List.of(Map.of("text", "v1")));
+        Map<String, Object> doc2 = Map.of("type", "doc", "content", List.of(Map.of("text", "v2")));
+
+        when(llmCallStepExecutor.execute(any(), any()))
+                .thenReturn(llmResult("draft v1", doc1))
+                .thenReturn(llmResult("v1", verdict(5.0, false, "weak")))
+                .thenReturn(llmResult("draft v2", doc2))
+                .thenReturn(llmResult("v2", verdict(7.0, false, "still low")));
+
+        Map<String, Object> result = executor.execute(step, defaultContext());
+
+        assertThat(result.get("loop_exhausted")).isEqualTo(true);
+        assertThat(result.get("output")).isEqualTo("draft v2");
+        // 마지막 회차(iter 1)의 structured_data
+        assertThat(result.get("structured_data")).isEqualTo(doc2);
+    }
+
+    @Test
+    @DisplayName("generator가 structured_data를 안 주면 결과에 structured_data 키 없음")
+    void noStructuredDataKey_whenGeneratorOmitsIt() {
+        WorkflowStep step = buildStep(3, "SCORE_THRESHOLD");
+
+        when(llmCallStepExecutor.execute(any(), any()))
+                .thenReturn(llmResult("plain text", null))
+                .thenReturn(llmResult("verdict", verdict(9.0, true, "ok")));
+
+        Map<String, Object> result = executor.execute(step, defaultContext());
+
+        assertThat(result.get("output")).isEqualTo("plain text");
+        assertThat(result).doesNotContainKey("structured_data");
+    }
+
+    // ═══════════════════════════════════════════════
     // 10. Evaluator 1회 재시도 (Q1 정책)
     // ═══════════════════════════════════════════════
 
