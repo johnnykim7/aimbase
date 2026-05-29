@@ -55,8 +55,13 @@ import java.util.stream.Collectors;
  * </ul>
  *
  * <h3>출력 계약</h3>
- * {@code { output: [...], results: [...], item_count: N, failed_count: M }} —
- * {@code output}/{@code results} 는 각 원소 body 결과 List (collect=none 이면 빈 List).
+ * {@code { output: ..., results: [...], item_count: N, failed_count: M }} —
+ * <ul>
+ *   <li>{@code collect=append}(기본): {@code output}/{@code results} 모두 각 원소 body 결과 List</li>
+ *   <li>{@code collect=none}: {@code output}/{@code results} 모두 빈 List</li>
+ *   <li>{@code collect=merge}: {@code output} 은 각 섹션 {@code structured_data.content[]} 를 평탄
+ *       병합한 TipTap 문서 1건({@code {type:"doc", content:[...]}}, Map), {@code results} 는 원본 List 보존</li>
+ * </ul>
  */
 @Component
 public class ForeachStepExecutor implements StepExecutor {
@@ -139,6 +144,26 @@ public class ForeachStepExecutor implements StepExecutor {
         long failed = results.stream().filter(r -> "failed".equals(r.get("status"))).count();
 
         // 3) 결과 수집 (collect)
+        if ("merge".equals(collect)) {
+            // 각 섹션 body 결과의 structured_data 에서 TipTap content 노드[] 를 평탄 병합 →
+            // {type:"doc", content:[...]} 단일 문서 1건. results(원본 List)도 보존.
+            List<Object> mergedContent = new ArrayList<>();
+            for (Map<String, Object> r : results) {
+                if ("failed".equals(r.get("status"))) continue;
+                mergedContent.addAll(extractTipTapNodes(r));
+            }
+            Map<String, Object> doc = new LinkedHashMap<>();
+            doc.put("type", "doc");
+            doc.put("content", mergedContent);
+
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("output", doc);          // merge = doc 1건 (Map)
+            output.put("results", results);     // 원본 List 보존
+            output.put("item_count", items.size());
+            output.put("failed_count", (int) failed);
+            return output;
+        }
+
         List<Map<String, Object>> collected = "none".equals(collect) ? List.of() : results;
 
         Map<String, Object> output = new LinkedHashMap<>();
@@ -147,6 +172,23 @@ public class ForeachStepExecutor implements StepExecutor {
         output.put("item_count", items.size());
         output.put("failed_count", (int) failed);
         return output;
+    }
+
+    /**
+     * 단일 섹션 body 결과에서 TipTap content 노드 배열을 추출.
+     * generator 의 structured_data 가 {type:"doc", content:[...]} 형태면 content[] 를,
+     * structured_data 자체가 노드 배열(List)이면 그대로 사용한다 (스키마 변형 방어).
+     */
+    @SuppressWarnings("unchecked")
+    private List<?> extractTipTapNodes(Map<String, Object> result) {
+        Object sd = result.get("structured_data");
+        if (sd instanceof Map<?, ?> sdMap) {
+            Object nodes = sdMap.get("content");
+            if (nodes instanceof List<?> list) return list;
+        } else if (sd instanceof List<?> list) {
+            return list;
+        }
+        return List.of();
     }
 
     // ─── 실행 모드 ──────────────────────────────────────────────────────────

@@ -268,6 +268,119 @@ class ForeachStepExecutorTest {
         }
     }
 
+    // ═══════════════════════════════════════════════
+    // collect=merge — TipTap content[] 평탄 병합
+    // ═══════════════════════════════════════════════
+
+    /** body=LLM_CALL 로 가장 — {{item.url}} 별로 structured_data.{type:doc, content:[node]} 반환. */
+    static class FakeDocBody implements StepExecutor {
+        volatile boolean failOnU1 = false;
+        @Override public WorkflowStep.StepType supports() { return WorkflowStep.StepType.LLM_CALL; }
+        @Override public Map<String, Object> execute(WorkflowStep step, StepContext context) {
+            String url = context.resolve("{{item.url}}");
+            if (failOnU1 && "u1".equals(url)) throw new RuntimeException("boom on u1");
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("type", "paragraph");
+            node.put("text", "section:" + url);
+            Map<String, Object> sd = new LinkedHashMap<>();
+            sd.put("type", "doc");
+            sd.put("content", List.of(node));
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("output", "");
+            r.put("structured_data", sd);
+            return r;
+        }
+    }
+
+    private FakeDocBody wireDocBody() {
+        FakeDocBody fake = new FakeDocBody();
+        when(applicationContext.getBeansOfType(StepExecutor.class))
+                .thenReturn(Map.of("fake", fake));
+        return fake;
+    }
+
+    private Map<String, Object> docBaseConfig() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", "LLM_CALL");
+        body.put("config", Map.of());
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("items", "{{input.samples}}");
+        config.put("body", body);
+        config.put("collect", "merge");
+        return config;
+    }
+
+    @Test
+    @DisplayName("collect=merge — 각 섹션 structured_data.content[] 를 doc 1건으로 평탄 병합")
+    @SuppressWarnings("unchecked")
+    void collectMergeFlattensTipTapNodes() {
+        wireDocBody();
+        StepContext ctx = ctxWithSamples(sampleMaps("u0", "u1", "u2"));
+
+        Map<String, Object> out = executor.execute(foreachStep(docBaseConfig()), ctx);
+
+        assertThat(out.get("item_count")).isEqualTo(3);
+        assertThat(out.get("failed_count")).isEqualTo(0);
+        // output = 단일 doc Map
+        Map<String, Object> doc = (Map<String, Object>) out.get("output");
+        assertThat(doc.get("type")).isEqualTo("doc");
+        List<Map<String, Object>> content = (List<Map<String, Object>>) doc.get("content");
+        assertThat(content).hasSize(3);
+        assertThat(content.get(0).get("text")).isEqualTo("section:u0");
+        assertThat(content.get(2).get("text")).isEqualTo("section:u2");
+        // results = 원본 List 보존
+        assertThat((List<?>) out.get("results")).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("collect=merge — 실패 섹션(on_item_error=continue)은 병합에서 제외")
+    @SuppressWarnings("unchecked")
+    void collectMergeSkipsFailedSections() {
+        FakeDocBody body = wireDocBody();
+        body.failOnU1 = true;
+        StepContext ctx = ctxWithSamples(sampleMaps("u0", "u1", "u2"));
+
+        Map<String, Object> config = docBaseConfig();
+        config.put("on_item_error", "continue");
+
+        Map<String, Object> out = executor.execute(foreachStep(config), ctx);
+
+        assertThat(out.get("failed_count")).isEqualTo(1);
+        Map<String, Object> doc = (Map<String, Object>) out.get("output");
+        List<Map<String, Object>> content = (List<Map<String, Object>>) doc.get("content");
+        // u1 실패 → u0, u2 노드만 병합
+        assertThat(content).hasSize(2);
+        assertThat(content.get(0).get("text")).isEqualTo("section:u0");
+        assertThat(content.get(1).get("text")).isEqualTo("section:u2");
+    }
+
+    @Test
+    @DisplayName("collect=merge — structured_data 자체가 노드 List 인 스키마 변형도 평탄 병합")
+    @SuppressWarnings("unchecked")
+    void collectMergeAcceptsFlatNodeArray() {
+        // structured_data 가 {type:doc,...} 가 아니라 노드 배열 List 인 generator
+        StepExecutor flatBody = new StepExecutor() {
+            @Override public WorkflowStep.StepType supports() { return WorkflowStep.StepType.LLM_CALL; }
+            @Override public Map<String, Object> execute(WorkflowStep step, StepContext context) {
+                String url = context.resolve("{{item.url}}");
+                Map<String, Object> r = new LinkedHashMap<>();
+                r.put("structured_data", List.of(Map.of("type", "paragraph", "text", url)));
+                return r;
+            }
+        };
+        when(applicationContext.getBeansOfType(StepExecutor.class))
+                .thenReturn(Map.of("fake", flatBody));
+        StepContext ctx = ctxWithSamples(sampleMaps("a", "b"));
+
+        Map<String, Object> out = executor.execute(foreachStep(docBaseConfig()), ctx);
+
+        Map<String, Object> doc = (Map<String, Object>) out.get("output");
+        List<Map<String, Object>> content = (List<Map<String, Object>>) doc.get("content");
+        assertThat(content).hasSize(2);
+        assertThat(content.get(0).get("text")).isEqualTo("a");
+        assertThat(content.get(1).get("text")).isEqualTo("b");
+    }
+
     @Test
     @DisplayName("인라인 리스트 items — 변수 참조 없이 직접 리스트도 동작")
     void inlineListItems() {
