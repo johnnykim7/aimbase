@@ -102,6 +102,26 @@ public class MCPController {
         }
     }
 
+    @PostMapping("/{id}/reconnect")
+    @Operation(summary = "MCP 서버 재연결 (기존 연결 정리 + 도구 재등록)")
+    public ApiResponse<Map<String, Object>> reconnect(@PathVariable String id) {
+        mcpServerRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "MCP server not found: " + id));
+        try {
+            List<UnifiedToolDef> tools = mcpServerManager.reconnect(id);
+            return ApiResponse.ok(Map.of(
+                    "serverId", id,
+                    "status", "connected",
+                    "toolCount", tools.size(),
+                    "tools", tools
+            ));
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Failed to reconnect MCP server '" + id + "': " + e.getMessage());
+        }
+    }
+
     @PostMapping("/{id}/disconnect")
     @Operation(summary = "MCP 서버 연결 해제")
     public ApiResponse<Map<String, String>> disconnect(@PathVariable String id) {

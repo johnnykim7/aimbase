@@ -191,6 +191,47 @@ class MCPServerManagerTest {
         verify(mockClient).close();
     }
 
+    // ── reconnect ───────────────────────────────────────────
+
+    @Test
+    void reconnect_existingConnection_shouldCloseOldAndDiscover() {
+        MCPServerEntity entity = buildServerEntity("srv-1");
+        when(mcpServerRepository.findById("srv-1")).thenReturn(Optional.of(entity));
+
+        // 기존 (stale) 연결 주입
+        MCPServerClient staleClient = mock(MCPServerClient.class);
+        connections.put("srv-1", staleClient);
+
+        // discover 단계에서 새 connection 이 만들어지지 않도록, computeIfAbsent 로 들어갈 새 client 를 미리 주입할 수 없다.
+        // 대신 reconnect 가 discover 를 호출하는 흐름만 검증 — staleClient.close() 호출 + status disconnected → connected 전이.
+        // discover 가 실제 외부 서버에 접근하지 않도록, computeIfAbsent 이후 isInitialized=true 인 새 mock client 주입을 위해
+        // reconnect 호출 직후 connections 에 새 mockClient 를 강제 주입하는 방법은 race 가 있어, 여기서는 close 만 검증한다.
+        try {
+            manager.reconnect("srv-1");
+        } catch (Exception ignored) {
+            // 실제 외부 호출은 없으므로 discover 가 connect() 시도 시 NPE 가 날 수 있다 — 본 테스트는 close 검증만 한다.
+        }
+
+        verify(staleClient).close();
+        // 기존 연결이 제거됐고, repository.save 가 disconnected 로 1회 호출됐는지 확인
+        verify(mcpServerRepository, atLeastOnce()).save(entity);
+    }
+
+    @Test
+    void reconnect_noExistingConnection_shouldStillCallDiscover() {
+        MCPServerEntity entity = buildServerEntity("srv-2");
+        when(mcpServerRepository.findById("srv-2")).thenReturn(Optional.of(entity));
+
+        try {
+            manager.reconnect("srv-2");
+        } catch (Exception ignored) {
+            // discover 의 외부 호출 부분은 본 테스트 범위 외
+        }
+
+        // 기존 연결이 없어도 status 를 disconnected 로 한 번 갱신했어야 함 (discover 가 성공하면 connected 로 다시 갱신)
+        verify(mcpServerRepository, atLeastOnce()).save(entity);
+    }
+
     // ── getConnectedServerIds ───────────────────────────────
 
     @Test

@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -113,12 +114,81 @@ public class MCPServerManager {
         }
 
         // ToolRegistry에 MCP 도구 등록 (기존 동일 이름 도구 덮어쓰기)
+        // manager + serverId 를 넘겨 lazy reconnect 가 가능하게 함.
         for (UnifiedToolDef tool : tools) {
-            toolRegistry.register(new MCPToolExecutor(client, tool));
+            toolRegistry.register(new MCPToolExecutor(client, tool, this, serverId));
         }
         log.info("Registered {} tool(s) from MCP server '{}'", tools.size(), serverId);
 
         return tools;
+    }
+
+    /**
+     * MCP 서버 재연결.
+     * 기존 연결을 닫고(있다면), discover 를 통해 새 client 로 재연결 + 도구 재등록.
+     * 호출자는 TenantContext 를 미리 설정해야 한다.
+     *
+     * @param serverId MCP 서버 ID
+     * @return 재연결 후 등록된 도구 목록
+     */
+    public List<UnifiedToolDef> reconnect(String serverId) {
+        MCPServerClient existing = connections.remove(serverId);
+        if (existing != null) {
+            try {
+                existing.close();
+            } catch (Exception e) {
+                log.warn("Error closing stale MCP client for server '{}': {}", serverId, e.getMessage());
+            }
+        }
+        // 상태를 disconnected 로 일단 기록 (discover 가 성공하면 connected 로 갱신)
+        mcpServerRepository.findById(serverId).ifPresent(entity -> {
+            entity.setStatus("disconnected");
+            mcpServerRepository.save(entity);
+        });
+        return discover(serverId);
+    }
+
+    /**
+     * 주기 health check + 자동 재연결.
+     *
+     * 60초마다 모든 캐시된 테넌트의 autoStart=true 서버를 점검:
+     * - connections 에 없는 서버 → 재연결 시도 (실패는 warn 만)
+     * - connections 에 있지만 client.isInitialized()==false → 재연결 시도
+     *
+     * ApplicationReadyEvent autoconnect 의 일시적 실패(SSE cold start, 일시 네트워크 장애 등)
+     * 를 자동 복구하기 위한 안전망. initialDelay=120s 로 부팅 직후 첫 autoconnect 와 겹치지 않게 함.
+     */
+    @Scheduled(fixedDelayString = "${aimbase.mcp.healthcheck.interval-ms:60000}",
+               initialDelayString = "${aimbase.mcp.healthcheck.initial-delay-ms:120000}")
+    public void healthCheckAndReconnect() {
+        for (String tenantId : tenantDataSourceManager.getAllCachedDataSources().keySet()) {
+            try {
+                TenantContext.setTenantId(tenantId);
+                List<MCPServerEntity> autoStartServers = mcpServerRepository.findAll()
+                        .stream()
+                        .filter(MCPServerEntity::isAutoStart)
+                        .toList();
+                for (MCPServerEntity server : autoStartServers) {
+                    MCPServerClient current = connections.get(server.getId());
+                    boolean needsReconnect = current == null || !current.isInitialized();
+                    if (!needsReconnect) {
+                        continue;
+                    }
+                    try {
+                        reconnect(server.getId());
+                        log.info("Health check reconnected MCP server '{}' (tenant {})",
+                                server.getId(), tenantId);
+                    } catch (Exception e) {
+                        log.warn("Health check reconnect failed for MCP server '{}' (tenant {}): {}",
+                                server.getId(), tenantId, e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Health check failed for tenant {}: {}", tenantId, e.getMessage());
+            } finally {
+                TenantContext.clear();
+            }
+        }
     }
 
     /**

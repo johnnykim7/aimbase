@@ -8,6 +8,8 @@ import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -36,12 +38,69 @@ public class MCPServerClient implements AutoCloseable {
             throw new IllegalArgumentException("MCP server config must contain 'url' for transport: " + transport);
         }
 
-        var httpTransport = HttpClientSseClientTransport.builder(url).build();
+        // SDK 0.10.0 의 HttpClientSseClientTransport 는 baseUri + sseEndpoint("/sse" 기본)
+        // 형태로 호출. Java URI.resolve 는 절대경로(sseEndpoint) 가 base path 를 덮어쓰므로,
+        // baseUri 에 context path(`/api/mcp`) 가 포함돼 있으면 호출이 root(`/sse`) 로 가서 404.
+        // → DB url(`http://host:8183/api/mcp`) 을 scheme://authority 와 path 로 분리해
+        //    baseUri = scheme://authority, sseEndpoint = path + "/sse" 로 설정한다.
+        UrlSplit split = splitBaseAndSsePath(url);
+        log.info("MCP server '{}' transport split: baseUri={}, sseEndpoint={}",
+                serverId, split.baseUri, split.sseEndpoint);
+
+        var httpTransport = HttpClientSseClientTransport.builder(split.baseUri)
+                .sseEndpoint(split.sseEndpoint)
+                .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)))
+                .build();
         this.client = McpClient.sync(httpTransport)
                 .clientInfo(new McpSchema.Implementation("aimbase", "1.0.0"))
                 .requestTimeout(Duration.ofSeconds(30))
+                .initializationTimeout(Duration.ofSeconds(30))
                 .build();
     }
+
+    /**
+     * DB 에 저장된 단일 url 을 SDK 가 요구하는 (baseUri, sseEndpoint) 쌍으로 분리.
+     *
+     * 규칙:
+     * - 입력에 path 가 없거나 "/" 만 있으면 baseUri=입력, sseEndpoint="/sse" (SDK 기본 동작과 동일)
+     * - 입력에 path 가 있으면 baseUri=scheme://authority, sseEndpoint=path 끝의 "/sse" 보장
+     *   - 이미 "/sse" 로 끝나면 그대로 사용
+     *   - 끝이 "/" 면 "sse" 만 붙임
+     *   - 그 외엔 "/sse" 를 append
+     * - 잘못된 URL 이면 IllegalArgumentException
+     *
+     * package-private — 단위 테스트용.
+     */
+    static UrlSplit splitBaseAndSsePath(String url) {
+        URI uri;
+        try {
+            uri = new URI(url);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid MCP server url: " + url, e);
+        }
+        if (uri.getScheme() == null || uri.getHost() == null) {
+            throw new IllegalArgumentException("MCP server url must be absolute (scheme://host): " + url);
+        }
+        String authority = uri.getScheme() + "://" + uri.getRawAuthority();
+        String path = uri.getRawPath();
+        if (path == null || path.isEmpty() || "/".equals(path)) {
+            return new UrlSplit(authority, "/sse");
+        }
+        String trimmed = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
+        String sseEndpoint;
+        if (trimmed.endsWith("/sse")) {
+            sseEndpoint = trimmed;
+        } else {
+            sseEndpoint = trimmed + "/sse";
+        }
+        if (!sseEndpoint.startsWith("/")) {
+            sseEndpoint = "/" + sseEndpoint;
+        }
+        return new UrlSplit(authority, sseEndpoint);
+    }
+
+    /** package-private — splitBaseAndSsePath 의 반환 타입. */
+    record UrlSplit(String baseUri, String sseEndpoint) {}
 
     /**
      * MCP 서버 초기화 핸드쉐이크 수행.
