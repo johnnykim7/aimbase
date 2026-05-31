@@ -33,16 +33,17 @@ public class ToolCallStepExecutor implements StepExecutor {
     /** CR-090: workflow_run_events 비동기 기록. null 허용(테스트 편의). */
     private final WorkflowRunEventRecorder eventRecorder;
 
+    /**
+     * Spring 생성자 — ObjectProvider 로 옵셔널 주입.
+     *
+     * <p>{@code @Autowired} 미지정 시 Spring 6 은 다중 public 생성자에서 default 생성자를 찾아
+     * NoSuchMethodException 으로 기동 실패한다 (운영 6/1 21:04 사고 사례). 단일 생성자로 정리.
+     * 테스트는 {@code null} ObjectProvider 를 그대로 넘기면 된다.
+     */
     public ToolCallStepExecutor(ToolRegistry toolRegistry,
                                 ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider) {
         this.toolRegistry = toolRegistry;
         this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
-    }
-
-    /** 하위 호환: 기존 1-arg 생성자 (테스트). */
-    public ToolCallStepExecutor(ToolRegistry toolRegistry) {
-        this.toolRegistry = toolRegistry;
-        this.eventRecorder = null;
     }
 
     @Override
