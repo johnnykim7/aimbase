@@ -62,8 +62,10 @@ public class ToolCallStepExecutor implements StepExecutor {
             rawInput.put("_agent_account_id", agentAccountId);
         }
 
-        // 변수 치환
-        Map<String, Object> resolvedInput = context.resolveMap(rawInput);
+        // 변수 치환 — 단일 {{ref}} 참조는 객체 그대로 보존 (Map/List 등을 toString 화 방지).
+        // resolveMap 만 쓰면 Map 값이 Java toString("{key=value,...}") 으로 직렬화되어
+        // 소비앱 측 JSON 파싱이 깨진다 (CR-087 resolveObject 활용).
+        Map<String, Object> resolvedInput = resolveInputPreservingObjects(rawInput, context);
 
         log.debug("TOOL_CALL step '{}': executing tool '{}'", step.id(), toolName);
 
@@ -73,10 +75,50 @@ public class ToolCallStepExecutor implements StepExecutor {
 
         String output = result != null ? result : "";
 
+        // ToolRegistry.execute(ToolCall) 는 미인식 도구/실행 예외를 "오류: ..." / "도구 실행 오류: ..." 문자열로 반환한다
+        // (String 반환 시그니처라 throw 못 함). 그 결과를 그대로 output 에 담으면
+        // WorkflowEngine.executeWithRetry 가 Exception 만 보기 때문에 retry/failed 처리가 안 되고
+        // status=completed 가짜 성공으로 끝난다 — 여기서 RuntimeException 으로 승격해서 retry 정책에 태운다.
+        if (output.startsWith("오류: ") || output.startsWith("도구 실행 오류: ")) {
+            throw new RuntimeException(output);
+        }
+
         // output이 JSON이면 structured_data에도 저장 (LLM_CALL과 동일한 참조 키 지원)
         if (output.startsWith("{") || output.startsWith("[")) {
             return Map.of("output", output, "structured_data", output);
         }
         return Map.of("output", output);
+    }
+
+    /**
+     * Tool input 변수 치환 — 단일 {{ref}} 참조는 원본 객체를 그대로 유지하고,
+     * 혼합 문자열/리터럴은 기존 텍스트 치환 경로를 탄다.
+     *
+     * <p>{@link StepContext#resolveMap}만 쓰면 Map/List 값이 Java {@code toString}
+     * ({@code {key=value, ...}}) 으로 직렬화되어 소비앱 측 JSON 파싱이 깨진다.
+     * 중첩 Map 도 재귀 적용.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> resolveInputPreservingObjects(Map<String, Object> raw, StepContext context) {
+        if (raw == null) return Map.of();
+        Map<String, Object> out = new HashMap<>();
+        for (Map.Entry<String, Object> e : raw.entrySet()) {
+            Object v = e.getValue();
+            if (v instanceof String s) {
+                Object resolved = context.resolveObject(s);
+                // resolveObject 는 "단일 {{ref}} 참조" 일 때만 객체 반환, 아니면 null.
+                // 객체로 풀린 경우만 보존, 그 외(혼합 문자열·리터럴)는 기존 텍스트 치환.
+                if (resolved != null && !(resolved instanceof String)) {
+                    out.put(e.getKey(), resolved);
+                } else {
+                    out.put(e.getKey(), context.resolve(s));
+                }
+            } else if (v instanceof Map) {
+                out.put(e.getKey(), resolveInputPreservingObjects((Map<String, Object>) v, context));
+            } else {
+                out.put(e.getKey(), v);
+            }
+        }
+        return out;
     }
 }

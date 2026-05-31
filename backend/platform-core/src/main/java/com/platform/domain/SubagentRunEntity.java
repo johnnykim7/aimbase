@@ -3,6 +3,7 @@ package com.platform.domain;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Type;
+import org.springframework.data.domain.Persistable;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -10,18 +11,35 @@ import java.util.UUID;
 
 /**
  * CR-030 PRD-207/210: 서브에이전트 실행 기록.
+ *
+ * <p>ID는 {@link com.platform.agent.SubagentRunner}가 외부에서 UUID로 직접 주입한다.
+ * {@code @GeneratedValue}를 제거하고 {@link Persistable}을 구현하여
+ * Spring Data JPA의 {@code save()}가 항상 {@code persist()} 경로(INSERT)를 타도록 강제한다 —
+ * Hibernate 6의 detached-merge 오인 + "unsaved-value mapping was incorrect" 회피.
  */
 @Entity
 @Table(name = "subagent_runs", indexes = {
         @Index(name = "idx_subagent_runs_parent_session", columnList = "parent_session_id"),
         @Index(name = "idx_subagent_runs_status", columnList = "status")
 })
-public class SubagentRunEntity {
+public class SubagentRunEntity implements Persistable<UUID> {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
     @Column(columnDefinition = "uuid")
     private UUID id;
+
+    @Transient
+    private boolean isNew = true;
+
+    @Override
+    public UUID getId() { return id; }
+
+    @Override
+    public boolean isNew() { return isNew; }
+
+    @PostLoad
+    @PostPersist
+    void markNotNew() { this.isNew = false; }
 
     @Column(name = "parent_session_id", length = 100, nullable = false)
     private String parentSessionId;
@@ -111,7 +129,6 @@ public class SubagentRunEntity {
 
     // --- Getters & Setters ---
 
-    public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
 
     public String getParentSessionId() { return parentSessionId; }

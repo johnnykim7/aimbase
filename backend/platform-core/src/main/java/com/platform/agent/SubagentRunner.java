@@ -154,8 +154,20 @@ public class SubagentRunner {
     // ── 포그라운드 실행 (동기 대기) ──
 
     private SubagentResult runForeground(SubagentContext context, SubagentRunEntity entity) {
-        CompletableFuture<SubagentResult> future = CompletableFuture.supplyAsync(
-                () -> executeAgent(context), java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+        // VT 는 부모 ThreadLocal 을 상속하지 않으므로 TenantContext / 스트림 싱크를 캡처해 자식 VT 안에서 재주입.
+        // 누락 시 OrchestratorEngine → SessionStore → 잘못된 DataSource(=master) → conversation_sessions 없음 오류.
+        String tenantId = com.platform.tenant.TenantContext.getTenantId();
+        Consumer<StreamEvent> capturedSink = STREAM_SINK.get();
+        CompletableFuture<SubagentResult> future = CompletableFuture.supplyAsync(() -> {
+            if (tenantId != null) com.platform.tenant.TenantContext.setTenantId(tenantId);
+            if (capturedSink != null) STREAM_SINK.set(capturedSink);
+            try {
+                return executeAgent(context);
+            } finally {
+                STREAM_SINK.remove();
+                com.platform.tenant.TenantContext.clear();
+            }
+        }, java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
 
         try {
             SubagentResult result = future.get(context.getRequest().timeoutMs(), TimeUnit.MILLISECONDS);
@@ -186,10 +198,12 @@ public class SubagentRunner {
     // ── 백그라운드 실행 (비동기) ──
 
     private SubagentResult runBackground(SubagentContext context, SubagentRunEntity entity) {
-        // CR-053 Phase 2: 자식 VT는 부모의 ThreadLocal을 상속하지 않으므로 싱크를 캡처해서 전달.
+        // CR-053 Phase 2: 자식 VT는 부모의 ThreadLocal을 상속하지 않으므로 싱크/TenantContext 를 캡처해서 전달.
         Consumer<StreamEvent> capturedSink = STREAM_SINK.get();
+        String tenantId = com.platform.tenant.TenantContext.getTenantId();
         Thread.ofVirtual().name("subagent-" + context.getSubagentRunId()).start(() -> {
             if (capturedSink != null) STREAM_SINK.set(capturedSink);
+            if (tenantId != null) com.platform.tenant.TenantContext.setTenantId(tenantId);
             try {
                 SubagentResult result = executeAgent(context);
                 updateEntity(entity, result);
@@ -206,6 +220,7 @@ public class SubagentRunner {
                 dispatchStopHook(context, result);
             } finally {
                 STREAM_SINK.remove();
+                com.platform.tenant.TenantContext.clear();
             }
         });
 
@@ -279,6 +294,18 @@ public class SubagentRunner {
             } else {
                 worktreeManager.remove(wCtx);
             }
+        }
+
+        // 응답이 텍스트도 구조화도 비어있으면 — 모델이 'structured_output' 같은 종료 도구로
+        // 마무리하지 않고 빈 응답으로 끝낸 케이스. 워크플로우 retry 정책에 태우기 위해 실패로 표시한다.
+        // (모델 동작 변동성에 대한 안전망. 정상 흐름은 무영향.)
+        if ((output == null || output.isBlank()) && structured == null) {
+            log.warn("Subagent run {} produced empty output and no structured data — treating as FAILED",
+                    context.getSubagentRunId());
+            return SubagentResult.failed(
+                    context.getSubagentRunId(), context.getChildSessionId(),
+                    "Empty model response (no text, no structured output)",
+                    durationMs, startedAt);
         }
 
         return SubagentResult.completed(

@@ -78,6 +78,12 @@ public class AgentCallStepExecutor implements StepExecutor {
                                                     StepContext context, long startMs) {
         SubagentRequest request = buildRequest(config, context.sessionId());
         SubagentResult result = agentOrchestrator.runSingle(request);
+        // FAILED/TIMEOUT 은 Exception 으로 승격해야 WorkflowEngine.executeWithRetry 가 retry/failed 처리한다.
+        // 그대로 두면 result map 만 채우고 정상 return → status=completed 가짜 성공.
+        if (result.status() == SubagentResult.Status.FAILED || result.status() == SubagentResult.Status.TIMEOUT) {
+            String reason = result.error() != null ? result.error() : result.status().name();
+            throw new RuntimeException("AGENT_CALL failed: " + reason);
+        }
         return toResultMap(result, startMs);
     }
 

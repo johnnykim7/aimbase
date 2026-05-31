@@ -83,7 +83,7 @@ public class WorkflowEngine {
 
         WorkflowRunEntity run = new WorkflowRunEntity();
         run.setWorkflowId(workflowId);
-        run.setSessionId(sessionId);
+        run.setSessionId(resolveSessionId(sessionId));
         run.setStatus("running");
         Map<String, Object> effectiveInput = input != null ? input : Map.of();
         run.setInputData(effectiveInput);
@@ -134,7 +134,7 @@ public class WorkflowEngine {
 
         WorkflowRunEntity run = new WorkflowRunEntity();
         run.setWorkflowId(proxy.getId());
-        run.setSessionId(sessionId);
+        run.setSessionId(resolveSessionId(sessionId));
         run.setStatus("running");
         run.setInputData(input != null ? input : Map.of());
         run.setStepResults(new LinkedHashMap<>());
@@ -478,6 +478,18 @@ public class WorkflowEngine {
         Object reduce = cfg.get("reduce");
         return context.withStepResult(step.id(), enriched,
                 channel.toString(), reduce != null ? reduce.toString() : "replace");
+    }
+
+    /**
+     * 호출부가 sessionId 를 null/blank 로 넘기면 workflow-run-{uuid} 로 자동 채운다.
+     * 워크플로우 내부 스텝 중 일부(예: AGENT_CALL 의 SubagentRunEntity.parent_session_id NOT NULL)
+     * 는 sessionId 가 null 이면 INSERT 자체가 거부된다. 호출부 부담을 줄이기 위해 엔진에서 안전망을 둔다.
+     */
+    private String resolveSessionId(String sessionId) {
+        if (sessionId != null && !sessionId.isBlank()) {
+            return sessionId;
+        }
+        return "workflow-run-" + UUID.randomUUID();
     }
 
     private Map<String, Object> executeWithRetry(WorkflowStep step, StepContext context, ErrorHandling errorHandling) {

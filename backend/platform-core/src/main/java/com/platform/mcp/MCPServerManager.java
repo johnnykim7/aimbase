@@ -68,8 +68,11 @@ public class MCPServerManager {
                 log.info("Auto-connecting {} MCP server(s) for tenant {}...", autoStartServers.size(), tenantId);
                 for (MCPServerEntity server : autoStartServers) {
                     try {
-                        connect(server);
-                        log.info("Auto-connected to MCP server: {} (tenant {})", server.getId(), tenantId);
+                        // connect 만 하면 connections 만 채워지고 ToolRegistry 에 도구가 등록되지 않는다 —
+                        // discover() 가 도구를 ToolRegistry 에 register 한다. 재기동 후 워크플로우 TOOL_CALL 이
+                        // "알 수 없는 도구" 로 실패하는 원인 차단.
+                        discover(server.getId());
+                        log.info("Auto-connected + discovered MCP server: {} (tenant {})", server.getId(), tenantId);
                     } catch (Exception e) {
                         log.warn("Failed to auto-connect to MCP server '{}' (tenant {}): {}",
                                 server.getId(), tenantId, e.getMessage());
@@ -225,13 +228,6 @@ public class MCPServerManager {
     /** 특정 서버의 클라이언트 반환 (연결 안 되어 있으면 null) */
     public MCPServerClient getClient(String serverId) {
         return connections.get(serverId);
-    }
-
-    private MCPServerClient connect(MCPServerEntity entity) {
-        MCPServerClient client = createClient(entity);
-        client.connect();
-        connections.put(entity.getId(), client);
-        return client;
     }
 
     private MCPServerClient createClient(MCPServerEntity entity) {
