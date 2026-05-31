@@ -1,0 +1,187 @@
+package com.platform.workflow.event;
+
+import com.platform.domain.WorkflowRunEventEntity;
+import com.platform.domain.WorkflowRunEventEntity.EventType;
+import com.platform.repository.WorkflowRunEventRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+/**
+ * CR-090 WorkflowRunEventRecorder 단위 테스트.
+ *
+ * <p>Recorder 는 VT 비동기 fire-and-forget 이라 await 없이는 결과 확인이 어렵다.
+ * 여기서는 ArgumentCaptor 와 짧은 polling 으로 INSERT 가 발생했음을 확인한다.
+ */
+@DisplayName("WorkflowRunEventRecorder — CR-090")
+class WorkflowRunEventRecorderTest {
+
+    private WorkflowRunEventRepository repository;
+    private WorkflowRunEventRecorder recorder;
+
+    @BeforeEach
+    void setUp() {
+        repository = mock(WorkflowRunEventRepository.class);
+        recorder = new WorkflowRunEventRecorder(repository);
+    }
+
+    @Test
+    @DisplayName("stepStart → STEP_START 이벤트 저장, payload.step_type 포함")
+    void stepStart() throws Exception {
+        UUID runId = UUID.randomUUID();
+
+        recorder.stepStart(runId, "step1", "LLM_CALL");
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getRunId()).isEqualTo(runId);
+        assertThat(saved.getStepId()).isEqualTo("step1");
+        assertThat(saved.getEventType()).isEqualTo(EventType.STEP_START);
+        assertThat(saved.getPayload()).containsEntry("step_type", "LLM_CALL");
+        assertThat(saved.getDurationMs()).isNull();
+    }
+
+    @Test
+    @DisplayName("stepEnd → STEP_END + duration_ms + output_size payload")
+    void stepEnd() throws Exception {
+        UUID runId = UUID.randomUUID();
+
+        recorder.stepEnd(runId, "step1", 1234L, 42);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getEventType()).isEqualTo(EventType.STEP_END);
+        assertThat(saved.getDurationMs()).isEqualTo(1234L);
+        assertThat(saved.getPayload()).containsEntry("output_size", 42);
+    }
+
+    @Test
+    @DisplayName("stepFailed → STEP_FAILED + error truncated + attempts")
+    void stepFailed() throws Exception {
+        UUID runId = UUID.randomUUID();
+
+        recorder.stepFailed(runId, "step1", 999L, "boom", 3);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getEventType()).isEqualTo(EventType.STEP_FAILED);
+        assertThat(saved.getDurationMs()).isEqualTo(999L);
+        assertThat(saved.getPayload()).containsEntry("error", "boom");
+        assertThat(saved.getPayload()).containsEntry("attempts", 3);
+    }
+
+    @Test
+    @DisplayName("toolUse — input_keys, input_preview ≤100자")
+    void toolUse() throws Exception {
+        UUID runId = UUID.randomUUID();
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("query", "x".repeat(500));
+        input.put("flag", true);
+
+        recorder.toolUse(runId, "step1", 0, "web_search", input, null);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getEventType()).isEqualTo(EventType.TOOL_USE);
+        assertThat(saved.getToolName()).isEqualTo("web_search");
+        assertThat(saved.getIteration()).isEqualTo(0);
+        assertThat(saved.getPayload()).containsKey("input_keys");
+        String preview = (String) saved.getPayload().get("input_preview");
+        // 100자 + "…" — 정확히 101 chars (단, truncate 안 일어났으면 적을 수도)
+        assertThat(preview.length()).isLessThanOrEqualTo(101);
+    }
+
+    @Test
+    @DisplayName("toolResult — ok=true 일 때 error 없음, output_size 채워짐")
+    void toolResultSuccess() throws Exception {
+        UUID runId = UUID.randomUUID();
+
+        recorder.toolResult(runId, "step1", null, "calc", 50L, true, null, 128, null);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getEventType()).isEqualTo(EventType.TOOL_RESULT);
+        assertThat(saved.getDurationMs()).isEqualTo(50L);
+        assertThat(saved.getPayload()).containsEntry("ok", true);
+        assertThat(saved.getPayload()).containsEntry("output_size", 128);
+        assertThat(saved.getPayload()).doesNotContainKey("error");
+    }
+
+    @Test
+    @DisplayName("toolResult — ok=false + error 메시지 truncate")
+    void toolResultFailure() throws Exception {
+        UUID runId = UUID.randomUUID();
+        String longErr = "e".repeat(300);
+
+        recorder.toolResult(runId, "step1", null, "calc", 10L, false, longErr, 0, null);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getEventType()).isEqualTo(EventType.TOOL_RESULT);
+        assertThat(saved.getPayload()).containsEntry("ok", false);
+        String err = (String) saved.getPayload().get("error");
+        assertThat(err.length()).isLessThanOrEqualTo(201);  // 200 + "…"
+    }
+
+    @Test
+    @DisplayName("llmResponse — model, in_tok, out_tok, finish_reason 채움")
+    void llmResponse() throws Exception {
+        UUID runId = UUID.randomUUID();
+
+        recorder.llmResponse(runId, "step1", null,
+                "claude-sonnet-4-5", 1000, 250, "END", 800L, null, null);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getEventType()).isEqualTo(EventType.LLM_RESPONSE);
+        assertThat(saved.getDurationMs()).isEqualTo(800L);
+        assertThat(saved.getPayload()).containsEntry("model", "claude-sonnet-4-5");
+        assertThat(saved.getPayload()).containsEntry("in_tok", 1000);
+        assertThat(saved.getPayload()).containsEntry("out_tok", 250);
+        assertThat(saved.getPayload()).containsEntry("finish_reason", "END");
+    }
+
+    @Test
+    @DisplayName("runId == null → publish 스킵 (워크플로우 무관 호출 방어)")
+    void nullRunIdSkipped() throws Exception {
+        recorder.stepStart(null, "step1", "TOOL_CALL");
+        Thread.sleep(50);   // VT 가 안 돌아도 충분
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Repository 예외 발생해도 호출자에 전파 안 됨 (워크플로우 hot path 보호)")
+    void exceptionSwallowed() throws Exception {
+        when(repository.save(any())).thenThrow(new RuntimeException("DB down"));
+        UUID runId = UUID.randomUUID();
+
+        // 호출 자체가 예외 안 던지면 OK
+        recorder.stepStart(runId, "step1", "LLM_CALL");
+
+        // VT 가 save 호출까지 도달했음을 확인
+        Thread.sleep(150);
+        verify(repository, atLeastOnce()).save(any());
+    }
+
+    // ─── 헬퍼: VT save 가 끝날 때까지 짧게 polling ───
+
+    private WorkflowRunEventEntity waitForSave() throws Exception {
+        ArgumentCaptor<WorkflowRunEventEntity> captor =
+                ArgumentCaptor.forClass(WorkflowRunEventEntity.class);
+        AtomicReference<WorkflowRunEventEntity> result = new AtomicReference<>();
+        long deadline = System.currentTimeMillis() + 1000L;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                verify(repository, atLeastOnce()).save(captor.capture());
+                result.set(captor.getValue());
+                return result.get();
+            } catch (AssertionError notYet) {
+                Thread.sleep(20);
+            }
+        }
+        throw new AssertionError("Repository.save 가 1초 안에 호출되지 않았습니다");
+    }
+}

@@ -45,6 +45,8 @@ public class WorkflowEngine {
     private final PlatformMetrics platformMetrics;
     /** CR-058: 스텝/런 상태 전이 이벤트 브로드캐스터. null 이면 발행 스킵(테스트 편의). */
     private final com.platform.workflow.event.WorkflowEventPublisher eventPublisher;
+    /** CR-090: workflow_run_events 비동기 기록. null 허용(테스트 편의). */
+    private final com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder;
 
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
@@ -52,7 +54,8 @@ public class WorkflowEngine {
                           ObjectMapper objectMapper,
                           List<StepExecutor> stepExecutors,
                           PlatformMetrics platformMetrics,
-                          com.platform.workflow.event.WorkflowEventPublisher eventPublisher) {
+                          com.platform.workflow.event.WorkflowEventPublisher eventPublisher,
+                          org.springframework.beans.factory.ObjectProvider<com.platform.workflow.event.WorkflowRunEventRecorder> eventRecorderProvider) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -61,6 +64,8 @@ public class WorkflowEngine {
                 .collect(Collectors.toMap(StepExecutor::supports, e -> e));
         this.platformMetrics = platformMetrics;
         this.eventPublisher = eventPublisher;
+        // ObjectProvider 로 옵셔널 주입 — 기존 테스트가 5-arg/6-arg 생성자 mock 으로 호환 유지
+        this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
@@ -318,6 +323,10 @@ public class WorkflowEngine {
                     if (eventPublisher != null) {
                         eventPublisher.stepRunning(run.getId(), run.getParentRunId(), step.id(), startedAt);
                     }
+                    // CR-090: STEP_START
+                    if (eventRecorder != null) {
+                        eventRecorder.stepStart(run.getId(), step.id(), step.type().name());
+                    }
 
                     Map<String, Object> result = executeWithRetry(step, context, errorHandling);
                     long stepEnd = System.currentTimeMillis();
@@ -347,6 +356,10 @@ public class WorkflowEngine {
                                 subRef != null ? subRef.toString() : null,
                                 previewOutput(result));
                     }
+                    // CR-090: STEP_END
+                    if (eventRecorder != null) {
+                        eventRecorder.stepEnd(run.getId(), step.id(), stepEnd - stepStart, estimateResultSize(result));
+                    }
 
                     // CONDITION 분기 처리
                     if (step.type() == WorkflowStep.StepType.CONDITION) {
@@ -368,6 +381,14 @@ public class WorkflowEngine {
                         long durationMs = run.getStartedAt() != null
                                 ? failedAtMs - run.getStartedAt().toInstant().toEpochMilli() : 0L;
                         eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", durationMs);
+                    }
+                    // CR-090: STEP_FAILED (attempts 는 executeWithRetry 안 retry 횟수 반영 — 메시지 파싱 대신 errorHandling.retryMaxAttempts+1 상한으로 근사)
+                    if (eventRecorder != null) {
+                        eventRecorder.stepFailed(run.getId(), step.id(),
+                                run.getStartedAt() != null
+                                        ? failedAtMs - run.getStartedAt().toInstant().toEpochMilli() : 0L,
+                                e.getMessage(),
+                                errorHandling.retryMaxAttempts() + 1);
                     }
                     return;
                 }
@@ -478,6 +499,17 @@ public class WorkflowEngine {
         Object reduce = cfg.get("reduce");
         return context.withStepResult(step.id(), enriched,
                 channel.toString(), reduce != null ? reduce.toString() : "replace");
+    }
+
+    /**
+     * CR-090: 스텝 결과의 대략적 크기 — payload 크기 미리보기용 메타.
+     * 정확한 직렬화 비용 회피를 위해 String.valueOf 길이로 근사한다.
+     */
+    private int estimateResultSize(Map<String, Object> result) {
+        if (result == null || result.isEmpty()) return 0;
+        Object out = result.get("output");
+        if (out instanceof String s) return s.length();
+        return String.valueOf(result).length();
     }
 
     /**
@@ -628,6 +660,11 @@ public class WorkflowEngine {
                         long d = runDurationMs(run);
                         eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", d);
                     }
+                    // CR-090: STEP_FAILED (cyclic step budget)
+                    if (eventRecorder != null) {
+                        eventRecorder.stepFailed(run.getId(), stepId, runDurationMs(run),
+                                "step_budget_exceeded (budget=" + budget + ")", 0);
+                    }
                     return;
                 }
 
@@ -668,6 +705,10 @@ public class WorkflowEngine {
                     eventPublisher.stepRunning(run.getId(), run.getParentRunId(), step.id(),
                             startedAt, iterationIndex);
                 }
+                // CR-090: STEP_START (cyclic)
+                if (eventRecorder != null) {
+                    eventRecorder.stepStart(run.getId(), step.id(), step.type().name());
+                }
 
                 Map<String, Object> result;
                 try {
@@ -684,6 +725,11 @@ public class WorkflowEngine {
                         eventPublisher.stepFailed(run.getId(), run.getParentRunId(), step.id(),
                                 null, Instant.ofEpochMilli(failedAtMs), e.getMessage());
                         eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", runDurationMs(run));
+                    }
+                    // CR-090: STEP_FAILED (cyclic)
+                    if (eventRecorder != null) {
+                        eventRecorder.stepFailed(run.getId(), step.id(),
+                                failedAtMs - stepStart, e.getMessage(), errorHandling.retryMaxAttempts() + 1);
                     }
                     return;
                 }
@@ -706,6 +752,10 @@ public class WorkflowEngine {
                             startedAt, completedAt,
                             subRef != null ? subRef.toString() : null,
                             previewOutput(result), iterationIndex);
+                }
+                // CR-090: STEP_END (cyclic)
+                if (eventRecorder != null) {
+                    eventRecorder.stepEnd(run.getId(), step.id(), stepEnd - stepStart, estimateResultSize(result));
                 }
 
                 // 다음 노드 결정 → worklist push

@@ -2,7 +2,9 @@ package com.platform.api;
 
 import com.platform.domain.WorkflowEntity;
 import com.platform.domain.WorkflowRunEntity;
+import com.platform.domain.WorkflowRunEventEntity;
 import com.platform.repository.WorkflowRepository;
+import com.platform.repository.WorkflowRunEventRepository;
 import com.platform.repository.WorkflowRunRepository;
 import com.platform.workflow.WorkflowEngine;
 import com.platform.workflow.WorkflowValidator;
@@ -36,17 +38,20 @@ public class WorkflowController {
     private final WorkflowEngine workflowEngine;
     private final WorkflowValidator workflowValidator;
     private final WorkflowRunSubscriberRegistry subscriberRegistry;
+    private final WorkflowRunEventRepository eventRepository;
 
     public WorkflowController(WorkflowRepository workflowRepository,
                                WorkflowRunRepository workflowRunRepository,
                                WorkflowEngine workflowEngine,
                                WorkflowValidator workflowValidator,
-                               WorkflowRunSubscriberRegistry subscriberRegistry) {
+                               WorkflowRunSubscriberRegistry subscriberRegistry,
+                               WorkflowRunEventRepository eventRepository) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.workflowEngine = workflowEngine;
         this.workflowValidator = workflowValidator;
         this.subscriberRegistry = subscriberRegistry;
+        this.eventRepository = eventRepository;
     }
 
     @GetMapping
@@ -218,6 +223,40 @@ public class WorkflowController {
         // 3) 이벤트 스트림 구독자로 등록.
         subscriberRegistry.register(run.getId(), emitter);
         return emitter;
+    }
+
+    /**
+     * CR-090: 워크플로우 실행 이벤트 시간순 조회.
+     *
+     * <p>STEP_START / TOOL_USE / TOOL_RESULT / LLM_RESPONSE / STEP_END / STEP_FAILED
+     * 6종 이벤트를 created_at, id ASC 로 반환. 소비앱이 "Claude Code 처럼 한 줄 흐름"
+     * 화면을 사후 재구성할 때 사용.
+     */
+    @GetMapping("/runs/{runId}/events")
+    @Operation(summary = "워크플로우 실행 이벤트 시간순 조회",
+            description = "STEP_START/TOOL_USE/TOOL_RESULT/LLM_RESPONSE/STEP_END/STEP_FAILED 이벤트를 시간순으로 반환")
+    public ApiResponse<List<Map<String, Object>>> getRunEvents(@PathVariable UUID runId) {
+        // 존재 확인 (404 명시)
+        workflowRunRepository.findById(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Workflow run not found: " + runId));
+
+        List<WorkflowRunEventEntity> events = eventRepository.findByRunIdOrderByCreatedAtAscIdAsc(runId);
+        List<Map<String, Object>> body = events.stream().map(e -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", e.getId());
+            m.put("event_type", e.getEventType() != null ? e.getEventType().name() : null);
+            m.put("step_id", e.getStepId());
+            m.put("iteration", e.getIteration());
+            m.put("tool_name", e.getToolName());
+            m.put("duration_ms", e.getDurationMs());
+            m.put("payload", e.getPayload());
+            m.put("trace_id", e.getTraceId());
+            m.put("subagent_run_id", e.getSubagentRunId() != null ? e.getSubagentRunId().toString() : null);
+            m.put("created_at", e.getCreatedAt() != null ? e.getCreatedAt().toString() : null);
+            return m;
+        }).toList();
+        return ApiResponse.ok(body);
     }
 
     public record WorkflowRequest(

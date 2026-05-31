@@ -8,6 +8,7 @@ import com.platform.llm.model.*;
 import com.platform.llm.router.ModelRouter;
 import com.platform.workflow.StepContext;
 import com.platform.workflow.event.WorkflowEventPublisher;
+import com.platform.workflow.event.WorkflowRunEventRecorder;
 import com.platform.workflow.model.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,25 +45,30 @@ public class LlmCallStepExecutor implements StepExecutor {
     private final com.platform.service.PromptTemplateService promptTemplateService;
     // CR-085 P3: 노드 내부 토큰 스트리밍 발행 (opt-in). null 허용 — 기존 테스트/비스트리밍 경로 무영향.
     private final WorkflowEventPublisher eventPublisher;
+    /** CR-090: workflow_run_events 비동기 기록. null 허용(테스트 편의). */
+    private final WorkflowRunEventRecorder eventRecorder;
 
     @org.springframework.beans.factory.annotation.Autowired
     public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
                                 com.platform.service.PromptTemplateService promptTemplateService,
-                                org.springframework.beans.factory.ObjectProvider<WorkflowEventPublisher> eventPublisherProvider) {
+                                org.springframework.beans.factory.ObjectProvider<WorkflowEventPublisher> eventPublisherProvider,
+                                org.springframework.beans.factory.ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider) {
         this.modelRouter = modelRouter;
         this.promptTemplateService = promptTemplateService;
         this.connectionAdapterFactory = connectionAdapterFactory;
         // ObjectProvider 로 순환참조 회피 (WorkflowEventPublisher 는 워크플로우 패키지 컴포넌트)
         this.eventPublisher = eventPublisherProvider != null ? eventPublisherProvider.getIfAvailable() : null;
+        this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
     }
 
-    /** 하위 호환: eventPublisher 없는 3-arg 생성자 (기존 테스트/비스트리밍 사용처). */
+    /** 하위 호환: eventPublisher/eventRecorder 없는 3-arg 생성자 (기존 테스트/비스트리밍 사용처). */
     public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
                                 com.platform.service.PromptTemplateService promptTemplateService) {
         this.modelRouter = modelRouter;
         this.promptTemplateService = promptTemplateService;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.eventPublisher = null;
+        this.eventRecorder = null;
     }
 
     @Override
@@ -121,11 +127,14 @@ public class LlmCallStepExecutor implements StepExecutor {
 
         // ── Phase 1: 일반 호출 ──
         int phase1Tokens = configCeiling != null ? Math.min(INITIAL_MAX_TOKENS, configCeiling) : INITIAL_MAX_TOKENS;
+        long phase1Start = System.currentTimeMillis();
         LLMResponse response = streamTokens
                 ? callLlmStreaming(adapter, resolvedModel, system, prompt, phase1Tokens, context,
                         extThinking, thinkingBudget, step.id())
                 : callLlm(adapter, resolvedModel, system, prompt, responseSchema,
                         phase1Tokens, context, extThinking, thinkingBudget);
+        // CR-090: LLM_RESPONSE (Phase 1)
+        recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase1Start);
 
         if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
             return buildResult(response, resolvedModel);
@@ -137,7 +146,10 @@ public class LlmCallStepExecutor implements StepExecutor {
         // ── Phase 2: 에스컬레이션 (1회) ──
         int phase2Tokens = configCeiling != null ? Math.min(ESCALATION_MAX_TOKENS, configCeiling) : ESCALATION_MAX_TOKENS;
         if (phase2Tokens > phase1Tokens) {
+            long phase2Start = System.currentTimeMillis();
             response = callLlm(adapter, resolvedModel, system, prompt, responseSchema, phase2Tokens, context);
+            // CR-090: LLM_RESPONSE (Phase 2)
+            recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase2Start);
 
             if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
                 log.info("LLM_CALL step '{}': 에스컬레이션 성공 (max_tokens={})", step.id(), phase2Tokens);
@@ -497,6 +509,22 @@ public class LlmCallStepExecutor implements StepExecutor {
         } catch (IllegalArgumentException e) {
             return null;  // 테스트/비표준 runId — 이벤트 runId=null 허용
         }
+    }
+
+    /**
+     * CR-090: LLM_RESPONSE 이벤트 발행 헬퍼.
+     *
+     * <p>Phase 1/2/3(자동분할의 plan/part/merge)에서 모두 호출 — 단일 LLM 호출 1회당 1 이벤트.
+     */
+    private void recordLlmResponse(StepContext context, String stepId, LLMResponse response,
+                                   String resolvedModel, long durationMs) {
+        if (eventRecorder == null || response == null) return;
+        UUID runId = parseUuid(context.workflowRunId());
+        if (runId == null) return;
+        int in = response.usage() != null ? response.usage().inputTokens() : 0;
+        int out = response.usage() != null ? response.usage().outputTokens() : 0;
+        String finishReason = response.finishReason() != null ? response.finishReason().name() : null;
+        eventRecorder.llmResponse(runId, stepId, null, resolvedModel, in, out, finishReason, durationMs, null, null);
     }
 
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,

@@ -41,7 +41,8 @@ class WorkflowControllerSubscribeTest {
     @BeforeEach
     void setUp() {
         controller = new WorkflowController(workflowRepository, workflowRunRepository,
-                workflowEngine, workflowValidator, subscriberRegistry);
+                workflowEngine, workflowValidator, subscriberRegistry,
+                org.mockito.Mockito.mock(com.platform.repository.WorkflowRunEventRepository.class));
     }
 
     @Test

@@ -3,13 +3,16 @@ package com.platform.workflow.step;
 import com.platform.llm.model.ToolCall;
 import com.platform.tool.ToolRegistry;
 import com.platform.workflow.StepContext;
+import com.platform.workflow.event.WorkflowRunEventRecorder;
 import com.platform.workflow.model.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * TOOL_CALL 스텝 실행기.
@@ -27,9 +30,19 @@ public class ToolCallStepExecutor implements StepExecutor {
     private static final Logger log = LoggerFactory.getLogger(ToolCallStepExecutor.class);
 
     private final ToolRegistry toolRegistry;
+    /** CR-090: workflow_run_events 비동기 기록. null 허용(테스트 편의). */
+    private final WorkflowRunEventRecorder eventRecorder;
 
+    public ToolCallStepExecutor(ToolRegistry toolRegistry,
+                                ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider) {
+        this.toolRegistry = toolRegistry;
+        this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
+    }
+
+    /** 하위 호환: 기존 1-arg 생성자 (테스트). */
     public ToolCallStepExecutor(ToolRegistry toolRegistry) {
         this.toolRegistry = toolRegistry;
+        this.eventRecorder = null;
     }
 
     @Override
@@ -69,7 +82,25 @@ public class ToolCallStepExecutor implements StepExecutor {
 
         log.debug("TOOL_CALL step '{}': executing tool '{}'", step.id(), toolName);
 
-        String result = toolRegistry.execute(new ToolCall(null, toolName, resolvedInput));
+        // CR-090: TOOL_USE
+        UUID runUuid = parseUuid(context.workflowRunId());
+        if (eventRecorder != null && runUuid != null) {
+            eventRecorder.toolUse(runUuid, step.id(), null, toolName, resolvedInput, null);
+        }
+
+        long startMs = System.currentTimeMillis();
+        String result;
+        try {
+            result = toolRegistry.execute(new ToolCall(null, toolName, resolvedInput));
+        } catch (RuntimeException ex) {
+            // CR-090: TOOL_RESULT (예외 경로 — ToolRegistry 는 보통 String 반환이지만 안전망)
+            if (eventRecorder != null && runUuid != null) {
+                eventRecorder.toolResult(runUuid, step.id(), null, toolName,
+                        System.currentTimeMillis() - startMs, false, ex.getMessage(), 0, null);
+            }
+            throw ex;
+        }
+        long durationMs = System.currentTimeMillis() - startMs;
 
         log.debug("TOOL_CALL step '{}' completed", step.id());
 
@@ -80,7 +111,18 @@ public class ToolCallStepExecutor implements StepExecutor {
         // WorkflowEngine.executeWithRetry 가 Exception 만 보기 때문에 retry/failed 처리가 안 되고
         // status=completed 가짜 성공으로 끝난다 — 여기서 RuntimeException 으로 승격해서 retry 정책에 태운다.
         if (output.startsWith("오류: ") || output.startsWith("도구 실행 오류: ")) {
+            // CR-090: TOOL_RESULT (도구 자체 에러 문자열)
+            if (eventRecorder != null && runUuid != null) {
+                eventRecorder.toolResult(runUuid, step.id(), null, toolName,
+                        durationMs, false, output, output.length(), null);
+            }
             throw new RuntimeException(output);
+        }
+
+        // CR-090: TOOL_RESULT (성공)
+        if (eventRecorder != null && runUuid != null) {
+            eventRecorder.toolResult(runUuid, step.id(), null, toolName,
+                    durationMs, true, null, output.length(), null);
         }
 
         // output이 JSON이면 structured_data에도 저장 (LLM_CALL과 동일한 참조 키 지원)
@@ -88,6 +130,14 @@ public class ToolCallStepExecutor implements StepExecutor {
             return Map.of("output", output, "structured_data", output);
         }
         return Map.of("output", output);
+    }
+
+    private static UUID parseUuid(String s) {
+        try {
+            return s != null ? UUID.fromString(s) : null;
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**

@@ -80,7 +80,7 @@ class LlmCallStreamingCr085IT {
         when(provider.getIfAvailable()).thenReturn(realPublisher);
 
         executor = new LlmCallStepExecutor(modelRouter, connectionAdapterFactory,
-                promptTemplateService, provider);
+                promptTemplateService, provider, null);  // CR-090: eventRecorderProvider — null 허용
     }
 
     private StepContext ctx() {
