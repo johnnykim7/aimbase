@@ -169,6 +169,12 @@ aimbase:
     base: ${AIMBASE_WORKSPACE_BASE:/data/workspaces}
     whitelist-roots:
       - ${AIMBASE_WORKSPACE_WHITELIST:${user.home}/Documents/GitHub/bp-fulfillment-infra}
+  # CR-092 OCR (Tesseract) — BIZ-105/106/107
+  ocr:
+    enabled: ${AIMBASE_OCR_ENABLED:true}
+    fallback-threshold-chars: ${AIMBASE_OCR_FALLBACK_THRESHOLD:50}
+    languages: ${AIMBASE_OCR_LANGUAGES:kor+eng}
+    max-pages: ${AIMBASE_OCR_MAX_PAGES:50}
 
 logging:
   level:

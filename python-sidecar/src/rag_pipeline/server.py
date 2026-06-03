@@ -9,6 +9,7 @@ Tools: ingest_document, ingest_file, search_hybrid, embed_texts, chunk_document,
        upload_file_template, read_pptx, read_docx, read_excel, read_pdf, convert_format
 """
 
+import base64
 import json
 import logging
 
@@ -850,16 +851,46 @@ def read_pdf(
     file_base64: str,
     extract_images: bool = False,
     ocr_enabled: bool = False,
+    ocr_languages: str = "kor+eng",
+    ocr_max_pages: int = 50,
 ) -> str:
-    """Read a PDF file and extract text/structure per page (CR-019).
+    """Read a PDF file and extract text/structure per page (CR-019, OCR by CR-092).
 
     Args:
         file_base64: Base64-encoded PDF file content
         extract_images: Whether to extract embedded images as base64
-        ocr_enabled: Enable OCR for scanned pages (requires pytesseract)
+        ocr_enabled: Enable Tesseract OCR for scanned pages (CR-092)
+        ocr_languages: Tesseract lang codes, '+' joined (e.g. 'kor+eng', 'jpn'). BIZ-106 whitelist
+        ocr_max_pages: Max pages to OCR per call (BIZ-105 default 50)
     """
     from rag_pipeline.tools.document_reader import read_pdf as do_read
-    result = do_read(file_base64=file_base64, extract_images=extract_images, ocr_enabled=ocr_enabled)
+    result = do_read(
+        file_base64=file_base64,
+        extract_images=extract_images,
+        ocr_enabled=ocr_enabled,
+        ocr_languages=ocr_languages,
+        ocr_max_pages=ocr_max_pages,
+    )
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+def ocr_image(
+    file_base64: str,
+    languages: str = "kor+eng",
+) -> str:
+    """OCR a single image (JPG/PNG/etc.) via Tesseract (CR-092).
+
+    Args:
+        file_base64: Base64-encoded image bytes
+        languages: Tesseract lang codes, '+' joined (e.g. 'kor+eng', 'jpn'). BIZ-106 whitelist
+    """
+    from rag_pipeline.tools.ocr import ocr_image_bytes
+    try:
+        image_bytes = base64.b64decode(file_base64)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"invalid_base64: {e}"})
+    result = ocr_image_bytes(image_bytes, languages=languages)
     return json.dumps(result, ensure_ascii=False, default=str)
 
 

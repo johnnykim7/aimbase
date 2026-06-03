@@ -283,6 +283,47 @@ public class MCPRagClient {
     }
 
     /**
+     * Python MCP Server의 read_pdf 도구 호출 (CR-092 — OCR 옵션 포함).
+     *
+     * @param fileBase64    Base64 인코딩된 PDF
+     * @param extractImages 이미지 추출 여부 (텍스트 추출 경로에서만)
+     * @param ocrEnabled    OCR 사용 여부. true 면 Tesseract 경로
+     * @param ocrLanguages  Tesseract 언어 코드 (BIZ-106 화이트리스트, 예: "kor+eng")
+     * @param ocrMaxPages   OCR 페이지 상한 (BIZ-105)
+     * @return {pages, page_count, success, ...}
+     */
+    public Map<String, Object> readPdf(String fileBase64, boolean extractImages,
+                                       boolean ocrEnabled, String ocrLanguages, int ocrMaxPages) {
+        Map<String, Object> input = Map.of(
+                "file_base64", fileBase64,
+                "extract_images", extractImages,
+                "ocr_enabled", ocrEnabled,
+                "ocr_languages", ocrLanguages != null ? ocrLanguages : "kor+eng",
+                "ocr_max_pages", ocrMaxPages
+        );
+
+        String result = mcpClient.callTool("read_pdf", input);
+        return parseJson(result);
+    }
+
+    /**
+     * Python MCP Server의 ocr_image 도구 호출 (CR-092).
+     *
+     * @param fileBase64 Base64 인코딩된 이미지 (JPG/PNG/etc.)
+     * @param languages  Tesseract 언어 코드 (BIZ-106 화이트리스트, 예: "kor+eng")
+     * @return {text, success, languages, ...} 또는 {success: false, error}
+     */
+    public Map<String, Object> ocrImage(String fileBase64, String languages) {
+        Map<String, Object> input = Map.of(
+                "file_base64", fileBase64,
+                "languages", languages != null ? languages : "kor+eng"
+        );
+
+        String result = mcpClient.callTool("ocr_image", input);
+        return parseJson(result);
+    }
+
+    /**
      * Python MCP Server의 self_rag_search 도구 호출.
      *
      * @return {query, results, iterations, relevance_scores, success}

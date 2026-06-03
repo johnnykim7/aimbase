@@ -401,26 +401,39 @@ def read_pdf(
     file_base64: str,
     extract_images: bool = False,
     ocr_enabled: bool = False,
+    ocr_languages: str = "kor+eng",
+    ocr_max_pages: int = 50,
 ) -> dict[str, Any]:
     """PDF 파일에서 텍스트/구조를 추출.
 
     Args:
         file_base64: base64 인코딩된 PDF
-        extract_images: 이미지 추출 여부
-        ocr_enabled: OCR 사용 여부 (pytesseract 필요)
+        extract_images: 이미지 추출 여부 (텍스트 추출 경로에서만)
+        ocr_enabled: OCR 사용 여부 (CR-092 — Tesseract 경로로 전환)
+        ocr_languages: OCR 언어 (BIZ-106 화이트리스트, '+' 결합)
+        ocr_max_pages: OCR 페이지 상한 (BIZ-105)
 
     Returns:
-        {pages: [{page_number, text, tables}], page_count, success}
+        {pages: [{page_number, text, ...}], page_count, success, ...}
     """
     try:
         file_bytes = base64.b64decode(file_base64)
     except Exception as e:
         return {"success": False, "error": f"Invalid base64: {e}"}
 
-    # pdfplumber 시도
+    # CR-092: OCR 경로 — pdfplumber + pytesseract + pdf2image
+    if ocr_enabled:
+        from rag_pipeline.tools.ocr import ocr_pdf_bytes
+        return ocr_pdf_bytes(
+            file_bytes,
+            languages=ocr_languages,
+            max_pages=ocr_max_pages,
+        )
+
+    # pdfplumber 시도 (기존 텍스트 추출 경로)
     try:
         import pdfplumber
-        return _read_pdf_pdfplumber(file_bytes, extract_images, ocr_enabled)
+        return _read_pdf_pdfplumber(file_bytes, extract_images)
     except ImportError:
         pass
 
@@ -437,8 +450,8 @@ def read_pdf(
     return {"success": False, "error": "No PDF library available. Install pdfplumber or PyMuPDF."}
 
 
-def _read_pdf_pdfplumber(file_bytes: bytes, extract_images: bool, ocr_enabled: bool) -> dict[str, Any]:
-    """pdfplumber로 PDF 읽기."""
+def _read_pdf_pdfplumber(file_bytes: bytes, extract_images: bool) -> dict[str, Any]:
+    """pdfplumber로 PDF 읽기 (텍스트 박힌 PDF 전용 — OCR 분기는 read_pdf 상위에서 분리)."""
     import pdfplumber
 
     pages = []

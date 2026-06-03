@@ -23,7 +23,7 @@ import java.util.Set;
  */
 public final class McpExposurePolicy {
 
-    /** CR 노출 레벨: CLI 두뇌(Claude CLI 등)가 호출 가능한 도구 (26개). */
+    /** CR 노출 레벨: CLI 두뇌(Claude CLI 등)가 호출 가능한 도구 (27개). */
     private static final Set<String> CLI_EXPOSED = Set.of(
             // Network
             "web_search", "http_request",
@@ -31,6 +31,8 @@ public final class McpExposurePolicy {
             "send_message", "send_notification",
             // AI / Content
             "brief", "analyze_image", "translate_text", "suggest_background_pr",
+            // OCR (CR-092)
+            "ocr_image",
             // File / Result
             "notebook_edit", "read_tool_result",
             // CLI / LSP
