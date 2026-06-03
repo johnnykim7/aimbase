@@ -1284,6 +1284,47 @@ claude-code:
 - 동일 reason 3회 초과 강제 종료 발생률 — 임계값 조정 후보
 - max_iterations 우선 종료 vs BIZ-097 강제 종료 비율
 
+### 시나리오 O: OCR 운영 (Tesseract) [CR-092]
+
+전통적 OCR. Vision 모델(CR-061) 우회와 분리. 결정론·오프라인·비용 0.
+
+**적용 경로 2가지**:
+1. BE `PdfTextExtractor` 자동 fallback — 위젯/채팅 PDF 첨부 시 텍스트 < 50자(BIZ-107)면 자동 OCR
+2. `ocr_image` Built-in Tool — Claude CLI/워크플로우/직접 호출에서 자율 사용 (`McpExposurePolicy.CLI` 노출)
+
+**기동 점검**:
+- 사이드카 Docker 컨테이너에 `tesseract-ocr-kor` 설치 확인:
+  ```bash
+  docker exec aimbase-sidecar tesseract --list-langs | grep -E "kor|eng"
+  ```
+- `global_config` 4 키 확인 (V65 마이그레이션):
+  ```sql
+  SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'aimbase.ocr.%';
+  ```
+- application.yml: `aimbase.ocr.enabled=true` (기본). 임시 OFF: `AIMBASE_OCR_ENABLED=false`
+
+**언어팩 추가 (BIZ-106 화이트리스트 외)**:
+1. 사이드카 Dockerfile 의 apt 라인에 `tesseract-ocr-<lang>` 추가
+2. `rag_pipeline/tools/ocr.py` `_LANGUAGE_WHITELIST` 에 lang code 추가
+3. 사이드카 이미지 재빌드 + 재기동
+4. (선택) `global_config` `aimbase.ocr.languages` 갱신
+
+**페이지 상한 조정 (BIZ-105)**:
+- `aimbase.ocr.max-pages` 키 또는 `AIMBASE_OCR_MAX_PAGES` 환경변수
+- 50 페이지 OCR ≈ 150s, 100 페이지 ≈ 300s — SLA 영향 확인 후 조정
+- 초과 시 응답에 `truncated: true, total_pages: N, pages: [...50개...]` 반환
+
+**모니터링 포인트**:
+- `PdfTextExtractor` 로그: `"PDF text < 50 chars (got X), falling back to OCR ..."` — 스캔 PDF 비율 추정
+- `ocr_image` Tool 호출 메타: 감사 로그에 `characterCount`, `languages` 기록
+- 실패 패턴: `tesseract_not_installed` (언어팩 누락 / 바이너리 부재), `ocr_dependencies_missing` (pytesseract/pdf2image 미설치), `pdf2image_failed` (poppler-utils 부재 또는 손상 PDF)
+
+**Vision 모델(CR-061)과 선택 기준**:
+- 결정론 / 오프라인 / 비용 0 → CR-092 OCR
+- 손글씨 / 표 레이아웃 / 일회성 채팅 응답 → CR-061 Vision
+- RAG 인제스션은 OCR 기본, 위젯 채팅은 Vision 기본
+- BE `PdfTextExtractor` 만 자동 fallback (호출자 선택 불필요)
+
 ### 시나리오 N: 임베드 위젯 SDK 온보딩 [CR-058]
 
 새 소비앱(예: OMS / Rescue) 이 채팅 + 워크플로우 진행 가시화 + RAG 출처 카드를 자기 UI 에 얹을 때의 표준 절차.
@@ -1332,6 +1373,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.4.0 | 2026-06-03 | **CR-092 — 전통적 OCR (Tesseract)** 운영 시나리오 O 추가. 사이드카 `tesseract-ocr-kor` 한국어 언어팩 설치 확인 / `global_config` 4 키 (`aimbase.ocr.*` V65 seed) / 페이지 상한 (BIZ-105 50p) / 언어 화이트리스트 (BIZ-106) / fallback 임계 (BIZ-107 50자) 운영 절차. `PdfTextExtractor` 자동 fallback 로그 모니터링 + `ocr_image` Built-in Tool 감사 로그. Vision 모델(CR-061)과 선택 기준 정리 |
 | v3.3.0 | 2026-05-18 | **CR-085 — State 채널 reducer + 중첩 경로 + 노드 토큰 스트리밍**. § 3-5 워크플로우 관리에 CR-085 운영 점검표 추가. 중첩 경로 참조(자동, 폴백 빈 문자열) / 채널 reducer(`output_channel`+`reduce`, opt-in, `append` 채널 비대 방어 — `workflow_runs.step_results` JSONB 크기 모니터링) / 노드 토큰 스트리밍(`stream_tokens:true`, `response_schema` 없을 때만, SSE `step_token`, 내부 300초 상한). 세 기능 모두 opt-in — 미지정 시 기존 동작 100% 보존. 신규 마이그레이션 없음(StepContext/이벤트 계약 확장만). platform-core 653 회귀 GREEN |
 | v3.2.0 | 2026-05-16 | **CR-084 — 워크플로우 그래프 모드 + ROUTER**. § 3-5 워크플로우 관리에 `graphMode`(dag 기본 / cyclic) 표 + 운영 점검 항목 추가. 신규 노드 타입 `ROUTER`(N-way 동적 라우팅). cyclic 모드 운영 가이드: step budget(기본 50/절대 200, `triggerConfig.max_total_steps` 조정, `step_budget_exceeded` 진단), HUMAN_INPUT 재개 시 `workflow_runs.pending_worklist` 자동 복원, ROUTER 종료 경로(`__end__`/onSuccess 미지정 수렴) 필수, SSE `iterationIndex` 모니터링. **기존 DAG 워크플로우 무변경(하위호환)**. Flyway tenant V62(workflows.graph_mode) + V63(workflow_runs.pending_worklist) 자동 적용 |
 | v3.1.0 | 2026-04-29 | **CR-074 — TURN-TCP (RFC 6062) NAT 우회**. agent 부팅 시 `AgentConfig.turnEnabled=true` 면 coturn(`59.8.160.12:3478`)에 **TCP Allocate** → relay 주소를 `metadata.runnerEndpoint = "http://<relay-ip>:<relay-port>"` 로 등록 → BE `ClaudeCliRunnerClient` 가 그대로 HTTP TCP connect. agent 사이드는 `TurnConnectionBindHandler` 가 control connection 위 ConnectionAttempt indication 수신 → 새 TCP socket → ConnectionBind 송신, 성공 후 `TurnLoopbackBridge` 가 외부 socket ↔ `localhost:8290` Tomcat 양방향 byte pump (RunnerController 무수정). **coturn 측 요건**: `static-auth-secret` + `realm` 기존 자료 그대로, **TCP listen 활성화 필수** (`no-tcp=false`, `listening-port=3478`). **운영 변경**: agent 호스트 application 에서 `AgentConfig` 생성 시 `turnEnabled=true` + `turnTransport=TCP` 명시. 기본값 false 라 후방호환 (기존 공인 IP 직접 등록 환경 그대로 동작). `flowguard_dev` 테넌트 connection 시드 (`claude-cli-flowguard`) + `widget.allowed-origins` 에 FlowGuard FE Origin 2개 추가 (`http://localhost:3180`, `http://59.8.160.12:3180`) 동시 적용. UDP 전용 `TurnRelayClient` `@Deprecated`. 단위 테스트 10 신규 PASS / 백엔드 회귀 646 PASS. 실측 e2e 다음 턴 (coturn TCP listen 검증 후) |

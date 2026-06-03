@@ -1607,10 +1607,66 @@ try {
 
 ---
 
+## 20. 전통적 OCR (Tesseract) [CR-092]
+
+비전 모델 우회와 분리된 결정론·오프라인 OCR. 사이드카 Tesseract + pdf2image + pdfplumber 조합. Vision 모델(CR-061 이미지/PDF 첨부)이 모델 토큰을 쓰는 반면 OCR 은 0원·재현가능. RAG 인제스션과 결정론적 추출에 적합.
+
+### 20-1. 사이드카 MCP 툴 (BE 내부에서 호출)
+
+- `read_pdf(file_base64, extract_images=false, ocr_enabled=false, ocr_languages="kor+eng", ocr_max_pages=50)` — `ocr_enabled=true` 면 pdfplumber 로 페이지 추출 후 텍스트가 빈 페이지만 Tesseract 로 OCR. 응답에 `pages[].source` (`embedded`/`ocr`/`failed`), `total_pages`, `truncated`, `warnings` 포함.
+- `ocr_image(file_base64, languages="kor+eng")` — 단일 이미지(JPG/PNG/etc.) 전체를 Tesseract 로 OCR. 응답 `{text, success, languages}` 또는 `{success:false, error}`.
+
+언어 화이트리스트 (BIZ-106): `eng`, `kor`, `jpn`, `chi_sim`, `chi_tra`, `fra`, `deu`, `spa`. 그 외 코드는 거부. 페이지 상한 (BIZ-105): 기본 50, 초과 시 처음 N 페이지만 OCR 하고 `truncated:true`.
+
+### 20-2. BE PDF 첨부 — 자동 OCR fallback (BIZ-107)
+
+소비앱이 위젯/채팅으로 PDF 첨부 시 BE `PdfTextExtractor` 가 다음을 수행한다.
+
+1. 1차: `parse_document` (unstructured) 호출 — 텍스트 박힌 PDF 는 빠르게 추출
+2. 추출 결과 길이 < `aimbase.ocr.fallback-threshold-chars` (기본 50) → 스캔 PDF 로 판정
+3. 2차: `read_pdf(ocr_enabled=true)` 자동 호출 → Tesseract OCR
+
+`aimbase.ocr.enabled=false` 로 OFF 가능. `aimbase.ocr.*` 4 키는 `global_config` 에서 런타임 변경 가능 (CR-040 관리 UI).
+
+### 20-3. `ocr_image` Built-in Tool (CLI 자율 호출)
+
+`ocr_image` 는 BE Built-in Tool 로 등록되어 있고 `McpExposurePolicy.CLI_EXPOSED` 화이트리스트에 포함된다. 따라서 Claude CLI / 워크플로우 도구 루프에서 다음과 같이 노출된다.
+
+- MCP 노출 이름: `mcp__aimbase-server__ocr_image` (CR-072 server MCP endpoint 통해)
+- 입력 스키마: `{file_base64: string, languages?: string}`
+- 출력: `{text, languages, character_count}`
+- 권한: `READ_ONLY` (감사 로그 자동 기록)
+
+### 20-4. 비용 / 성능 / Vision 모델 선택 가이드
+
+| 항목 | OCR (CR-092) | Vision 모델 (CR-061) |
+|---|---|---|
+| 비용 | $0 (로컬) | 모델 토큰 |
+| 결정론 | O | X |
+| 오프라인 | O | X |
+| 손글씨/표 레이아웃 | 약함 | 강함 |
+| 권장 사용처 | RAG 인제스션, 결정론적 추출 | 채팅 즉시 응답, 손글씨/표 |
+
+RAG 인제스션은 OCR 우선, 위젯 채팅은 Vision 우선. BE `PdfTextExtractor` 만 텍스트 0자 자동 fallback (호출자 선택 불필요).
+
+### 20-5. 설정 키 (global_config)
+
+| 키 | 기본값 | 의미 |
+|---|---|---|
+| `aimbase.ocr.enabled` | `true` | OCR 전역 ON/OFF |
+| `aimbase.ocr.languages` | `kor+eng` | 기본 OCR 언어 (BIZ-106 화이트리스트) |
+| `aimbase.ocr.max-pages` | `50` | read_pdf 호출당 페이지 상한 (BIZ-105) |
+| `aimbase.ocr.fallback-threshold-chars` | `50` | PdfTextExtractor fallback 트리거 임계 (BIZ-107) |
+
+환경변수 오버라이드: `AIMBASE_OCR_ENABLED` / `AIMBASE_OCR_LANGUAGES` / `AIMBASE_OCR_MAX_PAGES` / `AIMBASE_OCR_FALLBACK_THRESHOLD`.
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.4.0 | 2026-06-03 | **CR-092 — 전통적 OCR (Tesseract)**. 사이드카 `read_pdf` 의 `ocr_enabled` 인자 실연결 + 신규 `ocr_image` MCP 툴 + BE `PdfTextExtractor` 텍스트 < 50자 fallback 자동 OCR + BE Built-in Tool `ocr_image` 신설 + CR-072 CLI 화이트리스트 추가(27개). 설정 4키 `aimbase.ocr.*` (`global_config` V65 seed). 언어 화이트리스트 BIZ-106 (eng/kor/jpn/chi_sim/chi_tra/fra/deu/spa), 페이지 상한 BIZ-105 (50), fallback 임계 BIZ-107 (50자). Dockerfile `tesseract-ocr-kor` 한국어 언어팩 추가. Vision 모델(CR-061)과 분리 — RAG 인제스션·결정론·오프라인 OCR 경로 (§ 20) |
 | v3.3.0 | 2026-05-29 | **CR-087 — 워크플로우 FOREACH step (동적 컬렉션 fan-out)**. 신규 스텝 타입 `FOREACH` — 런타임 컬렉션(`items`)의 각 원소에 `body` 스텝(`LLM_CALL`/`TOOL_CALL`/`SUB_WORKFLOW` 등)을 적용(map). body에서 `{{item.field}}`(Map)·`{{item.value}}`(스칼라)·`{{index.value}}`(0-based) 참조. `mode`(`sequential` 기본 / `parallel`=Virtual Thread + `max_concurrency` 기본 5), `max_items`(기본 100, 초과 시 FAIL), `collect`(`append` 기본 / `merge` / `none`), `on_item_error`(`fail` 기본 / `continue`). 출력 `{output:[...], results:[...], item_count, failed_count}`. `PARALLEL`(정적 branch)·`ROUTER`(N중 1택)로 표현 못하던 map/fan-out을 단일 노드로 선언 (LangGraph `Send`/map 대응). FOREACH 직접 중첩은 차단(body=`SUB_WORKFLOW`로 중첩). **단일 노드라 DAG/cyclic 양 모드 동일 동작, 마이그레이션 불필요(StepType JSONB 문자열), 기존 워크플로우 무변경(하위호환)** — platform-core 전체 회귀 GREEN |
 | v3.2.0 | 2026-05-18 | **CR-085 — State 채널 reducer + 중첩 경로 + 노드 토큰 스트리밍**. 변수 참조에 중첩 경로(`{{step.a.b[0].c}}`, List 인덱스/Map 혼합) 추가 — 기존 1뎁스 참조·실패 폴백(빈 문자열) 동작 100% 보존. 스텝 config에 `output_channel`+`reduce`(`replace` 기본 / `append`=List 누적, LangGraph `add_messages` 대응 / `merge`=Map 얕은 병합) opt-in — 미지정 시 기존 덮어쓰기 동작 그대로, `{{stepId.field}}` 참조는 항상 유지. `LLM_CALL` config에 `stream_tokens:true` opt-in 시 노드 내부 LLM 토큰 델타를 SSE `step_token`(`tokenDelta`/`type`/`iterationIndex` nullable)로 발행 — `response_schema` 없는 텍스트 응답에만 적용, orchestrator SSE 공용 스트리밍 경로 재사용. **기존 워크플로우 무변경(하위호환)** — platform-core 653 회귀 GREEN |
 | v3.1.0 | 2026-05-16 | **CR-084 — 워크플로우 임의 cycle + N-way 라우팅**. 워크플로우 생성 파라미터에 `graphMode`(`dag` 기본 / `cyclic`) 추가. 신규 스텝 타입 `ROUTER`(`routes` config — `when`/`default:true` + `to`). `graphMode:cyclic` 시 워크리스트 스케줄러로 임의 노드 순환 + ROUTER `next_step` 추종, run 당 step budget(기본 50, 절대 200, `triggerConfig.max_total_steps`로 조정) 무한루프 방어. HUMAN_INPUT 중단→resume 시 worklist 자동 복원. **기존 DAG 워크플로우는 무변경(하위호환)** — `graphMode` 생략 = 기존 1-pass. SSE 스텝 이벤트에 nullable `iterationIndex` 추가(cyclic 회차 구분, DAG 는 null) |
