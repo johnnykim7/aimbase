@@ -1,5 +1,6 @@
 package com.platform.agent;
 
+import com.platform.domain.PlanEntity;
 import com.platform.domain.SubagentRunEntity;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookEvent;
@@ -12,6 +13,7 @@ import com.platform.orchestrator.ChatResponse;
 import com.platform.orchestrator.OrchestratorEngine;
 import com.platform.orchestrator.stream.StreamEvent;
 import com.platform.repository.SubagentRunRepository;
+import com.platform.tool.ToolFilterContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -63,31 +65,51 @@ public class SubagentRunner {
         }
     }
 
+    /** CR-093 BIZ-109: 부모 chain 최대 깊이. 초과 시 즉시 FAILED. */
+    static final int MAX_SUBAGENT_DEPTH = 3;
+
     private final OrchestratorEngine orchestratorEngine;
     private final SubagentRunRepository subagentRunRepository;
     private final WorktreeManager worktreeManager;
     private final HookDispatcher hookDispatcher;
     private final SubagentLifecycleManager lifecycleManager;
     private final AgentTypeRegistry agentTypeRegistry;
+    private final PlanService planService;
 
     public SubagentRunner(OrchestratorEngine orchestratorEngine,
                           SubagentRunRepository subagentRunRepository,
                           WorktreeManager worktreeManager,
                           HookDispatcher hookDispatcher,
                           SubagentLifecycleManager lifecycleManager,
-                          AgentTypeRegistry agentTypeRegistry) {
+                          AgentTypeRegistry agentTypeRegistry,
+                          PlanService planService) {
         this.orchestratorEngine = orchestratorEngine;
         this.subagentRunRepository = subagentRunRepository;
         this.worktreeManager = worktreeManager;
         this.hookDispatcher = hookDispatcher;
         this.lifecycleManager = lifecycleManager;
         this.agentTypeRegistry = agentTypeRegistry;
+        this.planService = planService;
     }
 
     /**
      * 서브에이전트 실행 (포그라운드/백그라운드 자동 분기).
      */
     public SubagentResult run(SubagentRequest request) {
+        // CR-093 BIZ-109: 부모 chain 깊이 카운팅 + 차단.
+        // 부모 세션 ID 로 부모 run 조회 → depth + 1. root 호출은 부모 run 없음(depth=0).
+        // MAX_SUBAGENT_DEPTH 초과 시 즉시 FAILED 반환 — DB row 생성/훅 발행 모두 생략하여 자원 낭비 방지.
+        int depth = resolveDepth(request.parentSessionId());
+        if (depth > MAX_SUBAGENT_DEPTH) {
+            log.warn("Subagent depth limit exceeded: parentSession={}, depth={} > max={}",
+                    request.parentSessionId(), depth, MAX_SUBAGENT_DEPTH);
+            String rejectedRunId = UUID.randomUUID().toString();
+            return SubagentResult.failed(
+                    rejectedRunId, "subagent-rejected-" + rejectedRunId,
+                    "Subagent depth limit exceeded (BIZ-109): " + depth + " > " + MAX_SUBAGENT_DEPTH,
+                    0L, OffsetDateTime.now());
+        }
+
         String runId = UUID.randomUUID().toString();
         String childSessionId = "subagent-" + UUID.randomUUID();
 
@@ -104,6 +126,7 @@ public class SubagentRunner {
 
         // 3. DB 기록 생성
         SubagentRunEntity entity = createRunEntity(request, runId, childSessionId, worktreeCtx);
+        entity.setDepth(depth);
         subagentRunRepository.save(entity);
 
         // 4. 수명 주기 등록
@@ -241,6 +264,30 @@ public class SubagentRunner {
         if (typeConfig.systemPrompt() != null && !typeConfig.systemPrompt().isBlank()) {
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, typeConfig.systemPrompt()));
         }
+
+        // CR-093 Phase 4: agentType=PLAN 진입 시 PlanService.createPlan() 자동 호출 → PLANNING 상태.
+        // 부모 세션 기준으로 active plan 이 없을 때만 신규 생성. 모델은 exit_plan_mode 도구로 EXECUTING 전이.
+        // 부모 세션 ID 가 없거나 PlanService 실패 시 무영향(시스템 프롬프트만으로 동작 — B안 폴백).
+        if (req.agentType() == AgentType.PLAN && req.parentSessionId() != null
+                && !req.parentSessionId().isBlank()) {
+            try {
+                if (!planService.hasActivePlan(req.parentSessionId())) {
+                    PlanEntity plan = planService.createPlan(
+                            req.parentSessionId(),
+                            req.description() != null ? req.description() : "Subagent plan",
+                            java.util.List.of(req.prompt()),
+                            java.util.List.of()
+                    );
+                    messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
+                            "Plan FSM activated. plan_id=" + plan.getId()
+                            + ". Use exit_plan_mode tool with concrete steps when ready to transition PLANNING→EXECUTING."));
+                }
+            } catch (Exception e) {
+                log.warn("PLAN auto-entry failed (plan FSM not activated): parentSession={}, err={}",
+                        req.parentSessionId(), e.getMessage());
+            }
+        }
+
         messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, req.prompt()));
 
         // CR-088: config.response_schema → ChatRequest.ResponseFormat 변환.
@@ -254,6 +301,11 @@ public class SubagentRunner {
             responseFormat = new ChatRequest.ResponseFormat("json_schema", null, schema);
         }
 
+        // CR-093 Phase 2: AgentTypeRegistry 의 allowedTools 를 ToolFilterContext 로 실제 주입.
+        // readOnly 타입(PLAN/EXPLORE/GUIDE/VERIFICATION)은 readOnlyMode 도 함께 켠다 — 도구 메타의 readOnly 플래그로 이중 방어.
+        // null 이면 GENERAL 의 무제한 동작 유지.
+        ToolFilterContext toolFilter = buildToolFilter(typeConfig);
+
         // OrchestratorEngine에 ChatRequest 위임
         ChatRequest chatRequest = new ChatRequest(
                 req.model(),
@@ -262,7 +314,7 @@ public class SubagentRunner {
                 false, true,
                 null, null,
                 req.connectionId(),
-                null, null,
+                toolFilter, null,
                 responseFormat
         );
 
@@ -438,6 +490,39 @@ public class SubagentRunner {
             return out.length() <= 200 ? out : out.substring(0, 200) + "...";
         }
         return result.error() != null ? result.error() : result.status().name();
+    }
+
+    /**
+     * CR-093 BIZ-109: 부모 chain 깊이 계산.
+     * parentSessionId 가 자식 세션이면 그 row 의 depth + 1, 아니면 0(root 호출).
+     * NONE/null/조회 실패 → 0 (안전 폴백 — 차단을 우회하지 않음).
+     */
+    int resolveDepth(String parentSessionId) {
+        if (parentSessionId == null || parentSessionId.isBlank()) return 0;
+        try {
+            return subagentRunRepository.findFirstByChildSessionId(parentSessionId)
+                    .map(parent -> parent.getDepth() + 1)
+                    .orElse(0);
+        } catch (Exception e) {
+            log.warn("Depth lookup failed for parentSession={}, treating as root", parentSessionId, e);
+            return 0;
+        }
+    }
+
+    /**
+     * CR-093 Phase 2: AgentTypeRegistry.AgentTypeConfig → ToolFilterContext.
+     * allowedTools 가 null(=GENERAL) 이면 필터 미적용. 그 외에는 화이트리스트 + readOnly 강제.
+     */
+    ToolFilterContext buildToolFilter(AgentTypeRegistry.AgentTypeConfig typeConfig) {
+        if (typeConfig == null || typeConfig.allowedTools() == null) {
+            return null;
+        }
+        return new ToolFilterContext(
+                java.util.List.copyOf(typeConfig.allowedTools()),
+                null, null,
+                null, null,
+                typeConfig.readOnly() ? Boolean.TRUE : null
+        );
     }
 
     private void cleanupWorktree(SubagentContext context) {

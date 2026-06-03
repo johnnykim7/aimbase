@@ -32,6 +32,7 @@ class AgentOrchestratorTest {
     @Mock private HookDispatcher hookDispatcher;
     @Mock private SubagentLifecycleManager lifecycleManager;
     @Mock private AgentTypeRegistry agentTypeRegistry;
+    @Mock private PlanService planService;
 
     private AgentOrchestrator orchestrator;
 
@@ -46,7 +47,7 @@ class AgentOrchestratorTest {
                         AgentType.GENERAL, "범용 에이전트", null, false));
 
         SubagentRunner runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService);
         orchestrator = new AgentOrchestrator(runner);
     }
 

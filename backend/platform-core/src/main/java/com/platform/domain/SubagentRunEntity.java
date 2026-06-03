@@ -114,6 +114,10 @@ public class SubagentRunEntity implements Persistable<UUID> {
     @Column(name = "agent_type", length = 30)
     private String agentType = "GENERAL";
 
+    /** CR-093 BIZ-109: 부모 chain 깊이 (root=0, 자식=parent+1). max 3 초과 시 차단. */
+    @Column(name = "depth", nullable = false)
+    private int depth = 0;
+
     /** CR-033 PRD-226: Task 설명 (Task 도구용) */
     @Column(name = "task_description", columnDefinition = "text")
     private String taskDescription;
@@ -208,4 +212,7 @@ public class SubagentRunEntity implements Persistable<UUID> {
 
     public String getAgentType() { return agentType; }
     public void setAgentType(String agentType) { this.agentType = agentType; }
+
+    public int getDepth() { return depth; }
+    public void setDepth(int depth) { this.depth = depth; }
 }

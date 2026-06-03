@@ -36,6 +36,7 @@ class AgentCallStepExecutorTest {
     @Mock private HookDispatcher hookDispatcher;
     @Mock private SubagentLifecycleManager lifecycleManager;
     @Mock private AgentTypeRegistry agentTypeRegistry;
+    @Mock private PlanService planService;
 
     private AgentCallStepExecutor executor;
 
@@ -50,7 +51,7 @@ class AgentCallStepExecutorTest {
                         AgentType.GENERAL, "범용 에이전트", null, false));
 
         SubagentRunner runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService);
         AgentOrchestrator orchestrator = new AgentOrchestrator(runner);
         executor = new AgentCallStepExecutor(orchestrator);
     }
