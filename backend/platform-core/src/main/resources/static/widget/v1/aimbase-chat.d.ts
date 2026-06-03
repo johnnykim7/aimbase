@@ -78,6 +78,12 @@ interface WidgetOptions {
     sessionId?: string;
     /** 대상 RAG 소스 ID — chat request 의 rag_source_id 로 전달 */
     ragSourceId?: string;
+    /** 사용할 Connection ID — chat request 의 connection_id 로 전달. 미지정 시 테넌트 default. */
+    connectionId?: string;
+    /** MCP 도구 자동 호출 활성화 — chat request 의 actions_enabled=true 로 전달. 기본 false. */
+    actionsEnabled?: boolean;
+    /** 모델 명시 지정 — chat request 의 model 로 전달. 미지정 시 "auto". */
+    model?: string;
     /** 위젯 내 승인 UI 활성화 — 기본 false (이벤트만 발행) */
     allowApproval?: boolean;
     theme?: {

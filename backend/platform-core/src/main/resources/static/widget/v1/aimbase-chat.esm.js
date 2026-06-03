@@ -151,6 +151,7 @@ ${JSON.stringify(args.context, null, 2)}`
     };
     if (args.ragSourceId) body.rag_source_id = args.ragSourceId;
     if (args.connectionId) body.connection_id = args.connectionId;
+    if (args.actionsEnabled) body.actions_enabled = true;
     let res;
     try {
       res = await fetch(`${args.baseUrl}/api/v1/chat/completions`, {
@@ -1232,7 +1233,10 @@ function createWidget(options) {
           baseUrl: options.baseUrl,
           sessionId: state.sessionId,
           text: trimmed,
+          model: options.model,
           ragSourceId: state.ragSourceId,
+          connectionId: options.connectionId,
+          actionsEnabled: options.actionsEnabled,
           context: options.contextProvider?.(),
           attachments: attachmentPayload
         },
@@ -1387,7 +1391,17 @@ var AimbaseChatElement = class extends HTMLElement {
     this.ragSourceId = null;
   }
   static get observedAttributes() {
-    return ["base-url", "token-endpoint", "display", "theme-mode", "rag-source-id", "session-id"];
+    return [
+      "base-url",
+      "token-endpoint",
+      "display",
+      "theme-mode",
+      "rag-source-id",
+      "session-id",
+      "connection-id",
+      "actions-enabled",
+      "model"
+    ];
   }
   connectedCallback() {
     const baseUrl = this.getAttribute("base-url");
@@ -1409,12 +1423,16 @@ var AimbaseChatElement = class extends HTMLElement {
     }
     const displayAttr = this.getAttribute("display") ?? "inline";
     const themeAttr = this.getAttribute("theme-mode");
+    const actionsAttr = this.getAttribute("actions-enabled");
     const options = {
       baseUrl,
       authResolver: resolver,
       display: displayAttr,
       sessionId: this.getAttribute("session-id") ?? void 0,
       ragSourceId: this.ragSourceId ?? this.getAttribute("rag-source-id") ?? void 0,
+      connectionId: this.getAttribute("connection-id") ?? void 0,
+      actionsEnabled: actionsAttr === "true" || actionsAttr === "" ? true : void 0,
+      model: this.getAttribute("model") ?? void 0,
       target: displayAttr === "inline" ? this : void 0,
       theme: themeAttr ? { mode: themeAttr } : void 0,
       contextProvider: this.contextProvider ?? void 0

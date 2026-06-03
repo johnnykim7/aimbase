@@ -9,6 +9,8 @@ export interface SendMessageArgs {
   model?: string;
   ragSourceId?: string;
   connectionId?: string;
+  /** MCP 도구 자동 호출 활성화 — true 면 body.actions_enabled=true 송신. */
+  actionsEnabled?: boolean;
   context?: Record<string, unknown>;
   /** CR-061: 사전 업로드된 첨부들. `{media_type, attachment_id}` 로 BE 에 전달. */
   attachments?: Array<{ attachmentId: string; mediaType: string }>;
@@ -67,6 +69,7 @@ export class ChatClient {
     };
     if (args.ragSourceId) body.rag_source_id = args.ragSourceId;
     if (args.connectionId) body.connection_id = args.connectionId;
+    if (args.actionsEnabled) body.actions_enabled = true;
 
     let res: Response;
     try {

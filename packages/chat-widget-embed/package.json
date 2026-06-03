@@ -1,6 +1,6 @@
 {
   "name": "@aimbase/chat-widget-embed",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Aimbase Chat Widget — Web Component + UMD bundle for embedding in any frontend (React/Vue/Vanilla).",
   "type": "module",
   "main": "dist/aimbase-chat.umd.js",

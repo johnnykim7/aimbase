@@ -19,7 +19,17 @@ export class AimbaseChatElement extends HTMLElement {
   public ragSourceId: string | null = null;
 
   static get observedAttributes(): string[] {
-    return ["base-url", "token-endpoint", "display", "theme-mode", "rag-source-id", "session-id"];
+    return [
+      "base-url",
+      "token-endpoint",
+      "display",
+      "theme-mode",
+      "rag-source-id",
+      "session-id",
+      "connection-id",
+      "actions-enabled",
+      "model",
+    ];
   }
 
   connectedCallback(): void {
@@ -56,12 +66,16 @@ export class AimbaseChatElement extends HTMLElement {
     const displayAttr = (this.getAttribute("display") ?? "inline") as WidgetOptions["display"];
     const themeAttr = this.getAttribute("theme-mode") as "light" | "dark" | "auto" | null;
 
+    const actionsAttr = this.getAttribute("actions-enabled");
     const options: WidgetOptions = {
       baseUrl,
       authResolver: resolver,
       display: displayAttr,
       sessionId: this.getAttribute("session-id") ?? undefined,
       ragSourceId: this.ragSourceId ?? this.getAttribute("rag-source-id") ?? undefined,
+      connectionId: this.getAttribute("connection-id") ?? undefined,
+      actionsEnabled: actionsAttr === "true" || actionsAttr === "" ? true : undefined,
+      model: this.getAttribute("model") ?? undefined,
       target: displayAttr === "inline" ? (this as HTMLElement) : undefined,
       theme: themeAttr ? { mode: themeAttr } : undefined,
       contextProvider: this.contextProvider ?? undefined,
