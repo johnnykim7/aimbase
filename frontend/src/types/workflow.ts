@@ -1,7 +1,7 @@
 export interface WorkflowStep {
   id: string;
   name: string;
-  type: "llm" | "tool" | "condition" | "parallel" | "approval" | "action" | string;
+  type: "llm" | "tool" | "condition" | "parallel" | "approval" | "action" | "agent" | "evaluator_loop" | "sub_workflow" | string;
   config?: Record<string, unknown>;
   dependsOn?: string[];
   nextSteps?: string[];

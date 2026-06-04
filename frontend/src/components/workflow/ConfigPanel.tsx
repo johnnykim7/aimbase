@@ -5,6 +5,7 @@ import { useConnections } from "../../hooks/useConnections";
 import { usePrompts } from "../../hooks/usePrompts";
 import { useMCPServers } from "../../hooks/useMCPServers";
 import { useTools } from "../../hooks/useTools";
+import { usePlatformWorkflows } from "../../hooks/usePlatformWorkflows";
 import type { Connection } from "../../types/connection";
 import type { Prompt } from "../../types/prompt";
 import type { MCPServer, MCPToolDef } from "../../types/mcp";
@@ -66,6 +67,7 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
   const { data: prompts, isError: promptError } = usePrompts();
   const { data: mcpServers, isError: mcpError } = useMCPServers();
   const { data: nativeTools } = useTools();
+  const { data: platformWorkflows, isError: platformWfError } = usePlatformWorkflows();
 
   const toolOptions: SelectOption[] = (() => {
     const tools: SelectOption[] = [];
@@ -106,6 +108,15 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
     return (prompts as Prompt[]).map((p) => ({
       value: p.id,
       label: `${p.name ?? p.id}${p.domain ? ` [${p.domain}]` : ""}`,
+    }));
+  })();
+
+  // CR-097: SUB_WORKFLOW workflow_id 드롭다운 — ID 비노출, name 표시 (feedback_id_display)
+  const platformWorkflowOptions: SelectOption[] = (() => {
+    if (platformWfError || !platformWorkflows) return [];
+    return platformWorkflows.map((w) => ({
+      value: w.id,
+      label: w.name ?? w.id,
     }));
   })();
 
@@ -163,6 +174,8 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
     promptOptions,
     promptError,
     handlePromptSelect,
+    platformWorkflowOptions,
+    platformWfError,
   });
 
   const renderField = (field: ConfigField) => {
@@ -406,6 +419,8 @@ interface FieldContext {
   promptOptions: SelectOption[];
   promptError: boolean;
   handlePromptSelect: (id: string) => void;
+  platformWorkflowOptions: SelectOption[];
+  platformWfError: boolean;
 }
 
 function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
@@ -550,6 +565,25 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
             { value: "parallel", label: "parallel — 병렬 실행" },
             { value: "sequential", label: "sequential — 순차 실행" },
           ],
+        },
+      ];
+    case "SUB_WORKFLOW":
+    case "sub_workflow":
+      return [
+        {
+          key: "workflow_id",
+          label: "공용 워크플로우",
+          placeholder: ctx.platformWfError || ctx.platformWorkflowOptions.length === 0
+            ? "워크플로우 ID 직접 입력"
+            : "플랫폼 공용 워크플로우를 선택하세요",
+          type: ctx.platformWfError || ctx.platformWorkflowOptions.length === 0 ? "text" : "select",
+          options: ctx.platformWorkflowOptions,
+        },
+        {
+          key: "input",
+          label: "입력 매핑 (JSON)",
+          placeholder: '{\n  "zip_path": "{{input.zip_path}}",\n  "prompt": "코드 리뷰해줘"\n}',
+          multiline: true,
         },
       ];
     default:

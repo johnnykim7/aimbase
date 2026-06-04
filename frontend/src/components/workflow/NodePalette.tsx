@@ -7,6 +7,7 @@ const PALETTE_ITEMS = [
   { type: "action", label: "액션", icon: "▶", color: "#6366f1" },
   { type: "agent", label: "에이전트", icon: "🧬", color: "#0891b2" },
   { type: "evaluator_loop", label: "평가-최적화 루프", icon: "🔁", color: "#8b5cf6" },
+  { type: "sub_workflow", label: "서브 워크플로우", icon: "🔗", color: "#0d9488" },
 ] as const;
 
 export function NodePalette() {

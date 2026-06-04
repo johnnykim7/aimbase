@@ -20,6 +20,8 @@ const TYPE_STYLES: Record<string, { color: string; icon: string }> = {
   AGENT_CALL: { color: "#0891b2", icon: "🧬" },
   evaluator_loop: { color: "#8b5cf6", icon: "🔁" },
   EVALUATOR_LOOP: { color: "#8b5cf6", icon: "🔁" },
+  sub_workflow: { color: "#0d9488", icon: "🔗" },
+  SUB_WORKFLOW: { color: "#0d9488", icon: "🔗" },
 };
 
 const STATUS_COLORS: Record<string, string> = {

@@ -11,6 +11,7 @@ const TYPE_MAP: Record<string, string> = {
   action: "ACTION",
   agent: "AGENT_CALL",
   evaluator_loop: "EVALUATOR_LOOP",
+  sub_workflow: "SUB_WORKFLOW",
 };
 
 /**
