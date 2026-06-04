@@ -6,6 +6,9 @@ import java.util.Map;
 /**
  * CR-029: 도구 실행 결과.
  * LLM에는 summary만 전달하고, 전체 output/artifacts는 lineage에 보관.
+ *
+ * CR-095: {@code newMessages} 추가 — 도구가 tool_result 텍스트 외에 LLM 컨텍스트로
+ * 별도 주입할 멀티모달 블록(PDF document / 페이지 이미지). openclaude newMessages 대응.
  */
 public record ToolResult(
         boolean success,
@@ -15,8 +18,16 @@ public record ToolResult(
         List<String> sideEffects,
         Map<String, Object> auditPayload,
         String nextContextHint,
-        long durationMs
+        long durationMs,
+        List<ToolMessageBlock> newMessages
 ) {
+    /** CR-095: 기존 8-arg 생성자 호환 — newMessages 없이 생성. */
+    public ToolResult(boolean success, Object output, String summary,
+                      List<ToolArtifact> artifacts, List<String> sideEffects,
+                      Map<String, Object> auditPayload, String nextContextHint, long durationMs) {
+        this(success, output, summary, artifacts, sideEffects, auditPayload, nextContextHint, durationMs, List.of());
+    }
+
     /** 간단한 성공 결과 생성 */
     public static ToolResult ok(Object output, String summary) {
         return new ToolResult(true, output, summary, List.of(), List.of(), Map.of(), null, 0);
@@ -42,6 +53,12 @@ public record ToolResult(
 
     /** durationMs를 설정한 복사본 반환 */
     public ToolResult withDuration(long durationMs) {
-        return new ToolResult(success, output, summary, artifacts, sideEffects, auditPayload, nextContextHint, durationMs);
+        return new ToolResult(success, output, summary, artifacts, sideEffects, auditPayload, nextContextHint, durationMs, newMessages);
+    }
+
+    /** CR-095: newMessages(멀티모달 주입 블록)를 설정한 복사본 반환. */
+    public ToolResult withNewMessages(List<ToolMessageBlock> newMessages) {
+        return new ToolResult(success, output, summary, artifacts, sideEffects, auditPayload, nextContextHint, durationMs,
+                newMessages != null ? newMessages : List.of());
     }
 }

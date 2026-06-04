@@ -40,7 +40,10 @@ class ParseDocumentToolTest {
     @BeforeEach
     void setUp() {
         workspaceProperties = new WorkspaceProperties();
-        tool = new ParseDocumentTool(ragClient, workspaceProperties);
+        // CR-095: PDF 비전 게이트. 비-PDF(txt 등) 경로 테스트는 resolver 미호출이므로 실제 인스턴스로 충분.
+        com.platform.attachment.PdfVisionResolver pdfVisionResolver =
+                new com.platform.attachment.PdfVisionResolver(ragClient, 3145728L, 20971520L, 20, 100);
+        tool = new ParseDocumentTool(ragClient, workspaceProperties, pdfVisionResolver);
         ctx = ToolContext.minimal("test-tenant", "test-session");
     }
 

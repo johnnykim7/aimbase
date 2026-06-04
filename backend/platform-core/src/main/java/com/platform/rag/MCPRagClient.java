@@ -354,6 +354,31 @@ public class MCPRagClient {
     }
 
     /**
+     * Python MCP Server의 pdf_to_images 도구 호출 (CR-095 — 비전 파싱).
+     *
+     * PDF 페이지를 JPEG 이미지로 렌더한다 (텍스트 추출/OCR 아님). LLM 이 이미지를
+     * 비전으로 직접 읽도록, BE 가 image 블록으로 변환해 컨텍스트에 주입한다.
+     *
+     * @param fileBase64 Base64 인코딩된 PDF
+     * @param pages      페이지 범위(1-indexed, 예 "1-5", "3", "10-"). null/빈값=전체(maxPages 상한)
+     * @param dpi        렌더 해상도 (기본 100)
+     * @param maxPages   한 번에 변환할 최대 페이지 수
+     * @return {success, images:[{page_number, media_type, data}], page_count, truncated, dpi}
+     *         또는 {success:false, error}
+     */
+    public Map<String, Object> pdfToImages(String fileBase64, String pages, int dpi, int maxPages) {
+        Map<String, Object> input = Map.of(
+                "file_base64", fileBase64,
+                "pages", pages != null ? pages : "",
+                "dpi", dpi,
+                "max_pages", maxPages
+        );
+
+        String result = mcpClient.callTool("pdf_to_images", input);
+        return parseJson(result);
+    }
+
+    /**
      * Python MCP Server의 self_rag_search 도구 호출.
      *
      * @return {query, results, iterations, relevance_scores, success}

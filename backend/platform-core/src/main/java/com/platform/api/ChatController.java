@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.platform.attachment.AttachmentException;
 import com.platform.attachment.AttachmentService;
 import com.platform.attachment.PdfTextExtractor;
+import com.platform.attachment.PdfVisionResolver;
 import com.platform.config.WorkspaceProperties;
 import com.platform.domain.ChatAttachmentEntity;
 import com.platform.llm.LLMAdapterRegistry;
@@ -45,6 +46,7 @@ public class ChatController {
     private final CancellationRegistry cancellationRegistry;
     private final AttachmentService attachmentService;
     private final PdfTextExtractor pdfTextExtractor;
+    private final PdfVisionResolver pdfVisionResolver;
     private final LLMAdapterRegistry adapterRegistry;
 
     public ChatController(OrchestratorEngine orchestrator,
@@ -52,12 +54,14 @@ public class ChatController {
                           CancellationRegistry cancellationRegistry,
                           AttachmentService attachmentService,
                           PdfTextExtractor pdfTextExtractor,
+                          PdfVisionResolver pdfVisionResolver,
                           LLMAdapterRegistry adapterRegistry) {
         this.orchestrator = orchestrator;
         this.workspaceProperties = workspaceProperties;
         this.cancellationRegistry = cancellationRegistry;
         this.attachmentService = attachmentService;
         this.pdfTextExtractor = pdfTextExtractor;
+        this.pdfVisionResolver = pdfVisionResolver;
         this.adapterRegistry = adapterRegistry;
     }
 
@@ -442,7 +446,11 @@ public class ChatController {
         return null;
     }
 
-    /** CR-061: document 블록 해석 — 지원 adapter 는 Document 블록, 미지원은 텍스트 폴백 prefix 에 누적. */
+    /**
+     * CR-061 + CR-095: document 블록 해석 — PDF 비전 게이트(openclaude 1:1).
+     * ≤3MB & PDF 지원 → document block 통째 / >3MB or 미지원 → 페이지 이미지화 → image 블록 /
+     * 이미지도 미지원 → PdfTextExtractor 텍스트 폴백.
+     */
     private void resolveDocumentBlock(Map<?, ?> map, String sessionId, AdapterResolution adapter,
                                        List<ContentBlock> blocks, StringBuilder pdfFallbackPrefix) {
         String attachmentId = (String) map.get("attachment_id");
@@ -454,15 +462,28 @@ public class ChatController {
         ChatAttachmentEntity att = attachmentService.loadOwned(UUID.fromString(attachmentId), sessionId);
         byte[] bytes = attachmentService.readBytes(att);
 
-        if (adapter.capability().supportsPdf()) {
-            String base64 = Base64.getEncoder().encodeToString(bytes);
-            blocks.add(ContentBlock.Document.ofBase64(att.getMediaType(), base64, att.getFilename()));
-        } else {
-            PdfTextExtractor.ExtractResult extracted = pdfTextExtractor.extract(bytes);
-            pdfFallbackPrefix
-                    .append("[첨부 문서: ").append(att.getFilename()).append("]\n")
-                    .append(extracted.isEmpty() ? "(텍스트 추출 실패)" : extracted.text())
-                    .append("\n\n");
+        // PDF 외(미래 확장)는 기존 path 유지 — 현재 document 블록은 PDF 만 들어온다.
+        PdfVisionResolver.PdfVisionResult vision = pdfVisionResolver.resolve(
+                bytes, adapter.capability().supportsPdf(), adapter.capability().supportsImage());
+
+        switch (vision.mode()) {
+            case INLINE_PDF -> blocks.add(
+                    ContentBlock.Document.ofBase64(att.getMediaType(), vision.pdfBase64(), att.getFilename()));
+            case PAGE_IMAGES -> {
+                if (vision.note() != null) {
+                    blocks.add(new ContentBlock.Text("[첨부 PDF: " + att.getFilename() + " — " + vision.note() + "]"));
+                }
+                for (PdfVisionResolver.PageImage img : vision.images()) {
+                    blocks.add(ContentBlock.Image.ofBase64(img.mediaType(), img.base64()));
+                }
+            }
+            case TEXT_FALLBACK -> {
+                PdfTextExtractor.ExtractResult extracted = pdfTextExtractor.extract(bytes);
+                pdfFallbackPrefix
+                        .append("[첨부 문서: ").append(att.getFilename()).append("]\n")
+                        .append(extracted.isEmpty() ? "(텍스트 추출 실패)" : extracted.text())
+                        .append("\n\n");
+            }
         }
     }
 

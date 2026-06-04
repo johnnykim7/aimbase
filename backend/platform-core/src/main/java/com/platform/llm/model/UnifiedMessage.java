@@ -19,4 +19,12 @@ public record UnifiedMessage(Role role, List<ContentBlock> content) {
     public static UnifiedMessage ofToolResults(List<ContentBlock.ToolResult> results) {
         return new UnifiedMessage(Role.TOOL_RESULT, List.copyOf(results));
     }
+
+    /**
+     * CR-095: 멀티모달 USER 메시지 — 도구가 LLM 컨텍스트에 주입하는 document/image 블록.
+     * openclaude 의 createUserMessage({content, isMeta:true}) 대응.
+     */
+    public static UnifiedMessage ofUserContent(List<ContentBlock> content) {
+        return new UnifiedMessage(Role.USER, List.copyOf(content));
+    }
 }

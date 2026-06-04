@@ -47,10 +47,13 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
 
     private final MCPRagClient ragClient;
     private final WorkspaceProperties workspaceProperties;
+    private final com.platform.attachment.PdfVisionResolver pdfVisionResolver;
 
-    public ParseDocumentTool(MCPRagClient ragClient, WorkspaceProperties workspaceProperties) {
+    public ParseDocumentTool(MCPRagClient ragClient, WorkspaceProperties workspaceProperties,
+                             com.platform.attachment.PdfVisionResolver pdfVisionResolver) {
         this.ragClient = ragClient;
         this.workspaceProperties = workspaceProperties;
+        this.pdfVisionResolver = pdfVisionResolver;
     }
 
     @Override
@@ -154,8 +157,12 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
                     return ToolResult.error("File too large: " + bytes.length + " bytes (max " + MAX_FILE_BYTES + ")")
                             .withDuration(System.currentTimeMillis() - start);
                 }
-                String base64 = Base64.getEncoder().encodeToString(bytes);
                 String inferredType = fileType != null ? fileType : inferTypeFromPath(p);
+                // CR-095: PDF 는 텍스트 추출 대신 LLM 비전 파싱 — document/image 블록을 newMessages 로 주입.
+                if ("pdf".equals(inferredType)) {
+                    return buildVisionResult(bytes, p, start);
+                }
+                String base64 = Base64.getEncoder().encodeToString(bytes);
                 Map<String, Object> result = ragClient.parseDocument(base64, inferredType);
                 return buildResult(result, "file:" + p, start);
             }
@@ -164,6 +171,59 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
             return ToolResult.error("parse_document failed: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
+    }
+
+    /**
+     * CR-095: PDF 비전 파싱 — tool_result 에는 메타 텍스트, 실제 PDF/이미지는 newMessages 로 주입.
+     * openclaude FileReadTool 의 (tool_result 메타 + newMessages document/image) 패턴 1:1.
+     *
+     * AGENT 자율 호출은 호출 모델 capability 를 도구가 알 수 없으므로 PDF/이미지 지원을 가정한다
+     * (≤3MB → document, >3MB → 페이지 이미지화). 미지원 모델이면 어댑터가 처리하거나
+     * PdfTextExtractor 폴백(=resolve 의 TEXT_FALLBACK)으로 떨어진다.
+     */
+    private ToolResult buildVisionResult(byte[] bytes, Path p, long start) {
+        com.platform.attachment.PdfVisionResolver.PdfVisionResult vision =
+                pdfVisionResolver.resolve(bytes, true, true);
+
+        String filename = p.getFileName().toString();
+        java.util.List<com.platform.tool.ToolMessageBlock> injected = new java.util.ArrayList<>();
+        String summary;
+        Map<String, Object> output = new LinkedHashMap<>();
+
+        switch (vision.mode()) {
+            case INLINE_PDF -> {
+                injected.add(com.platform.tool.ToolMessageBlock.document(
+                        "application/pdf", vision.pdfBase64(), filename));
+                summary = "PDF attached for vision parsing: " + filename + " (inline document)";
+                output.put("mode", "inline_pdf");
+                output.put("source", "file:" + p);
+            }
+            case PAGE_IMAGES -> {
+                for (com.platform.attachment.PdfVisionResolver.PageImage img : vision.images()) {
+                    injected.add(com.platform.tool.ToolMessageBlock.image(img.mediaType(), img.base64()));
+                }
+                summary = "PDF rendered to " + vision.images().size() + " page image(s) for vision parsing: " + filename
+                        + (vision.note() != null ? " (" + vision.note() + ")" : "");
+                output.put("mode", "page_images");
+                output.put("page_count", vision.images().size());
+                output.put("source", "file:" + p);
+            }
+            default -> {
+                // TEXT_FALLBACK — 비전 불가. 사이드카 텍스트 추출로 폴백.
+                String base64 = Base64.getEncoder().encodeToString(bytes);
+                Map<String, Object> result = ragClient.parseDocument(base64, "pdf");
+                return buildResult(result, "file:" + p, start);
+            }
+        }
+
+        // tool_result 본문에는 안내만 — 실제 콘텐츠는 newMessages 로 LLM 이 직접 본다.
+        output.put("note", "The PDF content has been provided to you as a separate message above. "
+                + "Read it directly; do not call parse_document again for this file.");
+
+        return new ToolResult(true, output, summary,
+                List.of(), List.of(),
+                Map.of("source", "file:" + p, "mode", output.get("mode")),
+                null, System.currentTimeMillis() - start, injected);
     }
 
     private ToolResult buildResult(Map<String, Object> sidecarResult, String source, long start) {

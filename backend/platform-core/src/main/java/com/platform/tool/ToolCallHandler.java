@@ -399,8 +399,10 @@ public class ToolCallHandler {
 
             // CR-047 PRD-298: safeCalls 병렬 실행 (Virtual Threads + Semaphore 상한)
             // unsafeCalls는 순차 유지. 결과는 원래 tool_use 순서대로 재정렬.
+            // CR-095: injectedMessages 에 도구가 주입한 멀티모달(PDF/이미지) user 메시지 수집.
+            List<UnifiedMessage> injectedMessages = new ArrayList<>();
             List<ContentBlock.ToolResult> results =
-                    runToolsPartitioned(safeCalls, unsafeCalls, effectiveContext, toolRegistry, turnNum, seq, null);
+                    runToolsPartitioned(safeCalls, unsafeCalls, effectiveContext, toolRegistry, turnNum, seq, null, injectedMessages);
 
             // A2 + CR-031 PRD-215 + CR-040: per-message budget + 도구별 지능형 축약 (런타임 설정)
             int compactionThreshold = platformSettings.getInt("orchestrator.tool-result-compaction-threshold", 81920);
@@ -438,6 +440,10 @@ public class ToolCallHandler {
             }
 
             mutableMessages.add(UnifiedMessage.ofToolResults(results));
+            // CR-095: tool_result 직후 멀티모달 user 메시지 주입 (openclaude newMessages 패턴)
+            if (!injectedMessages.isEmpty()) {
+                mutableMessages.addAll(injectedMessages);
+            }
         }
 
         return ensureTextResponse(response, adapter, resolvedModel, mutableMessages, config, sessionId);
@@ -563,8 +569,10 @@ public class ToolCallHandler {
 
             // CR-047 PRD-298: safeCalls 병렬 실행 + 스트림 이벤트는 순서대로 발행
             // streamSink는 thread-unsafe 가정 — 병렬 실행은 백그라운드, sink 호출은 메인 스레드에서만.
+            // CR-095: injectedMessages 에 도구가 주입한 멀티모달(PDF/이미지) user 메시지 수집.
+            List<UnifiedMessage> injectedMessages = new ArrayList<>();
             List<ContentBlock.ToolResult> results = runToolsPartitioned(
-                    safeCalls, unsafeCalls, effectiveContext, toolRegistry, turnNum, seq, cancelled);
+                    safeCalls, unsafeCalls, effectiveContext, toolRegistry, turnNum, seq, cancelled, injectedMessages);
 
             // 결과를 streamSink로 순서대로 발행 (toolCalls 원래 순서)
             java.util.Map<String, ContentBlock.ToolResult> resultById = new java.util.HashMap<>();
@@ -602,6 +610,10 @@ public class ToolCallHandler {
             }
 
             mutableMessages.add(UnifiedMessage.ofToolResults(results));
+            // CR-095: tool_result 직후 멀티모달 user 메시지 주입 (openclaude newMessages 패턴)
+            if (!injectedMessages.isEmpty()) {
+                mutableMessages.addAll(injectedMessages);
+            }
         }
 
         // CR-046: 중지된 경우 ensureTextResponse 호출 건너뛰고 partial 텍스트에 마커 부착
@@ -767,6 +779,10 @@ public class ToolCallHandler {
      * - 결과는 입력 순서를 보존하여 반환.
      * - cancelled가 비-null이면 매 호출 전 체크.
      */
+    /**
+     * CR-095: 도구 병렬/순차 실행. {@code injectedSink} 가 non-null 이면 각 도구의
+     * ToolResult.newMessages 를 ContentBlock 으로 변환해 (toolUseId 순서대로) 추가한다.
+     */
     private List<ContentBlock.ToolResult> runToolsPartitioned(
             List<ToolCall> safeCalls,
             List<ToolCall> unsafeCalls,
@@ -774,52 +790,53 @@ public class ToolCallHandler {
             ToolRegistry toolRegistry,
             int turnNum,
             AtomicInteger seq,
-            java.util.concurrent.atomic.AtomicBoolean cancelled) {
+            java.util.concurrent.atomic.AtomicBoolean cancelled,
+            List<UnifiedMessage> injectedSink) {
 
         int parallelMax = Math.max(1, platformSettings.getInt("tool.parallel-max", 10));
         Semaphore semaphore = new Semaphore(parallelMax);
         String tenantId = TenantContext.getTenantId();
 
         // 1) safeCalls 병렬 디스패치
-        List<CompletableFuture<ContentBlock.ToolResult>> safeFutures = new ArrayList<>(safeCalls.size());
+        List<CompletableFuture<ToolExecOutcome>> safeFutures = new ArrayList<>(safeCalls.size());
         for (ToolCall tc : safeCalls) {
             int seqNum = seq.getAndIncrement();
-            CompletableFuture<ContentBlock.ToolResult> f = CompletableFuture.supplyAsync(() -> {
+            CompletableFuture<ToolExecOutcome> f = CompletableFuture.supplyAsync(() -> {
                 if (cancelled != null && cancelled.get()) {
-                    return new ContentBlock.ToolResult(tc.id(), "[중단됨] tool execution cancelled");
+                    return ToolExecOutcome.text(tc.id(), "[중단됨] tool execution cancelled");
                 }
                 try {
                     semaphore.acquire();
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    return new ContentBlock.ToolResult(tc.id(), "Error: interrupted while acquiring semaphore");
+                    return ToolExecOutcome.text(tc.id(), "Error: interrupted while acquiring semaphore");
                 }
                 try {
                     if (tenantId != null) TenantContext.setTenantId(tenantId);
                     return executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seqNum);
                 } catch (Exception e) {
                     log.warn("Parallel tool {} failed: {}", tc.name(), e.getMessage());
-                    return new ContentBlock.ToolResult(tc.id(), "Error: " + e.getMessage());
+                    return ToolExecOutcome.text(tc.id(), "Error: " + e.getMessage());
                 } finally {
                     TenantContext.clear();
                     semaphore.release();
                 }
             }, parallelToolExecutor).exceptionally(ex -> {
                 log.warn("Parallel tool {} exception: {}", tc.name(), ex.getMessage());
-                return new ContentBlock.ToolResult(tc.id(), "Error: " + ex.getMessage());
+                return ToolExecOutcome.text(tc.id(), "Error: " + ex.getMessage());
             });
             safeFutures.add(f);
         }
 
         // safeCalls 합류
-        java.util.Map<String, ContentBlock.ToolResult> byId = new java.util.HashMap<>();
+        java.util.Map<String, ToolExecOutcome> byId = new java.util.HashMap<>();
         for (int i = 0; i < safeCalls.size(); i++) {
-            ContentBlock.ToolResult r;
+            ToolExecOutcome r;
             try {
                 r = safeFutures.get(i).join();
             } catch (Exception e) {
                 ToolCall tc = safeCalls.get(i);
-                r = new ContentBlock.ToolResult(tc.id(), "Error: " + e.getMessage());
+                r = ToolExecOutcome.text(tc.id(), "Error: " + e.getMessage());
             }
             byId.put(safeCalls.get(i).id(), r);
         }
@@ -827,29 +844,62 @@ public class ToolCallHandler {
         // 2) unsafeCalls 순차 실행
         for (ToolCall tc : unsafeCalls) {
             if (cancelled != null && cancelled.get()) {
-                byId.put(tc.id(), new ContentBlock.ToolResult(tc.id(), "[중단됨] tool execution cancelled"));
+                byId.put(tc.id(), ToolExecOutcome.text(tc.id(), "[중단됨] tool execution cancelled"));
                 continue;
             }
             try {
                 byId.put(tc.id(), executeAndRecord(tc, effectiveContext, toolRegistry, turnNum, seq.getAndIncrement()));
             } catch (Exception e) {
-                byId.put(tc.id(), new ContentBlock.ToolResult(tc.id(), "Error: " + e.getMessage()));
+                byId.put(tc.id(), ToolExecOutcome.text(tc.id(), "Error: " + e.getMessage()));
             }
         }
 
-        // 3) 입력 순서대로 재정렬 (safe + unsafe 합쳐서)
+        // 3) 입력 순서대로 재정렬 (safe + unsafe 합쳐서). newMessages 수집.
         List<ContentBlock.ToolResult> ordered = new ArrayList<>(safeCalls.size() + unsafeCalls.size());
-        for (ToolCall tc : safeCalls) ordered.add(byId.get(tc.id()));
-        for (ToolCall tc : unsafeCalls) ordered.add(byId.get(tc.id()));
+        List<ToolCall> all = new ArrayList<>(safeCalls.size() + unsafeCalls.size());
+        all.addAll(safeCalls);
+        all.addAll(unsafeCalls);
+        for (ToolCall tc : all) {
+            ToolExecOutcome o = byId.get(tc.id());
+            ordered.add(o.result());
+            if (injectedSink != null && o.injected() != null && !o.injected().isEmpty()) {
+                injectedSink.add(UnifiedMessage.ofUserContent(o.injected()));
+            }
+        }
         return ordered;
+    }
+
+    /** CR-095: 도구 1회 실행 결과 + LLM 컨텍스트에 주입할 멀티모달 블록. */
+    private record ToolExecOutcome(ContentBlock.ToolResult result, List<ContentBlock> injected) {
+        static ToolExecOutcome text(String toolUseId, String content) {
+            return new ToolExecOutcome(new ContentBlock.ToolResult(toolUseId, content), List.of());
+        }
+    }
+
+    /** CR-095: 경량 ToolMessageBlock → platform-core ContentBlock 변환. */
+    private static List<ContentBlock> toContentBlocks(List<ToolMessageBlock> blocks) {
+        if (blocks == null || blocks.isEmpty()) return List.of();
+        List<ContentBlock> out = new ArrayList<>(blocks.size());
+        for (ToolMessageBlock b : blocks) {
+            switch (b.type()) {
+                case ToolMessageBlock.TYPE_DOCUMENT ->
+                        out.add(ContentBlock.Document.ofBase64(b.mediaType(), b.data(), b.filename()));
+                case ToolMessageBlock.TYPE_IMAGE ->
+                        out.add(ContentBlock.Image.ofBase64(b.mediaType(), b.data()));
+                case ToolMessageBlock.TYPE_TEXT ->
+                        out.add(new ContentBlock.Text(b.data()));
+                default -> log.warn("CR-095: unknown ToolMessageBlock type={}, skipped", b.type());
+            }
+        }
+        return out;
     }
 
     /**
      * 단일 도구 실행 + lineage 기록 + LLM용 결과 생성.
      * CR-030: PreToolUse / PostToolUse / PostToolUseFailure 훅 삽입.
      */
-    private ContentBlock.ToolResult executeAndRecord(ToolCall tc, ToolContext toolContext,
-                                                      ToolRegistry toolRegistry, int turnNum, int seqNum) {
+    private ToolExecOutcome executeAndRecord(ToolCall tc, ToolContext toolContext,
+                                              ToolRegistry toolRegistry, int turnNum, int seqNum) {
         log.debug("Executing tool: {} (id={}, turn={}, seq={})",
                 tc.name(), tc.id(), turnNum, seqNum);
 
@@ -861,7 +911,7 @@ public class ToolCallHandler {
                 ToolContractMeta meta = toolRegistry.getContractMeta(tc.name());
                 if (meta != null && !meta.readOnly()) {
                     log.info("Plan mode: blocked write tool={}, session={}", tc.name(), toolContext.sessionId());
-                    return new ContentBlock.ToolResult(tc.id(),
+                    return ToolExecOutcome.text(tc.id(),
                             "[DENIED] Plan mode active: only read-only tools allowed. " +
                                     "Use exit_plan_mode to enable writes.");
                 }
@@ -875,7 +925,7 @@ public class ToolCallHandler {
                 tc.name());
         if (preHook.decision() == HookDecision.BLOCK) {
             log.info("Tool execution blocked by hook: tool={}, turn={}", tc.name(), turnNum);
-            return new ContentBlock.ToolResult(tc.id(), "Tool execution blocked by policy hook");
+            return ToolExecOutcome.text(tc.id(), "Tool execution blocked by policy hook");
         }
 
         ToolResult toolResult;
@@ -918,7 +968,9 @@ public class ToolCallHandler {
         } else {
             resultText = toolResult.summary();
         }
-        return new ContentBlock.ToolResult(tc.id(), resultText);
+        // CR-095: 도구가 멀티모달 블록(PDF document / 페이지 이미지)을 주입 요청했으면 변환해 동봉
+        List<ContentBlock> injected = toContentBlocks(toolResult.newMessages());
+        return new ToolExecOutcome(new ContentBlock.ToolResult(tc.id(), resultText), injected);
     }
 
     /**

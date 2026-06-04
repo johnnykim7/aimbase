@@ -895,6 +895,40 @@ def ocr_image(
 
 
 @mcp.tool()
+def pdf_to_images(
+    file_base64: str,
+    pages: str = "",
+    dpi: int = 100,
+    max_pages: int = 20,
+) -> str:
+    """Render PDF pages to JPEG images for vision parsing (CR-095).
+
+    Unlike parse_document/read_pdf (which extract text via unstructured/OCR), this
+    renders each page as an image so the LLM can read it directly with vision.
+    Used when a PDF is too large for a base64 document block (>3MB) or when the
+    model lacks native PDF support — the BE sends these images as image blocks.
+
+    Args:
+        file_base64: Base64-encoded PDF content
+        pages: Page range, 1-indexed (e.g. "1-5", "3", "10-"). Empty = all (up to max_pages)
+        dpi: Render resolution (default 100, matches openclaude)
+        max_pages: Max pages to render in one call (default 20, polyfill cap)
+    """
+    from rag_pipeline.tools.pdf_images import pdf_to_images_bytes
+    try:
+        pdf_bytes = base64.b64decode(file_base64)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"invalid_base64: {e}"})
+    result = pdf_to_images_bytes(
+        pdf_bytes,
+        pages=pages or None,
+        dpi=dpi,
+        max_pages=max_pages,
+    )
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
 def convert_format(
     file_base64: str,
     input_format: str,

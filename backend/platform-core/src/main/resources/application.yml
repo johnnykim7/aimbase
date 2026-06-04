@@ -181,6 +181,16 @@ aimbase:
     fallback-threshold-chars: ${AIMBASE_OCR_FALLBACK_THRESHOLD:50}
     languages: ${AIMBASE_OCR_LANGUAGES:kor+eng}
     max-pages: ${AIMBASE_OCR_MAX_PAGES:50}
+  # CR-095 PDF 비전 파싱 (openclaude 1:1) — 모델 비전으로 PDF 처리
+  pdf:
+    # 이 크기 이하 & PDF 지원 어댑터 → base64 document block 통째 (모델 직접 비전)
+    inline-max-bytes: ${AIMBASE_PDF_INLINE_MAX_BYTES:3145728}      # 3 MB
+    # document block 으로 보낼 수 있는 최대 원본 크기 (API 32MB 한계 + base64 33% 여유)
+    target-raw-max-bytes: ${AIMBASE_PDF_TARGET_RAW_MAX_BYTES:20971520}  # 20 MB
+    # 페이지 이미지화 시 한 번에 변환할 최대 페이지 수
+    max-pages-per-read: ${AIMBASE_PDF_MAX_PAGES_PER_READ:20}
+    # 페이지 이미지 렌더 해상도 (openclaude pdftoppm -r 100 동일)
+    image-dpi: ${AIMBASE_PDF_IMAGE_DPI:100}
 
 logging:
   level:

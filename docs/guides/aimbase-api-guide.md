@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v2.0.0** | 2026-04-10 | Aimbase v6.3.0 기준
+> **v3.5.0** | 2026-06-04 | Aimbase v8.16.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1428,6 +1428,75 @@ await fetch(`${baseUrl}/api/v1/knowledge-sources/${sourceId}/chunks/${chunkId}`,
   { headers: { 'Authorization': `Bearer ${token}` } });
 ```
 
+### 17-9. 워크플로우 실행 이벤트 시간순 조회 — `GET /api/v1/workflows/runs/{runId}/events` [CR-090]
+
+실시간 SSE(§17-6) 연결을 유지하기 부담스러울 때, **실행이 끝난 뒤(또는 폴링으로 중간에) 한 번 호출**하면 "어떤 단계에서 어떤 도구를 어떤 input 으로 불렀고 무엇을 받았다" 흐름을 시간순 배열로 받는다. 로그처럼 그대로 출력하기 좋다.
+
+**인증**: `Authorization: Bearer <위젯 토큰>` 또는 `?access_token=<위젯 토큰>` (§17-6 과 동일하게 공통 JWT 필터가 처리). 기본 인증 사용자도 가능.
+
+```bash
+curl "$AIMBASE/api/v1/workflows/runs/$RUN_ID/events" \
+  -H "Authorization: Bearer $WIDGET_TOKEN"
+```
+
+**응답** (`data` 는 시간순(`created_at`, `id` ASC) 이벤트 배열):
+
+```json
+{
+  "success": true,
+  "data": [
+    { "id": 1, "event_type": "STEP_START", "step_id": "fetch_order", "iteration": null,
+      "tool_name": null, "duration_ms": null,
+      "payload": { "step_type": "TOOL_CALL" },
+      "trace_id": null, "subagent_run_id": null, "created_at": "2026-06-04T10:00:00.123Z" },
+    { "id": 2, "event_type": "TOOL_USE", "step_id": "fetch_order", "iteration": 0,
+      "tool_name": "http_request", "duration_ms": null,
+      "payload": { "input_keys": ["url","method"], "input_preview": "{url=https://…, method=GET}" },
+      "trace_id": null, "subagent_run_id": null, "created_at": "2026-06-04T10:00:00.130Z" },
+    { "id": 3, "event_type": "TOOL_RESULT", "step_id": "fetch_order", "iteration": 0,
+      "tool_name": "http_request", "duration_ms": 1420,
+      "payload": { "output_size": 8231, "ok": true },
+      "trace_id": null, "subagent_run_id": null, "created_at": "2026-06-04T10:00:01.550Z" },
+    { "id": 4, "event_type": "LLM_RESPONSE", "step_id": "summarize", "iteration": 1,
+      "tool_name": null, "duration_ms": 2100,
+      "payload": { "model": "claude-…", "in_tok": 1820, "out_tok": 240, "finish_reason": "end_turn" },
+      "trace_id": "abc123", "subagent_run_id": null, "created_at": "2026-06-04T10:00:03.700Z" },
+    { "id": 5, "event_type": "STEP_END", "step_id": "summarize", "iteration": null,
+      "tool_name": null, "duration_ms": 2100,
+      "payload": { "output_size": 240 },
+      "trace_id": null, "subagent_run_id": null, "created_at": "2026-06-04T10:00:03.710Z" }
+  ]
+}
+```
+
+**이벤트 6 종**:
+
+| event_type | 의미 | 주요 payload 필드 |
+|------------|------|------------------|
+| `STEP_START` | 단계 진입 | `step_type` |
+| `TOOL_USE` | 도구 호출 시작 | `input_keys`, `input_preview` (input 100자 미리보기) |
+| `TOOL_RESULT` | 도구 결과 | `output_size`, `ok`, `error`(실패 시) |
+| `LLM_RESPONSE` | LLM 응답 1회 | `model`, `in_tok`, `out_tok`, `finish_reason` |
+| `STEP_END` | 단계 정상 종료 | `output_size` (+ 최상위 `duration_ms`) |
+| `STEP_FAILED` | 단계 실패 | `error`(500자), `attempts` (+ 최상위 `duration_ms`) |
+
+**필드 주의**:
+- `iteration` — 같은 단계 내 도구 루프 회차(0-based). 단계 레벨 이벤트(START/END/FAILED)는 `null`
+- `trace_id` / `subagent_run_id` — 서브에이전트·심층 분석과 join 하기 위한 키. 얇은 버전이라 prompt/response **원본은 저장하지 않음**
+- payload 는 비어 있으면 `null` 로 내려갈 수 있음
+
+**§17-6(SSE) 과의 선택 기준**: 실시간 진행 표시가 필요하면 `/subscribe`(SSE), "실행 단위 로그를 사후/폴링으로 본다" 면 `/events`. 둘은 독립적으로 병행 사용 가능하다.
+
+```js
+// 실행 끝난 뒤(또는 N초 폴링) 한 번만 — 로그처럼 출력
+const res = await fetch(`${baseUrl}/api/v1/workflows/runs/${runId}/events`,
+  { headers: { Authorization: `Bearer ${token}` } });
+const events = (await res.json()).data;
+events.forEach(e =>
+  console.log(`[${e.created_at}] ${e.event_type} ${e.step_id} `
+    + `${e.tool_name ?? ''} ${e.duration_ms != null ? e.duration_ms + 'ms' : ''}`));
+```
+
 ---
 
 ## 18. 위젯 파일 첨부 (이미지/PDF Vision) [CR-061]
@@ -1502,7 +1571,13 @@ BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:upload` 
 
 **처리 규칙** — 서버가 요청 모델의 어댑터 capability 를 확인한 뒤:
 - `image` 블록: 이미지 지원 어댑터(Anthropic/OpenAI/Bedrock/Ollama/Vertex)는 모두 네이티브 `ImageBlockParam` 으로 전달
-- `document` 블록: Anthropic/Bedrock Claude 는 네이티브 PDF `DocumentBlockParam` 전달, 그 외 프로바이더는 Python 사이드카 `parse_document` 로 텍스트 추출 후 `"[첨부 문서: {filename}]\n{text}\n\n"` 를 메시지 앞에 prepend 하는 폴백 경로 사용
+- `document` 블록 (PDF): **CR-095 비전 게이트** — PDF 를 사이드카 텍스트 추출(`parse_document`/OCR)이 아니라 **LLM 모델 비전**으로 파싱한다 (openclaude 1:1). 크기/모델지원에 따라 3분기:
+  - **≤ 3MB & PDF 지원 어댑터**(Anthropic/Bedrock Claude) → base64 `DocumentBlockParam` 통째 — 모델이 PDF 를 직접 비전으로 봄
+  - **> 3MB or PDF 미지원 어댑터** → Python 사이드카 `pdf_to_images`(poppler) 로 페이지를 JPEG(100 DPI) 렌더 → `ImageBlockParam` 배열로 전달 (모델이 페이지 이미지를 비전으로 봄). 페이지 상한 기본 20
+  - **이미지조차 미지원 어댑터** → 기존 `PdfTextExtractor`(`parse_document` + OCR) 텍스트 폴백 — `"[첨부 문서: {filename}]\n{text}\n\n"` 메시지 앞에 prepend
+- 임계값은 `aimbase.pdf.*` 로 조정: `inline-max-bytes`(3MB), `target-raw-max-bytes`(20MB), `max-pages-per-read`(20), `image-dpi`(100)
+
+> **왜 비전인가**: `parse_document`(unstructured/OCR 직렬, 건당 ~38초)는 표·레이아웃·도표를 뭉갠다. 모델 비전은 페이지를 그림으로 직접 이해 → 복잡한 문서 품질↑·지연↓. OCR 경로(§ 20)는 결정론·오프라인 추출이 필요할 때만.
 
 기존 `image_url` (OpenAI 스타일 data: URI) 과 문자열 content 도 호환 유지.
 
@@ -1665,6 +1740,8 @@ RAG 인제스션은 OCR 우선, 위젯 채팅은 Vision 우선. BE `PdfTextExtra
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.6.0 | 2026-06-05 | **CR-095 — PDF Native 비전 파싱** (openclaude 1:1). PDF 첨부(`document` 블록)를 사이드카 텍스트 추출(`parse_document`/OCR ~38초)이 아니라 **LLM 모델 비전**으로 파싱 (§ 18-4). 3분기: ≤3MB & PDF지원 → base64 `DocumentBlockParam` 통째 / >3MB or PDF미지원 → 사이드카 `pdf_to_images`(poppler, JPEG 100DPI) 페이지 이미지화 → `ImageBlockParam` 배열 / 이미지도 미지원 → `PdfTextExtractor` 텍스트 폴백. 임계값 `aimbase.pdf.*` (inline-max-bytes 3MB, target-raw-max-bytes 20MB, max-pages-per-read 20, image-dpi 100). **AGENT 자율 호출**(`parse_document` 도구)도 PDF 면 비전 경로 — tool_result 엔 메타, 실제 PDF/이미지는 별도 user 메시지로 주입(`ToolResult.newMessages`, openclaude newMessages 패턴). 신규 사이드카 MCP 툴 `pdf_to_images`. 단위: 사이드카 18 + PdfVisionResolver 9 + tool/rag/attachment 회귀 GREEN. **기존 동작 무변경(하위호환)** |
+| v3.5.0 | 2026-06-04 | **CR-090 — 워크플로우 실행 이벤트 조회 API 문서화**. 기존 운영 라이브였으나 가이드에 누락돼 있던 `GET /api/v1/workflows/runs/{runId}/events` 추가 (§ 17-9). STEP_START/TOOL_USE/TOOL_RESULT/LLM_RESPONSE/STEP_END/STEP_FAILED 6종 이벤트를 시간순 배열로 반환 — 실시간 SSE(§17-6) 부담 없이 실행 단위 흐름을 사후/폴링 로그로 소비. 인증은 §17-6 과 동일(Bearer 또는 `?access_token=` 위젯 토큰, 공통 JWT 필터 처리). prompt/response 원본 미저장(얇은 버전), `trace_id`/`subagent_run_id` 로 심층 join. **신규 코드 없음 — 문서만 추가** |
 |------|------|----------|
 | v3.4.0 | 2026-06-03 | **CR-092 — 전통적 OCR (Tesseract)**. 사이드카 `read_pdf` 의 `ocr_enabled` 인자 실연결 + 신규 `ocr_image` MCP 툴 + BE `PdfTextExtractor` 텍스트 < 50자 fallback 자동 OCR + BE Built-in Tool `ocr_image` 신설 + CR-072 CLI 화이트리스트 추가(27개). 설정 4키 `aimbase.ocr.*` (`global_config` V65 seed). 언어 화이트리스트 BIZ-106 (eng/kor/jpn/chi_sim/chi_tra/fra/deu/spa), 페이지 상한 BIZ-105 (50), fallback 임계 BIZ-107 (50자). Dockerfile `tesseract-ocr-kor` 한국어 언어팩 추가. Vision 모델(CR-061)과 분리 — RAG 인제스션·결정론·오프라인 OCR 경로 (§ 20) |
 | v3.3.0 | 2026-05-29 | **CR-087 — 워크플로우 FOREACH step (동적 컬렉션 fan-out)**. 신규 스텝 타입 `FOREACH` — 런타임 컬렉션(`items`)의 각 원소에 `body` 스텝(`LLM_CALL`/`TOOL_CALL`/`SUB_WORKFLOW` 등)을 적용(map). body에서 `{{item.field}}`(Map)·`{{item.value}}`(스칼라)·`{{index.value}}`(0-based) 참조. `mode`(`sequential` 기본 / `parallel`=Virtual Thread + `max_concurrency` 기본 5), `max_items`(기본 100, 초과 시 FAIL), `collect`(`append` 기본 / `merge` / `none`), `on_item_error`(`fail` 기본 / `continue`). 출력 `{output:[...], results:[...], item_count, failed_count}`. `PARALLEL`(정적 branch)·`ROUTER`(N중 1택)로 표현 못하던 map/fan-out을 단일 노드로 선언 (LangGraph `Send`/map 대응). FOREACH 직접 중첩은 차단(body=`SUB_WORKFLOW`로 중첩). **단일 노드라 DAG/cyclic 양 모드 동일 동작, 마이그레이션 불필요(StepType JSONB 문자열), 기존 워크플로우 무변경(하위호환)** — platform-core 전체 회귀 GREEN |
