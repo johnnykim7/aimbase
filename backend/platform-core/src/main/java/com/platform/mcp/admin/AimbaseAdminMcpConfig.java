@@ -29,7 +29,12 @@ public class AimbaseAdminMcpConfig {
 
     @Bean
     public WebMvcSseServerTransportProvider adminMcpTransport(ObjectMapper objectMapper) {
-        return new WebMvcSseServerTransportProvider(objectMapper, "/admin-mcp/message", "/admin-mcp/sse");
+        // SDK 0.17.0: 생성자 대신 builder + McpJsonMapper 사용.
+        return WebMvcSseServerTransportProvider.builder()
+                .jsonMapper(io.modelcontextprotocol.json.McpJsonMapper.createDefault())
+                .messageEndpoint("/admin-mcp/message")
+                .sseEndpoint("/admin-mcp/sse")
+                .build();
     }
 
     @Bean
@@ -176,7 +181,12 @@ public class AimbaseAdminMcpConfig {
     private McpServerFeatures.SyncToolSpecification tool(
             String name, String description, McpSchema.JsonSchema inputSchema,
             Function<Map<String, Object>, String> handler) {
-        var mcpTool = new McpSchema.Tool(name, description, inputSchema);
+        // SDK 0.17.0: Tool 7-arg 생성자 대신 builder 사용.
+        var mcpTool = McpSchema.Tool.builder()
+                .name(name)
+                .description(description)
+                .inputSchema(inputSchema)
+                .build();
         return new McpServerFeatures.SyncToolSpecification(mcpTool, (exchange, args) -> {
             // MCP 메시지는 비동기 스레드에서 실행 → TenantContext가 없을 수 있음
             // McpTenantSessionFilter가 SSE 연결 시 저장한 테넌트를 사용

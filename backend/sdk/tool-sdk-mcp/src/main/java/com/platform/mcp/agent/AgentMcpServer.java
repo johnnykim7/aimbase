@@ -123,7 +123,9 @@ public class AgentMcpServer {
      */
     public void startStdio() {
         log.info("AgentMcpServer stdio 모드 시작: {} 도구 노출", tools.size());
-        McpSyncServer server = buildMcpServer(new StdioServerTransportProvider());
+        // SDK 0.17.0: StdioServerTransportProvider 는 McpJsonMapper 인자 필요.
+        McpSyncServer server = buildMcpServer(
+                new StdioServerTransportProvider(io.modelcontextprotocol.json.McpJsonMapper.createDefault()));
         // stdio transport는 stdin이 닫힐 때까지 블로킹 처리한다.
         // JVM 종료 시그널(SIGTERM/SIGINT)에 graceful 종료 등록
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -188,11 +190,12 @@ public class AgentMcpServer {
 
         @Bean
         public WebMvcSseServerTransportProvider mcpTransport() {
-            return new WebMvcSseServerTransportProvider(
-                    new com.fasterxml.jackson.databind.ObjectMapper(),
-                    "/mcp/message",
-                    "/mcp/sse"
-            );
+            // SDK 0.17.0: 생성자 대신 builder + McpJsonMapper 사용.
+            return WebMvcSseServerTransportProvider.builder()
+                    .jsonMapper(io.modelcontextprotocol.json.McpJsonMapper.createDefault())
+                    .messageEndpoint("/mcp/message")
+                    .sseEndpoint("/mcp/sse")
+                    .build();
         }
 
         @Bean

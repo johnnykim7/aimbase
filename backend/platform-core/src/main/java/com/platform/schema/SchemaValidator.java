@@ -2,17 +2,16 @@ package com.platform.schema;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SpecVersion;
-import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.Error;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Component
 public class SchemaValidator {
@@ -20,11 +19,12 @@ public class SchemaValidator {
     private static final Logger log = LoggerFactory.getLogger(SchemaValidator.class);
 
     private final ObjectMapper objectMapper;
-    private final JsonSchemaFactory schemaFactory;
+    // networknt 2.0.0: JsonSchemaFactory → SchemaRegistry, SpecVersion.VersionFlag.V7 → SpecificationVersion.DRAFT_7
+    private final SchemaRegistry schemaRegistry;
 
     public SchemaValidator(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
-        this.schemaFactory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
+        this.schemaRegistry = SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_7);
     }
 
     public ValidationResult validate(Map<String, Object> jsonSchema, Map<String, Object> data) {
@@ -32,14 +32,15 @@ public class SchemaValidator {
             JsonNode schemaNode = objectMapper.valueToTree(jsonSchema);
             JsonNode dataNode = objectMapper.valueToTree(data);
 
-            JsonSchema schema = schemaFactory.getSchema(schemaNode);
-            Set<ValidationMessage> errors = schema.validate(dataNode);
+            // networknt 2.0.0: getSchema(JsonNode) → Schema, validate(JsonNode) → List<Error>
+            Schema schema = schemaRegistry.getSchema(schemaNode);
+            List<Error> errors = schema.validate(dataNode);
 
             if (errors.isEmpty()) {
                 return ValidationResult.success();
             }
             List<String> messages = errors.stream()
-                    .map(ValidationMessage::getMessage)
+                    .map(Error::getMessage)
                     .toList();
             return ValidationResult.failure(messages);
         } catch (Exception e) {

@@ -71,6 +71,12 @@ rag:
   mcp:
     url: ${RAG_MCP_URL:http://localhost:8000}
     enabled: ${RAG_MCP_ENABLED:false}
+    # 사이드카 호출 타임아웃(초). 대용량 PDF parse_document 다운로드+파싱이 30초를 넘기는 사례 대응.
+    request-timeout-seconds: ${RAG_MCP_REQUEST_TIMEOUT_SECONDS:180}
+    # 사이드카 SSE 세션 워밍업 핑. 재기동/유휴로 죽은 세션을 살려둬 첫 호출 cold-start hang(180초) 예방.
+    healthcheck:
+      interval-ms: ${RAG_MCP_HEALTHCHECK_INTERVAL_MS:60000}
+      initial-delay-ms: ${RAG_MCP_HEALTHCHECK_INITIAL_DELAY_MS:90000}
 
 # ─── Safety MCP 설정 (PII Detection, Sprint 16) ──────────────────────
 safety:

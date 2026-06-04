@@ -27,10 +27,27 @@ public class MCPServerClient implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(MCPServerClient.class);
 
     private final String serverId;
-    private final McpSyncClient client;
+    // SSE 세션 무효화(사이드카 재기동 등) 시 reconnect 로 교체하므로 final 아님.
+    private McpSyncClient client;
     private boolean initialized = false;
 
+    // reconnect 시 동일 파라미터로 client 를 재생성하기 위해 보존.
+    private final UrlSplit urlSplit;
+    private final int requestTimeoutSeconds;
+
+    /** 기본 requestTimeout 30초. 문서 파싱처럼 오래 걸리는 호출은 아래 오버로드로 상향한다. */
+    private static final int DEFAULT_REQUEST_TIMEOUT_SECONDS = 30;
+
     public MCPServerClient(String serverId, String transport, Map<String, Object> config) {
+        this(serverId, transport, config, DEFAULT_REQUEST_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * requestTimeout 을 외부에서 주입하는 생성자.
+     * PDF 다운로드+파싱처럼 오래 걸리는 사이드카 호출(parse_document 등)은 30초로 부족하므로
+     * 호출부(MCPRagClient)에서 더 긴 값을 넘긴다. connect/initialization 은 30초 유지(연결·핸드셰이크는 빨라야 함).
+     */
+    public MCPServerClient(String serverId, String transport, Map<String, Object> config, int requestTimeoutSeconds) {
         this.serverId = serverId;
 
         String url = (String) config.get("url");
@@ -47,15 +64,42 @@ public class MCPServerClient implements AutoCloseable {
         log.info("MCP server '{}' transport split: baseUri={}, sseEndpoint={}",
                 serverId, split.baseUri, split.sseEndpoint);
 
-        var httpTransport = HttpClientSseClientTransport.builder(split.baseUri)
-                .sseEndpoint(split.sseEndpoint)
+        this.urlSplit = split;
+        this.requestTimeoutSeconds = requestTimeoutSeconds;
+        this.client = buildClient();
+    }
+
+    /**
+     * transport + sync client 생성. 생성자와 {@link #reconnect()} 가 공용으로 사용한다.
+     * 보존된 urlSplit/requestTimeoutSeconds 로 동일 구성을 재현한다.
+     */
+    private McpSyncClient buildClient() {
+        var httpTransport = HttpClientSseClientTransport.builder(urlSplit.baseUri())
+                .sseEndpoint(urlSplit.sseEndpoint())
                 .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)))
                 .build();
-        this.client = McpClient.sync(httpTransport)
+        return McpClient.sync(httpTransport)
                 .clientInfo(new McpSchema.Implementation("aimbase", "1.0.0"))
-                .requestTimeout(Duration.ofSeconds(30))
+                .requestTimeout(Duration.ofSeconds(requestTimeoutSeconds))
                 .initializationTimeout(Duration.ofSeconds(30))
                 .build();
+    }
+
+    /**
+     * SSE 세션 무효화(사이드카 재기동 등) 시 client 를 닫고 새로 만들어 재초기화.
+     * 죽은 session_id 로 보낸 POST 가 404("Could not find session") 를 받아도 SDK 가 이를
+     * 응답으로 전파하지 못해 requestTimeout 풀타임아웃이 나는 문제를 해소한다.
+     */
+    public synchronized void reconnect() {
+        try {
+            if (client != null) client.close();
+        } catch (Exception e) {
+            log.warn("MCP server '{}' reconnect: error closing stale client: {}", serverId, e.getMessage());
+        }
+        this.client = buildClient();
+        this.initialized = false;
+        connect();
+        log.info("MCP server '{}' reconnected (new SSE session)", serverId);
     }
 
     /**
@@ -138,8 +182,16 @@ public class MCPServerClient implements AutoCloseable {
      */
     public String callTool(String toolName, Map<String, Object> input) {
         ensureConnected();
-        McpSchema.CallToolResult result = client.callTool(
-                new McpSchema.CallToolRequest(toolName, input));
+        McpSchema.CallToolResult result;
+        try {
+            result = client.callTool(new McpSchema.CallToolRequest(toolName, input));
+        } catch (Exception e) {
+            // 죽은 SSE 세션(사이드카 재기동 등)에 걸리면 requestTimeout 풀타임아웃/IO 예외가 난다.
+            // 1회 재연결 후 재시도 — 죽은 session_id 대신 새 세션으로 호출한다.
+            log.warn("MCP tool '{}' call failed ({}), reconnecting and retrying once", toolName, e.getMessage());
+            reconnect();
+            result = client.callTool(new McpSchema.CallToolRequest(toolName, input));
+        }
 
         if (Boolean.TRUE.equals(result.isError())) {
             log.warn("MCP tool '{}' returned an error result", toolName);

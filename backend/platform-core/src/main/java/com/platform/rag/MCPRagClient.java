@@ -14,6 +14,7 @@ import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.ToolRegistry;
 
 import org.springframework.context.annotation.Lazy;
+import org.springframework.scheduling.annotation.Scheduled;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.List;
@@ -42,6 +43,11 @@ public class MCPRagClient {
     @Value("${rag.mcp.enabled:false}")
     private boolean mcpEnabled;
 
+    // 사이드카 호출 타임아웃(초). parse_document 의 PDF 다운로드+파싱이 30초를 넘기는 사례(대용량 PDF)로
+    // 기본 30초가 부족 → 180초로 상향. 환경변수 RAG_MCP_REQUEST_TIMEOUT_SECONDS 로 조정 가능.
+    @Value("${rag.mcp.request-timeout-seconds:180}")
+    private int requestTimeoutSeconds;
+
     private MCPServerClient mcpClient;
     private boolean connected = false;
 
@@ -54,10 +60,10 @@ public class MCPRagClient {
     public void init() {
         if (mcpEnabled) {
             try {
-                mcpClient = new MCPServerClient("rag-pipeline", "sse", Map.of("url", mcpServerUrl));
+                mcpClient = new MCPServerClient("rag-pipeline", "sse", Map.of("url", mcpServerUrl), requestTimeoutSeconds);
                 mcpClient.connect();
                 connected = true;
-                log.info("Connected to RAG Pipeline MCP Server at {}", mcpServerUrl);
+                log.info("Connected to RAG Pipeline MCP Server at {} (requestTimeout={}s)", mcpServerUrl, requestTimeoutSeconds);
                 registerToolsInRegistry();
             } catch (Exception e) {
                 log.warn("Failed to connect to RAG Pipeline MCP Server at {}: {}. Falling back to Java implementation.",
@@ -91,6 +97,30 @@ public class MCPRagClient {
 
     public boolean isAvailable() {
         return mcpEnabled && connected;
+    }
+
+    /**
+     * 사이드카 SSE 세션 워밍업 핑.
+     *
+     * SDK 0.10.0 의 SSE 세션은 사이드카 재기동/유휴 시 무효화되는데, MCPServerClient 가
+     * 죽은 session_id 로 POST 하면 사이드카는 404("Could not find session") 를 주지만 SDK 가
+     * 이를 응답으로 전파하지 못해 다음 첫 tool call 이 requestTimeout 풀타임아웃(180초) 으로 hang 한다.
+     * 가벼운 호출(list_document_formats, 인자 없음)을 주기적으로 보내 세션을 살아있게 유지 →
+     * 첫 호출 cold-start hang 자체를 예방한다. 실패하면 callTool 내부 재연결 로직이 새 세션을 만든다.
+     * (MCPServerManager.healthCheckAndReconnect 의 사이드카 버전)
+     */
+    @Scheduled(fixedDelayString = "${rag.mcp.healthcheck.interval-ms:60000}",
+               initialDelayString = "${rag.mcp.healthcheck.initial-delay-ms:90000}")
+    public void healthCheckPing() {
+        if (!mcpEnabled || !connected || mcpClient == null) {
+            return;
+        }
+        try {
+            mcpClient.callTool("list_document_formats", Map.of());
+        } catch (Exception e) {
+            // callTool 내부에서 이미 1회 재연결을 시도한다. 여기까지 오면 사이드카 자체가 죽은 상태.
+            log.warn("RAG sidecar health ping failed (session may be re-established on next call): {}", e.getMessage());
+        }
     }
 
     /**

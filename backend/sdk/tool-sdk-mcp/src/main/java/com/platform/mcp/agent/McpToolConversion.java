@@ -37,7 +37,12 @@ public final class McpToolConversion {
     /** ToolExecutor → MCP Tool 메타로 변환 (이름/설명/입력스키마). */
     public static McpSchema.Tool toMcpTool(ToolExecutor tool) {
         UnifiedToolDef def = tool.getDefinition();
-        return new McpSchema.Tool(def.name(), def.description(), toJsonSchema(def.inputSchema()));
+        // SDK 0.17.0: Tool 7-arg 생성자 대신 builder 사용.
+        return McpSchema.Tool.builder()
+                .name(def.name())
+                .description(def.description())
+                .inputSchema(toJsonSchema(def.inputSchema()))
+                .build();
     }
 
     /**

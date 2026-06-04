@@ -29,9 +29,14 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-starter-vector-store-pgvector")
 
     // ── MCP Java SDK ──
-    implementation(platform("io.modelcontextprotocol.sdk:mcp-bom:0.10.0"))
+    implementation(platform("io.modelcontextprotocol.sdk:mcp-bom:0.17.0"))
     implementation("io.modelcontextprotocol.sdk:mcp")
     implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc")
+    // 0.17.0: JSON 매퍼가 별도 모듈로 분리됨 (Jackson2 구현)
+    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
+    // 0.17.0 스키마 검증기는 networknt 2.0.0 의 Dialects 클래스 필요.
+    // 버전은 아래 dependencyManagement.dependencies 에서 2.0.0 으로 강제(플러그인 공식 override 경로).
+    implementation("com.networknt:json-schema-validator")
 
     // ── Database ──
     runtimeOnly("org.postgresql:postgresql")
@@ -69,6 +74,11 @@ dependencies {
 dependencyManagement {
     imports {
         mavenBom("org.springframework.boot:spring-boot-dependencies:3.4.2")
+    }
+    // MCP SDK 0.17.0 스키마 검증기가 요구하는 networknt 2.0.0(Dialects 클래스) 강제.
+    // io.spring.dependency-management 의 "selected by rule" 보다 이 명시 선언이 우선한다.
+    dependencies {
+        dependency("com.networknt:json-schema-validator:2.0.0")
     }
 }
 

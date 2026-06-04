@@ -54,7 +54,12 @@ public class ServerMcpConfig {
 
     @Bean
     public WebMvcSseServerTransportProvider serverMcpTransport(ObjectMapper objectMapper) {
-        return new WebMvcSseServerTransportProvider(objectMapper, "/mcp/message", "/mcp/sse");
+        // SDK 0.17.0: 생성자 대신 builder + McpJsonMapper 사용.
+        return WebMvcSseServerTransportProvider.builder()
+                .jsonMapper(io.modelcontextprotocol.json.McpJsonMapper.createDefault())
+                .messageEndpoint("/mcp/message")
+                .sseEndpoint("/mcp/sse")
+                .build();
     }
 
     @Bean

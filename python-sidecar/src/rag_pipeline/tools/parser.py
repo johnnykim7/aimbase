@@ -7,6 +7,7 @@ Output: extracted text + metadata (pages, title, etc.).
 
 import base64
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,10 @@ logger = logging.getLogger(__name__)
 
 # 다운로드 안전 한계
 _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100MB
-_DOWNLOAD_TIMEOUT_SEC = 60
+# 대용량 PDF(수 MB) 다운로드가 60초를 넘기는 사례 대응 → 150초로 상향.
+# BE 측 MCP requestTimeout(180초) 보다 작게 유지해 BE 가 먼저 끊지 않게 정합.
+# 환경변수 PARSE_DOWNLOAD_TIMEOUT_SEC 로 조정 가능.
+_DOWNLOAD_TIMEOUT_SEC = int(os.getenv("PARSE_DOWNLOAD_TIMEOUT_SEC", "150"))
 
 
 def _download_bytes(url: str) -> bytes:
