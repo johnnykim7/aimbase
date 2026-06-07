@@ -54,7 +54,7 @@ class ParseDocumentToolTest {
         assertThat(def.name()).isEqualTo("parse_document");
         assertThat(def.description()).contains("DOCX", "PPTX", "XLSX");
         Map<String, Object> properties = (Map<String, Object>) def.inputSchema().get("properties");
-        assertThat(properties).containsKeys("url", "file_path", "file_type");
+        assertThat(properties).containsKeys("url", "file_path", "content", "file_type");
         Map<String, Object> fileType = (Map<String, Object>) properties.get("file_type");
         List<String> allowed = (List<String>) fileType.get("enum");
         assertThat(allowed).containsExactlyInAnyOrder(
@@ -128,7 +128,8 @@ class ParseDocumentToolTest {
         Files.writeString(doc, "hello world");
         workspaceProperties.setWhitelistRoots(List.of(tmp.toString()));
 
-        when(ragClient.parseDocument(anyString(), eq("txt")))
+        // 선행 작업(file_path 입력): BE 가 byte 를 읽지 않고 path 를 사이드카에 패스 → parseDocumentByPath.
+        when(ragClient.parseDocumentByPath(anyString(), eq("txt")))
                 .thenReturn(Map.of(
                         "text", "hello world",
                         "metadata", Map.of("file_type", "txt")
@@ -140,7 +141,7 @@ class ParseDocumentToolTest {
         Map<?, ?> out = (Map<?, ?>) r.output();
         assertThat(out.get("text")).isEqualTo("hello world");
         assertThat(((String) out.get("source"))).startsWith("file:");
-        verify(ragClient).parseDocument(anyString(), eq("txt"));
+        verify(ragClient).parseDocumentByPath(anyString(), eq("txt"));
     }
 
     @Test
@@ -155,6 +156,47 @@ class ParseDocumentToolTest {
         Map<?, ?> out = (Map<?, ?>) r.output();
         assertThat(out.get("truncated")).isEqualTo(true);
         assertThat(((String) out.get("text"))).contains("[... truncated");
+    }
+
+    // ─── CR-100: content(base64) 분기 (로컬 PC 파싱 다리) ───────────────────
+
+    @Test
+    void validate_content_ok() {
+        String b64 = java.util.Base64.getEncoder().encodeToString("hello".getBytes());
+        ValidationResult r = tool.validateInput(Map.of("content", b64, "file_type", "txt"), ctx);
+        assertThat(r.valid()).isTrue();
+    }
+
+    @Test
+    void validate_contentAndUrlBoth_fails() {
+        String b64 = java.util.Base64.getEncoder().encodeToString("hello".getBytes());
+        ValidationResult r = tool.validateInput(
+                Map.of("content", b64, "url", "https://example.com/a.docx"), ctx);
+        assertThat(r.valid()).isFalse();
+    }
+
+    @Test
+    void validate_contentInvalidBase64_fails() {
+        ValidationResult r = tool.validateInput(Map.of("content", "!!!not base64!!!"), ctx);
+        assertThat(r.valid()).isFalse();
+    }
+
+    @Test
+    void execute_contentDelegatesToSidecarWithBase64() {
+        String b64 = java.util.Base64.getEncoder().encodeToString("hello docx bytes".getBytes());
+        when(ragClient.parseDocument(eq(b64), eq("docx")))
+                .thenReturn(Map.of(
+                        "text", "parsed local docx",
+                        "metadata", Map.of("file_type", "docx")
+                ));
+
+        ToolResult r = tool.execute(Map.of("content", b64, "file_type", "docx"), ctx);
+
+        assertThat(r.success()).isTrue();
+        Map<?, ?> out = (Map<?, ?>) r.output();
+        assertThat(out.get("text")).isEqualTo("parsed local docx");
+        assertThat(out.get("source")).isEqualTo("content:base64");
+        verify(ragClient).parseDocument(eq(b64), eq("docx"));
     }
 
     @Test

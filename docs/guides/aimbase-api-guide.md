@@ -1735,11 +1735,36 @@ RAG 인제스션은 OCR 우선, 위젯 채팅은 Vision 우선. BE `PdfTextExtra
 
 환경변수 오버라이드: `AIMBASE_OCR_ENABLED` / `AIMBASE_OCR_LANGUAGES` / `AIMBASE_OCR_MAX_PAGES` / `AIMBASE_OCR_FALLBACK_THRESHOLD`.
 
+### 20-6. 로컬 PC 문서 파싱 (CR-100 — 파싱 다리)
+
+사용자 로컬 PC 에 있는 문서("내 PC `/Users/me/docs` 의 PDF 분석해줘")는 서버 파일시스템에 없으므로 `parse_document(file_path=...)` 로 읽을 수 없다. 로컬 agent(aimbase-agent) 안의 Claude CLI 가 파일 byte 를 base64 로 서버 사이드카에 올리는 경로를 사용한다.
+
+**`parse_document` 입력 3종 (택1):**
+
+| 입력 | 읽는 주체 | 용도 |
+|---|---|---|
+| `url` | 사이드카 (HTTP 다운로드) | 공개 URL 문서 |
+| `file_path` | 사이드카 (서버 파일시스템 직접 read) | 서버 workspace 내 문서 |
+| `content` | BE (base64 디코드) → 사이드카 | **로컬 PC 문서** (CR-100) |
+
+**로컬 시나리오 흐름:**
+
+```
+CLI → builtin_file_read(file_path, as_base64=true)   # 로컬 byte → base64 (10MB 상한)
+    → parse_document(content=base64, file_type="docx")
+    → BE ParseDocumentTool: PDF 면 비전(document/image 블록 주입), 그 외 사이드카 텍스트 추출
+```
+
+- `builtin_file_read` 의 `as_base64=true` 는 바이너리(PDF/DOCX/XLSX 등)도 base64 로 반환한다 (일반 모드는 바이너리를 메타만 반환). 10MB 초과 시 거부 — stdio/relay 페이로드 보호.
+- `parse_document(content=...)` 는 PDF 면 비전 경로(§ 18-4 와 동일, BE 가 디코드해 별도 user 메시지로 주입), 그 외는 사이드카 `parse_document(file_content)` 텍스트 추출. 50MB 상한 + base64 유효성 검증.
+- 라우팅(어느 PC 의 agent 냐)은 토큰 `user_ref` 매핑(CR-075)으로 자동 결정 — 소비앱이 agent-id 를 몰라도 된다.
+
 ---
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.7.0 | 2026-06-08 | **CR-100 — 로컬 PC 문서 파싱 다리** (§ 20-6). 사용자 로컬 PC 문서를 서버 사이드카로 파싱하는 경로 완성. `builtin_file_read` 에 `as_base64=true` 옵션 신설(바이너리도 base64 반환, 10MB 가드), `parse_document` 에 `content`(base64) 입력 신설(url/file_path/content 3종 택1, PDF면 비전·그 외 사이드카 텍스트 추출, 50MB 가드). 흐름: CLI→`file_read(as_base64)`(로컬 byte)→`parse_document(content)`(서버 MCP CLI-level 기존 노출)→사이드카. 사이드카(Python)·MCPRagClient 는 이미 base64 입력 지원 → 무수정, Java 도구 2개만 수정. 단위 `FileReadToolTest` 4 + `ParseDocumentToolTest` content 4 추가, tool 회귀 PASS |
 | v3.6.0 | 2026-06-05 | **CR-095 — PDF Native 비전 파싱** (openclaude 1:1). PDF 첨부(`document` 블록)를 사이드카 텍스트 추출(`parse_document`/OCR ~38초)이 아니라 **LLM 모델 비전**으로 파싱 (§ 18-4). 3분기: ≤3MB & PDF지원 → base64 `DocumentBlockParam` 통째 / >3MB or PDF미지원 → 사이드카 `pdf_to_images`(poppler, JPEG 100DPI) 페이지 이미지화 → `ImageBlockParam` 배열 / 이미지도 미지원 → `PdfTextExtractor` 텍스트 폴백. 임계값 `aimbase.pdf.*` (inline-max-bytes 3MB, target-raw-max-bytes 20MB, max-pages-per-read 20, image-dpi 100). **AGENT 자율 호출**(`parse_document` 도구)도 PDF 면 비전 경로 — tool_result 엔 메타, 실제 PDF/이미지는 별도 user 메시지로 주입(`ToolResult.newMessages`, openclaude newMessages 패턴). 신규 사이드카 MCP 툴 `pdf_to_images`. 단위: 사이드카 18 + PdfVisionResolver 9 + tool/rag/attachment 회귀 GREEN. **기존 동작 무변경(하위호환)** |
 | v3.5.0 | 2026-06-04 | **CR-090 — 워크플로우 실행 이벤트 조회 API 문서화**. 기존 운영 라이브였으나 가이드에 누락돼 있던 `GET /api/v1/workflows/runs/{runId}/events` 추가 (§ 17-9). STEP_START/TOOL_USE/TOOL_RESULT/LLM_RESPONSE/STEP_END/STEP_FAILED 6종 이벤트를 시간순 배열로 반환 — 실시간 SSE(§17-6) 부담 없이 실행 단위 흐름을 사후/폴링 로그로 소비. 인증은 §17-6 과 동일(Bearer 또는 `?access_token=` 위젯 토큰, 공통 JWT 필터 처리). prompt/response 원본 미저장(얇은 버전), `trace_id`/`subagent_run_id` 로 심층 join. **신규 코드 없음 — 문서만 추가** |
 |------|------|----------|

@@ -61,9 +61,11 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
         return new UnifiedToolDef(
                 "parse_document",
                 "Parse a document (PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT, Markdown) " +
-                        "into plain text. Source can be a URL (auto-downloaded) or a file path " +
-                        "in the workspace. For scanned PDFs without embedded text, OCR fallback " +
-                        "is attempted automatically. " +
+                        "into plain text. Source is one of: a URL (auto-downloaded), a file path " +
+                        "in the workspace, or base64-encoded file content. For scanned PDFs without " +
+                        "embedded text, OCR fallback is attempted automatically. " +
+                        "Use 'content' for files on the user's local machine: first read them with " +
+                        "builtin_file_read(as_base64=true), then pass the base64 here. " +
                         "Use this when the user attaches or references a non-PDF document and you " +
                         "need to read its content. (Native Read tool handles PDFs directly via " +
                         "vision; this tool is mainly for DOCX/XLSX/PPTX/etc.)",
@@ -72,16 +74,20 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
                         "properties", Map.of(
                                 "url", Map.of(
                                         "type", "string",
-                                        "description", "HTTP(S) URL of the document. Either 'url' or 'file_path' is required."
+                                        "description", "HTTP(S) URL of the document. Provide exactly one of 'url', 'file_path', 'content'."
                                 ),
                                 "file_path", Map.of(
                                         "type", "string",
-                                        "description", "Absolute path inside the workspace whitelist. Either 'url' or 'file_path' is required."
+                                        "description", "Absolute path inside the workspace whitelist (read by the server-side sidecar). Provide exactly one of 'url', 'file_path', 'content'."
+                                ),
+                                "content", Map.of(
+                                        "type", "string",
+                                        "description", "Base64-encoded file bytes (for files on the user's local PC; obtain via builtin_file_read(as_base64=true)). Provide exactly one of 'url', 'file_path', 'content'."
                                 ),
                                 "file_type", Map.of(
                                         "type", "string",
                                         "enum", SUPPORTED_TYPES,
-                                        "description", "File format hint. Auto-detected from URL/file extension if omitted."
+                                        "description", "File format hint. Auto-detected from URL/file extension if omitted; recommended when using 'content'."
                                 )
                         )
                 )
@@ -104,12 +110,25 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
     public ValidationResult validateInput(Map<String, Object> input, ToolContext ctx) {
         String url = stringOrNull(input.get("url"));
         String filePath = stringOrNull(input.get("file_path"));
+        String content = stringOrNull(input.get("content"));
 
-        if (url == null && filePath == null) {
-            return ValidationResult.fail("Either 'url' or 'file_path' is required.");
+        int provided = (url != null ? 1 : 0) + (filePath != null ? 1 : 0) + (content != null ? 1 : 0);
+        if (provided == 0) {
+            return ValidationResult.fail("One of 'url', 'file_path', or 'content' is required.");
         }
-        if (url != null && filePath != null) {
-            return ValidationResult.fail("Provide either 'url' or 'file_path', not both.");
+        if (provided > 1) {
+            return ValidationResult.fail("Provide exactly one of 'url', 'file_path', 'content'.");
+        }
+        if (content != null) {
+            try {
+                int decodedLen = Base64.getDecoder().decode(content).length;
+                if (decodedLen > MAX_FILE_BYTES) {
+                    return ValidationResult.fail("Decoded content too large: " + decodedLen
+                            + " bytes (max " + MAX_FILE_BYTES + ").");
+                }
+            } catch (IllegalArgumentException e) {
+                return ValidationResult.fail("content is not valid base64.");
+            }
         }
         if (url != null) {
             try {
@@ -140,6 +159,7 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
         long start = System.currentTimeMillis();
         String url = stringOrNull(input.get("url"));
         String filePath = stringOrNull(input.get("file_path"));
+        String content = stringOrNull(input.get("content"));
         String fileType = stringOrNull(input.get("file_type"));
         if (fileType != null) fileType = fileType.toLowerCase(Locale.ROOT);
 
@@ -150,20 +170,32 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
                 sidecarInput.put("file_type", fileType != null ? fileType : "");
                 Map<String, Object> result = ragClient.callToolRaw("parse_document", sidecarInput);
                 return buildResult(result, "url:" + url, start);
+            } else if (content != null) {
+                // CR-100: 로컬 PC base64 — 사이드카가 같은 파일시스템이 아니므로 항상 base64 전달.
+                // PDF 면 비전 경로(BE 가 디코드해 document/image 블록 주입), 그 외는 사이드카 텍스트 추출.
+                if ("pdf".equals(fileType)) {
+                    byte[] bytes = Base64.getDecoder().decode(content);
+                    return buildVisionResult(bytes, Path.of("local.pdf"), start);
+                }
+                Map<String, Object> result = ragClient.parseDocument(content, fileType != null ? fileType : "");
+                return buildResult(result, "content:base64", start);
             } else {
                 Path p = Path.of(filePath).toAbsolutePath().normalize();
-                byte[] bytes = Files.readAllBytes(p);
-                if (bytes.length > MAX_FILE_BYTES) {
-                    return ToolResult.error("File too large: " + bytes.length + " bytes (max " + MAX_FILE_BYTES + ")")
-                            .withDuration(System.currentTimeMillis() - start);
-                }
                 String inferredType = fileType != null ? fileType : inferTypeFromPath(p);
-                // CR-095: PDF 는 텍스트 추출 대신 LLM 비전 파싱 — document/image 블록을 newMessages 로 주입.
+                // CR-095: PDF 는 텍스트 추출 대신 LLM 비전 파싱 — 사이드카가 읽는 게 아니라
+                // LLM 이 직접 비전으로 본다. BE 가 읽어 document/image 블록을 newMessages 로 주입.
                 if ("pdf".equals(inferredType)) {
+                    byte[] bytes = Files.readAllBytes(p);
+                    if (bytes.length > MAX_FILE_BYTES) {
+                        return ToolResult.error("File too large: " + bytes.length + " bytes (max " + MAX_FILE_BYTES + ")")
+                                .withDuration(System.currentTimeMillis() - start);
+                    }
                     return buildVisionResult(bytes, p, start);
                 }
-                String base64 = Base64.getEncoder().encodeToString(bytes);
-                Map<String, Object> result = ragClient.parseDocument(base64, inferredType);
+                // 비-PDF(DOCX/XLSX/PPTX/CSV/HTML/TXT): 문서를 읽어 텍스트 추출 = 사이드카의 일.
+                // LLM 이 준 file_path 를 BE 가 읽지 않고 그대로 사이드카에 패스(base64 왕복 제거).
+                // 사이드카(같은 파일시스템)가 직접 읽는다. 화이트리스트는 BE(아래 validateInput)+사이드카 이중 방어.
+                Map<String, Object> result = ragClient.parseDocumentByPath(p.toString(), inferredType);
                 return buildResult(result, "file:" + p, start);
             }
         } catch (Exception e) {
