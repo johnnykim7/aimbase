@@ -52,3 +52,30 @@ export interface WorkflowRequest {
 }
 
 export type PlatformWorkflow = Workflow;
+
+/** CR-102: 워크플로우 실행 이벤트 (workflow_run_events). API 응답은 snake_case. */
+export type WorkflowRunEventType =
+  | "STEP_START"
+  | "TOOL_USE"
+  | "TOOL_RESULT"
+  | "LLM_RESPONSE"
+  | "STEP_END"
+  | "STEP_FAILED";
+
+export interface WorkflowRunEvent {
+  id: number;
+  event_type: WorkflowRunEventType;
+  step_id?: string | null;
+  iteration?: number | null;
+  tool_name?: string | null;
+  duration_ms?: number | null;
+  payload?: Record<string, unknown> | null;
+  trace_id?: string | null;
+  subagent_run_id?: string | null;
+  created_at?: string | null;
+  // 본문 전문 — include_body=true 또는 단건 조회 시에만 채워짐
+  prompt_text?: string | null;
+  response_text?: string | null;
+  input_json?: Record<string, unknown> | null;
+  output_text?: string | null;
+}

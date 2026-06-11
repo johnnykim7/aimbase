@@ -54,7 +54,7 @@ class WorkflowControllerGetEventsTest {
         UUID runId = UUID.randomUUID();
         when(runRepository.findById(runId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> controller.getRunEvents(runId))
+        assertThatThrownBy(() -> controller.getRunEvents(runId, false))
                 .isInstanceOf(ResponseStatusException.class)
                 .matches(e -> ((ResponseStatusException) e).getStatusCode() == HttpStatus.NOT_FOUND);
     }
@@ -75,7 +75,7 @@ class WorkflowControllerGetEventsTest {
         when(eventRepository.findByRunIdOrderByCreatedAtAscIdAsc(runId))
                 .thenReturn(List.of(e1, e2, e3));
 
-        ApiResponse<List<Map<String, Object>>> resp = controller.getRunEvents(runId);
+        ApiResponse<List<Map<String, Object>>> resp = controller.getRunEvents(runId, false);
         List<Map<String, Object>> body = resp.data();
 
         assertThat(body).hasSize(3);
@@ -94,8 +94,92 @@ class WorkflowControllerGetEventsTest {
         when(runRepository.findById(runId)).thenReturn(Optional.of(new WorkflowRunEntity()));
         when(eventRepository.findByRunIdOrderByCreatedAtAscIdAsc(runId)).thenReturn(List.of());
 
-        ApiResponse<List<Map<String, Object>>> resp = controller.getRunEvents(runId);
+        ApiResponse<List<Map<String, Object>>> resp = controller.getRunEvents(runId, false);
         assertThat(resp.data()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("CR-102: include_body=false 면 본문 미노출, true 면 본문 전문 노출")
+    void includeBodyToggle() {
+        UUID runId = UUID.randomUUID();
+        when(runRepository.findById(runId)).thenReturn(Optional.of(new WorkflowRunEntity()));
+
+        WorkflowRunEventEntity llm = ev(runId, "s1", EventType.LLM_RESPONSE, null, 800L,
+                Map.of("model", "claude-sonnet-4-5"), "trace-1");
+        llm.setPromptText("[SYSTEM]\nyou are helpful\n\n[PROMPT]\n2+2?");
+        llm.setResponseText("4");
+        WorkflowRunEventEntity tool = ev(runId, "s2", EventType.TOOL_USE, "web_search", null,
+                Map.of("input_keys", java.util.Set.of("query")), null);
+        tool.setInputJson(Map.of("query", "aimbase"));
+        WorkflowRunEventEntity end = ev(runId, "s1", EventType.STEP_END, null, 900L,
+                Map.of("output_size", 1), null);
+        end.setOutputText("4");
+
+        when(eventRepository.findByRunIdOrderByCreatedAtAscIdAsc(runId))
+                .thenReturn(List.of(llm, tool, end));
+
+        // include_body=false → 본문 키 없음
+        List<Map<String, Object>> off = controller.getRunEvents(runId, false).data();
+        assertThat(off.get(0)).doesNotContainKeys("prompt_text", "response_text", "input_json", "output_text");
+
+        // include_body=true → 본문 전문 노출 (절단 없음)
+        List<Map<String, Object>> on = controller.getRunEvents(runId, true).data();
+        assertThat(on.get(0)).containsEntry("prompt_text", "[SYSTEM]\nyou are helpful\n\n[PROMPT]\n2+2?");
+        assertThat(on.get(0)).containsEntry("response_text", "4");
+        assertThat(on.get(1)).containsEntry("input_json", Map.of("query", "aimbase"));
+        assertThat(on.get(2)).containsEntry("output_text", "4");
+    }
+
+    // ─── CR-102: 신규 엔드포인트 ───
+
+    @Test
+    @DisplayName("CR-102: 이벤트 단건 조회 → 본문 전문 항상 포함")
+    void getSingleEventWithBody() {
+        UUID runId = UUID.randomUUID();
+        WorkflowRunEventEntity e = ev(runId, "s1", EventType.LLM_RESPONSE, null, 800L,
+                Map.of("model", "claude-sonnet-4-5"), null);
+        e.setPromptText("full prompt");
+        e.setResponseText("full response");
+        when(eventRepository.findById(7L)).thenReturn(Optional.of(e));
+
+        Map<String, Object> body = controller.getRunEvent(runId, 7L).data();
+        assertThat(body).containsEntry("prompt_text", "full prompt");
+        assertThat(body).containsEntry("response_text", "full response");
+    }
+
+    @Test
+    @DisplayName("CR-102: 이벤트가 다른 run 소속이면 404 (run 경계 검증)")
+    void getSingleEventWrongRun() {
+        WorkflowRunEventEntity e = ev(UUID.randomUUID(), "s1", EventType.STEP_END, null, 900L,
+                Map.of("output_size", 1), null);
+        when(eventRepository.findById(7L)).thenReturn(Optional.of(e));
+
+        assertThatThrownBy(() -> controller.getRunEvent(UUID.randomUUID(), 7L))
+                .isInstanceOf(ResponseStatusException.class)
+                .matches(ex -> ((ResponseStatusException) ex).getStatusCode() == HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("CR-102: 전체 run 횡단 목록 — workflow_id/status 필터가 searchRuns 로 위임")
+    void allRunsDelegatesToSearch() {
+        WorkflowRunEntity run = new WorkflowRunEntity();
+        when(runRepository.searchRuns(eq("wf-1"), eq("failed"), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(run)));
+
+        ApiResponse<?> resp = controller.allRuns(0, 20, "wf-1", "failed");
+        assertThat((List<?>) resp.data()).hasSize(1);
+        verify(runRepository).searchRuns(eq("wf-1"), eq("failed"), any());
+    }
+
+    @Test
+    @DisplayName("CR-102: run 단건 조회 (워크플로우 id 없이) — 미존재 시 404")
+    void getRunByIdNotFound() {
+        UUID runId = UUID.randomUUID();
+        when(runRepository.findById(runId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> controller.getRunById(runId))
+                .isInstanceOf(ResponseStatusException.class)
+                .matches(ex -> ((ResponseStatusException) ex).getStatusCode() == HttpStatus.NOT_FOUND);
     }
 
     private WorkflowRunEventEntity ev(UUID runId, String stepId, EventType type,

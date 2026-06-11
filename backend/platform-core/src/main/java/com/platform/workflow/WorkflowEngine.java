@@ -356,9 +356,9 @@ public class WorkflowEngine {
                                 subRef != null ? subRef.toString() : null,
                                 previewOutput(result));
                     }
-                    // CR-090: STEP_END
+                    // CR-090: STEP_END / CR-102: 결과 본문
                     if (eventRecorder != null) {
-                        eventRecorder.stepEnd(run.getId(), step.id(), stepEnd - stepStart, estimateResultSize(result));
+                        eventRecorder.stepEnd(run.getId(), step.id(), stepEnd - stepStart, estimateResultSize(result), resultBody(result));
                     }
 
                     // CONDITION 분기 처리
@@ -510,6 +510,21 @@ public class WorkflowEngine {
         Object out = result.get("output");
         if (out instanceof String s) return s.length();
         return String.valueOf(result).length();
+    }
+
+    /**
+     * CR-102: 단계 결과 본문 전문 — 품질 분석(단계 간 데이터 전달 검토)용. 절단 없음.
+     * output 이 단일 String 이면 그대로(가독), 그 외엔 result 전체를 JSON 직렬화.
+     */
+    private String resultBody(Map<String, Object> result) {
+        if (result == null || result.isEmpty()) return null;
+        Object out = result.get("output");
+        if (out instanceof String s) return s;
+        try {
+            return objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            return String.valueOf(result);
+        }
     }
 
     /**
@@ -753,9 +768,9 @@ public class WorkflowEngine {
                             subRef != null ? subRef.toString() : null,
                             previewOutput(result), iterationIndex);
                 }
-                // CR-090: STEP_END (cyclic)
+                // CR-090: STEP_END (cyclic) / CR-102: 결과 본문
                 if (eventRecorder != null) {
-                    eventRecorder.stepEnd(run.getId(), step.id(), stepEnd - stepStart, estimateResultSize(result));
+                    eventRecorder.stepEnd(run.getId(), step.id(), stepEnd - stepStart, estimateResultSize(result), resultBody(result));
                 }
 
                 // 다음 노드 결정 → worklist push

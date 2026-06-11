@@ -12,7 +12,8 @@ import java.util.UUID;
  * CR-090: 워크플로우 실행 가시성 이벤트.
  *
  * <p>"어떤 도구를 어떤 input 으로 불렀고 무엇을 받았다" 한 줄 흐름을 시간순으로 재구성하기 위함.
- * 얇은 버전 — prompt/response 원본은 저장 안 함. 깊이 분석은 {@code trace_id}/{@code subagent_run_id} 로 join.
+ * 메타(payload preview)는 흐름 재구성용, 본문 컬럼(promptText/responseText/inputJson/outputText)은
+ * 품질 분석용 — 절단 없는 전문 적재 (CR-102).
  */
 @Entity
 @Table(name = "workflow_run_events", indexes = {
@@ -62,6 +63,20 @@ public class WorkflowRunEventEntity {
     @Column(name = "subagent_run_id", columnDefinition = "uuid")
     private UUID subagentRunId;
 
+    // CR-102: 품질 분석용 본문 전문 (절단 없음, nullable)
+    @Column(name = "prompt_text", columnDefinition = "text")
+    private String promptText;        // LLM_RESPONSE: system + prompt 입력
+
+    @Column(name = "response_text", columnDefinition = "text")
+    private String responseText;      // LLM_RESPONSE: 응답 본문
+
+    @Type(JsonBinaryType.class)
+    @Column(name = "input_json", columnDefinition = "jsonb")
+    private Map<String, Object> inputJson;   // TOOL_USE: 도구 input 전문
+
+    @Column(name = "output_text", columnDefinition = "text")
+    private String outputText;        // TOOL_RESULT / STEP_END: 결과 본문 전문
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
@@ -84,6 +99,14 @@ public class WorkflowRunEventEntity {
     public void setTraceId(String traceId) { this.traceId = traceId; }
     public UUID getSubagentRunId() { return subagentRunId; }
     public void setSubagentRunId(UUID subagentRunId) { this.subagentRunId = subagentRunId; }
+    public String getPromptText() { return promptText; }
+    public void setPromptText(String promptText) { this.promptText = promptText; }
+    public String getResponseText() { return responseText; }
+    public void setResponseText(String responseText) { this.responseText = responseText; }
+    public Map<String, Object> getInputJson() { return inputJson; }
+    public void setInputJson(Map<String, Object> inputJson) { this.inputJson = inputJson; }
+    public String getOutputText() { return outputText; }
+    public void setOutputText(String outputText) { this.outputText = outputText; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
 }

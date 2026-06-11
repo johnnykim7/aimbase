@@ -1,6 +1,6 @@
 import { apiClient } from "./client";
 import type { ApiResponse, PagedResponse } from "../types/api";
-import type { Workflow, WorkflowRequest, WorkflowRun } from "../types/workflow";
+import type { Workflow, WorkflowRequest, WorkflowRun, WorkflowRunEvent } from "../types/workflow";
 
 export const workflowsApi = {
   list: (params?: { page?: number; size?: number; my?: boolean }) =>
@@ -29,4 +29,18 @@ export const workflowsApi = {
 
   approveRun: (runId: string) =>
     apiClient.post(`/workflows/runs/${runId}/approve`),
+
+  // CR-102: 전체 워크플로우 횡단 실행 내역
+  allRuns: (params?: { page?: number; size?: number; workflow_id?: string; status?: string }) =>
+    apiClient.get<ApiResponse<WorkflowRun[]>>("/workflows/runs", { params }),
+
+  getRunById: (runId: string) =>
+    apiClient.get<ApiResponse<WorkflowRun>>(`/workflows/runs/${runId}`),
+
+  // CR-102: run 이벤트 타임라인 (메타) / 단건 본문 전문
+  runEvents: (runId: string) =>
+    apiClient.get<ApiResponse<WorkflowRunEvent[]>>(`/workflows/runs/${runId}/events`),
+
+  runEvent: (runId: string, eventId: number) =>
+    apiClient.get<ApiResponse<WorkflowRunEvent>>(`/workflows/runs/${runId}/events/${eventId}`),
 };

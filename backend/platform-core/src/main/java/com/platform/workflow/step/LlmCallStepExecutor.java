@@ -20,12 +20,16 @@ import java.util.*;
  * LLM_CALL 스텝 실행기.
  *
  * 토큰 초과 자동 처리 전략:
- *   Phase 1: 일반 호출 (4096)
- *   Phase 2: 에스컬레이션 (8192) — 살짝 넘는 경우
+ *   Phase 1: 일반 호출 — step config의 max_tokens 지정 시 그 값으로, 미지정 시 4096
+ *   Phase 2: 에스컬레이션 (8192) — 살짝 넘는 경우 (max_tokens 미지정 케이스에서만 발생)
  *   Phase 3: 자동분할 — 크게 넘는 경우
  *     3-a: 분할 계획 호출 → 파트 목록
  *     3-b: 파트별 실행 (각 4096)
  *     3-c: 취합 호출 → 최종 결과
+ *
+ * Phase 1 시작값 정책: step config의 max_tokens 는 출력 크기에 대한 소비앱의 선언이다.
+ * 지정되면 그 값으로 1차 호출(큰 출력 WF가 4096→8192 에스컬레이션 왕복을 헛되이 겪지 않음).
+ * 미지정이면 출력 크기를 모르는 것이므로 4096부터 시작해 필요할 때만 올린다(비용 절감).
  *
  * 소비앱은 분할 여부를 모름 — response_schema에 맞는 완성된 JSON만 받음.
  */
@@ -35,6 +39,7 @@ public class LlmCallStepExecutor implements StepExecutor {
     private static final Logger log = LoggerFactory.getLogger(LlmCallStepExecutor.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /** max_tokens 미지정 시 Phase 1 시작값 (출력 크기를 모를 때의 비용 절감 기본). */
     private static final int INITIAL_MAX_TOKENS = 4096;
     private static final int ESCALATION_MAX_TOKENS = 8192;
     private static final int SPLIT_PART_MAX_TOKENS = 4096;
@@ -126,15 +131,17 @@ public class LlmCallStepExecutor implements StepExecutor {
                 && eventPublisher != null;
 
         // ── Phase 1: 일반 호출 ──
-        int phase1Tokens = configCeiling != null ? Math.min(INITIAL_MAX_TOKENS, configCeiling) : INITIAL_MAX_TOKENS;
+        // max_tokens 지정 = 소비앱이 출력 크기를 선언한 것 → 그 값으로 1차 호출(에스컬레이션 왕복 제거).
+        // 미지정 = 크기 미상 → 4096 부터 시작해 잘릴 때만 Phase 2/3 로 올림(비용 절감).
+        int phase1Tokens = configCeiling != null ? configCeiling : INITIAL_MAX_TOKENS;
         long phase1Start = System.currentTimeMillis();
         LLMResponse response = streamTokens
                 ? callLlmStreaming(adapter, resolvedModel, system, prompt, phase1Tokens, context,
                         extThinking, thinkingBudget, step.id())
                 : callLlm(adapter, resolvedModel, system, prompt, responseSchema,
                         phase1Tokens, context, extThinking, thinkingBudget);
-        // CR-090: LLM_RESPONSE (Phase 1)
-        recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase1Start);
+        // CR-090: LLM_RESPONSE (Phase 1) / CR-102: prompt·response 본문
+        recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase1Start, system, prompt);
 
         if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
             return buildResult(response, resolvedModel);
@@ -148,8 +155,8 @@ public class LlmCallStepExecutor implements StepExecutor {
         if (phase2Tokens > phase1Tokens) {
             long phase2Start = System.currentTimeMillis();
             response = callLlm(adapter, resolvedModel, system, prompt, responseSchema, phase2Tokens, context);
-            // CR-090: LLM_RESPONSE (Phase 2)
-            recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase2Start);
+            // CR-090: LLM_RESPONSE (Phase 2) / CR-102: prompt·response 본문
+            recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase2Start, system, prompt);
 
             if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
                 log.info("LLM_CALL step '{}': 에스컬레이션 성공 (max_tokens={})", step.id(), phase2Tokens);
@@ -517,14 +524,21 @@ public class LlmCallStepExecutor implements StepExecutor {
      * <p>Phase 1/2/3(자동분할의 plan/part/merge)에서 모두 호출 — 단일 LLM 호출 1회당 1 이벤트.
      */
     private void recordLlmResponse(StepContext context, String stepId, LLMResponse response,
-                                   String resolvedModel, long durationMs) {
+                                   String resolvedModel, long durationMs,
+                                   String system, String prompt) {
         if (eventRecorder == null || response == null) return;
         UUID runId = parseUuid(context.workflowRunId());
         if (runId == null) return;
         int in = response.usage() != null ? response.usage().inputTokens() : 0;
         int out = response.usage() != null ? response.usage().outputTokens() : 0;
         String finishReason = response.finishReason() != null ? response.finishReason().name() : null;
-        eventRecorder.llmResponse(runId, stepId, null, resolvedModel, in, out, finishReason, durationMs, null, null);
+        // CR-102: 프롬프트 입력(system + prompt) ↔ 응답 본문 전문 적재 (품질 정독용)
+        String promptBody = (system != null && !system.isBlank())
+                ? "[SYSTEM]\n" + system + "\n\n[PROMPT]\n" + prompt
+                : prompt;
+        String responseBody = response.textContent();
+        eventRecorder.llmResponse(runId, stepId, null, resolvedModel, in, out, finishReason, durationMs,
+                null, null, promptBody, responseBody);
     }
 
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,

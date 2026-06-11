@@ -10,6 +10,8 @@ import Prompts from "./pages/Prompts";
 import Workflows from "./pages/Workflows";
 import WorkflowStudio from "./pages/WorkflowStudio";
 import WorkflowDetail from "./pages/WorkflowDetail";
+import WorkflowRuns from "./pages/WorkflowRuns";
+import WorkflowRunDetail from "./pages/WorkflowRunDetail";
 import Knowledge from "./pages/Knowledge";
 import RagEvaluation from "./pages/RagEvaluation";
 import Documents from "./pages/Documents";
@@ -45,6 +47,8 @@ export default function App() {
         <Route path="workflows/new" element={<WorkflowStudio />} />
         <Route path="workflows/:id" element={<WorkflowDetail />} />
         <Route path="workflows/:id/edit" element={<WorkflowStudio />} />
+        <Route path="workflow-runs" element={<WorkflowRuns />} />
+        <Route path="workflow-runs/:runId" element={<WorkflowRunDetail />} />
         <Route path="knowledge" element={<Knowledge />} />
         <Route path="rag-evaluation" element={<RagEvaluation />} />
         <Route path="documents" element={<Documents />} />

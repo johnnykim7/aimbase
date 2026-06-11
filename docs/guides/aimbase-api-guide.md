@@ -1482,8 +1482,39 @@ curl "$AIMBASE/api/v1/workflows/runs/$RUN_ID/events" \
 
 **필드 주의**:
 - `iteration` — 같은 단계 내 도구 루프 회차(0-based). 단계 레벨 이벤트(START/END/FAILED)는 `null`
-- `trace_id` / `subagent_run_id` — 서브에이전트·심층 분석과 join 하기 위한 키. 얇은 버전이라 prompt/response **원본은 저장하지 않음**
+- `trace_id` / `subagent_run_id` — 서브에이전트·심층 분석과 join 하기 위한 키
 - payload 는 비어 있으면 `null` 로 내려갈 수 있음
+- ~~얇은 버전이라 prompt/response 원본은 저장하지 않음~~ → **CR-102 부터 본문 전문도 적재** (아래 § 17-10)
+
+### 17-10. 본문 전문 조회 + 횡단 실행 내역 [CR-102]
+
+§ 17-9 의 payload 는 메타(미리보기 ≤100자)다. **품질 분석(프롬프트↔응답 정독, 단계 간 데이터 전달 검토)** 을 위해 CR-102 부터 본문 전문(절단 없음)을 함께 적재하며, 다음 4가지로 조회한다.
+
+**(1) 이벤트 배열에 본문 동반** — `?include_body=true`
+
+```bash
+curl "$AIMBASE/api/v1/workflows/runs/$RUN_ID/events?include_body=true" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+각 이벤트에 4개 필드가 추가된다 (해당 없는 이벤트는 `null`):
+
+| 필드 | 적재 이벤트 | 내용 |
+|------|------------|------|
+| `prompt_text` | `LLM_RESPONSE` | `[SYSTEM]\n…\n\n[PROMPT]\n…` 합성 입력 전문 |
+| `response_text` | `LLM_RESPONSE` | 응답 본문 전문 |
+| `input_json` | `TOOL_USE` | 도구 input 전문 (JSON 객체) |
+| `output_text` | `TOOL_RESULT` / `STEP_END` | 도구 결과 / 단계 결과 본문 전문 |
+
+> ⚠️ LLM 프롬프트 전문 × 수십 이벤트면 응답이 수 MB 가 될 수 있다. 화면용이면 (2) 단건 조회를 권장.
+
+**(2) 이벤트 단건 본문** — `GET /api/v1/workflows/runs/{runId}/events/{eventId}` — 본문 전문을 **항상 포함**해 1건 반환. 타임라인은 § 17-9 로 가볍게 띄우고, 사용자가 행을 펼칠 때만 이걸 부르는 패턴 (Aimbase 관리 FE "실행 내역" 화면이 이 패턴).
+
+**(3) 전체 워크플로우 횡단 run 목록** — `GET /api/v1/workflows/runs?page=0&size=20&workflow_id=&status=` — 특정 워크플로우에 얽매이지 않은 최신순 run 목록. `workflow_id` / `status`(running/completed/failed/pending_approval/cancelled) 필터 옵션, 응답은 표준 `pagination` 동반.
+
+**(4) run 단건 (워크플로우 id 없이)** — `GET /api/v1/workflows/runs/{runId}` — (3) 의 행에서 상세 진입할 때 사용.
+
+본문은 **절단 없이 전문 적재**되므로 run 당 저장 용량이 증가한다. 보관기간(TTL) 정책은 후속 CR 예정.
 
 **§17-6(SSE) 과의 선택 기준**: 실시간 진행 표시가 필요하면 `/subscribe`(SSE), "실행 단위 로그를 사후/폴링으로 본다" 면 `/events`. 둘은 독립적으로 병행 사용 가능하다.
 
@@ -1764,6 +1795,7 @@ CLI → builtin_file_read(file_path, as_base64=true)   # 로컬 byte → base64 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.8.0 | 2026-06-12 | **CR-102 — 워크플로우 실행 본문 전문 적재 + 조회** (§ 17-10). `workflow_run_events` 에 본문 전문 4컬럼(prompt_text/response_text/input_json/output_text, V66) 적재 — LLM 프롬프트↔응답·도구 input↔output·단계 결과를 절단 없이 정독 가능. 조회 4종: § 17-9 `?include_body=true` / 이벤트 단건 `GET /runs/{runId}/events/{eventId}`(본문 항상 포함) / 횡단 run 목록 `GET /workflows/runs`(workflow_id·status 필터+페이지네이션) / run 단건 `GET /workflows/runs/{runId}`. TTL(보관기간)은 후속 CR |
 | v3.7.0 | 2026-06-08 | **CR-100 — 로컬 PC 문서 파싱 다리** (§ 20-6). 사용자 로컬 PC 문서를 서버 사이드카로 파싱하는 경로 완성. `builtin_file_read` 에 `as_base64=true` 옵션 신설(바이너리도 base64 반환, 10MB 가드), `parse_document` 에 `content`(base64) 입력 신설(url/file_path/content 3종 택1, PDF면 비전·그 외 사이드카 텍스트 추출, 50MB 가드). 흐름: CLI→`file_read(as_base64)`(로컬 byte)→`parse_document(content)`(서버 MCP CLI-level 기존 노출)→사이드카. 사이드카(Python)·MCPRagClient 는 이미 base64 입력 지원 → 무수정, Java 도구 2개만 수정. 단위 `FileReadToolTest` 4 + `ParseDocumentToolTest` content 4 추가, tool 회귀 PASS |
 | v3.6.0 | 2026-06-05 | **CR-095 — PDF Native 비전 파싱** (openclaude 1:1). PDF 첨부(`document` 블록)를 사이드카 텍스트 추출(`parse_document`/OCR ~38초)이 아니라 **LLM 모델 비전**으로 파싱 (§ 18-4). 3분기: ≤3MB & PDF지원 → base64 `DocumentBlockParam` 통째 / >3MB or PDF미지원 → 사이드카 `pdf_to_images`(poppler, JPEG 100DPI) 페이지 이미지화 → `ImageBlockParam` 배열 / 이미지도 미지원 → `PdfTextExtractor` 텍스트 폴백. 임계값 `aimbase.pdf.*` (inline-max-bytes 3MB, target-raw-max-bytes 20MB, max-pages-per-read 20, image-dpi 100). **AGENT 자율 호출**(`parse_document` 도구)도 PDF 면 비전 경로 — tool_result 엔 메타, 실제 PDF/이미지는 별도 user 메시지로 주입(`ToolResult.newMessages`, openclaude newMessages 패턴). 신규 사이드카 MCP 툴 `pdf_to_images`. 단위: 사이드카 18 + PdfVisionResolver 9 + tool/rag/attachment 회귀 GREEN. **기존 동작 무변경(하위호환)** |
 | v3.5.0 | 2026-06-04 | **CR-090 — 워크플로우 실행 이벤트 조회 API 문서화**. 기존 운영 라이브였으나 가이드에 누락돼 있던 `GET /api/v1/workflows/runs/{runId}/events` 추가 (§ 17-9). STEP_START/TOOL_USE/TOOL_RESULT/LLM_RESPONSE/STEP_END/STEP_FAILED 6종 이벤트를 시간순 배열로 반환 — 실시간 SSE(§17-6) 부담 없이 실행 단위 흐름을 사후/폴링 로그로 소비. 인증은 §17-6 과 동일(Bearer 또는 `?access_token=` 위젯 토큰, 공통 JWT 필터 처리). prompt/response 원본 미저장(얇은 버전), `trace_id`/`subagent_run_id` 로 심층 join. **신규 코드 없음 — 문서만 추가** |

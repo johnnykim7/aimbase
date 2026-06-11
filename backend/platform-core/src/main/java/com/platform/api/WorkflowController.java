@@ -156,6 +156,32 @@ public class WorkflowController {
         return ApiResponse.page(workflowRunRepository.findByWorkflowIdOrderByStartedAtDesc(id, PageRequest.of(page, size)));
     }
 
+    /**
+     * CR-102: 전체 워크플로우 횡단 실행 이력 조회.
+     * 특정 워크플로우에 얽매이지 않고 최근 run 을 한눈에 보는 목록 — FE "실행 내역" 화면의 받침.
+     */
+    @GetMapping("/runs")
+    @Operation(summary = "전체 워크플로우 실행 이력 조회 (횡단)",
+            description = "모든 워크플로우의 run 을 started_at DESC 로 반환. workflow_id / status 필터 옵션.")
+    public ApiResponse<?> allRuns(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(name = "workflow_id", required = false) String workflowId,
+            @RequestParam(required = false) String status
+    ) {
+        return ApiResponse.page(workflowRunRepository.searchRuns(workflowId, status, PageRequest.of(page, size)));
+    }
+
+    /** CR-102: run 단건 조회 (워크플로우 id 없이) — 횡단 실행 내역 화면에서 상세 진입용. */
+    @GetMapping("/runs/{runId}")
+    @Operation(summary = "워크플로우 실행 단건 조회 (횡단)")
+    public ApiResponse<WorkflowRunEntity> getRunById(@PathVariable UUID runId) {
+        return workflowRunRepository.findById(runId)
+                .map(ApiResponse::ok)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Workflow run not found: " + runId));
+    }
+
     @GetMapping("/{id}/runs/{runId}")
     @Operation(summary = "워크플로우 실행 상세 조회")
     public ApiResponse<WorkflowRunEntity> getRun(@PathVariable String id,
@@ -167,6 +193,19 @@ public class WorkflowController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Run does not belong to workflow");
         }
         return ApiResponse.ok(run);
+    }
+
+    /**
+     * CR-065: 부모 run 의 자식 서브워크플로우 run 트리 조회.
+     * SUB_WORKFLOW 스텝이 생성한 자식 run 들을 started_at 오름차순으로 반환한다.
+     */
+    @GetMapping("/runs/{runId}/children")
+    @Operation(summary = "서브워크플로우 자식 실행 트리 조회")
+    public ApiResponse<List<WorkflowRunEntity>> children(@PathVariable UUID runId) {
+        if (!workflowRunRepository.existsById(runId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Workflow run not found: " + runId);
+        }
+        return ApiResponse.ok(workflowRunRepository.findByParentRunIdOrderByStartedAtAsc(runId));
     }
 
     /**
@@ -234,29 +273,57 @@ public class WorkflowController {
      */
     @GetMapping("/runs/{runId}/events")
     @Operation(summary = "워크플로우 실행 이벤트 시간순 조회",
-            description = "STEP_START/TOOL_USE/TOOL_RESULT/LLM_RESPONSE/STEP_END/STEP_FAILED 이벤트를 시간순으로 반환")
-    public ApiResponse<List<Map<String, Object>>> getRunEvents(@PathVariable UUID runId) {
+            description = "STEP_START/TOOL_USE/TOOL_RESULT/LLM_RESPONSE/STEP_END/STEP_FAILED 이벤트를 시간순으로 반환. "
+                    + "include_body=true 시 품질 분석용 본문 전문(prompt/response/input/output)을 함께 반환 (CR-102).")
+    public ApiResponse<List<Map<String, Object>>> getRunEvents(
+            @PathVariable UUID runId,
+            @RequestParam(name = "include_body", defaultValue = "false") boolean includeBody) {
         // 존재 확인 (404 명시)
         workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Workflow run not found: " + runId));
 
         List<WorkflowRunEventEntity> events = eventRepository.findByRunIdOrderByCreatedAtAscIdAsc(runId);
-        List<Map<String, Object>> body = events.stream().map(e -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", e.getId());
-            m.put("event_type", e.getEventType() != null ? e.getEventType().name() : null);
-            m.put("step_id", e.getStepId());
-            m.put("iteration", e.getIteration());
-            m.put("tool_name", e.getToolName());
-            m.put("duration_ms", e.getDurationMs());
-            m.put("payload", e.getPayload());
-            m.put("trace_id", e.getTraceId());
-            m.put("subagent_run_id", e.getSubagentRunId() != null ? e.getSubagentRunId().toString() : null);
-            m.put("created_at", e.getCreatedAt() != null ? e.getCreatedAt().toString() : null);
-            return m;
-        }).toList();
-        return ApiResponse.ok(body);
+        return ApiResponse.ok(events.stream().map(e -> toEventMap(e, includeBody)).toList());
+    }
+
+    /**
+     * CR-102: 이벤트 단건 본문 조회.
+     * 타임라인은 메타로 가볍게 띄우고, 행을 펼칠 때만 해당 이벤트의 본문 전문을 가져온다
+     * (run 1건 include_body=true 일괄 응답은 LLM 프롬프트 전문 × 수십 건이라 수 MB 가 될 수 있음).
+     */
+    @GetMapping("/runs/{runId}/events/{eventId}")
+    @Operation(summary = "워크플로우 실행 이벤트 단건 조회 (본문 전문 포함)",
+            description = "prompt_text/response_text/input_json/output_text 본문 전문을 항상 포함해 반환.")
+    public ApiResponse<Map<String, Object>> getRunEvent(@PathVariable UUID runId,
+                                                        @PathVariable Long eventId) {
+        WorkflowRunEventEntity event = eventRepository.findById(eventId)
+                .filter(e -> runId.equals(e.getRunId()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Workflow run event not found: " + eventId));
+        return ApiResponse.ok(toEventMap(event, true));
+    }
+
+    private Map<String, Object> toEventMap(WorkflowRunEventEntity e, boolean includeBody) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", e.getId());
+        m.put("event_type", e.getEventType() != null ? e.getEventType().name() : null);
+        m.put("step_id", e.getStepId());
+        m.put("iteration", e.getIteration());
+        m.put("tool_name", e.getToolName());
+        m.put("duration_ms", e.getDurationMs());
+        m.put("payload", e.getPayload());
+        m.put("trace_id", e.getTraceId());
+        m.put("subagent_run_id", e.getSubagentRunId() != null ? e.getSubagentRunId().toString() : null);
+        m.put("created_at", e.getCreatedAt() != null ? e.getCreatedAt().toString() : null);
+        // CR-102: 품질 분석 본문 전문 — 옵트인(타임라인은 가볍게, 정독 시에만 본문 동반)
+        if (includeBody) {
+            m.put("prompt_text", e.getPromptText());
+            m.put("response_text", e.getResponseText());
+            m.put("input_json", e.getInputJson());
+            m.put("output_text", e.getOutputText());
+        }
+        return m;
     }
 
     public record WorkflowRequest(

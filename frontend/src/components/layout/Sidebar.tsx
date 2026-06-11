@@ -25,6 +25,7 @@ import {
   Settings2,
   Clock,
   Sparkles,
+  History,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -46,6 +47,7 @@ const NAV_ITEMS: NavItemDef[] = [
   { path: "/policies", icon: Shield, label: "정책" },
   { path: "/prompts", icon: MessageSquare, label: "프롬프트" },
   { path: "/workflows", icon: Zap, label: "워크플로우" },
+  { path: "/workflow-runs", icon: History, label: "실행 내역" },
   { path: "/knowledge", icon: BookOpen, label: "Knowledge" },
   { path: "/rag-evaluation", icon: Target, label: "RAG 평가" },
   { path: "/documents", icon: FileText, label: "문서 생성" },

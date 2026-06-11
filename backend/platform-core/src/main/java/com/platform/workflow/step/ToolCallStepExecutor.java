@@ -112,18 +112,18 @@ public class ToolCallStepExecutor implements StepExecutor {
         // WorkflowEngine.executeWithRetry 가 Exception 만 보기 때문에 retry/failed 처리가 안 되고
         // status=completed 가짜 성공으로 끝난다 — 여기서 RuntimeException 으로 승격해서 retry 정책에 태운다.
         if (output.startsWith("오류: ") || output.startsWith("도구 실행 오류: ")) {
-            // CR-090: TOOL_RESULT (도구 자체 에러 문자열)
+            // CR-090: TOOL_RESULT (도구 자체 에러 문자열) / CR-102: 에러 본문 전문 적재
             if (eventRecorder != null && runUuid != null) {
                 eventRecorder.toolResult(runUuid, step.id(), null, toolName,
-                        durationMs, false, output, output.length(), null);
+                        durationMs, false, output, output.length(), null, output);
             }
             throw new RuntimeException(output);
         }
 
-        // CR-090: TOOL_RESULT (성공)
+        // CR-090: TOOL_RESULT (성공) / CR-102: output 본문 전문 적재
         if (eventRecorder != null && runUuid != null) {
             eventRecorder.toolResult(runUuid, step.id(), null, toolName,
-                    durationMs, true, null, output.length(), null);
+                    durationMs, true, null, output.length(), null, output);
         }
 
         // output이 JSON이면 structured_data에도 저장 (LLM_CALL과 동일한 참조 키 지원)

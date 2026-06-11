@@ -511,6 +511,17 @@ DAG 기반 워크플로우를 설계하고 실행합니다. Workflow Studio(비�
 | 실행 | `POST /workflows/{id}/run` | 수동 실행 |
 | 실행 이력 | `GET /workflows/{id}/runs` | 실행 이력 목록 |
 | 실행 결과 | `GET /workflows/{id}/runs/{runId}` | 개별 실행 결과 |
+| 횡단 실행 내역 | `GET /workflows/runs` | 전체 워크플로우 횡단 run 목록 (CR-102) |
+| 이벤트 본문 | `GET /workflows/runs/{runId}/events/{eventId}` | 이벤트 단건 본문 전문 (CR-102) |
+
+**실행 내역 화면 (한눈에 보는 UI) [CR-102]**
+
+**UI 경로**: 실행 내역 (사이드바) → run 클릭 → 실행 상세
+
+- 특정 워크플로우에 얽매이지 않고 **전체 run 을 횡단 조회** (워크플로우/상태 필터, 페이지네이션)
+- 실행 상세 = run 메타 + 이벤트 타임라인 (STEP/TOOL/LLM 6종 시간순). **행을 클릭하면 본문 전문 펼침** — LLM 프롬프트↔응답, 도구 input↔output, 단계 결과를 절단 없이 정독 (품질 분석용)
+- 본문 적재는 V66(`workflow_run_events` 본문 4컬럼)부터. 그 이전 run 은 "본문이 적재되지 않은 이벤트" 표기 (정상)
+- **용량 주의**: 본문은 절단 없는 전문 적재라 run 이 잦은 테넌트는 `workflow_run_events` 테이블 크기 모니터링. 보관기간(TTL)은 후속 CR 예정
 
 **노드 타입** (Studio 팔레트):
 - `LLM_CALL` / `TOOL_CALL` / `CONDITION` / `PARALLEL` / `HUMAN_INPUT` / `ACTION` / `AGENT_CALL` — 기존
@@ -1373,6 +1384,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.5.0 | 2026-06-12 | **CR-102 — 실행 내역 화면 + 본문 전문 적재** (§ 3-5). FE 사이드바 "실행 내역" 신설 — 전체 워크플로우 횡단 run 목록(필터+페이지네이션) → 실행 상세(이벤트 타임라인 + 행 클릭 본문 전문 펼침). `workflow_run_events` 본문 4컬럼(V66 tenant) 무조건 적재 — 용량 모니터링 항목 추가, TTL 후속 CR |
 | v3.4.0 | 2026-06-03 | **CR-092 — 전통적 OCR (Tesseract)** 운영 시나리오 O 추가. 사이드카 `tesseract-ocr-kor` 한국어 언어팩 설치 확인 / `global_config` 4 키 (`aimbase.ocr.*` V65 seed) / 페이지 상한 (BIZ-105 50p) / 언어 화이트리스트 (BIZ-106) / fallback 임계 (BIZ-107 50자) 운영 절차. `PdfTextExtractor` 자동 fallback 로그 모니터링 + `ocr_image` Built-in Tool 감사 로그. Vision 모델(CR-061)과 선택 기준 정리 |
 | v3.3.0 | 2026-05-18 | **CR-085 — State 채널 reducer + 중첩 경로 + 노드 토큰 스트리밍**. § 3-5 워크플로우 관리에 CR-085 운영 점검표 추가. 중첩 경로 참조(자동, 폴백 빈 문자열) / 채널 reducer(`output_channel`+`reduce`, opt-in, `append` 채널 비대 방어 — `workflow_runs.step_results` JSONB 크기 모니터링) / 노드 토큰 스트리밍(`stream_tokens:true`, `response_schema` 없을 때만, SSE `step_token`, 내부 300초 상한). 세 기능 모두 opt-in — 미지정 시 기존 동작 100% 보존. 신규 마이그레이션 없음(StepContext/이벤트 계약 확장만). platform-core 653 회귀 GREEN |
 | v3.2.0 | 2026-05-16 | **CR-084 — 워크플로우 그래프 모드 + ROUTER**. § 3-5 워크플로우 관리에 `graphMode`(dag 기본 / cyclic) 표 + 운영 점검 항목 추가. 신규 노드 타입 `ROUTER`(N-way 동적 라우팅). cyclic 모드 운영 가이드: step budget(기본 50/절대 200, `triggerConfig.max_total_steps` 조정, `step_budget_exceeded` 진단), HUMAN_INPUT 재개 시 `workflow_runs.pending_worklist` 자동 복원, ROUTER 종료 경로(`__end__`/onSuccess 미지정 수렴) 필수, SSE `iterationIndex` 모니터링. **기존 DAG 워크플로우 무변경(하위호환)**. Flyway tenant V62(workflows.graph_mode) + V63(workflow_runs.pending_worklist) 자동 적용 |

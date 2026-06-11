@@ -144,6 +144,79 @@ class WorkflowRunEventRecorderTest {
         assertThat(saved.getPayload()).containsEntry("finish_reason", "END");
     }
 
+    // ─── CR-102: 본문 전문 적재 오버로드 ───
+
+    @Test
+    @DisplayName("CR-102: stepEnd(outputBody) → output_text 전문 적재 (절단 없음)")
+    void stepEndWithBody() throws Exception {
+        UUID runId = UUID.randomUUID();
+        String body = "결과 본문 ".repeat(100); // PREVIEW_MAX(100자) 초과
+
+        recorder.stepEnd(runId, "step1", 1234L, body.length(), body);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getEventType()).isEqualTo(EventType.STEP_END);
+        assertThat(saved.getOutputText()).isEqualTo(body); // 절단 없이 전문 그대로
+    }
+
+    @Test
+    @DisplayName("CR-102: toolUse → input_json 전문 적재 + 메타(preview)는 기존 유지")
+    void toolUseStoresFullInput() throws Exception {
+        UUID runId = UUID.randomUUID();
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("query", "q".repeat(500));
+
+        recorder.toolUse(runId, "step1", null, "web_search", input, null);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getInputJson()).isEqualTo(input); // 전문 (Map 그대로)
+        assertThat(saved.getPayload()).containsKey("input_preview"); // 메타 병행 유지
+    }
+
+    @Test
+    @DisplayName("CR-102: toolResult(outputBody) → output_text 전문 적재")
+    void toolResultWithBody() throws Exception {
+        UUID runId = UUID.randomUUID();
+        String body = "o".repeat(5000);
+
+        recorder.toolResult(runId, "step1", null, "calc", 50L, true, null, body.length(), null, body);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getOutputText()).isEqualTo(body);
+        assertThat(saved.getPayload()).containsEntry("output_size", 5000);
+    }
+
+    @Test
+    @DisplayName("CR-102: llmResponse(promptBody, responseBody) → prompt_text/response_text 전문 적재")
+    void llmResponseWithBodies() throws Exception {
+        UUID runId = UUID.randomUUID();
+        String promptBody = "[SYSTEM]\nsys\n\n[PROMPT]\n" + "p".repeat(2000);
+        String responseBody = "r".repeat(3000);
+
+        recorder.llmResponse(runId, "step1", null,
+                "claude-sonnet-4-5", 1000, 250, "END", 800L, null, null,
+                promptBody, responseBody);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getPromptText()).isEqualTo(promptBody);
+        assertThat(saved.getResponseText()).isEqualTo(responseBody);
+        assertThat(saved.getPayload()).containsEntry("model", "claude-sonnet-4-5");
+    }
+
+    @Test
+    @DisplayName("CR-102: 기존 시그니처(본문 미전달) → 본문 컬럼 null 유지 (하위호환)")
+    void legacySignatureLeavesBodiesNull() throws Exception {
+        UUID runId = UUID.randomUUID();
+
+        recorder.llmResponse(runId, "step1", null,
+                "claude-sonnet-4-5", 1000, 250, "END", 800L, null, null);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getPromptText()).isNull();
+        assertThat(saved.getResponseText()).isNull();
+        assertThat(saved.getOutputText()).isNull();
+    }
+
     @Test
     @DisplayName("runId == null → publish 스킵 (워크플로우 무관 호출 방어)")
     void nullRunIdSkipped() throws Exception {

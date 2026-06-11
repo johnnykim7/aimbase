@@ -39,9 +39,16 @@ public class WorkflowRunEventRecorder {
     }
 
     public void stepEnd(UUID runId, String stepId, long durationMs, int outputSize) {
+        stepEnd(runId, stepId, durationMs, outputSize, null);
+    }
+
+    /** CR-102: 단계 결과 본문(outputBody) 전문 적재 — 단계 간 데이터 전달 품질 검토용. */
+    public void stepEnd(UUID runId, String stepId, long durationMs, int outputSize, String outputBody) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("output_size", outputSize);
-        publish(buildEvent(runId, stepId, null, EventType.STEP_END, null, durationMs, payload, null, null));
+        WorkflowRunEventEntity e = buildEvent(runId, stepId, null, EventType.STEP_END, null, durationMs, payload, null, null);
+        e.setOutputText(outputBody);
+        publish(e);
     }
 
     public void stepFailed(UUID runId, String stepId, long durationMs, String error, int attempts) {
@@ -58,28 +65,53 @@ public class WorkflowRunEventRecorder {
             payload.put("input_keys", input.keySet());
             payload.put("input_preview", truncate(input.toString(), PREVIEW_MAX));
         }
-        publish(buildEvent(runId, stepId, iteration, EventType.TOOL_USE, toolName, null, payload, null, subagentRunId));
+        WorkflowRunEventEntity e = buildEvent(runId, stepId, iteration, EventType.TOOL_USE, toolName, null, payload, null, subagentRunId);
+        // CR-102: 도구 input 전문 적재 (절단 없음) — 품질 분석용
+        if (input != null && !input.isEmpty()) e.setInputJson(input);
+        publish(e);
     }
 
     public void toolResult(UUID runId, String stepId, Integer iteration, String toolName,
                            long durationMs, boolean ok, String error, int outputSize, UUID subagentRunId) {
+        toolResult(runId, stepId, iteration, toolName, durationMs, ok, error, outputSize, subagentRunId, null);
+    }
+
+    /** CR-102: 도구 결과 본문(outputBody) 전문 적재 — output 이 다음 단계에 제대로 쓰였나 검토용. */
+    public void toolResult(UUID runId, String stepId, Integer iteration, String toolName,
+                           long durationMs, boolean ok, String error, int outputSize, UUID subagentRunId,
+                           String outputBody) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("output_size", outputSize);
         payload.put("ok", ok);
         if (error != null) payload.put("error", truncate(error, 200));
-        publish(buildEvent(runId, stepId, iteration, EventType.TOOL_RESULT, toolName, durationMs, payload, null, subagentRunId));
+        WorkflowRunEventEntity e = buildEvent(runId, stepId, iteration, EventType.TOOL_RESULT, toolName, durationMs, payload, null, subagentRunId);
+        e.setOutputText(outputBody);
+        publish(e);
     }
 
     public void llmResponse(UUID runId, String stepId, Integer iteration,
                             String model, int inputTokens, int outputTokens,
                             String finishReason, long durationMs,
                             String traceId, UUID subagentRunId) {
+        llmResponse(runId, stepId, iteration, model, inputTokens, outputTokens,
+                finishReason, durationMs, traceId, subagentRunId, null, null);
+    }
+
+    /** CR-102: 프롬프트 입력(promptBody) ↔ 응답 본문(responseBody) 전문 적재 — LLM 응답 품질 정독용. */
+    public void llmResponse(UUID runId, String stepId, Integer iteration,
+                            String model, int inputTokens, int outputTokens,
+                            String finishReason, long durationMs,
+                            String traceId, UUID subagentRunId,
+                            String promptBody, String responseBody) {
         Map<String, Object> payload = new LinkedHashMap<>();
         if (model != null) payload.put("model", model);
         payload.put("in_tok", inputTokens);
         payload.put("out_tok", outputTokens);
         if (finishReason != null) payload.put("finish_reason", finishReason);
-        publish(buildEvent(runId, stepId, iteration, EventType.LLM_RESPONSE, null, durationMs, payload, traceId, subagentRunId));
+        WorkflowRunEventEntity e = buildEvent(runId, stepId, iteration, EventType.LLM_RESPONSE, null, durationMs, payload, traceId, subagentRunId);
+        e.setPromptText(promptBody);
+        e.setResponseText(responseBody);
+        publish(e);
     }
 
     // ── 내부 ──

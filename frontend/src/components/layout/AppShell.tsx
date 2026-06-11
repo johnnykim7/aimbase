@@ -4,9 +4,10 @@ import {
   LayoutDashboard, PlugZap, Wrench, FileJson, Shield, MessageSquare,
   Zap, BookOpen, Target, FileText, FolderOpen, Users, BarChart3,
   Building2, CreditCard, KeyRound, Globe,
-  MessageSquareText, MessageCircle, Layers, Settings2,
+  MessageSquareText, MessageCircle, Layers, Settings2, History,
 } from "lucide-react";
 import { Sidebar } from "./Sidebar";
+import { ImpersonationBanner } from "./ImpersonationBanner";
 
 /* ── 라우트별 정적 헤더 정의 (동기 렌더 → 깜박임 없음) ── */
 
@@ -26,6 +27,7 @@ const ROUTE_HEADERS: Record<string, RouteHeader> = {
   "/policies":              { title: "정책 관리", subtitle: "Policy Engine — 액션 실행 전 규칙 평가", icon: <Shield className={ICON} /> },
   "/prompts":               { title: "프롬프트 관리", subtitle: "LLM 프롬프트 템플릿 편집 및 버전 관리", icon: <MessageSquare className={ICON} /> },
   "/workflows":             { title: "워크플로우", subtitle: "DAG 기반 다단계 AI 오케스트레이션", icon: <Zap className={ICON} /> },
+  "/workflow-runs":         { title: "실행 내역", subtitle: "전체 워크플로우 횡단 실행 이력 및 본문 정독", icon: <History className={ICON} /> },
   "/knowledge":             { title: "Knowledge Base", subtitle: "RAG 소스 관리 및 벡터 검색", icon: <BookOpen className={ICON} /> },
   "/rag-evaluation":        { title: "RAG Quality Evaluation", subtitle: "RAGAS 메트릭으로 RAG 파이프라인 품질 측정", icon: <Target className={ICON} /> },
   "/documents":             { title: "Document Generation", subtitle: "AI 문서 생성 및 템플릿 관리", icon: <FileText className={ICON} /> },
@@ -49,6 +51,10 @@ function resolveHeader(pathname: string): RouteHeader | null {
   // /workflows/:id → 워크플로우 상세 (edit 제외)
   if (/^\/workflows\/[^/]+$/.test(pathname) && !pathname.endsWith("/new")) {
     return { title: "워크플로우 상세", icon: <Zap className={ICON} /> };
+  }
+  // /workflow-runs/:runId → 실행 상세 (동적 오버라이드 사용)
+  if (/^\/workflow-runs\/[^/]+$/.test(pathname)) {
+    return { title: "실행 상세", icon: <History className={ICON} /> };
   }
   // /sessions/:id → 세션 상세 (동적 오버라이드 사용)
   if (/^\/sessions\/[^/]+$/.test(pathname)) {
@@ -92,6 +98,8 @@ export const AppShell = () => {
         <div className="flex h-screen overflow-hidden bg-background">
           <Sidebar />
           <main className="flex-1 flex flex-col overflow-hidden">
+            {/* CR-096: 임퍼소네이션 배너 — 활성 시에만 렌더 */}
+            <ImpersonationBanner />
             {/* 페이지 헤더 — 셸 고정, 라우트에서 동기 렌더 */}
             {title && (
               <div className="shrink-0 bg-card border-b border-border px-7 py-5">
