@@ -1,15 +1,25 @@
 package com.platform.mcp.server;
 
+import com.platform.attachment.PdfVisionResolver;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookEvent;
 import com.platform.hook.HookOutput;
 import com.platform.policy.TokenBucketRateLimiter;
+import com.platform.tool.EnhancedToolExecutor;
+import com.platform.tool.PermissionLevel;
+import com.platform.tool.RetryPolicy;
+import com.platform.tool.ToolContext;
+import com.platform.tool.ToolContractMeta;
 import com.platform.tool.ToolExecutor;
+import com.platform.tool.ToolMessageBlock;
+import com.platform.tool.ToolResult;
+import com.platform.tool.ToolScope;
 import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,19 +36,21 @@ class ServerMcpToolDispatcherTest {
 
     private HookDispatcher hookDispatcher;
     private TokenBucketRateLimiter rateLimiter;
+    private PdfVisionResolver pdfVisionResolver;
     private ServerMcpToolDispatcher dispatcher;
 
     @BeforeEach
     void setUp() {
         hookDispatcher = mock(HookDispatcher.class);
         rateLimiter = mock(TokenBucketRateLimiter.class);
+        pdfVisionResolver = mock(PdfVisionResolver.class);
         // 기본: PASSTHROUGH 반환 (BLOCK 아님)
         when(hookDispatcher.dispatch(any(HookEvent.class), any(), any(String.class)))
                 .thenReturn(HookOutput.PASSTHROUGH);
         // 기본: rate limit 통과
         when(rateLimiter.tryAcquire(anyString(), anyInt()))
                 .thenReturn(TokenBucketRateLimiter.RateLimitResult.allowed(60, 59));
-        dispatcher = new ServerMcpToolDispatcher(hookDispatcher, rateLimiter, 60);
+        dispatcher = new ServerMcpToolDispatcher(hookDispatcher, rateLimiter, pdfVisionResolver, 60);
     }
 
     @Test
@@ -109,6 +121,131 @@ class ServerMcpToolDispatcherTest {
         verify(hookDispatcher, times(1)).dispatch(eq(HookEvent.POST_TOOL_USE_FAILURE), any(), eq("web_search"));
         // 성공 Hook 은 호출 안 됨
         verify(hookDispatcher, times(0)).dispatch(eq(HookEvent.POST_TOOL_USE), any(), any(String.class));
+    }
+
+    // ── CR-101: EnhancedToolExecutor newMessages → MCP 멀티모달 content 운반 ──
+
+    @Test
+    void enhanced_tool_pdf_document_rendered_to_page_images() {
+        // CLI 2.1.143 은 binary EmbeddedResource 를 인라인하지 않으므로 PDF → 페이지 이미지 변환이 정공
+        when(pdfVisionResolver.resolve(any(byte[].class), eq(false), eq(true)))
+                .thenReturn(new PdfVisionResolver.PdfVisionResult(
+                        PdfVisionResolver.Mode.PAGE_IMAGES, null,
+                        List.of(new PdfVisionResolver.PageImage(1, "image/jpeg", "UEFHRTFKUEVH"),
+                                new PdfVisionResolver.PageImage(2, "image/jpeg", "UEFHRTJKUEVH")),
+                        null));
+        ToolResult toolResult = new ToolResult(true,
+                Map.of("mode", "inline_pdf"), "PDF attached for vision parsing",
+                List.of(), List.of(), Map.of(), null, 0,
+                List.of(
+                        ToolMessageBlock.document("application/pdf", "UERGLUJBU0U2NA==", "report.pdf"),
+                        ToolMessageBlock.image("image/png", "UE5HLUJBU0U2NA==")));
+        ToolExecutor tool = stubEnhancedTool("parse_document", toolResult);
+
+        McpSchema.CallToolResult result = dispatcher.dispatch(tool, "parse_document", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        // [본문 텍스트, PDF 페이지 안내 텍스트, 페이지 이미지 2, 별도 image 블록] = 5
+        assertThat(result.content()).hasSize(5);
+        assertThat(result.content().get(0)).isInstanceOf(McpSchema.TextContent.class);
+        assertThat(((McpSchema.TextContent) result.content().get(0)).text())
+                .contains("PDF attached for vision parsing");
+
+        assertThat(((McpSchema.TextContent) result.content().get(1)).text())
+                .contains("report.pdf").contains("2 page image(s)");
+        McpSchema.ImageContent page1 = (McpSchema.ImageContent) result.content().get(2);
+        assertThat(page1.data()).isEqualTo("UEFHRTFKUEVH");
+        assertThat(page1.mimeType()).isEqualTo("image/jpeg");
+        assertThat(((McpSchema.ImageContent) result.content().get(3)).data()).isEqualTo("UEFHRTJKUEVH");
+
+        McpSchema.ImageContent image = (McpSchema.ImageContent) result.content().get(4);
+        assertThat(image.data()).isEqualTo("UE5HLUJBU0U2NA==");
+        assertThat(image.mimeType()).isEqualTo("image/png");
+    }
+
+    @Test
+    void enhanced_tool_pdf_render_failure_falls_back_to_embedded_resource() {
+        when(pdfVisionResolver.resolve(any(byte[].class), eq(false), eq(true)))
+                .thenReturn(new PdfVisionResolver.PdfVisionResult(
+                        PdfVisionResolver.Mode.TEXT_FALLBACK, null, List.of(), "sidecar down"));
+        ToolResult toolResult = new ToolResult(true,
+                Map.of("mode", "inline_pdf"), "PDF attached for vision parsing",
+                List.of(), List.of(), Map.of(), null, 0,
+                List.of(ToolMessageBlock.document("application/pdf", "UERGLUJBU0U2NA==", "report.pdf")));
+        ToolExecutor tool = stubEnhancedTool("parse_document", toolResult);
+
+        McpSchema.CallToolResult result = dispatcher.dispatch(tool, "parse_document", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(result.content()).hasSize(2);
+        McpSchema.EmbeddedResource resource = (McpSchema.EmbeddedResource) result.content().get(1);
+        McpSchema.BlobResourceContents blob = (McpSchema.BlobResourceContents) resource.resource();
+        assertThat(blob.blob()).isEqualTo("UERGLUJBU0U2NA==");
+        assertThat(blob.mimeType()).isEqualTo("application/pdf");
+        assertThat(blob.uri()).contains("report.pdf");
+    }
+
+    @Test
+    void enhanced_tool_without_newMessages_returns_single_text_content() {
+        ToolResult toolResult = new ToolResult(true,
+                Map.of("text", "parsed body"), "Parsed document",
+                List.of(), List.of(), Map.of(), null, 0);
+        ToolExecutor tool = stubEnhancedTool("parse_document", toolResult);
+
+        McpSchema.CallToolResult result = dispatcher.dispatch(tool, "parse_document", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0)).isInstanceOf(McpSchema.TextContent.class);
+        assertThat(((McpSchema.TextContent) result.content().get(0)).text()).contains("parsed body");
+    }
+
+    @Test
+    void enhanced_tool_failure_dispatches_post_failure_hook() {
+        ToolExecutor tool = new EnhancedToolExecutor() {
+            @Override
+            public UnifiedToolDef getDefinition() {
+                return new UnifiedToolDef("parse_document", "test", Map.of("type", "object"));
+            }
+
+            @Override
+            public ToolContractMeta getContractMeta() {
+                return contractMeta("parse_document");
+            }
+
+            @Override
+            public ToolResult execute(Map<String, Object> input, ToolContext ctx) {
+                throw new RuntimeException("enhanced-boom");
+            }
+        };
+
+        McpSchema.CallToolResult result = dispatcher.dispatch(tool, "parse_document", Map.of());
+
+        assertThat(result.isError()).isTrue();
+        verify(hookDispatcher, times(1)).dispatch(eq(HookEvent.POST_TOOL_USE_FAILURE), any(), eq("parse_document"));
+    }
+
+    private static ToolExecutor stubEnhancedTool(String name, ToolResult result) {
+        UnifiedToolDef def = new UnifiedToolDef(name, "test", Map.of("type", "object"));
+        return new EnhancedToolExecutor() {
+            @Override
+            public UnifiedToolDef getDefinition() { return def; }
+
+            @Override
+            public ToolContractMeta getContractMeta() { return contractMeta(name); }
+
+            @Override
+            public ToolResult execute(Map<String, Object> input, ToolContext ctx) { return result; }
+        };
+    }
+
+    private static ToolContractMeta contractMeta(String name) {
+        return new ToolContractMeta(
+                name, "1.0", ToolScope.BUILTIN,
+                PermissionLevel.READ_ONLY,
+                false, true, false, true,
+                RetryPolicy.NONE,
+                List.of("test"), List.of("read"));
     }
 
     private static ToolExecutor stubTool(String name, String result) {

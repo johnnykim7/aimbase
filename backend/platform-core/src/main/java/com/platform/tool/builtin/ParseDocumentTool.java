@@ -249,8 +249,11 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
         }
 
         // tool_result 본문에는 안내만 — 실제 콘텐츠는 newMessages 로 LLM 이 직접 본다.
-        output.put("note", "The PDF content has been provided to you as a separate message above. "
-                + "Read it directly; do not call parse_document again for this file.");
+        // CR-101: 문구 채널 중립화 — API 경로는 별도 user 메시지로, MCP(CLI) 경로는 같은
+        // tool result 의 content 블록으로 실리므로 위치를 단정하지 않는다.
+        output.put("note", "The PDF content has been provided to you directly, either as "
+                + "attachment blocks in this tool result or as a separate message. "
+                + "Read it with vision; do not call parse_document again for this file.");
 
         return new ToolResult(true, output, summary,
                 List.of(), List.of(),

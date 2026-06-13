@@ -252,12 +252,21 @@ public class ClaudeCliWorker implements AutoCloseable {
                     // override 있으면 무시, 없으면 위에서 systemPrefix 로 누적됨.
                 }
                 case USER -> {
-                    String text = flattenText(msg);
+                    // CR-098: 멀티모달(Image/Document) 블록이 있으면 stream-json content 배열로 전송.
+                    boolean hasMultimodal = msg.content().stream()
+                            .anyMatch(b -> b instanceof ContentBlock.Image || b instanceof ContentBlock.Document);
+                    String prefix = null;
                     if (!firstUserConsumed && systemPrefix.length() > 0) {
-                        text = systemPrefix + "\n\n" + text;
+                        prefix = systemPrefix.toString();
                         firstUserConsumed = true;
                     }
-                    writeUserLine(text);
+                    if (hasMultimodal) {
+                        writeUserContentBlocks(msg, prefix);
+                    } else {
+                        String text = flattenText(msg);
+                        if (prefix != null) text = prefix + "\n\n" + text;
+                        writeUserLine(text);
+                    }
                 }
                 case TOOL_RESULT -> {
                     // CR-050: OrchestratorEngine 이 도구 실행 결과를 다시 주입할 때.
@@ -288,6 +297,59 @@ public class ClaudeCliWorker implements AutoCloseable {
                 text != null && text.length() > 200 ? text.substring(0, 200) + "..." : text);
         stdin.write(line);
         stdin.newLine();
+    }
+
+    /**
+     * CR-098: 멀티모달 USER 메시지를 stream-json content 배열로 전송.
+     * claude CLI(2.1.143) stream-json 이 받는 Anthropic content block 포맷 그대로:
+     *   {type:"user", message:{role:"user", content:[{type:"text",...},{type:"document",source:{base64}},{type:"image",...}]}}
+     * base64 source 만 지원. prefix(시스템 prepend)가 있으면 맨 앞 text 블록으로 추가.
+     */
+    private void writeUserContentBlocks(UnifiedMessage msg, String prefix) throws IOException {
+        java.util.List<Map<String, Object>> blocks = new java.util.ArrayList<>();
+        if (prefix != null && !prefix.isBlank()) {
+            blocks.add(textBlock(prefix));
+        }
+        for (ContentBlock b : msg.content()) {
+            if (b instanceof ContentBlock.Text t) {
+                if (t.text() != null && !t.text().isEmpty()) blocks.add(textBlock(t.text()));
+            } else if (b instanceof ContentBlock.Image img && img.isBase64()) {
+                blocks.add(sourceBlock("image", img.mediaType(), img.data()));
+            } else if (b instanceof ContentBlock.Document doc && doc.isBase64()) {
+                blocks.add(sourceBlock("document", doc.mediaType(), doc.data()));
+            }
+            // URL 방식·기타 블록은 CLI stream-json 미지원 → 생략
+        }
+        if (blocks.isEmpty()) return;
+
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("type", "user");
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", "user");
+        message.put("content", blocks);
+        event.put("message", message);
+        String line = MAPPER.writeValueAsString(event);
+        log.info("[CLI-STDIN] writing multimodal user line: blocks={}, jsonLen={}", blocks.size(), line.length());
+        stdin.write(line);
+        stdin.newLine();
+    }
+
+    private static Map<String, Object> textBlock(String text) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("type", "text");
+        m.put("text", text);
+        return m;
+    }
+
+    private static Map<String, Object> sourceBlock(String type, String mediaType, String base64) {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("type", "base64");
+        source.put("media_type", mediaType);
+        source.put("data", base64);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("type", type);
+        m.put("source", source);
+        return m;
     }
 
     private void writeToolResultLine(UnifiedMessage msg) throws IOException {
