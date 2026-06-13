@@ -244,6 +244,210 @@ public class WorkflowEngine {
         return executeWithRetry(step, context, parseErrorHandling(workflowEntity));
     }
 
+    /**
+     * CR-065: SUB_WORKFLOW 스텝이 호출하는 자식 워크플로우 동기 실행 진입점.
+     *
+     * <p>{@link com.platform.workflow.step.SubWorkflowStepExecutor} 가
+     * {@link org.springframework.context.ApplicationContext} 지연 로드로 호출한다
+     * ({@link com.platform.workflow.step.ParallelStepExecutor} 와 동일한 순환의존 회피 패턴).
+     *
+     * <p>기존 인라인 실행(executor 안에서 서브스텝 순차 실행)을 자식
+     * {@link WorkflowRunEntity} 별도 레코드로 승격한다. 자식 run 은
+     * {@code parent_run_id} / {@code parent_step_id} 가 채워져 실존 트리로 저장되며,
+     * 자식 전용 stepResults 기록 + STEP_START/END 이벤트(부모 runId 와 분리)가 발행된다.
+     *
+     * <p><b>동기</b> 실행이다 — 부모 스텝이 자식의 최종 output 을 받아 다음 스텝에 넘겨야
+     * 하므로 VirtualThread 를 띄우지 않는다. 호출 스레드의 TenantContext 를 그대로 사용한다.
+     *
+     * <p><b>자식 HUMAN_INPUT 금지</b>: 동기 경로라 일시중단/재개가 불가능하므로 자식
+     * 워크플로우에 HUMAN_INPUT 스텝이 있으면 즉시 거부한다.
+     *
+     * @param platform     실행할 플랫폼 공용 워크플로우 (active 검증은 호출부 책임)
+     * @param subInput     변수치환 완료된 서브 워크플로우 입력
+     * @param parentRunId  부모 run UUID
+     * @param parentStepId 이 자식을 트리거한 부모 스텝 ID
+     * @param sessionId    부모 run 의 sessionId (자식도 동일 세션 공유)
+     * @return 자식 마지막 스텝 output + {@code sub_workflow_id}(기존 호환) + {@code sub_workflow_run_id}(신규 자식 UUID)
+     */
+    public Map<String, Object> executeSubWorkflowSync(PlatformWorkflowEntity platform,
+                                                      Map<String, Object> subInput,
+                                                      UUID parentRunId,
+                                                      String parentStepId,
+                                                      String sessionId) {
+        String workflowId = "platform:" + platform.getId();
+
+        // PlatformWorkflowEntity → WorkflowEntity 프록시 (executePlatform 과 동일 변환)
+        WorkflowEntity proxy = new WorkflowEntity();
+        proxy.setId(workflowId);
+        proxy.setName(platform.getName());
+        proxy.setSteps(platform.getSteps());
+        proxy.setErrorHandling(platform.getErrorHandling());
+        proxy.setOutputSchema(platform.getOutputSchema());
+        proxy.setTriggerConfig(platform.getTriggerConfig() != null ? platform.getTriggerConfig() : Map.of());
+
+        List<WorkflowStep> steps = parseSteps(proxy);
+
+        // 자식 run 레코드 생성 — parent_run_id / parent_step_id 채워 실존 트리로 저장
+        WorkflowRunEntity child = new WorkflowRunEntity();
+        child.setWorkflowId(workflowId);
+        child.setSessionId(resolveSessionId(sessionId));
+        child.setStatus("running");
+        child.setInputData(subInput != null ? subInput : Map.of());
+        child.setStepResults(new LinkedHashMap<>());
+        child.setParentRunId(parentRunId);
+        child.setParentStepId(parentStepId);
+        WorkflowRunEntity savedChild = workflowRunRepository.save(child);
+
+        log.info("SUB_WORKFLOW child run '{}' created (parent={}, step={}, workflow={}, {} steps)",
+                savedChild.getId(), parentRunId, parentStepId, workflowId, steps.size());
+
+        if (steps.isEmpty()) {
+            savedChild.setStatus("completed");
+            savedChild.setCompletedAt(OffsetDateTime.now());
+            workflowRunRepository.save(savedChild);
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("output", "");
+            empty.put("sub_workflow_id", platform.getId());
+            empty.put("sub_workflow_run_id", savedChild.getId().toString());
+            return empty;
+        }
+
+        // 자식에 HUMAN_INPUT 이 있으면 동기 경로상 처리 불가 → 거부 (자식 run 도 failed 로 마감)
+        boolean hasHumanInput = steps.stream()
+                .anyMatch(s -> s.type() == WorkflowStep.StepType.HUMAN_INPUT);
+        if (hasHumanInput) {
+            savedChild.setStatus("failed");
+            savedChild.setError(Map.of("reason", "sub_workflow_human_input_unsupported"));
+            savedChild.setCompletedAt(OffsetDateTime.now());
+            workflowRunRepository.saveAndFlush(savedChild);
+            throw new IllegalStateException(
+                    "SUB_WORKFLOW '" + platform.getId()
+                            + "' contains HUMAN_INPUT step which is not supported in synchronous child execution");
+        }
+
+        ErrorHandling errorHandling = parseErrorHandling(proxy);
+
+        // CR-007: output_schema → 마지막 LLM_CALL 스텝 자동 주입 (부모 경로와 동일)
+        if (proxy.getOutputSchema() != null && !proxy.getOutputSchema().isEmpty()) {
+            injectOutputSchemaToLastLlmStep(steps, proxy.getOutputSchema());
+        }
+
+        try {
+            Map<String, Object> lastResult = runChildSteps(savedChild, steps, errorHandling);
+
+            savedChild.setStatus("completed");
+            savedChild.setCompletedAt(OffsetDateTime.now());
+            workflowRunRepository.saveAndFlush(savedChild);
+            if (eventPublisher != null) {
+                long durationMs = savedChild.getCompletedAt() != null && savedChild.getStartedAt() != null
+                        ? savedChild.getCompletedAt().toInstant().toEpochMilli()
+                                - savedChild.getStartedAt().toInstant().toEpochMilli()
+                        : 0L;
+                eventPublisher.runCompleted(savedChild.getId(), parentRunId, "completed", durationMs);
+            }
+
+            // 마지막 스텝 output + 기존 호환 필드 + 신규 자식 run id
+            Map<String, Object> result = new LinkedHashMap<>(lastResult);
+            result.put("sub_workflow_id", platform.getId());
+            result.put("sub_workflow_run_id", savedChild.getId().toString());
+            return result;
+
+        } catch (Exception e) {
+            savedChild.setStatus("failed");
+            savedChild.setError(Map.of("error", e.getMessage()));
+            savedChild.setCompletedAt(OffsetDateTime.now());
+            workflowRunRepository.saveAndFlush(savedChild);
+            if (eventPublisher != null) {
+                long durationMs = savedChild.getStartedAt() != null
+                        ? System.currentTimeMillis() - savedChild.getStartedAt().toInstant().toEpochMilli() : 0L;
+                eventPublisher.runCompleted(savedChild.getId(), parentRunId, "failed", durationMs);
+            }
+            // 부모 스텝 실패로 전파
+            throw new RuntimeException(
+                    "SUB_WORKFLOW child run '" + savedChild.getId() + "' failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * CR-065: 자식 run 의 DAG 스텝을 동기 1-pass 실행한다.
+     *
+     * <p>{@link #doExecuteAsync} 의 핵심 루프(위상정렬 + 순차 + executeWithRetry +
+     * CONDITION 분기 + STEP_START/END 이벤트)를 자식 run 컨텍스트에 적용한 동기 버전.
+     * HUMAN_INPUT 은 호출부에서 사전 차단되므로 여기서는 다루지 않는다.
+     *
+     * @return 마지막으로 성공한 스텝의 결과 (없으면 {@code {"output":""}})
+     */
+    private Map<String, Object> runChildSteps(WorkflowRunEntity child, List<WorkflowStep> steps,
+                                              ErrorHandling errorHandling) {
+        Map<String, WorkflowStep> stepMap = steps.stream()
+                .collect(Collectors.toMap(WorkflowStep::id, s -> s, (a, b) -> a, LinkedHashMap::new));
+
+        StepContext context = new StepContext(
+                child.getId().toString(),
+                child.getWorkflowId(),
+                child.getSessionId(),
+                child.getInputData() != null ? child.getInputData() : Map.of(),
+                new LinkedHashMap<>()
+        );
+
+        List<WorkflowStep> sortedSteps = topologicalSort(steps);
+        Set<String> skippedSteps = new HashSet<>();
+        Map<String, Object> lastResult = Map.of("output", "");
+
+        for (WorkflowStep step : sortedSteps) {
+            if (skippedSteps.contains(step.id())) {
+                log.debug("Child run '{}': skipping step '{}' (not on active path)", child.getId(), step.id());
+                continue;
+            }
+
+            child.setCurrentStep(step.id());
+            workflowRunRepository.save(child);
+
+            long stepStart = System.currentTimeMillis();
+            Instant startedAt = Instant.ofEpochMilli(stepStart);
+            if (eventPublisher != null) {
+                eventPublisher.stepRunning(child.getId(), child.getParentRunId(), step.id(), startedAt);
+            }
+            if (eventRecorder != null) {
+                eventRecorder.stepStart(child.getId(), step.id(), step.type().name());
+            }
+
+            Map<String, Object> result = executeWithRetry(step, context, errorHandling);
+            long stepEnd = System.currentTimeMillis();
+            Instant completedAt = Instant.ofEpochMilli(stepEnd);
+
+            Map<String, Object> enriched = new LinkedHashMap<>(result);
+            enriched.put("_startedAt", startedAt.toString());
+            enriched.put("_completedAt", completedAt.toString());
+            enriched.put("_durationMs", stepEnd - stepStart);
+
+            context = applyStepResult(step, context, enriched);
+            lastResult = result;
+
+            child.setStepResults(new LinkedHashMap<>(context.stepResults()));
+            workflowRunRepository.save(child);
+
+            if (eventPublisher != null) {
+                Object subRef = step.type() == WorkflowStep.StepType.SUB_WORKFLOW
+                        ? result.get("sub_workflow_id") : null;
+                eventPublisher.stepCompleted(
+                        child.getId(), child.getParentRunId(), step.id(),
+                        startedAt, completedAt,
+                        subRef != null ? subRef.toString() : null,
+                        previewOutput(result));
+            }
+            if (eventRecorder != null) {
+                eventRecorder.stepEnd(child.getId(), step.id(), stepEnd - stepStart, estimateResultSize(result), resultBody(result));
+            }
+
+            if (step.type() == WorkflowStep.StepType.CONDITION) {
+                applyConditionSkips(step, result, stepMap, skippedSteps);
+            }
+        }
+
+        return lastResult;
+    }
+
     // ─── 내부 DAG 실행 ────────────────────────────────────────────────────
 
     private void doExecuteAsync(WorkflowEntity workflowEntity, WorkflowRunEntity run) {
