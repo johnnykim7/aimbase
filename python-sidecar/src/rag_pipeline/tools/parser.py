@@ -22,6 +22,34 @@ _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100MB
 _DOWNLOAD_TIMEOUT_SEC = int(os.getenv("PARSE_DOWNLOAD_TIMEOUT_SEC", "150"))
 
 
+def _is_relative_to(path: Path, root: Path) -> bool:
+    """path가 root 하위인지 (Python 3.8 호환 — Path.is_relative_to 미존재 환경 대비)."""
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_local_path(file_path: str) -> Path:
+    """로컬 path 화이트리스트 검증 (사이드카 자체 방어선).
+
+    PARSE_ALLOWED_ROOTS(콤마 구분) 안에 있는 실존 파일만 허용한다.
+    resolve(strict=True)로 심볼릭링크/'..' 우회를 차단한다.
+    미설정 시 로컬 path 파싱을 비활성(안전 기본값)으로 둔다.
+    """
+    roots_env = os.getenv("PARSE_ALLOWED_ROOTS", "").strip()
+    if not roots_env:
+        raise ValueError("Local path parsing disabled: PARSE_ALLOWED_ROOTS not set")
+    p = Path(file_path).expanduser().resolve(strict=True)
+    if not p.is_file():
+        raise ValueError(f"Not a file: {file_path}")
+    roots = [Path(r).expanduser().resolve() for r in roots_env.split(",") if r.strip()]
+    if not any(_is_relative_to(p, root) for root in roots):
+        raise ValueError(f"Path outside allowed roots: {file_path}")
+    return p
+
+
 def _download_bytes(url: str) -> bytes:
     """URL에서 파일 바이트를 직접 받는다 (base64 왕복 없이 파싱에 바로 사용)."""
     import urllib.request
@@ -55,21 +83,39 @@ def parse_document(
     file_content: str = "",
     file_type: str = "",
     url: str = "",
+    file_path: str = "",
 ) -> dict[str, Any]:
     """Parse a document file into plain text + metadata.
 
-    소스는 둘 중 하나: base64(file_content) 또는 url(다운로드). url이 주어지면
-    바이트를 직접 받아 파싱한다(base64 왕복 없음).
+    소스는 셋 중 하나: 로컬 path(file_path) / base64(file_content) / url(다운로드).
+    우선순위는 file_path > url > file_content. file_path가 주어지면 다운로드·디코딩·
+    임시파일 없이 실제 파일을 직접 파싱한다(로컬 사이드카가 그 PC 문서를 읽는 경로).
 
     Args:
-        file_content: Base64-encoded file bytes. (url 미지정 시 필수)
-        file_type: File type hint (e.g. "pdf", "docx"). If empty, auto-detected from url ext.
-        url: 다운로드할 파일 URL (http/https). 지정 시 file_content 무시.
+        file_content: Base64-encoded file bytes. (file_path/url 미지정 시 필수)
+        file_type: File type hint (e.g. "pdf", "docx"). If empty, auto-detected.
+        url: 다운로드할 파일 URL (http/https). file_path 미지정 + 지정 시 file_content 무시.
+        file_path: 로컬 파일 절대경로. PARSE_ALLOWED_ROOTS 화이트리스트 내에서만 허용.
+                   지정 시 url/file_content 무시.
 
     Returns:
         {"text": str, "metadata": {"pages": int, "elements": int, "file_type": str, ...}}
     """
     file_type = file_type.lower().strip().lstrip(".")
+
+    # ── 로컬 path 직접 파싱 (tmp 생략) ──
+    if file_path and file_path.strip():
+        try:
+            local_path = _validate_local_path(file_path.strip())
+        except Exception as exc:
+            return {
+                "text": "",
+                "metadata": {"error": f"Local path rejected: {exc}", "file_path": file_path},
+            }
+        if not file_type:
+            file_type = local_path.suffix.lstrip(".").lower()
+        partition_fn_name = _resolve_partition_fn(file_type)
+        return _parse_from_path(partition_fn_name, str(local_path), file_type)
 
     if url and url.strip():
         try:
@@ -112,46 +158,7 @@ def parse_document(
             tmp_path = tmp.name
 
         elements = _partition(partition_fn_name, tmp_path)
-
-        # Extract text
-        texts: list[str] = []
-        pages: set[int] = set()
-        element_types: dict[str, int] = {}
-
-        for el in elements:
-            text = str(el).strip()
-            if text:
-                texts.append(text)
-
-            # Collect metadata
-            el_type = type(el).__name__
-            element_types[el_type] = element_types.get(el_type, 0) + 1
-
-            if hasattr(el, "metadata"):
-                page = getattr(el.metadata, "page_number", None)
-                if page is not None:
-                    pages.add(page)
-
-        full_text = "\n\n".join(texts)
-
-        # Extract document-level metadata
-        doc_metadata: dict[str, Any] = {
-            "file_type": file_type or "auto",
-            "elements": len(elements),
-            "element_types": element_types,
-            "text_length": len(full_text),
-        }
-
-        if pages:
-            doc_metadata["pages"] = max(pages)
-
-        # Try to extract title from first Title element
-        for el in elements:
-            if type(el).__name__ == "Title":
-                doc_metadata["title"] = str(el).strip()
-                break
-
-        return {"text": full_text, "metadata": doc_metadata}
+        return _elements_to_result(elements, file_type)
 
     except Exception as exc:
         logger.exception("Document parsing failed for type=%s", file_type)
@@ -165,6 +172,59 @@ def parse_document(
             Path(tmp_path).unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def _resolve_partition_fn(file_type: str) -> str:
+    """file_type → unstructured partition 함수명. 미지정/미지 타입은 auto partition."""
+    if file_type and file_type in _TYPE_MAP:
+        return _TYPE_MAP[file_type][0]
+    return "partition"
+
+
+def _elements_to_result(elements: list, file_type: str) -> dict[str, Any]:
+    """unstructured elements → {text, metadata} 표준 결과 (path/bytes 공통)."""
+    texts: list[str] = []
+    pages: set[int] = set()
+    element_types: dict[str, int] = {}
+
+    for el in elements:
+        text = str(el).strip()
+        if text:
+            texts.append(text)
+        el_type = type(el).__name__
+        element_types[el_type] = element_types.get(el_type, 0) + 1
+        if hasattr(el, "metadata"):
+            page = getattr(el.metadata, "page_number", None)
+            if page is not None:
+                pages.add(page)
+
+    full_text = "\n\n".join(texts)
+    doc_metadata: dict[str, Any] = {
+        "file_type": file_type or "auto",
+        "elements": len(elements),
+        "element_types": element_types,
+        "text_length": len(full_text),
+    }
+    if pages:
+        doc_metadata["pages"] = max(pages)
+    for el in elements:
+        if type(el).__name__ == "Title":
+            doc_metadata["title"] = str(el).strip()
+            break
+    return {"text": full_text, "metadata": doc_metadata}
+
+
+def _parse_from_path(partition_fn_name: str, file_path: str, file_type: str) -> dict[str, Any]:
+    """실제 파일 경로를 직접 파싱 (tmp 생략). 로컬 path 입력 전용."""
+    try:
+        elements = _partition(partition_fn_name, file_path)
+        return _elements_to_result(elements, file_type)
+    except Exception as exc:
+        logger.exception("Local document parsing failed for type=%s", file_type)
+        return {
+            "text": "",
+            "metadata": {"error": f"Parsing failed: {exc}", "file_type": file_type},
+        }
 
 
 def _partition(fn_name: str, file_path: str) -> list:

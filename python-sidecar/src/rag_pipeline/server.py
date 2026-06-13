@@ -247,21 +247,28 @@ def parse_document(
     file_content: str = "",
     file_type: str = "",
     url: str = "",
+    file_path: str = "",
 ) -> str:
     """Parse a document file into plain text + metadata (PY-013).
 
     Supports: PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT, Markdown.
-    Source is either base64 (file_content) OR a URL to download.
+    Source is one of: local path (file_path) / base64 (file_content) / URL (url).
+    Priority: file_path > url > file_content.
 
     Args:
-        file_content: Base64-encoded file bytes (required if url omitted)
+        file_content: Base64-encoded file bytes (required if file_path/url omitted)
         file_type: File type hint (e.g. "pdf", "docx"). If empty, auto-detected.
-        url: File URL to download (http/https). When set, bytes are fetched
-             directly and parsed without base64 round-trip; file_content is ignored.
+        url: File URL to download (http/https). When set (and no file_path), bytes are
+             fetched directly and parsed without base64 round-trip; file_content is ignored.
+        file_path: Local absolute file path. Parsed directly without temp file.
+             Allowed only within PARSE_ALLOWED_ROOTS whitelist (disabled if unset).
+             When set, url/file_content are ignored. (로컬 사이드카가 그 PC 문서를 읽는 경로)
     """
     from rag_pipeline.tools.parser import parse_document as do_parse
 
-    result = do_parse(file_content=file_content, file_type=file_type, url=url)
+    result = do_parse(
+        file_content=file_content, file_type=file_type, url=url, file_path=file_path
+    )
     return json.dumps(result, ensure_ascii=False)
 
 
