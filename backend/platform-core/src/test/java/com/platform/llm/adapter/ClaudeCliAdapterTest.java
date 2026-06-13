@@ -40,7 +40,8 @@ class ClaudeCliAdapterTest {
         adapter = new ClaudeCliAdapter(
                 client, agentRegistry,
                 "claude-sonnet-4-5", "AIMBASE",
-                "/path/.claude", null, "runner-key-xyz");
+                "/path/.claude", null, "runner-key-xyz",
+                null /* routingAgentName — 기존 테스트는 헤더/user_ref 경로만 검증 */);
     }
 
     @AfterEach
@@ -232,5 +233,73 @@ class ClaudeCliAdapterTest {
         verify(agentRegistry, times(1)).resolveActiveRunner("explicit-agent");
         // user_ref 폴백 분기는 호출되지 않아야 한다
         verify(agentRegistry, times(0)).resolveActiveByUserRef(any());
+    }
+
+    // ─── CR-103: 커넥터 config agent_name 라우팅 (워크플로우 경로) ───
+
+    /** routingAgentName 이 박힌 어댑터 — 워크플로우 커넥터를 모사. */
+    private ClaudeCliAdapter adapterWithAgentName(String agentName) {
+        return new ClaudeCliAdapter(
+                client, agentRegistry,
+                "claude-sonnet-4-5", "AIMBASE",
+                "/path/.claude", null, "runner-key-xyz", agentName);
+    }
+
+    @Test
+    @DisplayName("CR-103: 헤더·user_ref 없고 커넥터 agent_name 만 있을 때 → resolveActiveByAgentName 로 라우팅 (워크플로우 정상 흐름)")
+    void chatRoutesByConnectorAgentName() throws Exception {
+        // RequestContext 완전 빈 상태 (워크플로우 스텝과 동일)
+        ClaudeCliAdapter wf = adapterWithAgentName("cli-runner-bidding");
+        AgentEndpoint endpoint = new AgentEndpoint("agent-9", "http://aimbase-agent:8290", "hash");
+        when(agentRegistry.resolveActiveByAgentName("cli-runner-bidding")).thenReturn(Optional.of(endpoint));
+
+        LLMResponse expected = new LLMResponse(
+                "run-1", "claude-sonnet-4-5",
+                List.of(new ContentBlock.Text("ok")),
+                List.of(), new TokenUsage(0, 0),
+                LLMResponse.FinishReason.END, 1L, 0.0);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any())).thenReturn(expected);
+
+        LLMResponse resp = wf.chat(sampleRequest()).get();
+        assertThat(resp.textContent()).isEqualTo("ok");
+        verify(agentRegistry, times(1)).resolveActiveByAgentName("cli-runner-bidding");
+        // 헤더/user_ref 분기는 비어 있으므로 호출되지 않는다
+        verify(agentRegistry, times(0)).resolveActiveRunner(any());
+        verify(agentRegistry, times(0)).resolveActiveByUserRef(any());
+    }
+
+    @Test
+    @DisplayName("CR-103: 헤더 명시가 커넥터 agent_name 보다 우선 — 호출자 명시가 커넥터 기본값을 덮는다")
+    void chatHeaderTakesPrecedenceOverConnectorAgentName() throws Exception {
+        ClaudeCliAdapter wf = adapterWithAgentName("cli-runner-bidding");
+        RequestContext.setAgentId("explicit-agent");
+        AgentEndpoint endpoint = new AgentEndpoint("explicit-agent", "http://host:8290", null);
+        when(agentRegistry.resolveActiveRunner("explicit-agent")).thenReturn(Optional.of(endpoint));
+
+        LLMResponse expected = new LLMResponse(
+                "run-1", "claude-sonnet-4-5",
+                List.of(new ContentBlock.Text("ok")),
+                List.of(), new TokenUsage(0, 0),
+                LLMResponse.FinishReason.END, 1L, 0.0);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any())).thenReturn(expected);
+
+        wf.chat(sampleRequest()).get();
+
+        verify(agentRegistry, times(1)).resolveActiveRunner("explicit-agent");
+        verify(agentRegistry, times(0)).resolveActiveByAgentName(any());
+    }
+
+    @Test
+    @DisplayName("CR-103: 커넥터 agent_name 으로도 활성 agent 0건이면 RuntimeException(cli_agent_offline:agent-name=)")
+    void chatConnectorAgentNameNoActiveAgent() {
+        ClaudeCliAdapter wf = adapterWithAgentName("cli-runner-bidding");
+        when(agentRegistry.resolveActiveByAgentName("cli-runner-bidding")).thenReturn(Optional.empty());
+
+        var future = wf.chat(sampleRequest());
+        assertThatThrownBy(future::get)
+                .isInstanceOf(ExecutionException.class)
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasMessageContaining("cli_agent_offline")
+                .hasMessageContaining("agent-name=cli-runner-bidding");
     }
 }

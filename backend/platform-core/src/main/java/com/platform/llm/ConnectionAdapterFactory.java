@@ -308,6 +308,9 @@ public class ConnectionAdapterFactory {
                 String configDirOpt = (String) conn.getConfig().get("config_dir");
                 String systemPromptOverride = (String) conn.getConfig().get("system_prompt_override");
                 String runnerApiKey = (String) conn.getConfig().get("runner_api_key");
+                // CR-103: 워크플로우 경로(LLM_CALL/AGENT_CALL)는 X-Aimbase-Agent-Id/user_ref 가 없으므로
+                // 커넥터 config.agent_name 으로 Runner 라우팅. null 이면 헤더/user_ref 만으로 동작(기존).
+                String routingAgentName = (String) conn.getConfig().get("agent_name");
                 yield new ClaudeCliAdapter(
                         claudeCliRunnerClient,
                         agentRegistryService,
@@ -315,7 +318,8 @@ public class ConnectionAdapterFactory {
                         toolModeStr,
                         configDirOpt,
                         systemPromptOverride,
-                        runnerApiKey);
+                        runnerApiKey,
+                        routingAgentName);
             }
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Unsupported adapter type: " + adapterType);
@@ -353,7 +357,9 @@ public class ConnectionAdapterFactory {
         if (adapter == null) return "";
         String lower = adapter.toLowerCase();
         // CR-050: CLI 경로는 anthropic 보다 먼저 체크 (anthropic-cli → anthropic 으로 오분류 방지).
+        // FE 표시명 "Claude CLI" (공백형) 포함 — 공백형을 먼저 잡지 않으면 아래 contains("claude") 가 anthropic 으로 오분류.
         if (lower.equals("anthropic-cli") || lower.equals("claude-cli")
+                || lower.equals("claude cli") || lower.equals("anthropic cli")
                 || lower.equals("claude-max") || lower.equals("claude-pro")) {
             return "anthropic-cli";
         }

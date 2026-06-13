@@ -21,4 +21,7 @@ public interface AgentRegistryRepository extends JpaRepository<AgentRegistryEnti
             String publicAddress, int mcpPort, String status);
 
     List<AgentRegistryEntity> findByUserId(String userId);
+
+    /** CR-103: 커넥터 config 의 agent_name 으로 워크플로우 CLI 라우팅. */
+    List<AgentRegistryEntity> findByAgentName(String agentName);
 }

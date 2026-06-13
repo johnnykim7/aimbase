@@ -50,6 +50,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
     private final String configDir;
     private final String systemPromptOverride;
     private final String runnerApiKey;
+    /** CR-103: 커넥터 config.agent_name — 워크플로우 경로 라우팅 폴백 키 (null 허용). */
+    private final String routingAgentName;
 
     public ClaudeCliAdapter(ClaudeCliRunnerClient runnerClient,
                              AgentRegistryService agentRegistry,
@@ -57,7 +59,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
                              String toolMode,
                              String configDir,
                              String systemPromptOverride,
-                             String runnerApiKey) {
+                             String runnerApiKey,
+                             String routingAgentName) {
         this.runnerClient = runnerClient;
         this.agentRegistry = agentRegistry;
         this.defaultModel = defaultModel;
@@ -65,6 +68,7 @@ public class ClaudeCliAdapter implements LLMAdapter {
         this.configDir = configDir;
         this.systemPromptOverride = systemPromptOverride;
         this.runnerApiKey = runnerApiKey;
+        this.routingAgentName = routingAgentName;
     }
 
     @Override
@@ -163,10 +167,14 @@ public class ClaudeCliAdapter implements LLMAdapter {
     // ─── 내부 ─────────────────────────────────────────────────────────────
 
     /**
-     * CR-075: 라우팅 우선순위
-     *   1) {@code X-Aimbase-Agent-Id} 헤더 명시 (디버깅/특수 케이스 호환)
-     *   2) 위젯 토큰 {@code user_ref} 클레임 (운영 정상 흐름)
-     *   3) 둘 다 없으면 400
+     * 라우팅 우선순위
+     *   1) {@code X-Aimbase-Agent-Id} 헤더 명시 (디버깅/특수 케이스 호환, CR-071)
+     *   2) 위젯 토큰 {@code user_ref} 클레임 (위젯 정상 흐름, CR-075)
+     *   3) 커넥터 config {@code agent_name} (워크플로우 정상 흐름, CR-103)
+     *   4) 모두 없으면 400
+     *
+     * <p>헤더/user_ref 가 커넥터 기본값(agent_name)보다 우선 — 호출자가 명시한 라우팅이
+     * 커넥터에 박힌 기본값을 덮는다. 워크플로우 경로는 1·2 가 비어 있으므로 3 이 동작한다.
      */
     private AgentEndpoint resolveEndpoint() {
         // 1) 헤더 명시 우선
@@ -194,10 +202,21 @@ public class ClaudeCliAdapter implements LLMAdapter {
             return ep.get();
         }
 
-        // 3) 둘 다 없으면 400 — 클라이언트가 토큰/헤더 자체를 안 보냄. 컨트롤러 진입 전 검증과 동일 의미.
+        // 3) 커넥터 config agent_name 자동 라우팅 (CR-103 — 워크플로우 LLM_CALL/AGENT_CALL 경로)
+        if (routingAgentName != null && !routingAgentName.isBlank()) {
+            Optional<AgentEndpoint> ep = agentRegistry.resolveActiveByAgentName(routingAgentName);
+            if (ep.isEmpty()) {
+                // CR-082 와 동일 — 인프라 문제는 RuntimeException 으로 일관 (SSE ASYNC dispatch 회피).
+                throw new RuntimeException("cli_agent_offline:agent-name=" + routingAgentName
+                        + " (해당 이름의 agent 가 inactive 또는 runner_capability=false)");
+            }
+            return ep.get();
+        }
+
+        // 4) 모두 없으면 400 — 클라이언트가 토큰/헤더 자체를 안 보냄. 컨트롤러 진입 전 검증과 동일 의미.
         // 이 케이스는 stream:false sync 핸들러에서 자연스럽게 400 매핑되는 게 의도. SSE 진입 전이라 ASYNC dispatch 위험 없음.
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "cli_routing_missing: X-Aimbase-Agent-Id 헤더 또는 위젯 토큰 user_ref 클레임이 필요합니다");
+                "cli_routing_missing: X-Aimbase-Agent-Id 헤더 / 위젯 토큰 user_ref / 커넥터 config.agent_name 중 하나가 필요합니다");
     }
 
     private LLMRequest ensureModel(LLMRequest request) {

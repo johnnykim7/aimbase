@@ -1,11 +1,9 @@
 package com.platform.service;
 
 import com.platform.domain.AgentRegistryEntity;
-import com.platform.mcp.MCPServerClient;
 import com.platform.repository.AgentRegistryRepository;
 import com.platform.tenant.TenantContext;
 import com.platform.tenant.TenantDataSourceManager;
-import com.platform.tool.model.UnifiedToolDef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -97,12 +95,13 @@ public class AgentRegistryService {
         }
         if (existing.isEmpty()) entity.setRegisteredAt(OffsetDateTime.now());
 
-        // MCP 연결하여 실제 도구 탐색
-        List<Map<String, Object>> discoveredTools = discoverToolsFromAgent(entity);
-        if (!discoveredTools.isEmpty()) {
-            entity.setToolsCache(discoveredTools);
-        } else if (toolNames != null && !toolNames.isEmpty()) {
-            // MCP 연결 실패 시 클라이언트가 보낸 도구명 목록 사용
+        // CR-103(B): register 응답 경로에서 동기 MCP discover 를 제거한다.
+        // 과거에는 여기서 discoverToolsFromAgent(entity) 를 동기 호출했으나, agent MCP 포트
+        // 접속이 실패하면 ~30초 블로킹 → agent 의 register HTTP timeout(15s) 초과 → agent 가
+        // agentId 를 못 받고 null heartbeat 전송 → 5분 뒤 STALE (운영 실측, 2026-06-13).
+        // 도구 스키마는 RemoteToolDiscovery 가 주기적 백그라운드로 채운다(register 와 독립).
+        // 여기서는 agent 가 register body 로 보낸 toolNames 로 즉시 캐시를 채우고 빠르게 응답한다.
+        if (toolNames != null && !toolNames.isEmpty()) {
             entity.setToolsCache(toolNames.stream()
                     .map(name -> Map.<String, Object>of("name", name))
                     .toList());
@@ -167,6 +166,28 @@ public class AgentRegistryService {
                 .filter(AgentRegistryEntity::isRunnerCapability)
                 .filter(a -> a.getRunnerEndpoint() != null && !a.getRunnerEndpoint().isBlank())
                 // 다중 활성이 들어와도 안전하게 — 가장 최근 heartbeat 우선 (정상 케이스 1건)
+                .max((a, b) -> a.getLastHeartbeatAt().compareTo(b.getLastHeartbeatAt()))
+                .map(a -> new AgentEndpoint(
+                        a.getId().toString(),
+                        a.getRunnerEndpoint(),
+                        a.getRunnerApiKeyHash()));
+    }
+
+    /**
+     * CR-103: 커넥터 config 의 {@code agent_name} 기반 워크플로우 CLI 라우팅.
+     * 워크플로우 스텝(LLM_CALL/AGENT_CALL)은 X-Aimbase-Agent-Id 헤더도 위젯 user_ref 도 없으므로,
+     * CLI 커넥터에 박힌 agent_name 으로 활성 + runner_capability=true agent 의 endpoint 를 결정한다.
+     * 동명 다중 등록(재등록 누적)이 들어와도 가장 최근 heartbeat 우선으로 1건 선택.
+     *
+     * @param agentName 커넥터 config.agent_name (AgentRegistry.agent_name)
+     * @return AgentEndpoint (없거나 비활성/Runner 미지원이면 빈 Optional)
+     */
+    public Optional<AgentEndpoint> resolveActiveByAgentName(String agentName) {
+        if (agentName == null || agentName.isBlank()) return Optional.empty();
+        return repository.findByAgentName(agentName).stream()
+                .filter(a -> "ACTIVE".equals(a.getStatus()))
+                .filter(AgentRegistryEntity::isRunnerCapability)
+                .filter(a -> a.getRunnerEndpoint() != null && !a.getRunnerEndpoint().isBlank())
                 .max((a, b) -> a.getLastHeartbeatAt().compareTo(b.getLastHeartbeatAt()))
                 .map(a -> new AgentEndpoint(
                         a.getId().toString(),
@@ -264,25 +285,8 @@ public class AgentRegistryService {
         }
     }
 
-    /**
-     * 에이전트의 MCP 서버에 연결하여 도구 목록 탐색.
-     */
-    private List<Map<String, Object>> discoverToolsFromAgent(AgentRegistryEntity agent) {
-        String mcpUrl = agent.getMcpUrl() + "/mcp/sse";
-        try (MCPServerClient client = new MCPServerClient(
-                "agent-" + agent.getAgentName(), "http", Map.of("url", mcpUrl))) {
-            client.connect();
-            List<UnifiedToolDef> tools = client.discoverTools();
-            return tools.stream()
-                    .map(t -> Map.<String, Object>of(
-                            "name", t.name(),
-                            "description", t.description() != null ? t.description() : "",
-                            "inputSchema", t.inputSchema() != null ? t.inputSchema() : Map.of()))
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Failed to discover tools from agent {}:{} — {}",
-                    agent.getPublicAddress(), agent.getMcpPort(), e.getMessage());
-            return List.of();
-        }
-    }
+    // CR-103(B): discoverToolsFromAgent(...) 동기 도구 탐색 메서드 제거.
+    // register 응답 블로킹의 원인이었고(MCP 접속 실패 시 ~30초), 도구 등록은
+    // RemoteToolDiscovery 의 주기적 백그라운드 경로가 담당한다(중복 제거).
+    // 도구 스키마 보강이 필요하면 RemoteToolDiscovery 경로에서 다룬다.
 }
