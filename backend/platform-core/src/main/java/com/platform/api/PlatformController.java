@@ -1,5 +1,7 @@
 package com.platform.api;
 
+import com.platform.auth.JwtProvider;
+import com.platform.auth.UserPrincipal;
 import com.platform.domain.master.SubscriptionEntity;
 import com.platform.domain.master.TenantEntity;
 import com.platform.repository.master.SubscriptionRepository;
@@ -16,8 +18,12 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -37,12 +43,18 @@ import java.util.stream.Collectors;
 @Tag(name = "Platform Admin", description = "슈퍼어드민 전용 플랫폼 관리 API")
 public class PlatformController {
 
+    private static final Logger log = LoggerFactory.getLogger(PlatformController.class);
+
     private final TenantRepository tenantRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final TenantUsageSummaryRepository usageSummaryRepository;
     private final TenantOnboardingService onboardingService;
     private final TenantDataSourceManager dataSourceManager;
     private final TenantMigrationRunner migrationRunner;
+    private final JwtProvider jwtProvider;
+
+    @Value("${platform.impersonation.ttl-seconds:1800}")
+    private long impersonationTtlSeconds;
 
     @Value("${platform.default-db-host:localhost}")
     private String defaultDbHost;
@@ -61,13 +73,15 @@ public class PlatformController {
                                TenantUsageSummaryRepository usageSummaryRepository,
                                TenantOnboardingService onboardingService,
                                TenantDataSourceManager dataSourceManager,
-                               TenantMigrationRunner migrationRunner) {
+                               TenantMigrationRunner migrationRunner,
+                               JwtProvider jwtProvider) {
         this.tenantRepository = tenantRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.usageSummaryRepository = usageSummaryRepository;
         this.onboardingService = onboardingService;
         this.dataSourceManager = dataSourceManager;
         this.migrationRunner = migrationRunner;
+        this.jwtProvider = jwtProvider;
     }
 
     // ─── Tenant CRUD ─────────────────────────────────────────────────
@@ -132,6 +146,52 @@ public class PlatformController {
             "subscription", subscription != null ? subscription : Map.of(),
             "usageHistory", usageHistory
         ));
+    }
+
+    /**
+     * CR-096: 테넌트 임퍼소네이션 — super admin 이 대상 테넌트로 '들어가서' 화면 전체를 본다.
+     * 대상 tenant_id 를 claim 에 박은 단기(기본 30분) access 토큰을 발급한다.
+     * 이 토큰은 일반 API 호출 시 X-Tenant-Id 헤더와 일치하므로 JwtAuthenticationFilter:118 의
+     * cross-tenant 사칭 가드(CR-086)를 합법적으로 통과한다. 헤더 가드 자체는 무변경.
+     * 본 엔드포인트는 SecurityConfig 에서 ROLE_SUPER_ADMIN 전용(/platform/**)으로 이미 보호된다.
+     */
+    @PostMapping("/tenants/{id}/impersonate")
+    @Operation(summary = "테넌트 임퍼소네이션 — 대상 테넌트 access 토큰 발급 (Super Admin 전용)")
+    public ApiResponse<Map<String, Object>> impersonateTenant(@PathVariable String id) {
+        TenantEntity tenant = tenantRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found: " + id));
+
+        if (!"active".equals(tenant.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Tenant is not active (status=" + tenant.getStatus() + ")");
+        }
+
+        UserPrincipal admin = currentPrincipal();
+
+        String token = jwtProvider.generateImpersonationToken(
+            admin.getId(), admin.getEmail(), tenant.getId(), impersonationTtlSeconds);
+
+        // CR-096 감사: 누가/어느 테넌트로 임퍼소네이션했는지 구조화 로그로 추적 (BIZ-020).
+        // platform 경로는 TenantContext 가 없어 테넌트 DB audit_logs 를 쓸 수 없으므로 SLF4J 로 남긴다.
+        log.warn("[AUDIT][IMPERSONATE] admin='{}' (id={}) → tenant='{}' (name='{}') ttl={}s",
+            admin.getEmail(), admin.getId(), tenant.getId(), tenant.getName(), impersonationTtlSeconds);
+
+        Map<String, Object> response = new java.util.HashMap<>();
+        response.put("access_token", token);
+        response.put("token_type", "Bearer");
+        response.put("tenant_id", tenant.getId());
+        response.put("tenant_name", tenant.getName());
+        response.put("impersonating", true);
+        response.put("expires_in", impersonationTtlSeconds);
+        return ApiResponse.ok(response);
+    }
+
+    private UserPrincipal currentPrincipal() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !(auth.getPrincipal() instanceof UserPrincipal principal)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+        return principal;
     }
 
     @PutMapping("/tenants/{id}")

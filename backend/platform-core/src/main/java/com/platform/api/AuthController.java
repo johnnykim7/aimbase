@@ -2,7 +2,9 @@ package com.platform.api;
 
 import com.platform.auth.JwtProvider;
 import com.platform.domain.UserEntity;
+import com.platform.domain.master.TenantAdminEntity;
 import com.platform.repository.UserRepository;
+import com.platform.repository.master.TenantAdminRepository;
 import com.platform.tenant.TenantContext;
 import com.platform.tenant.TenantDataSourceManager;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,6 +32,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -43,22 +46,33 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final JdbcTemplate masterJdbcTemplate;
     private final TenantDataSourceManager dataSourceManager;
+    private final TenantAdminRepository tenantAdminRepository;
 
     public AuthController(UserRepository userRepository,
                           JwtProvider jwtProvider,
                           PasswordEncoder passwordEncoder,
                           @Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate,
-                          TenantDataSourceManager dataSourceManager) {
+                          TenantDataSourceManager dataSourceManager,
+                          TenantAdminRepository tenantAdminRepository) {
         this.userRepository = userRepository;
         this.jwtProvider = jwtProvider;
         this.passwordEncoder = passwordEncoder;
         this.masterJdbcTemplate = masterJdbcTemplate;
         this.dataSourceManager = dataSourceManager;
+        this.tenantAdminRepository = tenantAdminRepository;
     }
 
     @PostMapping("/login")
     @Operation(summary = "로그인 (이메일 + 비밀번호) — X-Tenant-Id 미전달 시 자동 resolve [CR-027]")
     public ApiResponse<Map<String, Object>> login(@Valid @RequestBody LoginRequest request) {
+        // CR-096: Master tenant_admins(플랫폼 전역 super admin) 로그인 분기.
+        // tenant_admins 에 이메일이 있으면 이 경로로 인증 — 어느 테넌트에도 묶이지 않는다(tenant_id=null).
+        // 발급 토큰의 role 로 테넌트 임퍼소네이션 API(/platform/tenants/{id}/impersonate)를 호출한다.
+        Optional<TenantAdminEntity> adminOpt = tenantAdminRepository.findByEmail(request.email());
+        if (adminOpt.isPresent()) {
+            return loginAsPlatformAdmin(adminOpt.get(), request);
+        }
+
         // CR-027: X-Tenant-Id가 없으면 Master DB에서 email로 tenant_id 자동 resolve
         String tenantId = TenantContext.getTenantId();
         if (tenantId == null || tenantId.isBlank()) {
@@ -100,6 +114,41 @@ public class AuthController {
         response.put("role", role);
         response.put("tenant_id", tenantId);
 
+        return ApiResponse.ok(response);
+    }
+
+    /**
+     * CR-096: Master tenant_admins 기반 플랫폼 전역 super admin 로그인.
+     * tenant_id 가 null 인 access 토큰을 발급한다 — platform API(/api/v1/platform/**)는
+     * JwtAuthenticationFilter:104 가 TenantContext 없이 claim 만으로 인증하므로 동작한다.
+     * 임퍼소네이션 토큰은 별도 API(/platform/tenants/{id}/impersonate)에서 발급한다.
+     */
+    private ApiResponse<Map<String, Object>> loginAsPlatformAdmin(TenantAdminEntity admin, LoginRequest request) {
+        if (admin.getIsActive() == null || !admin.getIsActive()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account is disabled");
+        }
+        if (admin.getPasswordHash() == null
+                || !passwordEncoder.matches(request.password(), admin.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+        }
+
+        String role = admin.getRole() != null ? admin.getRole() : "super_admin";
+        // 전역 admin 은 어느 테넌트에도 묶이지 않는다 → tenant_id=null
+        String accessToken = jwtProvider.generateAccessToken(
+                admin.getId().toString(), admin.getEmail(), null, role);
+
+        admin.setLastLoginAt(OffsetDateTime.now());
+        tenantAdminRepository.save(admin);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("access_token", accessToken);
+        response.put("token_type", "Bearer");
+        response.put("user_id", admin.getId().toString());
+        response.put("email", admin.getEmail());
+        response.put("role", role);
+        response.put("tenant_id", null);
+        response.put("is_platform_admin", true);
+        log.info("Platform admin login: {} (role={})", admin.getEmail(), role);
         return ApiResponse.ok(response);
     }
 

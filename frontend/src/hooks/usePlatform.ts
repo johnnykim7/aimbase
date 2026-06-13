@@ -58,6 +58,12 @@ export const useActivateTenant = () => {
   });
 };
 
+// CR-096: 테넌트 임퍼소네이션 — 토큰 발급 후 교체는 호출부에서 처리한다(enterImpersonation).
+export const useImpersonateTenant = () =>
+  useMutation({
+    mutationFn: (id: string) => platformApi.impersonateTenant(id).then((r) => r.data.data),
+  });
+
 export const useSubscriptions = () =>
   useQuery({
     queryKey: ["subscriptions"],

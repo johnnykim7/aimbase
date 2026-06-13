@@ -38,14 +38,16 @@ public class JwtProvider {
 
     public String generateAccessToken(String userId, String email, String tenantId, String role) {
         Date now = new Date();
+        // CR-096: Map.of 는 null 값을 거부한다. 플랫폼 전역 super admin 은 tenantId=null 이므로
+        // HashMap 으로 만들고 null 일 때 tenant_id claim 자체를 생략한다(필터는 null 처리 가능).
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("email", email);
+        if (tenantId != null) claims.put("tenant_id", tenantId);
+        claims.put("role", role);
+        claims.put("type", "access");
         return Jwts.builder()
                 .subject(userId)
-                .claims(Map.of(
-                        "email", email,
-                        "tenant_id", tenantId,
-                        "role", role,
-                        "type", "access"
-                ))
+                .claims(claims)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + accessExpirationMs))
                 .signWith(key)
@@ -69,6 +71,31 @@ public class JwtProvider {
         claims.put("type", "widget");
         return Jwts.builder()
                 .subject(userRef != null ? userRef : "widget")
+                .claims(claims)
+                .issuedAt(now)
+                .expiration(new Date(now.getTime() + ttlSeconds * 1000L))
+                .signWith(key)
+                .compact();
+    }
+
+    /**
+     * CR-096: Super Admin 테넌트 임퍼소네이션용 단기 access 토큰.
+     * 대상 tenant_id 를 claim 에 박아 JwtAuthenticationFilter:118 의 헤더 일치 가드를 합법 통과한다.
+     * impersonating=true + actor(관리자 email) 로 감사 추적 가능.
+     * type=access 라서 일반 API 인증/RBAC 가 그대로 적용된다.
+     */
+    public String generateImpersonationToken(String adminUserId, String adminEmail,
+                                             String targetTenantId, long ttlSeconds) {
+        Date now = new Date();
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("email", adminEmail);
+        claims.put("tenant_id", targetTenantId);
+        claims.put("role", "super_admin");
+        claims.put("type", "access");
+        claims.put("impersonating", true);
+        claims.put("actor", adminEmail);
+        return Jwts.builder()
+                .subject(adminUserId)
                 .claims(claims)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + ttlSeconds * 1000L))

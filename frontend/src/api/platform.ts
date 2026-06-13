@@ -2,6 +2,16 @@ import { apiClient } from "./client";
 import type { ApiResponse, PagedResponse } from "../types/api";
 import type { Tenant, TenantRequest, Subscription, PlatformUsage, ApiKey, CreateApiKeyRequest } from "../types/tenant";
 
+// CR-096: 테넌트 임퍼소네이션 응답
+export interface ImpersonateResponse {
+  access_token: string;
+  token_type: string;
+  tenant_id: string;
+  tenant_name: string;
+  impersonating: boolean;
+  expires_in: number;
+}
+
 export const platformApi = {
   listTenants: (params?: { page?: number; size?: number; domain_app?: string }) =>
     apiClient.get<ApiResponse<PagedResponse<Tenant> | Tenant[]>>("/platform/tenants", { params }),
@@ -23,6 +33,10 @@ export const platformApi = {
 
   activateTenant: (id: string) =>
     apiClient.post<ApiResponse<Tenant>>(`/platform/tenants/${id}/activate`),
+
+  // CR-096: 테넌트 임퍼소네이션 — 대상 테넌트 access 토큰 발급
+  impersonateTenant: (id: string) =>
+    apiClient.post<ApiResponse<ImpersonateResponse>>(`/platform/tenants/${id}/impersonate`),
 
   listSubscriptions: () =>
     apiClient.get<ApiResponse<PagedResponse<Subscription> | Subscription[]>>("/platform/subscriptions"),

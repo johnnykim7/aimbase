@@ -10,8 +10,9 @@ import { Page } from "../../components/layout/Page";
 import { Building2 } from "lucide-react";
 import {
   useTenants, useCreateTenant, useDeleteTenant,
-  useSuspendTenant, useActivateTenant,
+  useSuspendTenant, useActivateTenant, useImpersonateTenant,
 } from "../../hooks/usePlatform";
+import { enterImpersonation } from "../../lib/impersonation";
 import type { Tenant, TenantRequest } from "../../types/tenant";
 
 export default function Tenants() {
@@ -21,6 +22,17 @@ export default function Tenants() {
   const deleteTenant = useDeleteTenant();
   const suspendTenant = useSuspendTenant();
   const activateTenant = useActivateTenant();
+  const impersonate = useImpersonateTenant();
+
+  // CR-096: 대상 테넌트로 진입 — 토큰 교체 후 루트로 이동(전체 화면이 그 테넌트로 동작)
+  const handleEnter = (id: string, name: string) => {
+    impersonate.mutate(id, {
+      onSuccess: (res) => {
+        enterImpersonation(res.access_token, res.tenant_id, res.tenant_name || name);
+        window.location.href = "/";
+      },
+    });
+  };
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<TenantRequest>({ id: "", name: "", adminEmail: "", plan: "standard", domainApp: "" });
@@ -73,6 +85,17 @@ export default function Tenants() {
       header: "액션",
       render: (t) => (
         <div className="flex gap-1">
+          {/* CR-096: 임퍼소네이션 — 대상 테넌트로 들어가서 화면 전체를 본다 */}
+          {t.status === "active" && (
+            <ActionButton
+              small
+              variant="primary"
+              disabled={impersonate.isPending}
+              onClick={() => handleEnter(t.id, t.name || t.id)}
+            >
+              들어가기
+            </ActionButton>
+          )}
           {t.status === "active" ? (
             <ActionButton small variant="danger" disabled={suspendTenant.isPending} onClick={() => suspendTenant.mutate(t.id)}>
               정지

@@ -120,6 +120,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             "Tenant mismatch between access token and X-Tenant-Id header");
                     return;
                 }
+
+                // CR-096: 임퍼소네이션 토큰은 super admin 이 발급받은 합법 토큰이다.
+                // subject 가 super admin UUID 라 대상 테넌트 DB users 에 없으므로 user 조회를 건너뛰고
+                // claim 만으로 인증한다(CR-086 헤더 일치 가드는 위에서 이미 통과).
+                Boolean impersonating = claims.get("impersonating", Boolean.class);
+                if (Boolean.TRUE.equals(impersonating)) {
+                    UserPrincipal principal = new UserPrincipal(userId, email, tenantId, role, Map.of());
+                    var auth = new UsernamePasswordAuthenticationToken(
+                            principal, null, principal.getAuthorities());
+                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+
                 UserEntity user = userRepository.findById(userId).orElse(null);
                 if (user == null || !user.isActive()) {
                     filterChain.doFilter(request, response);
