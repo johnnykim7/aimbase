@@ -313,6 +313,23 @@ public class MCPRagClient {
     }
 
     /**
+     * parse_document 를 로컬 path 로 호출 (사이드카가 직접 읽음 — base64 왕복 제거).
+     * LLM 이 준 file_path 를 BE 가 읽지 않고 그대로 사이드카에 패스한다.
+     * 사이드카 PARSE_ALLOWED_ROOTS 화이트리스트 내 path 만 허용된다.
+     *
+     * @return {content, metadata, file_type, success}
+     */
+    public Map<String, Object> parseDocumentByPath(String filePath, String fileType) {
+        Map<String, Object> input = Map.of(
+                "file_path", filePath,
+                "file_type", fileType != null ? fileType : ""
+        );
+
+        String result = mcpClient.callTool("parse_document", input);
+        return parseJson(result);
+    }
+
+    /**
      * Python MCP Server의 read_pdf 도구 호출 (CR-092 — OCR 옵션 포함).
      *
      * @param fileBase64    Base64 인코딩된 PDF
