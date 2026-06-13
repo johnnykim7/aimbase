@@ -23,7 +23,7 @@ public class PlatformSettingsService {
     private static final Logger log = LoggerFactory.getLogger(PlatformSettingsService.class);
     private static final long CACHE_TTL_MS = 5 * 60 * 1000L; // 5분
 
-    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget");
+    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget", "llm");
 
     private final GlobalConfigRepository configRepository;
     private final AuditLogger auditLogger;

@@ -94,7 +94,10 @@ public class AgentAutoConfiguration {
     public AgentLifecycle agentLifecycle(AgentConfig config, SdkToolKit kit,
                                          ToolFilterService filterService) {
         List<ToolExecutor> tools = filterService.filter(kit.getAllTools());
-        return new AgentLifecycle(config, tools, props.getTenantId());
+        AgentLifecycle lifecycle = new AgentLifecycle(config, tools, props.getTenantId());
+        // CR-098: TURN 비활성 + 같은 네트워크 직접 호출 경로 — runnerEndpoint 명시.
+        lifecycle.setExplicitRunnerEndpoint(props.getRunnerEndpoint());
+        return lifecycle;
     }
 
     private String resolveWorkspace() {

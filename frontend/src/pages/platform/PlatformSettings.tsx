@@ -5,12 +5,63 @@ import { LoadingSpinner } from "../../components/common/LoadingSpinner";
 import { ActionButton } from "../../components/common/ActionButton";
 import { Settings, RotateCcw, Save } from "lucide-react";
 import { usePlatformSettings, useUpdatePlatformSettings, useEvictSettingsCache } from "../../hooks/usePlatformSettings";
+import { useTenants } from "../../hooks/usePlatform";
+import { Checkbox } from "../../components/ui/checkbox";
 import type { SettingItem } from "../../api/platform";
+
+/** anthropic-cli 허용 테넌트 화이트리스트 키 — 텍스트 대신 멀티셀렉트로 편집 */
+const TENANT_WHITELIST_KEY = "llm.anthropic-cli.enabled-tenants";
+
+/**
+ * 테넌트 화이트리스트 전용 입력 — "전체 허용(*)" 토글 + 테넌트 멀티셀렉트(name 표시 / id 저장).
+ * 저장값: "*" 또는 쉼표 구분 tenant id 목록.
+ */
+function TenantWhitelistInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { data: tenants = [] } = useTenants();
+  const isAll = value.trim() === "*";
+  const selected = isAll ? [] : value.split(",").map((s) => s.trim()).filter(Boolean);
+
+  const toggle = (id: string) => {
+    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
+    onChange(next.join(","));
+  };
+
+  return (
+    <div className="flex flex-col gap-2 items-end max-w-md">
+      <label className="flex items-center gap-2 text-sm cursor-pointer">
+        <Checkbox size="sm" checked={isAll} onCheckedChange={(c) => onChange(c === true ? "*" : "")} />
+        전체 허용 (*)
+      </label>
+      {!isAll && (
+        <div className="flex flex-wrap gap-1.5 justify-end">
+          {tenants.map((t) => {
+            const on = selected.includes(t.id);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => toggle(t.id)}
+                title={t.id}
+                className={`py-1 px-2.5 rounded-lg border text-xs cursor-pointer transition-all ${
+                  on ? "border-primary bg-primary/10 text-primary" : "border-border bg-accent text-muted-foreground"
+                }`}
+              >
+                {t.name}
+              </button>
+            );
+          })}
+          {tenants.length === 0 && <span className="text-xs text-muted-foreground">테넌트 목록 없음</span>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const CATEGORY_LABELS: Record<string, { label: string; description: string }> = {
   orchestrator: { label: "Orchestrator", description: "도구 루프, 토큰 제한, 결과 축약 설정" },
   session: { label: "Session", description: "세션 TTL, 메시지 수/크기 제한" },
   compaction: { label: "Compaction", description: "컨텍스트 압축 임계값 (% 단위)" },
+  llm: { label: "LLM", description: "프로바이더/어댑터 정책 — Claude CLI 어댑터 허용 테넌트 등" },
 };
 
 export default function PlatformSettings() {
@@ -103,16 +154,23 @@ export default function PlatformSettings() {
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={currentValue}
-                            onChange={(e) => handleChange(item.key, e.target.value)}
-                            className={`w-32 px-2 py-1 text-sm text-right border rounded-md bg-background ${
-                              isEdited
-                                ? "border-primary ring-1 ring-primary/20"
-                                : "border-border"
-                            }`}
-                          />
+                          {item.key === TENANT_WHITELIST_KEY ? (
+                            <TenantWhitelistInput
+                              value={currentValue}
+                              onChange={(v) => handleChange(item.key, v)}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={currentValue}
+                              onChange={(e) => handleChange(item.key, e.target.value)}
+                              className={`w-32 px-2 py-1 text-sm text-right border rounded-md bg-background ${
+                                isEdited
+                                  ? "border-primary ring-1 ring-primary/20"
+                                  : "border-border"
+                              }`}
+                            />
+                          )}
                           {isEdited && (
                             <button
                               onClick={() => {

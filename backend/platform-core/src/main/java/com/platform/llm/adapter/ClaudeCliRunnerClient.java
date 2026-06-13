@@ -171,18 +171,57 @@ public class ClaudeCliRunnerClient {
         return body;
     }
 
+    /**
+     * UnifiedMessage → Runner HTTP body 의 messages 항목.
+     * CR-098: 멀티모달(Document/Image) 블록이 있으면 content 를 Anthropic content block 배열로 보존한다.
+     * (claude CLI stream-json 이 받는 포맷과 동일 — Runner 쪽 ClaudeCliWorker 가 그대로 stdin 에 흘려보냄)
+     * 멀티모달이 없으면 기존처럼 텍스트 한 줄(String)로 단순화 — 하위호환.
+     */
     private static List<Map<String, Object>> toRawMessages(List<UnifiedMessage> messages) {
         if (messages == null) return List.of();
         List<Map<String, Object>> out = new ArrayList<>();
         for (UnifiedMessage m : messages) {
             String role = m.role() != null ? m.role().name().toLowerCase() : "user";
-            String text = m.content().stream()
-                    .filter(b -> b instanceof ContentBlock.Text)
-                    .map(b -> ((ContentBlock.Text) b).text())
-                    .reduce("", (a, b) -> a + b);
-            out.add(Map.of("role", role, "content", text));
+            boolean hasMultimodal = m.content().stream()
+                    .anyMatch(b -> b instanceof ContentBlock.Image || b instanceof ContentBlock.Document);
+            if (hasMultimodal) {
+                List<Map<String, Object>> blocks = new ArrayList<>();
+                for (ContentBlock b : m.content()) {
+                    Map<String, Object> blk = toAnthropicBlock(b);
+                    if (blk != null) blocks.add(blk);
+                }
+                Map<String, Object> msg = new HashMap<>();
+                msg.put("role", role);
+                msg.put("content", blocks);
+                out.add(msg);
+            } else {
+                String text = m.content().stream()
+                        .filter(b -> b instanceof ContentBlock.Text)
+                        .map(b -> ((ContentBlock.Text) b).text())
+                        .reduce("", (a, b) -> a + b);
+                out.add(Map.of("role", role, "content", text));
+            }
         }
         return out;
+    }
+
+    /**
+     * CR-098: ContentBlock → Anthropic API content block(Map). base64 source 만 지원(URL 미지원).
+     * text/image/document 외 타입은 null(전달 생략).
+     */
+    private static Map<String, Object> toAnthropicBlock(ContentBlock b) {
+        if (b instanceof ContentBlock.Text t) {
+            return Map.of("type", "text", "text", t.text() != null ? t.text() : "");
+        }
+        if (b instanceof ContentBlock.Image img && img.isBase64()) {
+            return Map.of("type", "image", "source", Map.of(
+                    "type", "base64", "media_type", img.mediaType(), "data", img.data()));
+        }
+        if (b instanceof ContentBlock.Document doc && doc.isBase64()) {
+            return Map.of("type", "document", "source", Map.of(
+                    "type", "base64", "media_type", doc.mediaType(), "data", doc.data()));
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

@@ -56,7 +56,7 @@ const CONNECTION_TYPES = [
 const ADAPTERS: Record<string, string[]> = {
   database: ["PostgreSQL", "MySQL", "MongoDB", "Redis"],
   messaging: ["Slack", "카카오톡", "Discord", "Webhook"],
-  llm: ["Claude (Anthropic)", "OpenAI", "Ollama", "OpenAI Compatible", "AWS Bedrock", "Vertex AI"],
+  llm: ["Claude (Anthropic)", "Claude CLI", "OpenAI", "Ollama", "OpenAI Compatible", "AWS Bedrock", "Vertex AI"],
   realtime: ["WebSocket", "SSE"],
 };
 
@@ -114,6 +114,11 @@ export default function Connections() {
       "GCP Project ID": (cfg.project_id as string) ?? "",
       "Location": (cfg.location as string) ?? "",
       "Service Account Key": (cfg.service_account_key as string) ?? "",
+      // CR-071: Claude CLI 어댑터 전용
+      "Tool Mode": (cfg.tool_mode as string) ?? "AIMBASE",
+      "Config Dir": (cfg.config_dir as string) ?? "",
+      "Runner API Key": (cfg.runner_api_key as string) ?? "",
+      "System Prompt Override": (cfg.system_prompt_override as string) ?? "",
     });
     setShowModal(true);
   };
@@ -137,6 +142,11 @@ export default function Connections() {
       project_id: form["GCP Project ID"],
       location: form["Location"],
       service_account_key: form["Service Account Key"],
+      // CR-071: Claude CLI 어댑터 전용 (BE 키명과 일치)
+      tool_mode: form["Tool Mode"],
+      config_dir: form["Config Dir"],
+      runner_api_key: form["Runner API Key"],
+      system_prompt_override: form["System Prompt Override"],
     };
 
     if (editingConn) {
@@ -318,9 +328,38 @@ export default function Connections() {
               </FormField>
             )}
 
-            <FormField label="API Key">
-              <input type="password" style={inputStyle} value={form["API Key"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "API Key": e.target.value }))} />
-            </FormField>
+            {/* Claude CLI(anthropic-cli)는 OAuth(CLAUDE_CONFIG_DIR) 기반 — API Key 불필요 */}
+            {selectedAdapter !== "Claude CLI" && (
+              <FormField label="API Key">
+                <input type="password" style={inputStyle} value={form["API Key"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "API Key": e.target.value }))} />
+              </FormField>
+            )}
+
+            {/* CR-071: Claude CLI 어댑터 전용 필드 (BE ConnectionAdapterFactory.createAdapter 'anthropic-cli' 분기와 키 일치) */}
+            {selectedAdapter === "Claude CLI" && (
+              <>
+                <FormField label="Tool Mode">
+                  <select
+                    style={inputStyle}
+                    value={form["Tool Mode"] ?? "AIMBASE"}
+                    onChange={(e) => setForm((p) => ({ ...p, "Tool Mode": e.target.value }))}
+                  >
+                    <option value="AIMBASE">AIMBASE (Aimbase MCP 도구만)</option>
+                    <option value="NATIVE">NATIVE (CLI 네이티브 도구만)</option>
+                    <option value="HYBRID">HYBRID (둘 다)</option>
+                  </select>
+                </FormField>
+                <FormField label="Config Dir (선택)">
+                  <input style={inputStyle} placeholder="/data/agents/<id>/.claude" value={form["Config Dir"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "Config Dir": e.target.value }))} />
+                </FormField>
+                <FormField label="Runner API Key (선택)">
+                  <input type="password" style={inputStyle} placeholder="Runner 인증용 (미지정 시 무인증)" value={form["Runner API Key"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "Runner API Key": e.target.value }))} />
+                </FormField>
+                <FormField label="System Prompt Override (선택)">
+                  <textarea style={{ ...inputStyle, minHeight: 80 }} placeholder="--append-system-prompt 로 주입할 추가 지침" value={form["System Prompt Override"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "System Prompt Override": e.target.value }))} />
+                </FormField>
+              </>
+            )}
 
             {/* CR-032: Bedrock 전용 필드 */}
             {selectedAdapter === "AWS Bedrock" && (
@@ -357,6 +396,7 @@ export default function Connections() {
                 style={inputStyle}
                 placeholder={
                   selectedAdapter === "Claude (Anthropic)" ? "claude-sonnet-4-6" :
+                  selectedAdapter === "Claude CLI" ? "claude-sonnet-4-6 (미지정 시 CLI 기본)" :
                   selectedAdapter === "OpenAI" ? "gpt-4o" :
                   selectedAdapter === "Ollama" ? "llama3.2" :
                   selectedAdapter === "OpenAI Compatible" ? "deepseek-chat" :

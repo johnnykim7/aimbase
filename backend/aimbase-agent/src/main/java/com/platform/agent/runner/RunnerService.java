@@ -1,5 +1,6 @@
 package com.platform.agent.runner;
 
+import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.LLMRequest;
 import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.UnifiedMessage;
@@ -9,6 +10,7 @@ import com.platform.runner.claudecli.ClaudeCliWorkerPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -126,14 +128,61 @@ public class RunnerService {
     private static UnifiedMessage toUnified(Map<String, Object> m) {
         String role = m.get("role") != null ? m.get("role").toString().toLowerCase() : "user";
         Object content = m.get("content");
-        String text = (content instanceof String s) ? s
-                : (content == null ? "" : content.toString());
         UnifiedMessage.Role r = switch (role) {
             case "system" -> UnifiedMessage.Role.SYSTEM;
             case "assistant" -> UnifiedMessage.Role.ASSISTANT;
             case "tool", "tool_result" -> UnifiedMessage.Role.TOOL_RESULT;
             default -> UnifiedMessage.Role.USER;
         };
+
+        // CR-098: content 가 블록 배열(멀티모달)이면 ContentBlock 으로 복원, 문자열이면 텍스트(하위호환).
+        if (content instanceof List<?> blocks && r == UnifiedMessage.Role.USER) {
+            List<ContentBlock> restored = new ArrayList<>();
+            for (Object o : blocks) {
+                if (o instanceof Map<?, ?> blk) {
+                    ContentBlock cb = toContentBlock(blk);
+                    if (cb != null) restored.add(cb);
+                }
+            }
+            if (!restored.isEmpty()) {
+                return UnifiedMessage.ofUserContent(restored);
+            }
+        }
+
+        String text = (content instanceof String s) ? s
+                : (content == null ? "" : content.toString());
         return UnifiedMessage.ofText(r, text);
+    }
+
+    /**
+     * CR-098: Anthropic content block(Map) → ContentBlock. base64 source 만. text/image/document 지원.
+     */
+    @SuppressWarnings("unchecked")
+    private static ContentBlock toContentBlock(Map<?, ?> blk) {
+        Object type = blk.get("type");
+        if (type == null) return null;
+        switch (type.toString()) {
+            case "text" -> {
+                Object t = blk.get("text");
+                return new ContentBlock.Text(t != null ? t.toString() : "");
+            }
+            case "image" -> {
+                Map<String, Object> src = (Map<String, Object>) blk.get("source");
+                if (src == null) return null;
+                return ContentBlock.Image.ofBase64(str(src.get("media_type")), str(src.get("data")));
+            }
+            case "document" -> {
+                Map<String, Object> src = (Map<String, Object>) blk.get("source");
+                if (src == null) return null;
+                return ContentBlock.Document.ofBase64(str(src.get("media_type")), str(src.get("data")), null);
+            }
+            default -> {
+                return null;
+            }
+        }
+    }
+
+    private static String str(Object o) {
+        return o != null ? o.toString() : null;
     }
 }

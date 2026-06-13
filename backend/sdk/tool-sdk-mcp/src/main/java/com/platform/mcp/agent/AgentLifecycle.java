@@ -43,6 +43,13 @@ public class AgentLifecycle implements AutoCloseable {
     private String publicAddress;
     private String turnRelayAddress;
 
+    /**
+     * CR-098: TURN 비활성 + 같은 네트워크 직접 호출 경로용 명시적 runnerEndpoint.
+     * 설정 시(예: http://aimbase-agent:8290) TURN 없이도 metadata.runnerEndpoint 로 등록되어
+     * BE 가 runner_capability=true 로 마킹 → resolveActiveRunner 가 이 endpoint 로 호출.
+     */
+    private String explicitRunnerEndpoint;
+
     // CR-074
     private TurnConnectionBindHandler bindHandler;
     private TurnLoopbackBridge loopbackBridge;
@@ -84,6 +91,14 @@ public class AgentLifecycle implements AutoCloseable {
     }
 
     /**
+     * CR-098: TURN 없이 직접 호출할 runnerEndpoint 를 명시 설정한다.
+     * 같은 docker 네트워크 등 BE 가 직접 도달 가능한 경우 사용 (예: http://aimbase-agent:8290).
+     */
+    public void setExplicitRunnerEndpoint(String runnerEndpoint) {
+        this.explicitRunnerEndpoint = runnerEndpoint;
+    }
+
+    /**
      * Agent 시작: MCP 서버 기동 → STUN 주소 탐색 → (TURN-TCP) → Aimbase 등록 → 하트비트 시작.
      */
     public void start() {
@@ -111,6 +126,13 @@ public class AgentLifecycle implements AutoCloseable {
             if (turnRelayAddress != null) {
                 metadata.put("turnRelayAddress", turnRelayAddress);
             }
+        }
+
+        // CR-098: TURN 비활성 + 명시적 runnerEndpoint 설정 시 직접 호출 경로 등록.
+        // (TURN 활성 경로는 startTurnTcp 가 이미 metadata.runnerEndpoint 를 채움)
+        if (!config.turnEnabled() && explicitRunnerEndpoint != null && !explicitRunnerEndpoint.isBlank()) {
+            metadata.put("runnerEndpoint", explicitRunnerEndpoint);
+            log.info("Registering explicit runnerEndpoint (TURN disabled): {}", explicitRunnerEndpoint);
         }
 
         // 4. Aimbase 등록 — CR-074: 실패해도 agent 자체는 계속 동작 (TURN-TCP 도달 경로 유지)

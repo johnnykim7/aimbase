@@ -55,13 +55,56 @@ services:
       - "host.docker.internal:host-gateway"
     env_file:
       - .env
+    volumes:
+      # api 와 동일 경로로 workspace 공유 → BE 가 패스한 file_path 를 사이드카가 직접 읽음
+      - ./workspace:/data/workspace
     environment:
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8000"
       PARSE_DOWNLOAD_TIMEOUT_SEC: "150"
+      # parse_document file_path 화이트리스트 (미설정 시 로컬 path 파싱 비활성)
+      PARSE_ALLOWED_ROOTS: /data/workspace
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/sse')"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  # ── Claude CLI Runner Agent (CR-098) ──
+  # adapter='anthropic-cli' chat 시 api 가 http://aimbase-agent:8290/v1/chat 로 호출.
+  # 같은 compose 네트워크라 TURN 불필요(agent.turn.enabled=false).
+  # claude-accounts 볼륨을 api 와 공유 → 동일 OAuth 계정(config_dir) 사용.
+  aimbase-agent:
+    build:
+      context: ./backend
+      dockerfile: aimbase-agent/Dockerfile
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      - api
+    volumes:
+      - ./claude-accounts:/home/appuser/.claude-accounts
+    environment:
+      # ── Runner HTTP 서비스 (RunnerProperties: aimbase.runner.*) ──
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "5"
+      AIMBASE_RUNNER_AIMBASE_MCP_JAR: "/app/app.jar"
+      SERVER_PORT: "8290"
+      # ── Agent 등록 (AgentProperties: agent.*) ──
+      AGENT_NAME: "cli-runner-bidding"
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"
+      AGENT_TENANT_ID: "bidding_system"
+      AGENT_MCP_PORT: "8291"
+      AGENT_TURN_ENABLED: "false"
+      # CR-098: TURN 없이 같은 네트워크 직접 호출 — BE 가 이 주소로 /v1/chat 호출
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent:8290"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8290/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s

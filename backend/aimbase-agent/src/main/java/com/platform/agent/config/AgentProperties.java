@@ -34,6 +34,13 @@ public class AgentProperties {
     /** MCP 서버 포트 */
     private int mcpPort = 8190;
 
+    /**
+     * CR-098: TURN 없이 직접 호출할 runnerEndpoint (예: http://aimbase-agent:8290).
+     * 같은 docker 네트워크 등 BE 가 직접 도달 가능한 환경에서 사용.
+     * 비어있으면 기존 동작(TURN 활성 시에만 runnerEndpoint 등록).
+     */
+    private String runnerEndpoint;
+
     /** 워크스페이스 루트 경로 (비어있으면 ~/aimbase-workspace) */
     private String workspacePath;
 
@@ -119,6 +126,9 @@ public class AgentProperties {
 
     public int getMcpPort() { return mcpPort; }
     public void setMcpPort(int mcpPort) { this.mcpPort = mcpPort; }
+
+    public String getRunnerEndpoint() { return runnerEndpoint; }
+    public void setRunnerEndpoint(String runnerEndpoint) { this.runnerEndpoint = runnerEndpoint; }
 
     public String getWorkspacePath() { return workspacePath; }
     public void setWorkspacePath(String workspacePath) { this.workspacePath = workspacePath; }

@@ -65,12 +65,29 @@ deploy_rag() {
   echo "✅ RAG 완료 → $REMOTE/python-sidecar/"
 }
 
+deploy_agent() {
+  echo "━━━ Agent(Runner) 빌드 ━━━"
+  cd backend
+  ./gradlew aimbase-agent:bootJar
+  cd ..
+
+  echo "━━━ Agent 배포 & 재빌드/재시작 ━━━"
+  ssh_run "mkdir -p $REMOTE/backend/aimbase-agent/build/libs"
+  AGENT_JAR=$(find backend/aimbase-agent/build/libs -name '*.jar' ! -name '*plain*')
+  scp_send "$AGENT_JAR" "$SERVER:$REMOTE/backend/aimbase-agent/build/libs/$(basename "$AGENT_JAR")"
+  scp_send backend/aimbase-agent/Dockerfile "$SERVER:$REMOTE/backend/aimbase-agent/Dockerfile"
+  scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
+  ssh_run "cd $REMOTE && docker compose build aimbase-agent && docker compose up -d --force-recreate aimbase-agent"
+  echo "✅ Agent 완료 → $REMOTE/backend/aimbase-agent/build/libs/"
+}
+
 case "$TARGET" in
-  fe)  deploy_fe ;;
-  be)  deploy_be ;;
-  rag) deploy_rag ;;
-  all) deploy_fe && deploy_rag && deploy_be ;;
-  *)   echo "사용법: ./deploy.sh [fe|be|rag|all]"; exit 1 ;;
+  fe)    deploy_fe ;;
+  be)    deploy_be ;;
+  rag)   deploy_rag ;;
+  agent) deploy_agent ;;
+  all)   deploy_fe && deploy_rag && deploy_be ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|all]"; exit 1 ;;
 esac
 
 echo ""
