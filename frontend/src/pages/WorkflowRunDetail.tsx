@@ -117,13 +117,17 @@ function EventBody({ runId, eventId }: { runId: string; eventId: number }) {
   return <div className="flex flex-col gap-3 py-2">{sections}</div>;
 }
 
-function EventRow({ runId, event }: { runId: string; event: WorkflowRunEvent }) {
+function EventRow({ runId, event, stepModel }: { runId: string; event: WorkflowRunEvent; stepModel?: string }) {
   const [expanded, setExpanded] = useState(false);
   const visual = EVENT_VISUALS[event.event_type] ?? EVENT_VISUALS.STEP_START;
   const failed = event.event_type === "STEP_FAILED" || event.payload?.ok === false;
   const Icon = failed && event.event_type === "TOOL_RESULT" ? XCircle : visual.icon;
   const expandable = EXPANDABLE.includes(event.event_type);
-  const summary = payloadSummary(event);
+  // STEP_START 행에 그 스텝이 사용한 모델 동반 표시 (같은 step_id 의 LLM_RESPONSE 에서 집계)
+  const summary =
+    event.event_type === "STEP_START" && stepModel
+      ? `${payloadSummary(event)} · ${stepModel}`
+      : payloadSummary(event);
 
   return (
     <div className="border-b border-border last:border-b-0">
@@ -190,6 +194,24 @@ export default function WorkflowRunDetail() {
   const { data: run, isLoading: runLoading } = useWorkflowRun(runId);
   const { data: events = [], isLoading: eventsLoading } = useWorkflowRunEvents(runId);
   const { data: workflows = [] } = useWorkflows();
+  // 사용 모델 요약 — LLM_RESPONSE 이벤트 payload.model 집계 (중복 제거, 등장 순서 유지)
+  const usedModels = [
+    ...new Set(
+      events
+        .filter((e) => e.event_type === "LLM_RESPONSE")
+        .map((e) => e.payload?.model)
+        .filter((m): m is string => typeof m === "string" && m.length > 0)
+    ),
+  ];
+  // 스텝별 사용 모델 — STEP_START 행에 동반 표시용 (같은 step_id 의 첫 LLM_RESPONSE 기준)
+  const stepModels = new Map<string, string>();
+  for (const e of events) {
+    if (e.event_type !== "LLM_RESPONSE" || !e.step_id) continue;
+    const m = e.payload?.model;
+    if (typeof m === "string" && m.length > 0 && !stepModels.has(e.step_id)) {
+      stepModels.set(e.step_id, m);
+    }
+  }
   const workflowName = run
     ? workflows.find((w) => w.id === run.workflowId)?.name ?? run.workflowId
     : "";
@@ -247,6 +269,16 @@ export default function WorkflowRunDetail() {
           />
           <MetaItem label="소요" value={formatDuration(run.startedAt, run.completedAt)} />
           <MetaItem
+            label="사용 모델"
+            value={
+              usedModels.length > 0 ? (
+                <span className="font-mono text-xs">{usedModels.join(", ")}</span>
+              ) : (
+                <span className="text-muted-foreground/60">--</span>
+              )
+            }
+          />
+          <MetaItem
             label="Run ID"
             value={<span className="font-mono text-xs">{run.id}</span>}
           />
@@ -272,7 +304,14 @@ export default function WorkflowRunDetail() {
             기록된 이벤트가 없습니다 (CR-090 이전 실행이거나 이벤트 기록 실패)
           </div>
         ) : (
-          events.map((e) => <EventRow key={e.id} runId={run.id} event={e} />)
+          events.map((e) => (
+            <EventRow
+              key={e.id}
+              runId={run.id}
+              event={e}
+              stepModel={e.step_id ? stepModels.get(e.step_id) : undefined}
+            />
+          ))
         )}
       </div>
     </Page>
