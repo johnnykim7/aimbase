@@ -157,6 +157,49 @@ class LlmCallStepExecutorTest {
         }
 
         @Test
+        @DisplayName("Phase 1 — max_tokens 지정 시 그 값으로 1차 호출 (4096 더듬기 없음)")
+        void phase1_usesDeclaredMaxTokens_noEscalationRoundtrip() {
+            // 소비앱이 max_tokens=16384 선언 → 큰 출력 → 1차부터 16384 로 한 방 호출.
+            // (회귀 방지: 과거 Math.min(4096, ceiling) 로 1차가 4096 에 묶여 헛된 에스컬레이션 왕복 발생)
+            Map<String, Object> config = baseConfig();
+            config.put("max_tokens", 16384);
+            mockAdapterReturn(makeResponse(LLMResponse.FinishReason.END, 12000));
+
+            executor.execute(stepWithConfig(config), defaultContext());
+
+            ArgumentCaptor<LLMRequest> captor = ArgumentCaptor.forClass(LLMRequest.class);
+            verify(adapter, times(1)).chat(captor.capture());
+            assertThat(captor.getValue().config().maxTokens()).isEqualTo(16384);
+        }
+
+        @Test
+        @DisplayName("Phase 1 — max_tokens 지정 + 잘림 → Phase 2 스킵 (지정값이 곧 상한)")
+        void phase1_declaredMaxTokensTruncated_skipsEscalationToSplit() {
+            // 선언한 16384 에서도 잘리면 더 올릴 곳이 없으므로 Phase 2 에스컬레이션은 무의미 → 바로 Phase 3.
+            Map<String, Object> config = baseConfigWithSchema();
+            config.put("max_tokens", 16384);
+            LLMResponse truncated = makeResponse(LLMResponse.FinishReason.MAX_TOKENS, 16384);
+            // Phase 3 자동분할 경로: plan(structured) → part1 → part2 → merge(structured)
+            LLMResponse plan = makeStructuredResponse(LLMResponse.FinishReason.END,
+                    Map.of("parts", List.of(
+                            Map.of("part_number", 1, "scope", "a"),
+                            Map.of("part_number", 2, "scope", "b"))), 200);
+            LLMResponse part = makeResponse(LLMResponse.FinishReason.END, 300);
+            LLMResponse merge = makeStructuredResponse(LLMResponse.FinishReason.END,
+                    Map.of("category", "bug"), 400);
+            mockAdapterReturn(truncated, plan, part, part, merge);
+
+            executor.execute(stepWithConfig(config), defaultContext());
+
+            ArgumentCaptor<LLMRequest> captor = ArgumentCaptor.forClass(LLMRequest.class);
+            verify(adapter, times(5)).chat(captor.capture());
+            List<LLMRequest> requests = captor.getAllValues();
+            // 1차는 16384, 2차(에스컬레이션 8192)는 없어야 함 → 2차 호출은 분할 계획(4096)
+            assertThat(requests.get(0).config().maxTokens()).isEqualTo(16384);
+            assertThat(requests.get(1).config().maxTokens()).isEqualTo(4096);
+        }
+
+        @Test
         @DisplayName("Phase 1 — TOOL_USE finishReason도 성공 처리")
         void phase1_toolUseFinishReason_success() {
             mockAdapterReturn(makeResponse(LLMResponse.FinishReason.TOOL_USE, 300));
