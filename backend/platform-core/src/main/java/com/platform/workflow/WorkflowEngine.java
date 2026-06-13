@@ -866,12 +866,16 @@ public class WorkflowEngine {
         int maxAttempts = Math.max(1, errorHandling.retryMaxAttempts() + 1);
         long delayMs = errorHandling.retryDelayMs();
         Exception lastException = null;
+        // CR-106: 다음 attempt 에 직전 실패 메시지를 전달 — AgentCallStepExecutor 가 turn timeout 류 판정에 사용.
+        StepContext attemptContext = context;
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                return executor.execute(step, context);
+                return executor.execute(step, attemptContext);
             } catch (Exception e) {
                 lastException = e;
+                // CR-106: 다음 attempt 컨텍스트에 직전 실패 메시지 주입 (timeout 류 이어하기 판정용).
+                attemptContext = context.withRetryFailure(e.getMessage());
                 if (attempt < maxAttempts) {
                     log.warn("Step '{}' attempt {}/{} failed: {}. Retrying in {}ms...",
                             step.id(), attempt, maxAttempts, e.getMessage(), delayMs);

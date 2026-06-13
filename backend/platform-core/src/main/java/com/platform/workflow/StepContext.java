@@ -20,7 +20,8 @@ public record StepContext(
         String sessionId,
         Map<String, Object> inputData,
         Map<String, Object> stepResults,  // {"stepId": {"output": ..., ...}}
-        Map<String, Object> loopData      // CR-055: EVALUATOR_LOOP iteration 변수 ({{loop.*}} 참조용)
+        Map<String, Object> loopData,     // CR-055: EVALUATOR_LOOP iteration 변수 ({{loop.*}} 참조용)
+        String previousAttemptFailure     // CR-106: executeWithRetry 가 다음 attempt 에 직전 실패 메시지를 전달 (null=첫 시도/이전 실패 없음)
 ) {
 
     private static final Logger log = LoggerFactory.getLogger(StepContext.class);
@@ -29,7 +30,23 @@ public record StepContext(
     /** 기존 호출부 호환용 5-arg 생성자 — loopData=null로 처리 (루프 외부 컨텍스트). */
     public StepContext(String workflowRunId, String workflowId, String sessionId,
                        Map<String, Object> inputData, Map<String, Object> stepResults) {
-        this(workflowRunId, workflowId, sessionId, inputData, stepResults, null);
+        this(workflowRunId, workflowId, sessionId, inputData, stepResults, null, null);
+    }
+
+    /** 기존 호출부 호환용 6-arg 생성자 (CR-055 loopData 포함, CR-106 previousAttemptFailure 없음). */
+    public StepContext(String workflowRunId, String workflowId, String sessionId,
+                       Map<String, Object> inputData, Map<String, Object> stepResults,
+                       Map<String, Object> loopData) {
+        this(workflowRunId, workflowId, sessionId, inputData, stepResults, loopData, null);
+    }
+
+    /**
+     * CR-106: 다음 retry attempt 용 컨텍스트 — 직전 실패 메시지를 실어 반환.
+     * AgentCallStepExecutor 가 이 값으로 "직전 실패가 turn timeout 류인지" 판단해
+     * timeout 류일 때만 결정적 childSessionId 를 --resume 이어하기로 넘긴다.
+     */
+    public StepContext withRetryFailure(String failureMessage) {
+        return new StepContext(workflowRunId, workflowId, sessionId, inputData, stepResults, loopData, failureMessage);
     }
 
     /**

@@ -111,7 +111,12 @@ public class SubagentRunner {
         }
 
         String runId = UUID.randomUUID().toString();
-        String childSessionId = "subagent-" + UUID.randomUUID();
+        // CR-106: resumeSessionId 가 지정되면(워크플로우 AGENT_CALL timeout retry 멱등화) 그 값을
+        // childSessionId 로 사용 → CLI run_id 동일 → Pool 이 살아있는 Worker 재사용 + --resume 이어하기.
+        // 미지정(=메인 대화 서브에이전트 등)이면 기존대로 매 호출 새 세션(격리 보존).
+        String childSessionId = (request.resumeSessionId() != null && !request.resumeSessionId().isBlank())
+                ? request.resumeSessionId()
+                : "subagent-" + UUID.randomUUID();
 
         // 1. Worktree 격리 설정
         WorktreeContext worktreeCtx = null;

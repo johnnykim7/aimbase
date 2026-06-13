@@ -122,6 +122,13 @@ platform:
     default-max-tokens: ${PLATFORM_DEFAULT_MAX_TOKENS:16000}
   # ─── CR-071 Phase 1: platform.llm.anthropic-cli 블록 삭제 (in-process Worker 풀 제거) ─────
   # Phase 4 ClaudeCliAdapter 는 connection.config + AgentRegistry 로 Runner 라우팅.
+  # ─── CR-106: Runner HTTP 요청 타임아웃 설정화 (장기 AGENT_CALL 대응) ─────
+  # BE → aimbase-agent Runner /v1/chat(/stream) 요청 타임아웃(초). 기본 300s.
+  # 장기 적재 작업(다수 PDF parse→file_write)이 turn timeout 으로 죽으면 상향 검토.
+  # turn timeout 자체는 retry 멱등화(--resume 이어하기)로 작업을 누적 처리하므로 단독 상향은 미봉책.
+  llm:
+    anthropic-cli:
+      http-timeout-seconds: ${ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS:300}
   # ─── 압축 임계값 (PRD-206, CR-030 Phase 5) ─────────────────────────
   # 퍼센트 단위 (70 = 70%). 환경변수 PLATFORM_*_PCT가 우선.
   compaction:

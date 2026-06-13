@@ -50,7 +50,7 @@ public class RunnerAutoConfiguration {
                         resumeSessionId,
                         forkSession,
                         configDir,
-                        Duration.ofSeconds(300),
+                        Duration.ofSeconds(props.getTurnTimeoutSeconds()),  // CR-106: 설정화 (기본 300s)
                         mcpConfig);
         return new ClaudeCliWorkerPool(factory, props.getMaxWorkers(), Duration.ofSeconds(60));
     }

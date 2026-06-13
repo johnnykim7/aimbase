@@ -26,6 +26,9 @@ public class RunnerProperties {
     /** 최대 동시 워커 수 (BIZ-100). */
     private int maxWorkers = 5;
 
+    /** CR-106: CLI turn 타임아웃(초). 장기 AGENT_CALL(다수 PDF 적재) 대응 설정화. 기본 300s. */
+    private int turnTimeoutSeconds = 300;
+
     /** Aimbase MCP 서버 jar 경로 (AIMBASE/HYBRID tool-mode 일 때). */
     private String aimbaseMcpJar;
 
@@ -46,6 +49,8 @@ public class RunnerProperties {
     public void setClaudeBinary(String claudeBinary) { this.claudeBinary = claudeBinary; }
     public int getMaxWorkers() { return maxWorkers; }
     public void setMaxWorkers(int maxWorkers) { this.maxWorkers = maxWorkers; }
+    public int getTurnTimeoutSeconds() { return turnTimeoutSeconds; }
+    public void setTurnTimeoutSeconds(int turnTimeoutSeconds) { this.turnTimeoutSeconds = turnTimeoutSeconds; }
     public String getAimbaseMcpJar() { return aimbaseMcpJar; }
     public void setAimbaseMcpJar(String aimbaseMcpJar) { this.aimbaseMcpJar = aimbaseMcpJar; }
 

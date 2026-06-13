@@ -57,16 +57,42 @@ public class ClaudeCliRunnerClient {
 
     public static final String API_KEY_HEADER = "X-Api-Key";
 
-    private final HttpClient httpClient;
+    /** CR-106: 설정 미주입(테스트/무인자) 시 HTTP 요청 타임아웃 기본값 (초). */
+    static final long DEFAULT_HTTP_TIMEOUT_SECONDS = 300L;
 
-    public ClaudeCliRunnerClient() {
+    private final HttpClient httpClient;
+    /** CR-106: Runner /v1/chat(/stream) 요청 타임아웃 — 장기 AGENT_CALL 대응 설정화. */
+    private final Duration httpRequestTimeout;
+
+    /** Spring 주입용 — application.yml platform.llm.anthropic-cli.http-timeout-seconds. */
+    @org.springframework.beans.factory.annotation.Autowired
+    public ClaudeCliRunnerClient(
+            @org.springframework.beans.factory.annotation.Value(
+                    "${platform.llm.anthropic-cli.http-timeout-seconds:" + DEFAULT_HTTP_TIMEOUT_SECONDS + "}")
+            long httpTimeoutSeconds) {
         this(HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build());
+                        .connectTimeout(Duration.ofSeconds(10))
+                        .build(),
+                Duration.ofSeconds(httpTimeoutSeconds > 0 ? httpTimeoutSeconds : DEFAULT_HTTP_TIMEOUT_SECONDS));
     }
 
+    /** 기존 무인자 생성자 호환 (테스트). 기본 타임아웃 사용. */
+    public ClaudeCliRunnerClient() {
+        this(HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofSeconds(10))
+                        .build(),
+                Duration.ofSeconds(DEFAULT_HTTP_TIMEOUT_SECONDS));
+    }
+
+    /** 기존 HttpClient 주입 생성자 호환 (테스트). 기본 타임아웃 사용. */
     public ClaudeCliRunnerClient(HttpClient httpClient) {
+        this(httpClient, Duration.ofSeconds(DEFAULT_HTTP_TIMEOUT_SECONDS));
+    }
+
+    public ClaudeCliRunnerClient(HttpClient httpClient, Duration httpRequestTimeout) {
         this.httpClient = httpClient;
+        this.httpRequestTimeout = httpRequestTimeout != null
+                ? httpRequestTimeout : Duration.ofSeconds(DEFAULT_HTTP_TIMEOUT_SECONDS);
     }
 
     public LLMResponse chat(AgentEndpoint endpoint, LLMRequest request, String toolMode,
@@ -137,13 +163,13 @@ public class ClaudeCliRunnerClient {
 
     // ─── 내부 ─────────────────────────────────────────────────────────────
 
-    private static HttpRequest newJsonRequest(AgentEndpoint endpoint, String path,
-                                               Map<String, Object> body, String runnerApiKey) {
+    private HttpRequest newJsonRequest(AgentEndpoint endpoint, String path,
+                                        Map<String, Object> body, String runnerApiKey) {
         try {
             String json = MAPPER.writeValueAsString(body);
             HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(endpoint.runnerEndpoint() + path))
                     .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(300))
+                    .timeout(httpRequestTimeout)  // CR-106: 설정화 (기본 300s)
                     .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8));
             if (runnerApiKey != null && !runnerApiKey.isBlank()) {
                 b.header(API_KEY_HEADER, runnerApiKey);

@@ -17,6 +17,9 @@ import java.util.Map;
  * @param agentType     에이전트 타입 (GENERAL, PLAN, EXPLORE, GUIDE, VERIFICATION)
  * @param workflowRunId  CR-102: AGENT_CALL 스텝에서 실행될 때의 워크플로우 run ID (이벤트 타임라인 연결). 비워크플로우 경로면 null.
  * @param workflowStepId CR-102: AGENT_CALL 스텝 ID
+ * @param resumeSessionId CR-106: 지정 시 SubagentRunner 가 새 UUID 대신 이 값을 childSessionId 로 사용 →
+ *        같은 CLI run_id 로 Worker 재사용 + {@code --resume} 이어하기. timeout 류 retry 멱등화 전용.
+ *        null 이면 기존대로 매 호출 새 childSessionId 발급(메인 대화 서브에이전트 격리 보존).
  */
 public record SubagentRequest(
         String description,
@@ -30,7 +33,8 @@ public record SubagentRequest(
         String parentSessionId,
         AgentType agentType,
         String workflowRunId,
-        String workflowStepId
+        String workflowStepId,
+        String resumeSessionId
 ) {
     public enum IsolationMode {
         NONE,       // 격리 없이 동일 컨텍스트에서 실행
@@ -43,7 +47,7 @@ public record SubagentRequest(
                            boolean runInBackground, long timeoutMs,
                            Map<String, Object> config, String parentSessionId) {
         this(description, prompt, model, connectionId, isolation,
-             runInBackground, timeoutMs, config, parentSessionId, AgentType.GENERAL, null, null);
+             runInBackground, timeoutMs, config, parentSessionId, AgentType.GENERAL, null, null, null);
     }
 
     /** 기존 10-arg 생성자 호환 (CR-102 워크플로우 연결 키 없음) */
@@ -53,7 +57,18 @@ public record SubagentRequest(
                            Map<String, Object> config, String parentSessionId,
                            AgentType agentType) {
         this(description, prompt, model, connectionId, isolation,
-             runInBackground, timeoutMs, config, parentSessionId, agentType, null, null);
+             runInBackground, timeoutMs, config, parentSessionId, agentType, null, null, null);
+    }
+
+    /** 기존 12-arg 생성자 호환 (CR-102 워크플로우 연결 키 포함, CR-106 resumeSessionId 없음) */
+    public SubagentRequest(String description, String prompt, String model,
+                           String connectionId, IsolationMode isolation,
+                           boolean runInBackground, long timeoutMs,
+                           Map<String, Object> config, String parentSessionId,
+                           AgentType agentType, String workflowRunId, String workflowStepId) {
+        this(description, prompt, model, connectionId, isolation,
+             runInBackground, timeoutMs, config, parentSessionId, agentType,
+             workflowRunId, workflowStepId, null);
     }
 
     public SubagentRequest {

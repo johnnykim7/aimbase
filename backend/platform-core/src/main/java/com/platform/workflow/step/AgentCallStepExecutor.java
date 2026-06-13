@@ -76,7 +76,7 @@ public class AgentCallStepExecutor implements StepExecutor {
     @SuppressWarnings("unchecked")
     private Map<String, Object> executeSingleAgent(Map<String, Object> config,
                                                     StepContext context, String stepId, long startMs) {
-        SubagentRequest request = buildRequest(config, context, stepId);
+        SubagentRequest request = buildRequest(config, context, stepId, true);
         SubagentResult result = agentOrchestrator.runSingle(request);
         // FAILED/TIMEOUT 은 Exception 으로 승격해야 WorkflowEngine.executeWithRetry 가 retry/failed 처리한다.
         // 그대로 두면 result map 만 채우고 정상 return → status=completed 가짜 성공.
@@ -95,7 +95,9 @@ public class AgentCallStepExecutor implements StepExecutor {
 
         List<SubagentRequest> requests = new ArrayList<>();
         for (Map<String, Object> agentConfig : agentConfigs) {
-            requests.add(buildRequest(agentConfig, context, stepId));
+            // CR-106: 멀티 에이전트는 한 step 에 여러 agent 가 같은 stepId 공유 → 결정적 키 충돌 위험.
+            // timeout retry 멱등화는 단일 AGENT_CALL 장기작업 대상이므로 멀티 경로는 비활성(enableResume=false).
+            requests.add(buildRequest(agentConfig, context, stepId, false));
         }
 
         AgentOrchestrator.OrchestratedResult orchestrated;
@@ -131,7 +133,8 @@ public class AgentCallStepExecutor implements StepExecutor {
         return resultMap;
     }
 
-    private SubagentRequest buildRequest(Map<String, Object> config, StepContext context, String stepId) {
+    private SubagentRequest buildRequest(Map<String, Object> config, StepContext context, String stepId,
+                                         boolean enableResume) {
         String description = (String) config.getOrDefault("description", "workflow-agent");
         String prompt = (String) config.get("prompt");
         if (prompt == null || prompt.isBlank()) {
@@ -148,12 +151,44 @@ public class AgentCallStepExecutor implements StepExecutor {
                 ? ((Number) config.get("timeout_ms")).longValue()
                 : 120_000L;
 
+        // CR-106: 직전 attempt 가 turn timeout 류로 실패했으면, 이 step·run 의 결정적 childSessionId 를
+        // resumeSessionId 로 넘긴다 → 같은 CLI run_id 로 Worker 재사용 + --resume 이어하기(작업장 누적 위 계속).
+        // timeout 류가 아니면 null → SubagentRunner 가 새 세션 발급(깨끗이 재시도). 첫 시도도 null.
+        String resumeSessionId = null;
+        if (enableResume && isTurnTimeoutFailure(context.previousAttemptFailure())) {
+            resumeSessionId = deterministicSessionId(context.workflowRunId(), stepId);
+            log.info("AGENT_CALL step '{}' (run={}): previous attempt timed out — resuming same CLI session '{}'",
+                    stepId, context.workflowRunId(), resumeSessionId);
+        }
+
         // CR-102: 워크플로우 run/step 연결 키 전파 — 서브에이전트 내부 도구 루프 이벤트를 run 타임라인에 적재
         return new SubagentRequest(
                 description, prompt, model, connectionId,
                 isolation, false, timeoutMs,
                 config, context.sessionId(), com.platform.agent.AgentType.GENERAL,
-                context.workflowRunId(), stepId);
+                context.workflowRunId(), stepId, resumeSessionId);
+    }
+
+    /**
+     * CR-106: 직전 실패 메시지가 turn timeout 류인지 판정.
+     * AgentCallStepExecutor.executeSingleAgent 가 TIMEOUT status 를
+     * {@code "AGENT_CALL failed: <reason>"} 로 승격(reason 에 "turn timeout after Ns" 보존)하므로
+     * 메시지에 "timeout" 이 포함되면 timeout 류로 본다.
+     */
+    static boolean isTurnTimeoutFailure(String failureMessage) {
+        if (failureMessage == null) return false;
+        String lower = failureMessage.toLowerCase();
+        return lower.contains("timeout") || lower.contains("timed out");
+    }
+
+    /**
+     * CR-106: (workflowRunId, stepId) 로 결정적 childSessionId 파생.
+     * 같은 step 의 retry 는 항상 같은 값 → Pool 이 살아있는 Worker 재사용 + CLI --resume.
+     * workflowRunId 가 null(비워크플로우 경로)이면 멱등화 대상 아님 — 호출 측에서 timeout 류일 때만 호출.
+     */
+    static String deterministicSessionId(String workflowRunId, String stepId) {
+        String seed = (workflowRunId != null ? workflowRunId : "no-run") + ":" + stepId;
+        return "subagent-" + java.util.UUID.nameUUIDFromBytes(seed.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private Map<String, Object> toResultMap(SubagentResult result, long startMs) {
