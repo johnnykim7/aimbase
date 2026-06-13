@@ -9,6 +9,7 @@ import {
   Flag,
   History,
   Play,
+  RefreshCw,
   Wrench,
   XCircle,
 } from "lucide-react";
@@ -192,10 +193,12 @@ function MetaItem({ label, value }: { label: string; value: React.ReactNode }) {
 export default function WorkflowRunDetail() {
   const { runId } = useParams<{ runId: string }>();
   const setHeaderOverride = useSetHeaderOverride();
-  const { data: run, isLoading: runLoading } = useWorkflowRun(runId);
-  const { data: events = [], isLoading: eventsLoading } = useWorkflowRunEvents(runId);
+  const { data: run, isLoading: runLoading, refetch: refetchRun, isFetching: runFetching } = useWorkflowRun(runId);
+  const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents, isFetching: eventsFetching } = useWorkflowRunEvents(runId);
   const { data: workflows = [] } = useWorkflows();
   const { data: connections = [] } = useConnections();
+  const refreshing = runFetching || eventsFetching;
+  const refresh = () => { refetchRun(); refetchEvents(); };
   // 커넥터 id → name (UI 는 ID 직접 노출 금지 — name 으로 표시)
   const connNames = new Map(connections.map((c) => [c.id, c.name]));
 
@@ -251,7 +254,18 @@ export default function WorkflowRunDetail() {
         : JSON.stringify(run.error, null, 2);
 
   return (
-    <Page>
+    <Page
+      actions={
+        <button
+          onClick={refresh}
+          disabled={refreshing}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50 disabled:cursor-default cursor-pointer bg-card"
+        >
+          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+          새로고침
+        </button>
+      }
+    >
       {/* Meta Card */}
       <div className="bg-card border border-border rounded-xl p-5 mb-5">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">

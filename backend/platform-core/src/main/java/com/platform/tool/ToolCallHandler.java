@@ -901,7 +901,8 @@ public class ToolCallHandler {
                 response.model() != null ? response.model() : resolvedModel,
                 in, out, finish, response.latencyMs(),
                 null, parseUuidSafe(ctx.subagentRunId()),
-                null, (body != null && !body.isBlank()) ? body : null);
+                null, (body != null && !body.isBlank()) ? body : null,
+                ctx.connectionId());
         // CR-102: CLI 어댑터가 내부에서 돈 도구 루프 관찰 (AGENT_CALL + CLI 연결 경로)
         if (response.hasObservedToolEvents()) {
             eventRecorder.observedTools(runId, ctx.stepId(), parseUuidSafe(ctx.subagentRunId()),

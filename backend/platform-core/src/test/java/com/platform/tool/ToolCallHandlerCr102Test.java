@@ -125,10 +125,10 @@ class ToolCallHandlerCr102Test {
         // 회차 0 (tool_use) + 회차 1 (end) — 응답 본문만 (prompt null)
         verify(recorder).llmResponse(eq(runId), eq("step1"), eq(0), eq("claude-x"),
                 eq(10), eq(5), eq("TOOL_USE"), eq(100L), isNull(), eq(subagentRunId),
-                isNull(), eq("도구를 호출합니다"));
+                isNull(), eq("도구를 호출합니다"), isNull());
         verify(recorder).llmResponse(eq(runId), eq("step1"), eq(1), eq("claude-x"),
                 eq(20), eq(7), eq("END"), eq(200L), isNull(), eq(subagentRunId),
-                isNull(), eq("결과는 2 입니다"));
+                isNull(), eq("결과는 2 입니다"), isNull());
         // 도구 1회: TOOL_USE(input 전문) + TOOL_RESULT(output 전문)
         verify(recorder).toolUse(eq(runId), eq("step1"), eq(0), eq("calc"),
                 eq(Map.of("expr", "1+1")), eq(subagentRunId));
@@ -176,7 +176,7 @@ class ToolCallHandlerCr102Test {
         assertThat(result.textContent()).isEqualTo("최종 답");
         verify(recorder).llmResponse(eq(runId), eq("step1"), eq(0), eq("anthropic-cli"),
                 eq(30), eq(9), eq("END"), eq(5000L), isNull(), eq(subagentRunId),
-                isNull(), eq("최종 답"));
+                isNull(), eq("최종 답"), isNull());
         verify(recorder).observedTools(eq(runId), eq("step1"), eq(subagentRunId), eq(observed));
     }
 }

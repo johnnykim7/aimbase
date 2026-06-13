@@ -15,6 +15,7 @@ public record ToolContext(
         String workflowRunId,
         String stepId,
         String subagentRunId,
+        String connectionId,
         String actorUserId,
         PermissionLevel permissionLevel,
         ApprovalState approvalState,
@@ -22,12 +23,21 @@ public record ToolContext(
         boolean dryRun,
         int turnNumber
 ) {
-    /** 기존 12-arg 호환 (subagentRunId 없음, CR-102 이전 호출부용) */
+    /** 기존 12-arg 호환 (subagentRunId/connectionId 없음, CR-102 이전 호출부용) */
     public ToolContext(String tenantId, String appId, String projectId, String sessionId,
                        String workflowRunId, String stepId, String actorUserId,
                        PermissionLevel permissionLevel, ApprovalState approvalState,
                        String workspacePath, boolean dryRun, int turnNumber) {
-        this(tenantId, appId, projectId, sessionId, workflowRunId, stepId, null,
+        this(tenantId, appId, projectId, sessionId, workflowRunId, stepId, null, null,
+                actorUserId, permissionLevel, approvalState, workspacePath, dryRun, turnNumber);
+    }
+
+    /** 13-arg 호환 (subagentRunId 있음, connectionId 없음 — CR-102 1·2차 호출부용) */
+    public ToolContext(String tenantId, String appId, String projectId, String sessionId,
+                       String workflowRunId, String stepId, String subagentRunId,
+                       String actorUserId, PermissionLevel permissionLevel, ApprovalState approvalState,
+                       String workspacePath, boolean dryRun, int turnNumber) {
+        this(tenantId, appId, projectId, sessionId, workflowRunId, stepId, subagentRunId, null,
                 actorUserId, permissionLevel, approvalState, workspacePath, dryRun, turnNumber);
     }
 
@@ -36,7 +46,7 @@ public record ToolContext(
      */
     public static ToolContext minimal(String tenantId, String sessionId) {
         return new ToolContext(
-                tenantId, null, null, sessionId, null, null, null,
+                tenantId, null, null, sessionId, null, null, null, null,
                 PermissionLevel.READ_ONLY, ApprovalState.NOT_REQUIRED,
                 null, false, 0
         );
