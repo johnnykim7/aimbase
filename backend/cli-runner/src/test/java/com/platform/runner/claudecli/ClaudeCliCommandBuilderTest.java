@@ -32,6 +32,32 @@ class ClaudeCliCommandBuilderTest {
     }
 
     @Test
+    @DisplayName("CR-104: allowedTools 가 --allowedTools 플래그로 도구별 추가된다 (네이티브 봉인과 공존)")
+    void cr104_allowedTools_emits_per_tool_flag() {
+        List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
+                .mcpConfigJson(AIMBASE_MCP)
+                .allowedTools(List.of("mcp__aimbase-server__file_write",
+                        "mcp__aimbase-server__builtin_grep"))
+                .build();
+
+        // --tools "" (네이티브 봉인) 는 그대로 — allowedTools 는 MCP 도구 화이트리스트로 별개 적용
+        assertThat(cmd).containsSequence("--tools", "");
+        assertThat(cmd).containsSequence("--allowedTools", "mcp__aimbase-server__file_write");
+        assertThat(cmd).containsSequence("--allowedTools", "mcp__aimbase-server__builtin_grep");
+    }
+
+    @Test
+    @DisplayName("CR-104: allowedTools 미지정(null) 이면 --allowedTools 플래그 미출력 (endpoint 전체 사용)")
+    void cr104_no_allowedTools_means_no_flag() {
+        List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
+                .mcpConfigJson(AIMBASE_MCP)
+                .allowedTools(null)
+                .build();
+
+        assertThat(cmd).doesNotContain("--allowedTools");
+    }
+
+    @Test
     @DisplayName("AIMBASE 모드: Worker 시나리오 (stream-json + model + resume)")
     void aimbase_worker_scenario() {
         List<String> cmd = ClaudeCliCommandBuilder.builder("claude")

@@ -40,13 +40,26 @@ public class RunnerService {
 
     public LLMResponse chat(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                             String configDir, String systemPromptOverride) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, null);
+        return chat(request, toolMode, configDir, systemPromptOverride, null);
+    }
+
+    /** CR-104: allowedTools(원본 도구명) 전달 오버로드. */
+    public LLMResponse chat(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
+                            String configDir, String systemPromptOverride, List<String> allowedTools) {
+        return runTurn(request, toolMode, configDir, systemPromptOverride, null, allowedTools);
     }
 
     public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                                   String configDir, String systemPromptOverride,
                                   Consumer<String> deltaConsumer) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer);
+        return chatStream(request, toolMode, configDir, systemPromptOverride, deltaConsumer, null);
+    }
+
+    /** CR-104: allowedTools(원본 도구명) 전달 오버로드. */
+    public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
+                                  String configDir, String systemPromptOverride,
+                                  Consumer<String> deltaConsumer, List<String> allowedTools) {
+        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools);
     }
 
     /**
@@ -72,17 +85,18 @@ public class RunnerService {
 
     private LLMResponse runTurn(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                                 String configDir, String systemPromptOverride,
-                                Consumer<String> deltaConsumer) {
+                                Consumer<String> deltaConsumer, List<String> allowedTools) {
         String runId = request.sessionId();
         if (runId == null || runId.isBlank()) {
             throw new IllegalArgumentException("run_id (sessionId) required");
         }
         String model = (request.model() != null && !request.model().isBlank())
                 ? request.model() : defaultModel;
-        // Pool 의 4-인자 오버로드: spawn 시점에 systemPrompt/toolMode 모두 적용된다.
-        // 같은 runId 재호출 시 Worker 가 이미 살아있으면 두 인자는 무시 (Pool 정책).
+        // Pool 의 오버로드: spawn 시점에 systemPrompt/toolMode/allowedTools 모두 적용된다.
+        // 같은 runId 재호출 시 Worker 가 이미 살아있으면 세 인자는 무시 (Pool 정책 — run 단위 도구 집합 고정).
+        // CR-104: allowedTools = 호출의 도구 목록(원본명) → Worker 가 mcp__aimbase-server__ 변환 후 --allowedTools.
         ClaudeCliWorker worker = workerPool.getOrCreateMain(
-                runId, model, configDir, systemPromptOverride, toolMode);
+                runId, model, configDir, systemPromptOverride, toolMode, allowedTools);
 
         boolean isFirst = firstTurnDone.putIfAbsent(runId, Boolean.TRUE) == null;
         List<UnifiedMessage> messages = request.messages();

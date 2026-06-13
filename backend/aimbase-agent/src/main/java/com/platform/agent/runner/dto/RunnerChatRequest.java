@@ -37,6 +37,17 @@ public class RunnerChatRequest {
     @JsonProperty("fork_session")
     private Boolean forkSession;
 
+    /**
+     * CR-104: 이 호출에서 CLI 가 사용 가능한 도구 이름 목록 (원본 도구명, prefix 없음).
+     * <p>서버 측({@code ClaudeCliRunnerClient}) 이 {@code LLMRequest.tools()}(= API 경로가 모델에
+     * 전달하는 {@code getToolDefs(toolFilter)} 와 동일 집합)를 그대로 실어 보낸다.
+     * Runner 는 이를 {@code mcp__aimbase-server__<tool>} 형식으로 변환해 CLI {@code --allowedTools} 로 주입,
+     * CLI 가 가져가는 도구 = API tools 목록이 되게 한다 (불변식).
+     * <p>null/빈 목록이면 제한 미적용 — 서버 MCP endpoint 가 노출하는 전체(CLI_EXPOSED)를 그대로 사용.
+     */
+    @JsonProperty("allowed_tools")
+    private List<String> allowedTools;
+
     public String getRunId() { return runId; }
     public void setRunId(String runId) { this.runId = runId; }
     public String getModel() { return model; }
@@ -53,4 +64,6 @@ public class RunnerChatRequest {
     public void setMaxTokens(Integer maxTokens) { this.maxTokens = maxTokens; }
     public Boolean getForkSession() { return forkSession; }
     public void setForkSession(Boolean forkSession) { this.forkSession = forkSession; }
+    public List<String> getAllowedTools() { return allowedTools; }
+    public void setAllowedTools(List<String> allowedTools) { this.allowedTools = allowedTools; }
 }

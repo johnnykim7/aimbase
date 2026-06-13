@@ -91,7 +91,12 @@ services:
       AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
-      AIMBASE_RUNNER_AIMBASE_MCP_JAR: "/app/app.jar"
+      # CR-104: 서버 MCP endpoint(aimbase-server)만 사용 — 도구 출처를 API 경로와 동일화.
+      # local stdio MCP(AIMBASE_MCP_JAR)는 제거 — server 와 도구 중복 + allowedTools(mcp__aimbase-server__*)
+      # prefix 정합성 깨짐 방지. 정공 A 의 도구는 모두 서버 MCP endpoint 를 거친다.
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:-plat-77111309dc1043758c474444b4a36605}"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bidding"
       SERVER_PORT: "8290"
       # ── Agent 등록 (AgentProperties: agent.*) ──
       AGENT_NAME: "cli-runner-bidding"

@@ -72,7 +72,7 @@ class RunnerControllerTest {
                 new TokenUsage(10, 5),
                 LLMResponse.FinishReason.END,
                 123L, 0.0);
-        when(service.chat(any(LLMRequest.class), any(ClaudeCliCommandBuilder.ToolMode.class), any(), any()))
+        when(service.chat(any(LLMRequest.class), any(ClaudeCliCommandBuilder.ToolMode.class), any(), any(), any()))
                 .thenReturn(llmResp);
 
         RunnerChatResponse out = controller.chat("secret-test-key", req);
@@ -82,7 +82,7 @@ class RunnerControllerTest {
         assertThat(out.getContent()).isEqualTo("ok");
         assertThat(out.getFinishReason()).isEqualTo("END");
         assertThat(out.getUsage()).containsEntry("input_tokens", 10).containsEntry("output_tokens", 5);
-        verify(service, times(1)).chat(any(), any(), any(), any());
+        verify(service, times(1)).chat(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -96,7 +96,7 @@ class RunnerControllerTest {
                 new TokenUsage(0, 0),
                 LLMResponse.FinishReason.TOOL_USE,
                 10L, 0.0);
-        when(service.chat(any(), any(), any(), any())).thenReturn(llmResp);
+        when(service.chat(any(), any(), any(), any(), any())).thenReturn(llmResp);
 
         RunnerChatResponse out = controller.chat("secret-test-key", req);
 
@@ -183,7 +183,7 @@ class RunnerControllerTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(service.chat(any(), any(), any(), any())).thenReturn(llmResp);
+        when(service.chat(any(), any(), any(), any(), any())).thenReturn(llmResp);
 
         RunnerChatResponse out = controller.chat(null, req);
         assertThat(out.getContent()).isEqualTo("ok");

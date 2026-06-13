@@ -167,6 +167,19 @@ public class ClaudeCliRunnerClient {
         if (request.config() != null && request.config().maxTokens() != null) {
             body.put("max_tokens", request.config().maxTokens());
         }
+        // CR-104: 이 호출의 도구 목록(= getToolDefs(toolFilter), API 경로가 모델에 싣는 것과 동일)을
+        // 원본 도구명으로 실어 보낸다. Runner 가 mcp__aimbase-server__<tool> 로 변환해 --allowedTools 주입.
+        // 비어있으면 미전송 → Runner 가 서버 MCP endpoint 노출 전체(CLI_EXPOSED)를 그대로 사용.
+        if (request.tools() != null && !request.tools().isEmpty()) {
+            List<String> toolNames = request.tools().stream()
+                    .map(com.platform.tool.model.UnifiedToolDef::name)
+                    .filter(n -> n != null && !n.isBlank())
+                    .distinct()
+                    .toList();
+            if (!toolNames.isEmpty()) {
+                body.put("allowed_tools", toolNames);
+            }
+        }
         body.put("messages", toRawMessages(request.messages()));
         return body;
     }

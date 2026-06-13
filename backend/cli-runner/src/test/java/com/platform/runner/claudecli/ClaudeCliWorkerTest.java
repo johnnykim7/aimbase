@@ -149,6 +149,53 @@ class ClaudeCliWorkerTest {
         assertThat(worker.isAlive()).isFalse();
     }
 
+    @Test
+    void cr104_setAllowedTools_injects_mcp_server_prefixed_allowedTools_flag() throws IOException {
+        // stub 가 받은 전체 명령 인자($@)를 파일에 덤프 → buildCommand 의 prefix 변환 검증
+        Path argsDump = tempDir.resolve("args-" + System.nanoTime() + ".txt");
+        Path argStub = writeStub("""
+                #!/bin/bash
+                echo "$@" > '%s'
+                echo '{"type":"system","subtype":"init","session_id":"sess-args"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-args","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(argsDump.toString()));
+
+        worker = new ClaudeCliWorker(argStub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.setAllowedTools(List.of("file_write", "builtin_grep"));
+        worker.start();
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        String args = Files.readString(argsDump);
+        // CR-104: 원본 도구명 → mcp__aimbase-server__<tool> 변환 + --allowedTools 플래그
+        assertThat(args).contains("--allowedTools mcp__aimbase-server__file_write");
+        assertThat(args).contains("--allowedTools mcp__aimbase-server__builtin_grep");
+    }
+
+    @Test
+    void cr104_no_allowedTools_means_no_allowedTools_flag() throws IOException {
+        Path argsDump = tempDir.resolve("args2-" + System.nanoTime() + ".txt");
+        Path argStub = writeStub("""
+                #!/bin/bash
+                echo "$@" > '%s'
+                echo '{"type":"system","subtype":"init","session_id":"sess-args2"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-args2","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(argsDump.toString()));
+
+        worker = new ClaudeCliWorker(argStub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        // setAllowedTools 미호출 — 노출 제한 없음
+        worker.start();
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        String args = Files.readString(argsDump);
+        assertThat(args).doesNotContain("--allowedTools");
+    }
+
     private Path writeStub(String body) throws IOException {
         Path p = tempDir.resolve("claude-stub-" + System.nanoTime() + ".sh");
         Files.writeString(p, body);

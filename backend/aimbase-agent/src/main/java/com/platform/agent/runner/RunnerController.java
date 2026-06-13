@@ -69,7 +69,8 @@ public class RunnerController {
         LLMRequest llmRequest = toLlmRequest(req);
         ClaudeCliCommandBuilder.ToolMode toolMode = parseToolMode(req.getToolMode());
 
-        LLMResponse resp = service.chat(llmRequest, toolMode, req.getConfigDir(), req.getSystemPromptOverride());
+        LLMResponse resp = service.chat(llmRequest, toolMode, req.getConfigDir(),
+                req.getSystemPromptOverride(), req.getAllowedTools());
         return toResponse(req.getRunId(), resp);
     }
 
@@ -89,7 +90,8 @@ public class RunnerController {
                         llmRequest, toolMode, req.getConfigDir(), req.getSystemPromptOverride(),
                         delta -> emitNdjsonUnchecked(out, Map.of(
                                 "type", "delta",
-                                "delta", delta != null ? delta : "")));
+                                "delta", delta != null ? delta : "")),
+                        req.getAllowedTools());
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("type", "result");
                 done.put("run_id", req.getRunId());

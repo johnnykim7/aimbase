@@ -80,6 +80,18 @@ public class ClaudeCliWorkerPool {
     public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
                                             String systemPrompt,
                                             ClaudeCliCommandBuilder.ToolMode toolMode) {
+        return getOrCreateMain(runId, model, configDir, systemPrompt, toolMode, null);
+    }
+
+    /**
+     * CR-104: systemPrompt + toolMode + allowedTools override 지원.
+     * 메인 워커가 이미 살아있으면 셋 다 무시(이미 spawn 시 결정됨 — run 단위 도구 집합 고정).
+     * allowedTools 는 원본 도구명 목록 — Worker 가 mcp__aimbase-server__ prefix 변환 후 주입.
+     */
+    public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
+                                            String systemPrompt,
+                                            ClaudeCliCommandBuilder.ToolMode toolMode,
+                                            List<String> allowedTools) {
         RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
         synchronized (rw) {
             if (rw.main != null && rw.main.isAlive()) return rw.main;
@@ -93,6 +105,9 @@ public class ClaudeCliWorkerPool {
                 ClaudeCliCommandBuilder.ToolMode effectiveMode = toolMode != null ? toolMode : defaultToolMode;
                 if (effectiveMode != null) {
                     worker.setToolMode(effectiveMode);
+                }
+                if (allowedTools != null && !allowedTools.isEmpty()) {
+                    worker.setAllowedTools(allowedTools);
                 }
                 worker.start();
                 rw.main = worker;

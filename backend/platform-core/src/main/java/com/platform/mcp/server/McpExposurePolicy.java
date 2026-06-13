@@ -23,7 +23,15 @@ import java.util.Set;
  */
 public final class McpExposurePolicy {
 
-    /** CR 노출 레벨: CLI 두뇌(Claude CLI 등)가 호출 가능한 도구 (28개). */
+    /**
+     * CR 노출 레벨: CLI 두뇌(Claude CLI 등)가 호출 가능한 도구 (42개).
+     *
+     * <p>CR-104 불변식: 이 목록은 API 어댑터가 {@code LLMRequest.tools} 로 모델에 전달하는 도구
+     * 목록({@code ToolRegistry.getToolDefs}, 전체 builtin 48개 중 toolFilter 허용분)과 동일 집합이어야 한다.
+     * 워크플로우를 CLI 커넥터로 돌릴 때, 같은 스텝이 API 어댑터면 동작하고 CLI 어댑터면
+     * "No such tool" 로 실패하던 회귀의 근본 원인 = 두 목록의 출처 불일치였다.
+     * 따라서 {@link #EXPLICITLY_NONE}(내부 관리/계획 전용) 6개를 제외한 전체 builtin 을 노출한다.</p>
+     */
     private static final Set<String> CLI_EXPOSED = Set.of(
             // Network
             "web_search", "http_request",
@@ -48,7 +56,16 @@ public final class McpExposurePolicy {
             // Task
             "task_create", "task_get", "task_list", "task_update", "task_output", "task_stop",
             // Other
-            "todo_write"
+            "todo_write",
+            // CR-104: 워크플로우 필수 native/유틸 도구 — API 경로엔 항상 노출되던 것을 CLI 경로에도 동일 노출.
+            // Shell / 파일 쓰기
+            "bash", "file_write",
+            // Native 파일 탐색·읽기·편집 (tool-sdk-core nativetool)
+            "builtin_grep", "builtin_file_read", "builtin_glob", "builtin_safe_edit",
+            "builtin_patch_apply", "builtin_structured_search", "builtin_document_section_read",
+            "builtin_path_info", "builtin_workspace_snapshot",
+            // 유틸
+            "zip_extract", "calculate", "get_current_time"
     );
 
     /** NONE 노출: 서버 내부 전용 (관리/계획/유지보수 도구 6개). */

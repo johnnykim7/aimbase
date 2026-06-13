@@ -61,6 +61,15 @@ public class ClaudeCliWorker implements AutoCloseable {
     /** CR-069: 도구 노출 모드 (AIMBASE/NATIVE/HYBRID). null/미설정 시 빌더 default(AIMBASE). */
     private volatile ClaudeCliCommandBuilder.ToolMode toolMode;
     /**
+     * CR-104: 이 워커가 CLI 에 허용할 도구(원본 도구명) 목록. null/빈 목록이면 미적용
+     * (서버 MCP endpoint 가 노출하는 전체를 그대로 사용). 설정 시 {@code mcp__aimbase-server__<tool>}
+     * 형식으로 변환해 CLI {@code --allowedTools} 로 주입 → CLI 가 가져가는 도구 = API tools 목록.
+     * start() 호출 전에만 setAllowedTools 로 변경 가능.
+     */
+    private volatile List<String> allowedToolNames;
+    /** CR-104: --allowedTools 에 붙일 MCP server prefix. resolveMcpConfigJson 의 server 키와 일치해야 함. */
+    private static final String MCP_SERVER_PREFIX = "mcp__aimbase-server__";
+    /**
      * CR-068 후속: --system-prompt flag 로 CLI 의 기본 system prompt 를 우리 prompt 로 교체.
      * null 이면 CLI 기본(Claude Code 학습 패턴) 사용. 비어있으면 SYSTEM 메시지 prepend 폴백.
      * start() 호출 전에만 setSystemPrompt 로 변경 가능.
@@ -123,6 +132,17 @@ public class ClaudeCliWorker implements AutoCloseable {
             throw new IllegalStateException("Worker already started; cannot set toolMode after start()");
         }
         this.toolMode = mode;
+    }
+
+    /**
+     * CR-104: start() 호출 전, 이 워커가 CLI 에 허용할 도구(원본 도구명) 목록 설정.
+     * null/빈 목록이면 미적용. 같은 runId 워커가 이미 살아있으면 호출처에서 무시(Pool 정책).
+     */
+    public void setAllowedTools(List<String> toolNames) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set allowedTools after start()");
+        }
+        this.allowedToolNames = (toolNames == null || toolNames.isEmpty()) ? null : List.copyOf(toolNames);
     }
 
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
@@ -648,9 +668,19 @@ public class ClaudeCliWorker implements AutoCloseable {
      * 호출처가 setToolMode(...) 로 override.
      */
     private List<String> buildCommand() {
+        // CR-104: 원본 도구명 → mcp__aimbase-server__<tool> 로 변환해 --allowedTools 주입.
+        // CLI 가 MCP 서버에서 받는 도구는 server prefix 가 붙으므로 allowedTools 매칭도 같은 prefix 필요.
+        // 비어있으면 null → 빌더 미적용(endpoint 노출 전체 사용).
+        List<String> mcpAllowed = null;
+        if (allowedToolNames != null && !allowedToolNames.isEmpty()) {
+            mcpAllowed = allowedToolNames.stream()
+                    .map(n -> MCP_SERVER_PREFIX + n)
+                    .toList();
+        }
         return ClaudeCliCommandBuilder.builder(binaryPath)
                 .toolMode(toolMode)               // null 이면 빌더 default(AIMBASE)
                 .mcpConfigJson(mcpConfigJson)
+                .allowedTools(mcpAllowed)         // CR-104: null 이면 빌더가 무시
                 .streamJson(true)
                 .verbose(true)
                 .resume(resumeSessionId, forkSession)
