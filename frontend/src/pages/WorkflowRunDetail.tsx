@@ -20,6 +20,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { Page } from "../components/layout/Page";
 import { useSetHeaderOverride } from "../components/layout/AppShell";
 import { useWorkflows } from "../hooks/useWorkflows";
+import { useConnections } from "../hooks/useConnections";
 import {
   useWorkflowRun,
   useWorkflowRunEvents,
@@ -194,23 +195,34 @@ export default function WorkflowRunDetail() {
   const { data: run, isLoading: runLoading } = useWorkflowRun(runId);
   const { data: events = [], isLoading: eventsLoading } = useWorkflowRunEvents(runId);
   const { data: workflows = [] } = useWorkflows();
-  // 사용 모델 요약 — LLM_RESPONSE 이벤트 payload.model 집계 (중복 제거, 등장 순서 유지)
+  const { data: connections = [] } = useConnections();
+  // 커넥터 id → name (UI 는 ID 직접 노출 금지 — name 으로 표시)
+  const connNames = new Map(connections.map((c) => [c.id, c.name]));
+
+  // "모델 · 커넥터명" 라벨 — LLM_RESPONSE payload 의 model/connection_id 결합
+  const modelConnLabel = (ev: WorkflowRunEvent): string | undefined => {
+    const model = typeof ev.payload?.model === "string" ? ev.payload.model : undefined;
+    if (!model) return undefined;
+    const connId = typeof ev.payload?.connection_id === "string" ? ev.payload.connection_id : undefined;
+    const connName = connId ? connNames.get(connId) ?? connId : undefined;
+    return connName ? `${model} · ${connName}` : model;
+  };
+
+  // 사용 모델/커넥터 요약 — run 전체 distinct (등장 순서 유지)
   const usedModels = [
     ...new Set(
       events
         .filter((e) => e.event_type === "LLM_RESPONSE")
-        .map((e) => e.payload?.model)
-        .filter((m): m is string => typeof m === "string" && m.length > 0)
+        .map(modelConnLabel)
+        .filter((m): m is string => !!m)
     ),
   ];
-  // 스텝별 사용 모델 — STEP_START 행에 동반 표시용 (같은 step_id 의 첫 LLM_RESPONSE 기준)
+  // 스텝별 모델/커넥터 — STEP_START 행 동반 표시용 (같은 step_id 의 첫 LLM_RESPONSE 기준)
   const stepModels = new Map<string, string>();
   for (const e of events) {
     if (e.event_type !== "LLM_RESPONSE" || !e.step_id) continue;
-    const m = e.payload?.model;
-    if (typeof m === "string" && m.length > 0 && !stepModels.has(e.step_id)) {
-      stepModels.set(e.step_id, m);
-    }
+    const label = modelConnLabel(e);
+    if (label && !stepModels.has(e.step_id)) stepModels.set(e.step_id, label);
   }
   const workflowName = run
     ? workflows.find((w) => w.id === run.workflowId)?.name ?? run.workflowId
@@ -269,7 +281,7 @@ export default function WorkflowRunDetail() {
           />
           <MetaItem label="소요" value={formatDuration(run.startedAt, run.completedAt)} />
           <MetaItem
-            label="사용 모델"
+            label="사용 모델 · 커넥터"
             value={
               usedModels.length > 0 ? (
                 <span className="font-mono text-xs">{usedModels.join(", ")}</span>

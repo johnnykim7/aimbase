@@ -140,8 +140,8 @@ public class LlmCallStepExecutor implements StepExecutor {
                         extThinking, thinkingBudget, step.id())
                 : callLlm(adapter, resolvedModel, system, prompt, responseSchema,
                         phase1Tokens, context, extThinking, thinkingBudget);
-        // CR-090: LLM_RESPONSE (Phase 1) / CR-102: prompt·response 본문
-        recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase1Start, system, prompt);
+        // CR-090: LLM_RESPONSE (Phase 1) / CR-102: prompt·response 본문 + connection 메타
+        recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase1Start, system, prompt, connectionId);
 
         if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
             return buildResult(response, resolvedModel);
@@ -155,8 +155,8 @@ public class LlmCallStepExecutor implements StepExecutor {
         if (phase2Tokens > phase1Tokens) {
             long phase2Start = System.currentTimeMillis();
             response = callLlm(adapter, resolvedModel, system, prompt, responseSchema, phase2Tokens, context);
-            // CR-090: LLM_RESPONSE (Phase 2) / CR-102: prompt·response 본문
-            recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase2Start, system, prompt);
+            // CR-090: LLM_RESPONSE (Phase 2) / CR-102: prompt·response 본문 + connection 메타
+            recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase2Start, system, prompt, connectionId);
 
             if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
                 log.info("LLM_CALL step '{}': 에스컬레이션 성공 (max_tokens={})", step.id(), phase2Tokens);
@@ -525,7 +525,7 @@ public class LlmCallStepExecutor implements StepExecutor {
      */
     private void recordLlmResponse(StepContext context, String stepId, LLMResponse response,
                                    String resolvedModel, long durationMs,
-                                   String system, String prompt) {
+                                   String system, String prompt, String connectionId) {
         if (eventRecorder == null || response == null) return;
         UUID runId = parseUuid(context.workflowRunId());
         if (runId == null) return;
@@ -550,7 +550,7 @@ public class LlmCallStepExecutor implements StepExecutor {
             }
         }
         eventRecorder.llmResponse(runId, stepId, null, resolvedModel, in, out, finishReason, durationMs,
-                null, null, promptBody, responseBody);
+                null, null, promptBody, responseBody, connectionId);
         // CR-102: CLI 어댑터 경로 — CLI 가 내부에서 돈 도구 루프 관찰을 TOOL_USE/TOOL_RESULT 로 적재
         if (response.hasObservedToolEvents()) {
             eventRecorder.observedTools(runId, stepId, null, response.observedToolEvents());

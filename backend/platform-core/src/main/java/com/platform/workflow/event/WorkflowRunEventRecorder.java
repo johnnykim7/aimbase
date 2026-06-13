@@ -97,17 +97,30 @@ public class WorkflowRunEventRecorder {
                             String finishReason, long durationMs,
                             String traceId, UUID subagentRunId) {
         llmResponse(runId, stepId, iteration, model, inputTokens, outputTokens,
-                finishReason, durationMs, traceId, subagentRunId, null, null);
+                finishReason, durationMs, traceId, subagentRunId, null, null, null);
     }
 
-    /** CR-102: 프롬프트 입력(promptBody) ↔ 응답 본문(responseBody) 전문 적재 — LLM 응답 품질 정독용. */
     public void llmResponse(UUID runId, String stepId, Integer iteration,
                             String model, int inputTokens, int outputTokens,
                             String finishReason, long durationMs,
                             String traceId, UUID subagentRunId,
                             String promptBody, String responseBody) {
+        llmResponse(runId, stepId, iteration, model, inputTokens, outputTokens,
+                finishReason, durationMs, traceId, subagentRunId, promptBody, responseBody, null);
+    }
+
+    /**
+     * CR-102: 프롬프트 입력(promptBody) ↔ 응답 본문(responseBody) 전문 적재 — LLM 응답 품질 정독용.
+     * connectionId 는 payload 에 메타로만 적재 (UI 가 어떤 커넥터를 썼는지 모델과 함께 표시).
+     */
+    public void llmResponse(UUID runId, String stepId, Integer iteration,
+                            String model, int inputTokens, int outputTokens,
+                            String finishReason, long durationMs,
+                            String traceId, UUID subagentRunId,
+                            String promptBody, String responseBody, String connectionId) {
         Map<String, Object> payload = new LinkedHashMap<>();
         if (model != null) payload.put("model", model);
+        if (connectionId != null && !connectionId.isBlank()) payload.put("connection_id", connectionId);
         payload.put("in_tok", inputTokens);
         payload.put("out_tok", outputTokens);
         if (finishReason != null) payload.put("finish_reason", finishReason);
