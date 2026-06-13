@@ -527,8 +527,27 @@ GET /api/v1/workflows/{workflowId}/runs/{runId}
 | `completed` | 정상 완료 |
 | `failed` | 스텝 실행 실패 |
 | `pending_approval` | HUMAN_INPUT 승인 대기 |
+| `cancelled` | 중지됨 (사용자 요청) |
 
-### 4-7. 삭제
+### 4-7. 실행 중지 [CR-105]
+
+진행 중인 run 을 **협조적으로** 중지합니다.
+
+```bash
+curl -X POST /api/v1/workflows/runs/{runId}/cancel
+# → { "data": { "id": "run_xxx", "status": "running" 또는 "cancelled" } }
+```
+
+| run 상태 | 동작 | 응답 status |
+|----------|------|------------|
+| `running` | 중지 표식을 세움. **현재 실행 중인 스텝은 끝까지 수행**한 뒤, 다음 스텝 경계에서 `cancelled` 로 종료. 응답은 표식 직후라 아직 `running` 일 수 있음 — 실제 종료는 § 4-5 폴링으로 확인. | `running` |
+| `pending_approval` | 승인 대기 중이라 즉시 `cancelled` 로 전이. | `cancelled` |
+| `completed`/`failed`/`cancelled` | 이미 종료 — 변경 없이 반환 (멱등). | 그대로 |
+| 미존재 runId | `404 Not Found` | — |
+
+> ⚠️ **즉시성 한계**: 협조적 중지라 진행 중인 한 스텝(예: 긴 LLM 호출)은 강제로 끊지 않고 끝낸 뒤 멈춥니다. 즉시 종료가 필요한 게 아니라 "더 이상 다음 스텝으로 진행하지 말라"는 의미입니다.
+
+### 4-8. 삭제
 
 ```bash
 DELETE /api/v1/workflows/{id}
@@ -949,6 +968,8 @@ GET /api/v1/agents/active
 | PUT | `/workflows/{id}` | 수정 |
 | DELETE | `/workflows/{id}` | 삭제 |
 | POST | `/workflows/{id}/run` | 실행 |
+| POST | `/workflows/runs/{runId}/cancel` | 실행 중지 (협조적) [CR-105] |
+| POST | `/workflows/runs/{runId}/approve` | HUMAN_INPUT 스텝 승인/거부 |
 | GET | `/workflows/{id}/runs` | 실행 이력 |
 | GET | `/workflows/{id}/runs/{runId}` | 실행 결과 조회 |
 
@@ -1812,6 +1833,7 @@ CLI → builtin_file_read(file_path, as_base64=true)   # 로컬 byte → base64 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.10.0 | 2026-06-14 | **CR-105 — 워크플로우 실행 중지 (협조적)** (§ 4-7). `POST /api/v1/workflows/runs/{runId}/cancel` 신설 — 진행 중 run 을 스텝 경계에서 안전하게 중지. `running` 은 중지 표식만 세우고 백그라운드 실행 루프가 다음 스텝 경계에서 `cancelled` 로 종료(현재 스텝은 끝까지 수행 — 즉시성 없음), `pending_approval` 은 즉시 `cancelled` 전이 + 대기 승인 엔티티 정리, terminal(completed/failed/cancelled) 은 무변경 멱등, 미존재 404. DAG·cyclic 양 실행 경로에 체크포인트 삽입, run 종료 시 표식 정리(메모리 누수 방지). 메모리 플래그라 멀티노드 시 `running` 은 인스턴스 로컬(다른 노드 실행 run 미인터셉트), `pending_approval` 은 DB 기반이라 노드 무관. `WorkflowEngineCancelTest` 9 PASS + workflow 회귀 GREEN. 기존 동작 무변경(신규 엔드포인트만 추가) |
 | v3.9.0 | 2026-06-12 | **CR-102 2차 — 내부 도구 루프 가시화** (§ 17-11). AGENT_CALL 서브에이전트의 BE 도구 루프(회차별 LLM_RESPONSE + TOOL_USE/TOOL_RESULT 전문, subagent_run_id 연결) + CLI 어댑터 내부 자율 루프 관찰(`LLMResponse.observedToolEvents` 운반 — Worker stream-json tool_use/tool_result 페어링) 을 run 타임라인에 적재. 구조화 출력(response_schema) 본문 폴백 — response_text/output_text 에 structured_data JSON 적재 (이전 빈 문자열). API 표면 변화 없음(이벤트 적재 범위 확대) |
 | v3.8.0 | 2026-06-12 | **CR-102 — 워크플로우 실행 본문 전문 적재 + 조회** (§ 17-10). `workflow_run_events` 에 본문 전문 4컬럼(prompt_text/response_text/input_json/output_text, V66) 적재 — LLM 프롬프트↔응답·도구 input↔output·단계 결과를 절단 없이 정독 가능. 조회 4종: § 17-9 `?include_body=true` / 이벤트 단건 `GET /runs/{runId}/events/{eventId}`(본문 항상 포함) / 횡단 run 목록 `GET /workflows/runs`(workflow_id·status 필터+페이지네이션) / run 단건 `GET /workflows/runs/{runId}`. TTL(보관기간)은 후속 CR |
 | v3.7.0 | 2026-06-08 | **CR-100 — 로컬 PC 문서 파싱 다리** (§ 20-6). 사용자 로컬 PC 문서를 서버 사이드카로 파싱하는 경로 완성. `builtin_file_read` 에 `as_base64=true` 옵션 신설(바이너리도 base64 반환, 10MB 가드), `parse_document` 에 `content`(base64) 입력 신설(url/file_path/content 3종 택1, PDF면 비전·그 외 사이드카 텍스트 추출, 50MB 가드). 흐름: CLI→`file_read(as_base64)`(로컬 byte)→`parse_document(content)`(서버 MCP CLI-level 기존 노출)→사이드카. 사이드카(Python)·MCPRagClient 는 이미 base64 입력 지원 → 무수정, Java 도구 2개만 수정. 단위 `FileReadToolTest` 4 + `ParseDocumentToolTest` content 4 추가, tool 회귀 PASS |

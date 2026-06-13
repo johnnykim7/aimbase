@@ -146,6 +146,20 @@ public class WorkflowController {
         }
     }
 
+    // CR-105: 워크플로우 실행 중지 (협조적)
+    @PostMapping("/runs/{runId}/cancel")
+    @Operation(summary = "워크플로우 실행 중지 (협조적)",
+            description = "진행 중인 run 을 협조적으로 중지한다. running 은 다음 스텝 경계에서 멈추고, "
+                    + "pending_approval 은 즉시 cancelled 로 전이한다. 이미 종료된 run 은 변경 없이 반환.")
+    public ApiResponse<WorkflowRunEntity> cancel(@PathVariable UUID runId) {
+        try {
+            WorkflowRunEntity run = workflowEngine.cancelRun(runId);
+            return ApiResponse.ok(run);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
     @GetMapping("/{id}/runs")
     @Operation(summary = "워크플로우 실행 이력 조회")
     public ApiResponse<?> runs(

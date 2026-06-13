@@ -48,6 +48,14 @@ public class WorkflowEngine {
     /** CR-090: workflow_run_events 비동기 기록. null 허용(테스트 편의). */
     private final com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder;
 
+    /**
+     * CR-105: 협조적 중지 요청 집합 — {@link #requestCancel(UUID)} 가 runId 를 넣고,
+     * DAG/cyclic 실행 루프가 스텝 경계에서 {@link #isCancelRequested(String)} 로 검사한다.
+     * 같은 JVM 인스턴스에서 도는 run 만 인터셉트 가능(VT fire-and-forget 모델, 멀티노드 시 인스턴스 로컬).
+     */
+    private final java.util.Set<String> cancelRequests =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
                           PendingApprovalRepository pendingApprovalRepository,
@@ -75,6 +83,101 @@ public class WorkflowEngine {
      */
     private void shutdownCliWorkers(String runId) {
         // no-op (CR-071)
+    }
+
+    // ─── 협조적 중지 (CR-105) ─────────────────────────────────────────────
+
+    /**
+     * 진행 중인 run 에 협조적 중지를 요청한다. 실행 루프가 다음 스텝 경계에서 이 요청을 감지해
+     * 현재 스텝까지만 마치고 status=cancelled 로 종료한다(진행 중 스텝은 강제로 끊지 않음).
+     *
+     * <p>같은 JVM 에서 도는 run 에만 표식을 남긴다. 멀티노드 환경에서 다른 인스턴스가 실행 중인
+     * run 은 이 메모리 플래그로 잡히지 않는다(향후 DB 폴링 보강 여지).
+     *
+     * @return 표식 등록 여부(이미 등록돼 있었으면 false)
+     */
+    public boolean requestCancel(UUID runId) {
+        boolean added = cancelRequests.add(runId.toString());
+        log.info("Cancel requested for run '{}' (newlyMarked={})", runId, added);
+        return added;
+    }
+
+    /**
+     * 워크플로우 run 중지(협조적). 컨트롤러 진입점.
+     *
+     * <ul>
+     *   <li><b>running</b>: 중지 표식만 세운다. 백그라운드 실행 루프가 다음 스텝 경계에서
+     *       감지해 cancelled 로 종료한다(현재 스텝은 끝까지 수행).</li>
+     *   <li><b>pending_approval</b>: 백그라운드 스레드가 없으므로(승인 대기 중) 즉시 cancelled 로
+     *       전이하고 종료 이벤트를 발행한다. 대기 중인 승인 엔티티도 정리한다.</li>
+     *   <li>그 외(completed/failed/cancelled): 이미 종료된 run — 변경 없이 그대로 반환.</li>
+     * </ul>
+     *
+     * @return 중지 처리 후의 run 엔티티
+     * @throws IllegalArgumentException run 미존재 시
+     */
+    public WorkflowRunEntity cancelRun(UUID runId) {
+        WorkflowRunEntity run = workflowRunRepository.findById(runId)
+                .orElseThrow(() -> new IllegalArgumentException("Workflow run not found: " + runId));
+
+        String status = run.getStatus();
+        if ("completed".equals(status) || "failed".equals(status) || "cancelled".equals(status)) {
+            log.info("Cancel ignored for run '{}': already terminal (status={})", runId, status);
+            return run;
+        }
+
+        if ("pending_approval".equals(status)) {
+            // 대기 중인 승인 엔티티 정리
+            pendingApprovalRepository.findByActionLogId(runId).stream()
+                    .filter(a -> "pending".equals(a.getStatus()))
+                    .forEach(a -> {
+                        a.setStatus("cancelled");
+                        a.setReason("workflow run cancelled");
+                        a.setResolvedAt(OffsetDateTime.now());
+                        pendingApprovalRepository.save(a);
+                    });
+            run.setStatus("cancelled");
+            run.setCompletedAt(OffsetDateTime.now());
+            workflowRunRepository.saveAndFlush(run);
+            platformMetrics.recordWorkflowExecution("cancelled");
+            if (eventPublisher != null) {
+                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "cancelled", runDurationMs(run));
+            }
+            log.info("Run '{}' cancelled immediately from pending_approval", runId);
+            return run;
+        }
+
+        // running (또는 그 외 진행 상태) — 표식만 세우고 백그라운드 루프에 맡긴다.
+        requestCancel(runId);
+        return run;
+    }
+
+    /** 실행 루프 체크포인트 — 이 run 에 중지 요청이 걸려 있는지. */
+    private boolean isCancelRequested(String runId) {
+        return cancelRequests.contains(runId);
+    }
+
+    /** run 종료 시 표식 정리(메모리 누수 방지). */
+    private void clearCancel(String runId) {
+        cancelRequests.remove(runId);
+    }
+
+    /**
+     * 중지 요청이 감지되었을 때 run 을 cancelled 로 종료한다.
+     * 현재까지의 stepResults 를 보존하고 종료 이벤트를 발행한다.
+     */
+    private void finishCancelled(WorkflowRunEntity run, StepContext context) {
+        log.info("Run '{}': cancellation honored at step boundary", run.getId());
+        run.setStatus("cancelled");
+        run.setCompletedAt(OffsetDateTime.now());
+        if (context != null) {
+            run.setStepResults(new LinkedHashMap<>(context.stepResults()));
+        }
+        workflowRunRepository.saveAndFlush(run);
+        platformMetrics.recordWorkflowExecution("cancelled");
+        if (eventPublisher != null) {
+            eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "cancelled", runDurationMs(run));
+        }
     }
 
     // ─── 공개 API ─────────────────────────────────────────────────────────
@@ -115,6 +218,7 @@ public class WorkflowEngine {
                     } finally {
                         // CR-050 PRD-309: 정상/예외 무관 CLI 워커 정리 (프로세스 누수 방지)
                         shutdownCliWorkers(runIdForShutdown);
+                        clearCancel(runIdForShutdown); // 중지 표식 정리 (메모리 누수 방지)
                         TenantContext.clear();
                     }
                 });
@@ -155,6 +259,7 @@ public class WorkflowEngine {
                         doExecuteAsync(proxy, saved);
                     } finally {
                         shutdownCliWorkers(runIdForShutdown);
+                        clearCancel(runIdForShutdown); // 중지 표식 정리 (메모리 누수 방지)
                         TenantContext.clear();
                     }
                 });
@@ -221,6 +326,7 @@ public class WorkflowEngine {
                         doExecuteAsync(workflowEntity, run);
                     } finally {
                         shutdownCliWorkers(runIdForShutdown);
+                        clearCancel(runIdForShutdown); // 중지 표식 정리 (메모리 누수 방지)
                         TenantContext.clear();
                     }
                 });
@@ -507,6 +613,12 @@ public class WorkflowEngine {
                 if (skippedSteps.contains(step.id())) {
                     log.debug("Run '{}': skipping step '{}' (not on active path)", run.getId(), step.id());
                     continue;
+                }
+
+                // 협조적 중지 체크포인트 — 다음 스텝 실행 전에 중지 요청을 감지하면 cancelled 로 종료.
+                if (isCancelRequested(run.getId().toString())) {
+                    finishCancelled(run, context);
+                    return;
                 }
 
                 // HUMAN_INPUT → PendingApproval 생성 후 실행 중단
@@ -859,6 +971,13 @@ public class WorkflowEngine {
             while (!worklist.isEmpty()) {
                 String stepId = worklist.poll();
                 if ("__end__".equals(stepId)) break;
+
+                // 협조적 중지 체크포인트 (cyclic) — 다음 노드 실행 전 감지.
+                if (isCancelRequested(run.getId().toString())) {
+                    finishCancelled(run, context);
+                    return;
+                }
+
                 WorkflowStep step = stepMap.get(stepId);
                 if (step == null) {
                     log.warn("Cyclic run '{}': step '{}' not found, ending path", run.getId(), stepId);
