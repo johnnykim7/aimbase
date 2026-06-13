@@ -1516,6 +1516,23 @@ curl "$AIMBASE/api/v1/workflows/runs/$RUN_ID/events?include_body=true" \
 
 본문은 **절단 없이 전문 적재**되므로 run 당 저장 용량이 증가한다. 보관기간(TTL) 정책은 후속 CR 예정.
 
+### 17-11. 내부 도구 루프 가시화 — AGENT_CALL / CLI 어댑터 [CR-102 2차]
+
+§ 17-9 의 이벤트는 처음엔 워크플로우 스텝 레벨만 적재했다. CR-102 2차부터 **LLM 이 스스로 도구를 부르는 내부 루프까지** 같은 이벤트 형태로 적재된다 — 어느 어댑터를 쓰든 타임라인 모양이 동일하다.
+
+| 경로 | 루프 주체 | 적재 내용 |
+|------|----------|----------|
+| `AGENT_CALL` + API 어댑터 | Aimbase BE 도구 루프 | 회차별 `LLM_RESPONSE`(iteration 0..N, 응답 본문만) + 도구마다 `TOOL_USE`(input 전문)/`TOOL_RESULT`(output 전문). `subagent_run_id` 채워짐 — 멀티에이전트 병렬도 구분 가능 |
+| `LLM_CALL`/`AGENT_CALL` + CLI 어댑터 | CLI 내부 자율 루프 | CLI(stream-json)의 tool_use/tool_result 를 Worker 가 관찰·페어링해 `TOOL_USE`/`TOOL_RESULT` 로 적재 (`duration_ms` 는 관찰 근사값). CLI 가 도구 루프를 자체 완결하는 구조(CR-050)는 그대로 — 관찰 전용 운반 |
+| `LLM_CALL` + API 어댑터 | 루프 없음 | 기존 § 17-10 그대로 |
+
+**필드 의미 보강**:
+- `iteration` — 내부 루프 회차(0-based). 스텝 레벨 이벤트는 `null`
+- 루프 회차의 `LLM_RESPONSE` 는 **응답 본문만** 적재 (`prompt_text` null) — 회차 prompt 는 이전 대화 전체의 누적 중복이라 제외. 도구 결과는 `TOOL_RESULT` 이벤트로 별도 적재되므로 흐름 재구성 가능
+- CLI 관찰 건 중 tool_result 미페어링(비정상 종료 등)은 `TOOL_USE` 만 적재
+
+**구조화 출력 본문 폴백**: `response_schema` 를 쓰는 LLM_CALL 은 응답이 tool_use 블록이라 textContent 가 비는데, 이 경우 `response_text`/STEP_END `output_text` 에 structured_data JSON 이 적재된다 (이전엔 빈 문자열).
+
 **§17-6(SSE) 과의 선택 기준**: 실시간 진행 표시가 필요하면 `/subscribe`(SSE), "실행 단위 로그를 사후/폴링으로 본다" 면 `/events`. 둘은 독립적으로 병행 사용 가능하다.
 
 ```js
@@ -1795,6 +1812,7 @@ CLI → builtin_file_read(file_path, as_base64=true)   # 로컬 byte → base64 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.9.0 | 2026-06-12 | **CR-102 2차 — 내부 도구 루프 가시화** (§ 17-11). AGENT_CALL 서브에이전트의 BE 도구 루프(회차별 LLM_RESPONSE + TOOL_USE/TOOL_RESULT 전문, subagent_run_id 연결) + CLI 어댑터 내부 자율 루프 관찰(`LLMResponse.observedToolEvents` 운반 — Worker stream-json tool_use/tool_result 페어링) 을 run 타임라인에 적재. 구조화 출력(response_schema) 본문 폴백 — response_text/output_text 에 structured_data JSON 적재 (이전 빈 문자열). API 표면 변화 없음(이벤트 적재 범위 확대) |
 | v3.8.0 | 2026-06-12 | **CR-102 — 워크플로우 실행 본문 전문 적재 + 조회** (§ 17-10). `workflow_run_events` 에 본문 전문 4컬럼(prompt_text/response_text/input_json/output_text, V66) 적재 — LLM 프롬프트↔응답·도구 input↔output·단계 결과를 절단 없이 정독 가능. 조회 4종: § 17-9 `?include_body=true` / 이벤트 단건 `GET /runs/{runId}/events/{eventId}`(본문 항상 포함) / 횡단 run 목록 `GET /workflows/runs`(workflow_id·status 필터+페이지네이션) / run 단건 `GET /workflows/runs/{runId}`. TTL(보관기간)은 후속 CR |
 | v3.7.0 | 2026-06-08 | **CR-100 — 로컬 PC 문서 파싱 다리** (§ 20-6). 사용자 로컬 PC 문서를 서버 사이드카로 파싱하는 경로 완성. `builtin_file_read` 에 `as_base64=true` 옵션 신설(바이너리도 base64 반환, 10MB 가드), `parse_document` 에 `content`(base64) 입력 신설(url/file_path/content 3종 택1, PDF면 비전·그 외 사이드카 텍스트 추출, 50MB 가드). 흐름: CLI→`file_read(as_base64)`(로컬 byte)→`parse_document(content)`(서버 MCP CLI-level 기존 노출)→사이드카. 사이드카(Python)·MCPRagClient 는 이미 base64 입력 지원 → 무수정, Java 도구 2개만 수정. 단위 `FileReadToolTest` 4 + `ParseDocumentToolTest` content 4 추가, tool 회귀 PASS |
 | v3.6.0 | 2026-06-05 | **CR-095 — PDF Native 비전 파싱** (openclaude 1:1). PDF 첨부(`document` 블록)를 사이드카 텍스트 추출(`parse_document`/OCR ~38초)이 아니라 **LLM 모델 비전**으로 파싱 (§ 18-4). 3분기: ≤3MB & PDF지원 → base64 `DocumentBlockParam` 통째 / >3MB or PDF미지원 → 사이드카 `pdf_to_images`(poppler, JPEG 100DPI) 페이지 이미지화 → `ImageBlockParam` 배열 / 이미지도 미지원 → `PdfTextExtractor` 텍스트 폴백. 임계값 `aimbase.pdf.*` (inline-max-bytes 3MB, target-raw-max-bytes 20MB, max-pages-per-read 20, image-dpi 100). **AGENT 자율 호출**(`parse_document` 도구)도 PDF 면 비전 경로 — tool_result 엔 메타, 실제 PDF/이미지는 별도 user 메시지로 주입(`ToolResult.newMessages`, openclaude newMessages 패턴). 신규 사이드카 MCP 툴 `pdf_to_images`. 단위: 사이드카 18 + PdfVisionResolver 9 + tool/rag/attachment 회귀 GREEN. **기존 동작 무변경(하위호환)** |

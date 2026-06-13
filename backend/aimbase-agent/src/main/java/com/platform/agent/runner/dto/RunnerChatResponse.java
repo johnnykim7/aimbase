@@ -30,6 +30,10 @@ public class RunnerChatResponse {
     @JsonProperty("finish_reason")
     private String finishReason;
 
+    /** CR-102: CLI 내부 도구 루프 관찰 (가시화 전용 — tool_calls 와 달리 루프 재진입 안 함) */
+    @JsonProperty("observed_tool_events")
+    private List<Map<String, Object>> observedToolEvents;
+
     public String getRunId() { return runId; }
     public void setRunId(String runId) { this.runId = runId; }
     public String getModel() { return model; }
@@ -42,4 +46,6 @@ public class RunnerChatResponse {
     public void setUsage(Map<String, Object> usage) { this.usage = usage; }
     public String getFinishReason() { return finishReason; }
     public void setFinishReason(String finishReason) { this.finishReason = finishReason; }
+    public List<Map<String, Object>> getObservedToolEvents() { return observedToolEvents; }
+    public void setObservedToolEvents(List<Map<String, Object>> observedToolEvents) { this.observedToolEvents = observedToolEvents; }
 }

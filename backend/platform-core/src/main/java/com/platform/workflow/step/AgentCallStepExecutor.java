@@ -66,17 +66,17 @@ public class AgentCallStepExecutor implements StepExecutor {
 
         // 멀티 에이전트 모드
         if (config.containsKey("agents")) {
-            return executeMultiAgent(config, context, startMs);
+            return executeMultiAgent(config, context, step.id(), startMs);
         }
 
         // 단일 에이전트 모드
-        return executeSingleAgent(config, context, startMs);
+        return executeSingleAgent(config, context, step.id(), startMs);
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> executeSingleAgent(Map<String, Object> config,
-                                                    StepContext context, long startMs) {
-        SubagentRequest request = buildRequest(config, context.sessionId());
+                                                    StepContext context, String stepId, long startMs) {
+        SubagentRequest request = buildRequest(config, context, stepId);
         SubagentResult result = agentOrchestrator.runSingle(request);
         // FAILED/TIMEOUT 은 Exception 으로 승격해야 WorkflowEngine.executeWithRetry 가 retry/failed 처리한다.
         // 그대로 두면 result map 만 채우고 정상 return → status=completed 가짜 성공.
@@ -89,13 +89,13 @@ public class AgentCallStepExecutor implements StepExecutor {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> executeMultiAgent(Map<String, Object> config,
-                                                   StepContext context, long startMs) {
+                                                   StepContext context, String stepId, long startMs) {
         List<Map<String, Object>> agentConfigs = (List<Map<String, Object>>) config.get("agents");
         String execution = (String) config.getOrDefault("execution", "parallel");
 
         List<SubagentRequest> requests = new ArrayList<>();
         for (Map<String, Object> agentConfig : agentConfigs) {
-            requests.add(buildRequest(agentConfig, context.sessionId()));
+            requests.add(buildRequest(agentConfig, context, stepId));
         }
 
         AgentOrchestrator.OrchestratedResult orchestrated;
@@ -131,7 +131,7 @@ public class AgentCallStepExecutor implements StepExecutor {
         return resultMap;
     }
 
-    private SubagentRequest buildRequest(Map<String, Object> config, String parentSessionId) {
+    private SubagentRequest buildRequest(Map<String, Object> config, StepContext context, String stepId) {
         String description = (String) config.getOrDefault("description", "workflow-agent");
         String prompt = (String) config.get("prompt");
         if (prompt == null || prompt.isBlank()) {
@@ -148,10 +148,12 @@ public class AgentCallStepExecutor implements StepExecutor {
                 ? ((Number) config.get("timeout_ms")).longValue()
                 : 120_000L;
 
+        // CR-102: 워크플로우 run/step 연결 키 전파 — 서브에이전트 내부 도구 루프 이벤트를 run 타임라인에 적재
         return new SubagentRequest(
                 description, prompt, model, connectionId,
                 isolation, false, timeoutMs,
-                config, parentSessionId);
+                config, context.sessionId(), com.platform.agent.AgentType.GENERAL,
+                context.workflowRunId(), stepId);
     }
 
     private Map<String, Object> toResultMap(SubagentResult result, long startMs) {

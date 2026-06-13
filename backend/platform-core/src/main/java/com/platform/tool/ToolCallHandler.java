@@ -53,6 +53,9 @@ public class ToolCallHandler {
     private final com.platform.config.PlatformSettingsService platformSettings;
     /** CR-048 PRD-300: 세션별 활성 도구 필터링 */
     private final com.platform.tool.registry.SessionToolRegistry sessionToolRegistry;
+
+    /** CR-102: 워크플로우 run 컨텍스트(workflowRunId 보유)의 도구 루프 이벤트 적재 */
+    private final com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder;
     /** CR-048 PRD-301: 대형 tool result 외부 저장 */
     private final com.platform.tool.storage.ToolResultStorageService toolResultStorage;
 
@@ -101,7 +104,8 @@ public class ToolCallHandler {
                            @org.springframework.beans.factory.annotation.Value("${platform.orchestrator.max-tool-iterations:30}") int maxIterations,
                            com.platform.config.PlatformSettingsService platformSettings,
                            com.platform.tool.registry.SessionToolRegistry sessionToolRegistry,
-                           com.platform.tool.storage.ToolResultStorageService toolResultStorage) {
+                           com.platform.tool.storage.ToolResultStorageService toolResultStorage,
+                           com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder) {
         this.executionLogRepository = executionLogRepository;
         this.hookDispatcher = hookDispatcher;
         this.permissionClassifier = permissionClassifier;
@@ -111,6 +115,7 @@ public class ToolCallHandler {
         this.platformSettings = platformSettings;
         this.sessionToolRegistry = sessionToolRegistry;
         this.toolResultStorage = toolResultStorage;
+        this.eventRecorder = eventRecorder;
     }
 
     /**
@@ -315,7 +320,10 @@ public class ToolCallHandler {
             LLMRequest request = new LLMRequest(
                     resolvedModel, mutableMessages, null, config, false, sessionId, null, responseSchema);
             try {
-                return adapter.chat(request).get();
+                LLMResponse direct = adapter.chat(request).get();
+                // CR-102: 도구 없는 단발 호출도 워크플로우 run 컨텍스트면 이벤트 적재
+                recordLoopLlmResponse(toolContext, 0, direct, resolvedModel);
+                return direct;
             } catch (Exception e) {
                 throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
             }
@@ -332,6 +340,10 @@ public class ToolCallHandler {
                 log.error("LLM call failed during tool loop (iteration {})", iteration, e);
                 throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
             }
+
+            // CR-102: 루프 회차별 LLM_RESPONSE 이벤트 — 응답 본문만 적재
+            // (회차 prompt 는 이전 대화 전체의 누적 중복이라 미적재. 도구 결과는 TOOL_RESULT 이벤트로 별도 적재됨)
+            recordLoopLlmResponse(toolContext, iteration, response, resolvedModel);
 
             // CR-088: structured_output tool 호출이 도착했으면 그 입력을 구조화 결과로 캡처하고 종료.
             // (어댑터가 진짜 도구 + structured_output 가상 tool 결합으로 전달한 경우)
@@ -369,6 +381,7 @@ public class ToolCallHandler {
                 effectiveContext = new ToolContext(
                         toolContext.tenantId(), toolContext.appId(), toolContext.projectId(),
                         toolContext.sessionId(), toolContext.workflowRunId(), toolContext.stepId(),
+                        toolContext.subagentRunId(),
                         toolContext.actorUserId(), resolved, toolContext.approvalState(),
                         toolContext.workspacePath(), toolContext.dryRun(), toolContext.turnNumber());
                 log.debug("AUTO permission resolved: tools={} → {}", callNames, resolved);
@@ -549,6 +562,7 @@ public class ToolCallHandler {
                 effectiveContext = new ToolContext(
                         toolContext.tenantId(), toolContext.appId(), toolContext.projectId(),
                         toolContext.sessionId(), toolContext.workflowRunId(), toolContext.stepId(),
+                        toolContext.subagentRunId(),
                         toolContext.actorUserId(), resolved, toolContext.approvalState(),
                         toolContext.workspacePath(), toolContext.dryRun(), toolContext.turnNumber());
             } else {
@@ -869,6 +883,41 @@ public class ToolCallHandler {
         return ordered;
     }
 
+    /**
+     * CR-102: 도구 루프 회차별 LLM_RESPONSE 이벤트.
+     * 응답 본문만 적재 — 회차 prompt 는 이전 대화 전체의 누적 중복(용량 폭증)이라 미적재.
+     * workflowRunId 없는 컨텍스트(일반 채팅)는 무동작.
+     */
+    private void recordLoopLlmResponse(ToolContext ctx, int iteration,
+                                       LLMResponse response, String resolvedModel) {
+        if (eventRecorder == null || ctx == null || ctx.workflowRunId() == null || response == null) return;
+        java.util.UUID runId = parseUuidSafe(ctx.workflowRunId());
+        if (runId == null) return;
+        int in = response.usage() != null ? response.usage().inputTokens() : 0;
+        int out = response.usage() != null ? response.usage().outputTokens() : 0;
+        String finish = response.finishReason() != null ? response.finishReason().name() : null;
+        String body = response.textContent();
+        eventRecorder.llmResponse(runId, ctx.stepId(), iteration,
+                response.model() != null ? response.model() : resolvedModel,
+                in, out, finish, response.latencyMs(),
+                null, parseUuidSafe(ctx.subagentRunId()),
+                null, (body != null && !body.isBlank()) ? body : null);
+        // CR-102: CLI 어댑터가 내부에서 돈 도구 루프 관찰 (AGENT_CALL + CLI 연결 경로)
+        if (response.hasObservedToolEvents()) {
+            eventRecorder.observedTools(runId, ctx.stepId(), parseUuidSafe(ctx.subagentRunId()),
+                    response.observedToolEvents());
+        }
+    }
+
+    private static java.util.UUID parseUuidSafe(String s) {
+        if (s == null || s.isBlank()) return null;
+        try {
+            return java.util.UUID.fromString(s);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     /** CR-095: 도구 1회 실행 결과 + LLM 컨텍스트에 주입할 멀티모달 블록. */
     private record ToolExecOutcome(ContentBlock.ToolResult result, List<ContentBlock> injected) {
         static ToolExecOutcome text(String toolUseId, String content) {
@@ -928,6 +977,15 @@ public class ToolCallHandler {
             return ToolExecOutcome.text(tc.id(), "Tool execution blocked by policy hook");
         }
 
+        // CR-102: TOOL_USE 이벤트 — 워크플로우 run 컨텍스트일 때만 (input 전문 적재)
+        if (eventRecorder != null && toolContext != null && toolContext.workflowRunId() != null) {
+            java.util.UUID runId = parseUuidSafe(toolContext.workflowRunId());
+            if (runId != null) {
+                eventRecorder.toolUse(runId, toolContext.stepId(), turnNum, tc.name(),
+                        tc.input(), parseUuidSafe(toolContext.subagentRunId()));
+            }
+        }
+
         ToolResult toolResult;
         try {
             toolResult = toolRegistry.execute(tc, toolContext);
@@ -942,6 +1000,20 @@ public class ToolCallHandler {
         }
 
         recordLineage(toolContext, tc, toolResult, turnNum, seqNum);
+
+        // CR-102: TOOL_RESULT 이벤트 — output 전문 적재 (워크플로우 run 컨텍스트일 때만)
+        if (eventRecorder != null && toolContext != null && toolContext.workflowRunId() != null) {
+            java.util.UUID runId = parseUuidSafe(toolContext.workflowRunId());
+            if (runId != null) {
+                String outputFull = toolResult.output() != null ? toolResult.output().toString() : null;
+                eventRecorder.toolResult(runId, toolContext.stepId(), turnNum, tc.name(),
+                        toolResult.durationMs(), toolResult.success(),
+                        toolResult.success() ? null : toolResult.summary(),
+                        outputFull != null ? outputFull.length() : 0,
+                        parseUuidSafe(toolContext.subagentRunId()),
+                        outputFull);
+            }
+        }
 
         // PRD-193: PostToolUse / PostToolUseFailure 훅
         if (toolResult.success()) {

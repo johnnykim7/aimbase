@@ -537,8 +537,24 @@ public class LlmCallStepExecutor implements StepExecutor {
                 ? "[SYSTEM]\n" + system + "\n\n[PROMPT]\n" + prompt
                 : prompt;
         String responseBody = response.textContent();
+        // 구조화 출력(response_schema)이면 응답이 tool_use 블록이라 textContent 가 빈 문자열 —
+        // structured_data 를 직렬화해 본문으로 적재 (안 하면 정독 불가).
+        if (responseBody == null || responseBody.isBlank()) {
+            Map<String, Object> structured = extractStructuredData(response);
+            if (structured != null) {
+                try {
+                    responseBody = MAPPER.writeValueAsString(structured);
+                } catch (Exception e) {
+                    responseBody = String.valueOf(structured);
+                }
+            }
+        }
         eventRecorder.llmResponse(runId, stepId, null, resolvedModel, in, out, finishReason, durationMs,
                 null, null, promptBody, responseBody);
+        // CR-102: CLI 어댑터 경로 — CLI 가 내부에서 돈 도구 루프 관찰을 TOOL_USE/TOOL_RESULT 로 적재
+        if (response.hasObservedToolEvents()) {
+            eventRecorder.observedTools(runId, stepId, null, response.observedToolEvents());
+        }
     }
 
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,

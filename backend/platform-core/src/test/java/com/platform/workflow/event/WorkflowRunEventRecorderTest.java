@@ -218,6 +218,43 @@ class WorkflowRunEventRecorderTest {
     }
 
     @Test
+    @DisplayName("CR-102: observedTools — 페어링된 관찰은 TOOL_USE+TOOL_RESULT, 미페어링은 TOOL_USE 만")
+    void observedToolsBatch() throws Exception {
+        UUID runId = UUID.randomUUID();
+        UUID subRunId = UUID.randomUUID();
+        var paired = new com.platform.llm.model.ObservedToolEvent(
+                "web_search", Map.of("query", "aimbase"), "검색 결과 전문", 1234L);
+        var unpaired = new com.platform.llm.model.ObservedToolEvent(
+                "bash", Map.of("command", "ls"), null, null);
+
+        recorder.observedTools(runId, "step1", subRunId, java.util.List.of(paired, unpaired));
+
+        // paired: TOOL_USE + TOOL_RESULT / unpaired: TOOL_USE 만 → 총 3건
+        ArgumentCaptor<WorkflowRunEventEntity> captor =
+                ArgumentCaptor.forClass(WorkflowRunEventEntity.class);
+        verify(repository, timeout(1000).times(3)).save(captor.capture());
+
+        var events = captor.getAllValues();
+        var toolUses = events.stream().filter(e -> e.getEventType() == EventType.TOOL_USE).toList();
+        var toolResults = events.stream().filter(e -> e.getEventType() == EventType.TOOL_RESULT).toList();
+        assertThat(toolUses).hasSize(2);
+        assertThat(toolResults).hasSize(1);
+
+        var searchUse = toolUses.stream().filter(e -> "web_search".equals(e.getToolName())).findFirst().orElseThrow();
+        assertThat(searchUse.getInputJson()).containsEntry("query", "aimbase");
+        assertThat(searchUse.getIteration()).isEqualTo(0);
+        assertThat(searchUse.getSubagentRunId()).isEqualTo(subRunId);
+
+        var searchResult = toolResults.get(0);
+        assertThat(searchResult.getToolName()).isEqualTo("web_search");
+        assertThat(searchResult.getOutputText()).isEqualTo("검색 결과 전문");
+        assertThat(searchResult.getDurationMs()).isEqualTo(1234L);
+
+        var bashUse = toolUses.stream().filter(e -> "bash".equals(e.getToolName())).findFirst().orElseThrow();
+        assertThat(bashUse.getIteration()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("runId == null → publish 스킵 (워크플로우 무관 호출 방어)")
     void nullRunIdSkipped() throws Exception {
         recorder.stepStart(null, "step1", "TOOL_CALL");

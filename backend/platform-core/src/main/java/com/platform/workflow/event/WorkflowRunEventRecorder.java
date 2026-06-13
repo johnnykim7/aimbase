@@ -62,12 +62,15 @@ public class WorkflowRunEventRecorder {
                         Map<String, Object> input, UUID subagentRunId) {
         Map<String, Object> payload = new LinkedHashMap<>();
         if (input != null && !input.isEmpty()) {
-            payload.put("input_keys", input.keySet());
+            // CR-102 운영 실측: Set 을 jsonb payload 에 넣으면 Hypersistence 깊은복사(직렬화→역직렬화)가
+            // "byte array cannot be transformed to Json" 으로 깨져 TOOL_USE insert 가 전멸 (CR-090부터 잠복).
+            // JSON 네이티브 타입(List)으로 변환해 적재한다.
+            payload.put("input_keys", new java.util.ArrayList<>(input.keySet()));
             payload.put("input_preview", truncate(input.toString(), PREVIEW_MAX));
         }
         WorkflowRunEventEntity e = buildEvent(runId, stepId, iteration, EventType.TOOL_USE, toolName, null, payload, null, subagentRunId);
-        // CR-102: 도구 input 전문 적재 (절단 없음) — 품질 분석용
-        if (input != null && !input.isEmpty()) e.setInputJson(input);
+        // CR-102: 도구 input 전문 적재 (절단 없음) — 품질 분석용. 어댑터/SDK 산 Map 타입 방어 차원에서 plain Map 복사.
+        if (input != null && !input.isEmpty()) e.setInputJson(new LinkedHashMap<>(input));
         publish(e);
     }
 
@@ -112,6 +115,26 @@ public class WorkflowRunEventRecorder {
         e.setPromptText(promptBody);
         e.setResponseText(responseBody);
         publish(e);
+    }
+
+    /**
+     * CR-102: CLI 어댑터 내부 도구 루프 관찰({@code LLMResponse.observedToolEvents})을
+     * TOOL_USE/TOOL_RESULT 이벤트로 일괄 적재. iteration 은 관찰 순서.
+     * tool_result 미페어링(output null) 건은 TOOL_USE 만 적재.
+     */
+    public void observedTools(UUID runId, String stepId, UUID subagentRunId,
+                              java.util.List<com.platform.llm.model.ObservedToolEvent> events) {
+        if (events == null || events.isEmpty()) return;
+        int i = 0;
+        for (com.platform.llm.model.ObservedToolEvent ev : events) {
+            toolUse(runId, stepId, i, ev.toolName(), ev.input(), subagentRunId);
+            if (ev.output() != null) {
+                toolResult(runId, stepId, i, ev.toolName(),
+                        ev.durationMs() != null ? ev.durationMs() : 0L,
+                        true, null, ev.output().length(), subagentRunId, ev.output());
+            }
+            i++;
+        }
     }
 
     // ── 내부 ──

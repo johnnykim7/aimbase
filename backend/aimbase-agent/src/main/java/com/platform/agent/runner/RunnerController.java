@@ -213,6 +213,17 @@ public class RunnerController {
             out.setUsage(u);
         }
         if (resp.finishReason() != null) out.setFinishReason(resp.finishReason().name());
+        // CR-102: CLI 내부 도구 루프 관찰 운반 (가시화 전용)
+        if (resp.hasObservedToolEvents()) {
+            out.setObservedToolEvents(resp.observedToolEvents().stream().map(ev -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("tool_name", ev.toolName());
+                m.put("input", ev.input());
+                if (ev.output() != null) m.put("output", ev.output());
+                if (ev.durationMs() != null) m.put("duration_ms", ev.durationMs());
+                return m;
+            }).toList());
+        }
         return out;
     }
 

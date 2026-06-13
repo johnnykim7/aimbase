@@ -15,6 +15,8 @@ import java.util.Map;
  * @param config        추가 설정 (도구 필터, 스키마 등)
  * @param parentSessionId 부모 세션 ID
  * @param agentType     에이전트 타입 (GENERAL, PLAN, EXPLORE, GUIDE, VERIFICATION)
+ * @param workflowRunId  CR-102: AGENT_CALL 스텝에서 실행될 때의 워크플로우 run ID (이벤트 타임라인 연결). 비워크플로우 경로면 null.
+ * @param workflowStepId CR-102: AGENT_CALL 스텝 ID
  */
 public record SubagentRequest(
         String description,
@@ -26,7 +28,9 @@ public record SubagentRequest(
         long timeoutMs,
         Map<String, Object> config,
         String parentSessionId,
-        AgentType agentType
+        AgentType agentType,
+        String workflowRunId,
+        String workflowStepId
 ) {
     public enum IsolationMode {
         NONE,       // 격리 없이 동일 컨텍스트에서 실행
@@ -39,7 +43,17 @@ public record SubagentRequest(
                            boolean runInBackground, long timeoutMs,
                            Map<String, Object> config, String parentSessionId) {
         this(description, prompt, model, connectionId, isolation,
-             runInBackground, timeoutMs, config, parentSessionId, AgentType.GENERAL);
+             runInBackground, timeoutMs, config, parentSessionId, AgentType.GENERAL, null, null);
+    }
+
+    /** 기존 10-arg 생성자 호환 (CR-102 워크플로우 연결 키 없음) */
+    public SubagentRequest(String description, String prompt, String model,
+                           String connectionId, IsolationMode isolation,
+                           boolean runInBackground, long timeoutMs,
+                           Map<String, Object> config, String parentSessionId,
+                           AgentType agentType) {
+        this(description, prompt, model, connectionId, isolation,
+             runInBackground, timeoutMs, config, parentSessionId, agentType, null, null);
     }
 
     public SubagentRequest {

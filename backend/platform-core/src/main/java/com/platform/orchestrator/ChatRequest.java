@@ -12,6 +12,9 @@ import java.util.Map;
  * @param responseFormat      구조화된 출력 요청 (CR-007). null이면 일반 텍스트 응답.
  * @param connectionGroupId   커넥션 그룹 ID (CR-015). 그룹 내 전략에 따라 커넥션 선택 + 자동 폴백.
  * @param workingDirectory    작업 디렉토리 (CR-045). 세션 최초 요청 시에만 의미. 세션 메타에 저장되어 재개 시 복원.
+ * @param workflowRunId       CR-102: 워크플로우 run ID — AGENT_CALL 서브에이전트 도구 루프 이벤트를 run 타임라인에 연결. null이면 비워크플로우(채팅) 경로.
+ * @param workflowStepId      CR-102: 워크플로우 스텝 ID (workflowRunId 와 함께 전파)
+ * @param subagentRunId       CR-102: 서브에이전트 run ID — 멀티에이전트 병렬 시 이벤트 구분
  */
 public record ChatRequest(
         String model,
@@ -26,10 +29,25 @@ public record ChatRequest(
         String toolChoice,
         ResponseFormat responseFormat,
         String connectionGroupId,
-        String workingDirectory
+        String workingDirectory,
+        String workflowRunId,
+        String workflowStepId,
+        String subagentRunId
 ) {
     public ChatRequest(String model, List<UnifiedMessage> messages) {
-        this(model, null, messages, false, false, null, null, null, null, null, null, null, null);
+        this(model, null, messages, false, false, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /** 기존 13-arg 호환 (CR-102 워크플로우 연결 키 없음) */
+    public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
+                       boolean stream, boolean actionsEnabled, String userId,
+                       String ragSourceId, String connectionId,
+                       ToolFilterContext toolFilter, String toolChoice,
+                       ResponseFormat responseFormat, String connectionGroupId,
+                       String workingDirectory) {
+        this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                null, null, null);
     }
 
     /** 기존 호환용 생성자 (toolFilter/toolChoice/responseFormat/connectionGroupId 없음) */

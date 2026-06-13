@@ -225,8 +225,10 @@ public class OrchestratorEngine {
         // CR-045: workspacePath — 세션 메타(workspaceRef) > 요청값 > null 우선순위.
         // 첫 요청이면 세션 메타에 저장. 기존 메타와 다른 값 요청 시 IllegalStateException(BIZ-091) → Controller 409.
         String workspacePath = resolveWorkspace(request, sessionId);
+        // CR-102: workflowRunId/stepId/subagentRunId 전파 — 도구 루프 이벤트의 run 타임라인 연결 키
         ToolContext toolContext = new ToolContext(
-                tenantId, null, null, sessionId, null, null,
+                tenantId, null, null, sessionId,
+                request.workflowRunId(), request.workflowStepId(), request.subagentRunId(),
                 request.userId(), PermissionLevel.FULL,
                 ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
 
@@ -550,8 +552,10 @@ public class OrchestratorEngine {
         // CR-045: workspacePath 결정 (비스트리밍 경로와 동일)
         String tenantId = TenantContext.getTenantId();
         String workspacePath = resolveWorkspace(request, sessionId);
+        // CR-102: workflowRunId/stepId/subagentRunId 전파 (스트리밍 경로 동일)
         ToolContext toolContext = new ToolContext(
-                tenantId, null, null, sessionId, null, null,
+                tenantId, null, null, sessionId,
+                request.workflowRunId(), request.workflowStepId(), request.subagentRunId(),
                 request.userId(), PermissionLevel.FULL,
                 ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
 

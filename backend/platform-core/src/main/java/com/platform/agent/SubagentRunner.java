@@ -307,6 +307,7 @@ public class SubagentRunner {
         ToolFilterContext toolFilter = buildToolFilter(typeConfig);
 
         // OrchestratorEngine에 ChatRequest 위임
+        // CR-102: workflowRunId/stepId/subagentRunId 전파 — 도구 루프 이벤트를 run 타임라인에 연결
         ChatRequest chatRequest = new ChatRequest(
                 req.model(),
                 context.getChildSessionId(),
@@ -315,7 +316,11 @@ public class SubagentRunner {
                 null, null,
                 req.connectionId(),
                 toolFilter, null,
-                responseFormat
+                responseFormat,
+                null, null,
+                req.workflowRunId(),
+                req.workflowStepId(),
+                context.getSubagentRunId()
         );
 
         ChatResponse response = orchestratorEngine.chat(chatRequest);

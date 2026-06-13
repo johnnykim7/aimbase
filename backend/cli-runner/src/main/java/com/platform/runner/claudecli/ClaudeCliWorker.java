@@ -328,6 +328,10 @@ public class ClaudeCliWorker implements AutoCloseable {
         double costUsd = 0.0;
         String id = UUID.randomUUID().toString();
         String modelReport = model != null ? model : "anthropic-cli";
+        // CR-102: CLI 내부 도구 루프 관찰 — tool_use(assistant 이벤트) ↔ tool_result(user 이벤트) 를
+        // tool_use_id 로 페어링해 LLMResponse.observedToolEvents 로 운반 (가시화 전용, 루프 재진입 아님)
+        Map<String, PendingToolObservation> pendingTools = new java.util.LinkedHashMap<>();
+        List<com.platform.llm.model.ObservedToolEvent> observedTools = new ArrayList<>();
 
         while (true) {
             long remaining = deadline - System.currentTimeMillis();
@@ -384,6 +388,27 @@ public class ClaudeCliWorker implements AutoCloseable {
                         log.info("[CLI-OBS] CLI invoked {} tool(s) internally: {}",
                                 tu.size(),
                                 tu.stream().map(ToolCall::name).toList());
+                        // CR-102: 관찰 등록 — tool_result(user 이벤트) 도착 시 페어링
+                        for (ToolCall t : tu) {
+                            if (t.id() != null) {
+                                pendingTools.put(t.id(), new PendingToolObservation(
+                                        t.name(), t.input(), System.currentTimeMillis()));
+                            } else {
+                                observedTools.add(new com.platform.llm.model.ObservedToolEvent(
+                                        t.name(), t.input(), null, null));
+                            }
+                        }
+                    }
+                }
+                case "user" -> {
+                    // CR-102: CLI 가 내부 도구 결과를 user 메시지(tool_result 블록)로 transcript 에 흘린다
+                    for (ToolResultObservation tr : extractToolResults(json)) {
+                        PendingToolObservation p = pendingTools.remove(tr.toolUseId());
+                        if (p != null) {
+                            observedTools.add(new com.platform.llm.model.ObservedToolEvent(
+                                    p.name(), p.input(), tr.output(),
+                                    System.currentTimeMillis() - p.startMs()));
+                        }
                     }
                 }
                 case "result" -> {
@@ -400,9 +425,17 @@ public class ClaudeCliWorker implements AutoCloseable {
                     long latency = System.currentTimeMillis() - startMs;
 
                     // CR-050 Phase 9: CLI 가 도구 루프를 자체적으로 완결하므로 외부에는 항상
-                    // 최종 텍스트 + finishReason=END 만 노출. tool_use 는 관찰 로그용으로만 사용.
+                    // 최종 텍스트 + finishReason=END 만 노출. tool_use 는 toolCalls 에 싣지 않는다
+                    // (실으면 외부 도구 루프가 재진입 시도 — CLI 내부 완결과 충돌).
+                    // CR-102: 대신 관찰 전용 observedToolEvents 로 운반 — run 타임라인 가시화용.
                     java.util.List<ContentBlock> content = new ArrayList<>();
                     content.add(new ContentBlock.Text(finalText != null ? finalText : ""));
+
+                    // tool_result 미도착 분(비정상 종료 등)도 input 만이라도 관찰에 포함
+                    for (PendingToolObservation p : pendingTools.values()) {
+                        observedTools.add(new com.platform.llm.model.ObservedToolEvent(
+                                p.name(), p.input(), null, null));
+                    }
 
                     return new LLMResponse(
                             id,
@@ -412,7 +445,8 @@ public class ClaudeCliWorker implements AutoCloseable {
                             usage,
                             LLMResponse.FinishReason.END,
                             latency,
-                            costUsd
+                            costUsd,
+                            observedTools.isEmpty() ? null : java.util.List.copyOf(observedTools)
                     );
                 }
                 case "rate_limit_event" -> log.warn("CLI rate_limit_event: {}", json);
@@ -465,6 +499,49 @@ public class ClaudeCliWorker implements AutoCloseable {
             out.add(new ToolCall(tid, name, inputMap));
         }
         return out;
+    }
+
+    /** CR-102: tool_use 관찰 대기 항목 (tool_result 페어링 전) */
+    private record PendingToolObservation(String name, Map<String, Object> input, long startMs) {}
+
+    /** CR-102: user 이벤트에서 추출한 tool_result 관찰 */
+    private record ToolResultObservation(String toolUseId, String output) {}
+
+    /**
+     * CR-102: user 이벤트의 content[] 에서 type=tool_result 블록 추출.
+     * stream-json 포맷: {type:"user", message:{content:[{type:"tool_result", tool_use_id, content}]}}
+     */
+    private List<ToolResultObservation> extractToolResults(Map<String, Object> event) {
+        Object message = event.get("message");
+        if (!(message instanceof Map<?, ?> msg)) return java.util.List.of();
+        Object content = msg.get("content");
+        if (!(content instanceof List<?> list)) return java.util.List.of();
+        List<ToolResultObservation> out = new ArrayList<>();
+        for (Object b : list) {
+            if (!(b instanceof Map<?, ?> block)) continue;
+            if (!"tool_result".equals(block.get("type"))) continue;
+            Object tid = block.get("tool_use_id");
+            if (tid == null) continue;
+            out.add(new ToolResultObservation(tid.toString(), flattenToolResultContent(block.get("content"))));
+        }
+        return out;
+    }
+
+    /** tool_result content 는 string 또는 [{type:text,text}] 배열 — 텍스트로 평탄화 */
+    private static String flattenToolResultContent(Object content) {
+        if (content == null) return null;
+        if (content instanceof String s) return s;
+        if (content instanceof List<?> list) {
+            StringBuilder sb = new StringBuilder();
+            for (Object b : list) {
+                if (b instanceof Map<?, ?> block && "text".equals(block.get("type"))
+                        && block.get("text") != null) {
+                    sb.append(block.get("text"));
+                }
+            }
+            return sb.toString();
+        }
+        return String.valueOf(content);
     }
 
     /**

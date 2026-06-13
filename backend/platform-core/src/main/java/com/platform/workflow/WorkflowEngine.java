@@ -508,7 +508,8 @@ public class WorkflowEngine {
     private int estimateResultSize(Map<String, Object> result) {
         if (result == null || result.isEmpty()) return 0;
         Object out = result.get("output");
-        if (out instanceof String s) return s.length();
+        // 구조화 출력이면 output 이 빈 문자열 — resultBody 와 동일하게 result 전체 크기로 폴백 (0 chars 오표시 방지)
+        if (out instanceof String s && !s.isBlank()) return s.length();
         return String.valueOf(result).length();
     }
 
@@ -519,7 +520,8 @@ public class WorkflowEngine {
     private String resultBody(Map<String, Object> result) {
         if (result == null || result.isEmpty()) return null;
         Object out = result.get("output");
-        if (out instanceof String s) return s;
+        // 구조화 출력이면 output(textContent)이 빈 문자열 — result 전체 JSON 으로 폴백해야 정독 가능
+        if (out instanceof String s && !s.isBlank()) return s;
         try {
             return objectMapper.writeValueAsString(result);
         } catch (Exception e) {

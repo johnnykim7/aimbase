@@ -213,7 +213,28 @@ public class ClaudeCliRunnerClient {
 
         LLMResponse.FinishReason finishReason = parseFinishReason(json.get("finish_reason"));
 
-        return new LLMResponse(runId, model, blocks, toolCalls, usage, finishReason, 0L, 0.0);
+        // CR-102: CLI 내부 도구 루프 관찰 복원 (가시화 전용 — toolCalls 와 분리)
+        List<com.platform.llm.model.ObservedToolEvent> observed = null;
+        Object rawObserved = json.get("observed_tool_events");
+        if (rawObserved instanceof List<?> list && !list.isEmpty()) {
+            observed = new ArrayList<>();
+            for (Object o : list) {
+                if (o instanceof Map<?, ?> ev) {
+                    Object input = ev.get("input");
+                    Map<String, Object> inputMap = (input instanceof Map<?, ?>)
+                            ? new HashMap<>((Map<String, Object>) input)
+                            : Map.of();
+                    Object dur = ev.get("duration_ms");
+                    observed.add(new com.platform.llm.model.ObservedToolEvent(
+                            ev.get("tool_name") != null ? ev.get("tool_name").toString() : null,
+                            inputMap,
+                            ev.get("output") != null ? ev.get("output").toString() : null,
+                            dur instanceof Number n ? n.longValue() : null));
+                }
+            }
+        }
+
+        return new LLMResponse(runId, model, blocks, toolCalls, usage, finishReason, 0L, 0.0, observed);
     }
 
     private static TokenUsage parseUsage(Object raw) {
