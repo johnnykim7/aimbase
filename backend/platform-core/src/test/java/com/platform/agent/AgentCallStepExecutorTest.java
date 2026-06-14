@@ -177,6 +177,47 @@ class AgentCallStepExecutorTest {
         assertThat(result.get("branch_name")).isEqualTo("subagent/x");
     }
 
+    @Test
+    void agentCall_propagatesParentRunWorkspaceToChatRequest() {
+        // CR-107 후속: TOOL_CALL 이 쓴 run workspace 를 AGENT_CALL 서브에이전트가 보도록
+        // StepContext.workspacePath → SubagentRequest.workspacePath → ChatRequest.workingDirectory 전파.
+        mockChat("ok");
+
+        WorkflowStep step = new WorkflowStep("s1", "agent step",
+                WorkflowStep.StepType.AGENT_CALL,
+                Map.of("description", "추출 에이전트", "prompt", "첨부 분석"),
+                List.of(), null, null, null);
+        StepContext context = new StepContext("workflow-run-abc", "wf-1", "workflow-run-abc",
+                Map.of(), Map.of()).withWorkspacePath("/data/workspace/tenantX/run-abc");
+
+        executor.execute(step, context);
+
+        org.mockito.ArgumentCaptor<com.platform.orchestrator.ChatRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(com.platform.orchestrator.ChatRequest.class);
+        verify(orchestratorEngine).chat(captor.capture());
+        assertThat(captor.getValue().workingDirectory())
+                .isEqualTo("/data/workspace/tenantX/run-abc"); // tenant/project 폴백 아님
+    }
+
+    @Test
+    void agentCall_nullWorkspace_passesNullWorkingDirectory() {
+        mockChat("ok");
+
+        WorkflowStep step = new WorkflowStep("s1", "agent step",
+                WorkflowStep.StepType.AGENT_CALL,
+                Map.of("description", "추출 에이전트", "prompt", "분석"),
+                List.of(), null, null, null);
+        StepContext context = new StepContext("run-1", "wf-1", "sess-1", Map.of(), Map.of());
+        // withWorkspacePath 미호출 → workspacePath=null
+
+        executor.execute(step, context);
+
+        org.mockito.ArgumentCaptor<com.platform.orchestrator.ChatRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(com.platform.orchestrator.ChatRequest.class);
+        verify(orchestratorEngine).chat(captor.capture());
+        assertThat(captor.getValue().workingDirectory()).isNull(); // 기존 폴백 동작 보존
+    }
+
     // ── Helper ──
 
     private void mockChat(String text) {

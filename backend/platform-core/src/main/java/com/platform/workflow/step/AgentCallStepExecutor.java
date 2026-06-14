@@ -162,11 +162,13 @@ public class AgentCallStepExecutor implements StepExecutor {
         }
 
         // CR-102: 워크플로우 run/step 연결 키 전파 — 서브에이전트 내부 도구 루프 이벤트를 run 타임라인에 적재
+        // CR-107 후속: 부모 run 의 workspacePath 전파 → 서브에이전트가 TOOL_CALL(download_file) 이 쓴
+        // run 격리 workspace 를 본다(새 childSessionId 의 tenant/project 폴백 단절 해소).
         return new SubagentRequest(
                 description, prompt, model, connectionId,
                 isolation, false, timeoutMs,
                 config, context.sessionId(), com.platform.agent.AgentType.GENERAL,
-                context.workflowRunId(), stepId, resumeSessionId);
+                context.workflowRunId(), stepId, resumeSessionId, context.workspacePath());
     }
 
     /**

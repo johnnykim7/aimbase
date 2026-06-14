@@ -322,7 +322,8 @@ public class SubagentRunner {
                 req.connectionId(),
                 toolFilter, null,
                 responseFormat,
-                null, null,
+                null,                       // connectionGroupId
+                req.workspacePath(),        // CR-107 후속: workingDirectory — 부모 run workspace 전파(없으면 null=기존 폴백)
                 req.workflowRunId(),
                 req.workflowStepId(),
                 context.getSubagentRunId()
