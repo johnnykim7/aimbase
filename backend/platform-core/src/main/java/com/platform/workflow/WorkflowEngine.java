@@ -52,6 +52,9 @@ public class WorkflowEngine {
     // 옵셔널 — 미가용 시 workspacePath=null(기존 폴백 동작).
     private final com.platform.session.SessionStore sessionStore;
 
+    // CR-107 후속: 워크플로우 run 마다 격리 workspace 경로를 만들기 위한 base. 옵셔널.
+    private final com.platform.config.WorkspaceProperties workspaceProperties;
+
     /**
      * CR-105: 협조적 중지 요청 집합 — {@link #requestCancel(UUID)} 가 runId 를 넣고,
      * DAG/cyclic 실행 루프가 스텝 경계에서 {@link #isCancelRequested(String)} 로 검사한다.
@@ -68,7 +71,8 @@ public class WorkflowEngine {
                           PlatformMetrics platformMetrics,
                           com.platform.workflow.event.WorkflowEventPublisher eventPublisher,
                           org.springframework.beans.factory.ObjectProvider<com.platform.workflow.event.WorkflowRunEventRecorder> eventRecorderProvider,
-                          org.springframework.beans.factory.ObjectProvider<com.platform.session.SessionStore> sessionStoreProvider) {
+                          org.springframework.beans.factory.ObjectProvider<com.platform.session.SessionStore> sessionStoreProvider,
+                          org.springframework.beans.factory.ObjectProvider<com.platform.config.WorkspaceProperties> workspacePropertiesProvider) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -80,6 +84,7 @@ public class WorkflowEngine {
         // ObjectProvider 로 옵셔널 주입 — 기존 테스트가 5-arg/6-arg 생성자 mock 으로 호환 유지
         this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
         this.sessionStore = sessionStoreProvider != null ? sessionStoreProvider.getIfAvailable() : null;
+        this.workspaceProperties = workspacePropertiesProvider != null ? workspacePropertiesProvider.getIfAvailable() : null;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
@@ -499,8 +504,8 @@ public class WorkflowEngine {
                 child.getWorkflowId(),
                 child.getSessionId(),
                 child.getInputData() != null ? child.getInputData() : Map.of(),
-                new LinkedHashMap<>()).withWorkspacePath(resolveWorkspacePath(child.getSessionId())
-        );
+                new LinkedHashMap<>()).withWorkspacePath(
+                        resolveWorkspacePath(child.getId().toString(), child.getSessionId()));
 
         List<WorkflowStep> sortedSteps = topologicalSort(steps);
         Set<String> skippedSteps = new HashSet<>();
@@ -600,7 +605,7 @@ public class WorkflowEngine {
                     run.getSessionId(),
                     run.getInputData() != null ? run.getInputData() : Map.of(),
                     savedResults
-            ).withWorkspacePath(resolveWorkspacePath(run.getSessionId()));
+            ).withWorkspacePath(resolveWorkspacePath(run.getId().toString(), run.getSessionId()));
 
             List<WorkflowStep> sortedSteps = topologicalSort(steps);
             Set<String> skippedSteps = new HashSet<>();
@@ -864,21 +869,45 @@ public class WorkflowEngine {
     }
 
     /**
-     * CR-107: run 의 격리 workspace 절대경로를 세션 workspaceRef 에서 푼다.
-     * TOOL_CALL 스텝이 ToolContext.workspacePath 로 전파해 도구(download_file/file_write/bash 등)가
-     * default/general 폴백 대신 이 run 과 AGENT_CALL 이 공유하는 workspace 에 쓰게 한다.
-     * SessionStore 미가용/미매핑 시 null → 기존 폴백 동작 유지(하위호환).
+     * CR-107 후속: 워크플로우 run 의 격리 workspace 절대경로를 결정한다.
+     * TOOL_CALL/AGENT_CALL 스텝이 이 경로를 ToolContext.workspacePath / ChatRequest.workingDirectory
+     * 로 전파해, 한 run 의 download_file·file_write·서브에이전트가 모두 같은 디렉토리를 본다.
+     *
+     * <p>결정 우선순위:
+     * <ol>
+     *   <li>세션에 명시 workspaceRef 가 있으면(소비앱이 채팅 연동으로 지정) 그걸 사용 — 기존 동작 보존</li>
+     *   <li>없으면 {@code {base}/{tenant}/runs/{runId}} 로 run 단위 격리 경로 생성</li>
+     * </ol>
+     *
+     * <p>이게 없으면(이전 동작) workspacePath=null → WorkspaceResolver 가 {@code {base}/{tenant}/general}
+     * 공유 폴백 → 모든 run 의 파일이 한 디렉토리에 누적되어 다른 공고 파일을 보던 버그.
+     * base 미가용(WorkspaceProperties null)이면 null 반환 → 기존 폴백(하위호환).
      */
-    private String resolveWorkspacePath(String sessionId) {
-        if (sessionStore == null || sessionId == null || sessionId.isBlank()) {
+    String resolveWorkspacePath(String runId, String sessionId) {
+        // 1) 세션 명시 ref 우선 (채팅 연동 워크플로우)
+        if (sessionStore != null && sessionId != null && !sessionId.isBlank()) {
+            try {
+                String existing = sessionStore.getWorkspaceRef(sessionId);
+                if (existing != null && !existing.isBlank()) {
+                    return existing;
+                }
+            } catch (RuntimeException e) {
+                log.debug("getWorkspaceRef failed for session {}: {}", sessionId, e.getMessage());
+            }
+        }
+        // 2) run 단위 격리 경로 생성: {base}/{tenant}/runs/{runId}
+        if (workspaceProperties == null || runId == null || runId.isBlank()) {
+            return null; // 하위호환 폴백
+        }
+        String base = workspaceProperties.getBase();
+        if (base == null || base.isBlank()) {
             return null;
         }
-        try {
-            return sessionStore.getWorkspaceRef(sessionId);
-        } catch (RuntimeException e) {
-            log.debug("resolveWorkspacePath failed for session {}: {}", sessionId, e.getMessage());
-            return null;
+        String tenantId = com.platform.tenant.TenantContext.getTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            tenantId = "default";
         }
+        return java.nio.file.Path.of(base, tenantId, "runs", runId).toString();
     }
 
     private Map<String, Object> executeWithRetry(WorkflowStep step, StepContext context, ErrorHandling errorHandling) {
@@ -967,7 +996,7 @@ public class WorkflowEngine {
                     workflowEntity.getId(),
                     run.getSessionId(),
                     run.getInputData() != null ? run.getInputData() : Map.of(),
-                    savedResults).withWorkspacePath(resolveWorkspacePath(run.getSessionId()));
+                    savedResults).withWorkspacePath(resolveWorkspacePath(run.getId().toString(), run.getSessionId()));
 
             Deque<String> worklist = new ArrayDeque<>();
             int executed;

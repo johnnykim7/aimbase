@@ -44,7 +44,8 @@ class WorkflowEngineCyclicTest {
                 mock(PlatformMetrics.class),
                 mock(com.platform.workflow.event.WorkflowEventPublisher.class),
                 null,    // CR-090: eventRecorderProvider — ObjectProvider null 허용
-                null);   // CR-107: sessionStoreProvider — null 허용(workspacePath=null 폴백)
+                null,    // CR-107: sessionStoreProvider — null 허용
+                null);   // CR-107 후속: workspacePropertiesProvider — null 허용(workspacePath=null 폴백)
     }
 
     private WorkflowEntity wf(String graphMode) {
