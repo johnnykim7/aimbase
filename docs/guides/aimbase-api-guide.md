@@ -547,6 +547,37 @@ curl -X POST /api/v1/workflows/runs/{runId}/cancel
 
 > ⚠️ **즉시성 한계**: 협조적 중지라 진행 중인 한 스텝(예: 긴 LLM 호출)은 강제로 끊지 않고 끝낸 뒤 멈춥니다. 즉시 종료가 필요한 게 아니라 "더 이상 다음 스텝으로 진행하지 말라"는 의미입니다.
 
+#### 소비앱 UI 권장 패턴
+
+**cancel 응답의 `status` 를 그대로 화면에 박지 마세요.** `running` run 을 취소하면 응답이 아직 `running` 이라, 이걸 "중지됨"으로 표시하면 거짓이 됩니다. cancel API 는 "중지 요청 접수"만 하고 실제 종료는 다음 스텝 경계에서 일어납니다.
+
+권장 흐름:
+
+1. **cancel 호출 성공(2xx)** → 버튼을 `중지 중…`(비활성) 상태로 (낙관적 표시)
+2. **응답 `status` 분기**
+   - `cancelled` → 바로 `중지됨` 확정 (pending_approval 이었거나 이미 종료된 run)
+   - `running` → 아직 안 멈춤. **실제 종료를 기다려야 함** (아래 3)
+3. **실제 종료 확인** — 둘 중 하나
+   - **SSE 구독 중이면** (`GET /workflows/runs/{runId}/subscribe`, § 17-6): 스트림의 `workflow.done`(status=`cancelled`) 이벤트로 확정 — 별도 폴링 불필요 (권장)
+   - **폴링**: `GET /workflows/runs/{runId}` (§ 4-5) 를 2~3초 간격으로 → `status` 가 terminal(`cancelled`/`completed`/`failed`)이 되면 확정 + 폴링 종료
+
+```javascript
+// 폴링 예시 (React Query useMutation + 후속 폴링)
+async function cancelRun(runId) {
+  const { data } = await api.post(`/api/v1/workflows/runs/${runId}/cancel`);
+  if (data.data.status === 'cancelled') return 'cancelled';      // 즉시 확정
+  // running → terminal 될 때까지 폴링
+  while (true) {
+    await sleep(2500);
+    const { data: run } = await api.get(`/api/v1/workflows/runs/${runId}`);
+    const s = run.data.status;
+    if (['cancelled', 'completed', 'failed'].includes(s)) return s; // 확정
+  }
+}
+```
+
+> 경계 케이스: `running` 을 취소했는데 그 사이 워크플로우가 마지막 스텝까지 끝나버리면 최종 status 가 `completed` 일 수 있습니다(중지보다 완료가 빨랐던 경우). UI 는 "중지됨"만이 아니라 **terminal 상태 자체**를 받아 표시하세요.
+
 ### 4-8. 삭제
 
 ```bash
@@ -1830,9 +1861,30 @@ CLI → builtin_file_read(file_path, as_base64=true)   # 로컬 byte → base64 
 
 ---
 
+## 21. URL 파일 다운로드 (`download_file`) [CR-107]
+
+URL 에서 파일을 받아 워크스페이스에 **원본 그대로(바이너리 무손실)** 저장하는 네이티브 도구. 에이전트/워크플로우(`TOOL_CALL` step)에서 자율 호출하며, Claude CLI 경로(MCP)에도 노출된다.
+
+**입력:**
+
+| 파라미터 | 필수 | 설명 |
+| `url` | ✓ | 다운로드 소스 URL (`http`/`https` 만 허용) |
+| `file_path` | ✓ | 저장 경로 (절대 또는 워크스페이스 상대). 부모 디렉토리 자동 생성 |
+| `overwrite` | | 기존 파일 덮어쓰기 허용 (기본 `false` — 이미 있으면 실패) |
+
+**출력:** `{ file_path, bytes_written, source_url, created, overwritten }`
+
+- 경로 검증은 `file_write` 와 동일한 워크스페이스 화이트리스트(L1 resolver + L2 독립 게이트)를 거친다 — 화이트리스트 밖 경로는 거부.
+- 다운로드 상한 50MB, connect 15s / request 120s. HTTP 2xx 아니면 실패.
+- `file_write` 와의 차이: `file_write` 는 텍스트 본문 쓰기, `download_file` 은 URL→바이너리 저장. `parse_document(url=...)` 와의 차이: `parse_document` 는 다운로드 후 텍스트로 변환해 반환하지만 `download_file` 은 원본 파일을 워크스페이스에 그대로 남긴다 (ZIP/이미지/바이너리 등 후속 처리용).
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.11.0 | 2026-06-14 | **CR-107 — URL 파일 다운로드 도구 (`download_file`)** (§ 21). URL 에서 파일을 받아 워크스페이스에 원본 바이너리로 저장하는 네이티브 도구 신설. 입력 `url`(http/https) + `file_path`(+ `overwrite`), 출력 `{file_path, bytes_written, source_url, created, overwritten}`. 경로 검증은 `file_write` 와 동일 화이트리스트(L1 resolver + L2 게이트) 재사용, 다운로드 상한 50MB, connect 15s/request 120s, HTTP 2xx 외 실패, 기존 파일은 `overwrite` 없으면 거부(원본 보존). `file_write`(텍스트)·`parse_document`(다운로드 후 텍스트 변환)와 달리 바이너리 원본을 그대로 저장 — ZIP/이미지 등 후속 처리용. `SdkToolBeanConfig` @Bean 등록 + `McpExposurePolicy.CLI_EXPOSED` 추가(42→43, API/CLI 경로 동일 노출). `DownloadFileToolTest` 7 PASS + platform-core 회귀 GREEN. 기존 동작 무변경(신규 도구만 추가) |
+| v3.10.1 | 2026-06-14 | **CR-105 — § 4-7 소비앱 UI 권장 패턴 보강** (문서만). cancel 응답 `status` 를 그대로 화면에 박지 말 것 — `running` 취소 시 응답이 아직 `running` 이므로 "중지 요청 접수→`중지 중…` 낙관적 표시→SSE `workflow.done` 또는 `GET /runs/{runId}` 폴링으로 terminal 확정" 흐름 + 폴링 예시 코드 + 경계 케이스(중지보다 완료가 빨라 `completed` 로 끝날 수 있음) 추가. API 표면 무변화 |
 | v3.10.0 | 2026-06-14 | **CR-105 — 워크플로우 실행 중지 (협조적)** (§ 4-7). `POST /api/v1/workflows/runs/{runId}/cancel` 신설 — 진행 중 run 을 스텝 경계에서 안전하게 중지. `running` 은 중지 표식만 세우고 백그라운드 실행 루프가 다음 스텝 경계에서 `cancelled` 로 종료(현재 스텝은 끝까지 수행 — 즉시성 없음), `pending_approval` 은 즉시 `cancelled` 전이 + 대기 승인 엔티티 정리, terminal(completed/failed/cancelled) 은 무변경 멱등, 미존재 404. DAG·cyclic 양 실행 경로에 체크포인트 삽입, run 종료 시 표식 정리(메모리 누수 방지). 메모리 플래그라 멀티노드 시 `running` 은 인스턴스 로컬(다른 노드 실행 run 미인터셉트), `pending_approval` 은 DB 기반이라 노드 무관. `WorkflowEngineCancelTest` 9 PASS + workflow 회귀 GREEN. 기존 동작 무변경(신규 엔드포인트만 추가) |
 | v3.9.0 | 2026-06-12 | **CR-102 2차 — 내부 도구 루프 가시화** (§ 17-11). AGENT_CALL 서브에이전트의 BE 도구 루프(회차별 LLM_RESPONSE + TOOL_USE/TOOL_RESULT 전문, subagent_run_id 연결) + CLI 어댑터 내부 자율 루프 관찰(`LLMResponse.observedToolEvents` 운반 — Worker stream-json tool_use/tool_result 페어링) 을 run 타임라인에 적재. 구조화 출력(response_schema) 본문 폴백 — response_text/output_text 에 structured_data JSON 적재 (이전 빈 문자열). API 표면 변화 없음(이벤트 적재 범위 확대) |
 | v3.8.0 | 2026-06-12 | **CR-102 — 워크플로우 실행 본문 전문 적재 + 조회** (§ 17-10). `workflow_run_events` 에 본문 전문 4컬럼(prompt_text/response_text/input_json/output_text, V66) 적재 — LLM 프롬프트↔응답·도구 input↔output·단계 결과를 절단 없이 정독 가능. 조회 4종: § 17-9 `?include_body=true` / 이벤트 단건 `GET /runs/{runId}/events/{eventId}`(본문 항상 포함) / 횡단 run 목록 `GET /workflows/runs`(workflow_id·status 필터+페이지네이션) / run 단건 `GET /workflows/runs/{runId}`. TTL(보관기간)은 후속 CR |

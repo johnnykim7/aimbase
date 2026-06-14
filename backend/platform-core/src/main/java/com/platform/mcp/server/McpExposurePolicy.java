@@ -24,7 +24,7 @@ import java.util.Set;
 public final class McpExposurePolicy {
 
     /**
-     * CR 노출 레벨: CLI 두뇌(Claude CLI 등)가 호출 가능한 도구 (42개).
+     * CR 노출 레벨: CLI 두뇌(Claude CLI 등)가 호출 가능한 도구 (43개).
      *
      * <p>CR-104 불변식: 이 목록은 API 어댑터가 {@code LLMRequest.tools} 로 모델에 전달하는 도구
      * 목록({@code ToolRegistry.getToolDefs}, 전체 builtin 48개 중 toolFilter 허용분)과 동일 집합이어야 한다.
@@ -58,8 +58,8 @@ public final class McpExposurePolicy {
             // Other
             "todo_write",
             // CR-104: 워크플로우 필수 native/유틸 도구 — API 경로엔 항상 노출되던 것을 CLI 경로에도 동일 노출.
-            // Shell / 파일 쓰기
-            "bash", "file_write",
+            // Shell / 파일 쓰기 / 다운로드
+            "bash", "file_write", "download_file",
             // Native 파일 탐색·읽기·편집 (tool-sdk-core nativetool)
             "builtin_grep", "builtin_file_read", "builtin_glob", "builtin_safe_edit",
             "builtin_patch_apply", "builtin_structured_search", "builtin_document_section_read",

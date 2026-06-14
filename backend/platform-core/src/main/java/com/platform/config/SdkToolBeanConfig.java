@@ -44,6 +44,11 @@ public class SdkToolBeanConfig {
     }
 
     @Bean
+    public DownloadFileTool downloadFileTool(WorkspaceResolver wr, WorkspacePolicyEngine pe) {
+        return new DownloadFileTool(wr, pe);
+    }
+
+    @Bean
     public GlobTool globTool(WorkspaceResolver wr) {
         return new GlobTool(wr);
     }

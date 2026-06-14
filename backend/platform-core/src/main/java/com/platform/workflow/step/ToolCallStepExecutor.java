@@ -1,7 +1,13 @@
 package com.platform.workflow.step;
 
 import com.platform.llm.model.ToolCall;
+import com.platform.tenant.TenantContext;
+import com.platform.tool.ApprovalState;
+import com.platform.tool.PermissionLevel;
+import com.platform.tool.ToolContext;
 import com.platform.tool.ToolRegistry;
+import com.platform.tool.ToolResult;
+import com.platform.tool.ToolResultRenderer;
 import com.platform.workflow.StepContext;
 import com.platform.workflow.event.WorkflowRunEventRecorder;
 import com.platform.workflow.model.WorkflowStep;
@@ -89,12 +95,22 @@ public class ToolCallStepExecutor implements StepExecutor {
             eventRecorder.toolUse(runUuid, step.id(), null, toolName, resolvedInput, null);
         }
 
+        // CR-107: 1-인자 execute(ToolCall) 경로는 EnhancedToolExecutor default bridge 가
+        // ToolContext.minimal(null,null) 을 합성 → WorkspaceResolver 가 default/general 로 폴백한다.
+        // workspace 가 본질인 도구(download_file/file_write/bash 등)는 그 폴백이 run 격리를 깬다.
+        // run 의 sessionId/workflowRunId/workspacePath 를 담은 ToolContext 로 2-인자 경로를 탄다.
+        ToolContext toolCtx = new ToolContext(
+                TenantContext.getTenantId(), null, null, context.sessionId(),
+                context.workflowRunId(), step.id(), null,
+                PermissionLevel.FULL, ApprovalState.NOT_REQUIRED,
+                context.workspacePath(), false, 0);
+
         long startMs = System.currentTimeMillis();
-        String result;
+        ToolResult tr;
         try {
-            result = toolRegistry.execute(new ToolCall(null, toolName, resolvedInput));
+            tr = toolRegistry.execute(new ToolCall(null, toolName, resolvedInput), toolCtx);
         } catch (RuntimeException ex) {
-            // CR-090: TOOL_RESULT (예외 경로 — ToolRegistry 는 보통 String 반환이지만 안전망)
+            // CR-090: TOOL_RESULT (예외 경로 안전망)
             if (eventRecorder != null && runUuid != null) {
                 eventRecorder.toolResult(runUuid, step.id(), null, toolName,
                         System.currentTimeMillis() - startMs, false, ex.getMessage(), 0, null);
@@ -105,20 +121,22 @@ public class ToolCallStepExecutor implements StepExecutor {
 
         log.debug("TOOL_CALL step '{}' completed", step.id());
 
-        String output = result != null ? result : "";
-
-        // ToolRegistry.execute(ToolCall) 는 미인식 도구/실행 예외를 "오류: ..." / "도구 실행 오류: ..." 문자열로 반환한다
-        // (String 반환 시그니처라 throw 못 함). 그 결과를 그대로 output 에 담으면
-        // WorkflowEngine.executeWithRetry 가 Exception 만 보기 때문에 retry/failed 처리가 안 되고
-        // status=completed 가짜 성공으로 끝난다 — 여기서 RuntimeException 으로 승격해서 retry 정책에 태운다.
-        if (output.startsWith("오류: ") || output.startsWith("도구 실행 오류: ")) {
-            // CR-090: TOOL_RESULT (도구 자체 에러 문자열) / CR-102: 에러 본문 전문 적재
+        // 실패(미인식 도구/검증 실패/실행 예외)는 ToolResult.success()=false 로 온다.
+        // 그대로 output 에 담으면 executeWithRetry 가 Exception 만 보므로 retry/failed 가 안 되고
+        // 가짜 성공으로 끝난다 — RuntimeException 으로 승격해서 retry 정책에 태운다.
+        if (!tr.success()) {
+            String errMsg = tr.summary() != null ? tr.summary()
+                    : (tr.output() != null ? tr.output().toString() : "tool execution failed");
             if (eventRecorder != null && runUuid != null) {
                 eventRecorder.toolResult(runUuid, step.id(), null, toolName,
-                        durationMs, false, output, output.length(), null, output);
+                        durationMs, false, errMsg, errMsg.length(), null, errMsg);
             }
-            throw new RuntimeException(output);
+            throw new RuntimeException(errMsg);
         }
+
+        // CR-067: 본문(파일 내용·stdout 등)을 보존해 직렬화 (1-인자 bridge 와 동일 렌더링).
+        String output = ToolResultRenderer.render(tr);
+        if (output == null) output = "";
 
         // CR-090: TOOL_RESULT (성공) / CR-102: output 본문 전문 적재
         if (eventRecorder != null && runUuid != null) {

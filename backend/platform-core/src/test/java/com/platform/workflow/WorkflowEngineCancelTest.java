@@ -63,6 +63,7 @@ class WorkflowEngineCancelTest {
                 List.of(),
                 metrics,
                 eventPublisher,
+                null,
                 null);
     }
 

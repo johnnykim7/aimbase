@@ -43,7 +43,8 @@ class WorkflowEngineCyclicTest {
                 List.of(),
                 mock(PlatformMetrics.class),
                 mock(com.platform.workflow.event.WorkflowEventPublisher.class),
-                null);   // CR-090: eventRecorderProvider — ObjectProvider null 허용 (헬퍼 메서드 테스트만 검증)
+                null,    // CR-090: eventRecorderProvider — ObjectProvider null 허용
+                null);   // CR-107: sessionStoreProvider — null 허용(workspacePath=null 폴백)
     }
 
     private WorkflowEntity wf(String graphMode) {
