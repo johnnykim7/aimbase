@@ -46,7 +46,7 @@ public class RunnerService {
     /** CR-104: allowedTools(원본 도구명) 전달 오버로드. */
     public LLMResponse chat(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                             String configDir, String systemPromptOverride, List<String> allowedTools) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, null, allowedTools);
+        return runTurn(request, toolMode, configDir, systemPromptOverride, null, allowedTools, null);
     }
 
     public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
@@ -59,7 +59,15 @@ public class RunnerService {
     public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                                   String configDir, String systemPromptOverride,
                                   Consumer<String> deltaConsumer, List<String> allowedTools) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools);
+        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools, null);
+    }
+
+    /** CR-108: 도구 관찰 실시간 콜백(observeConsumer) 전달 오버로드. */
+    public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
+                                  String configDir, String systemPromptOverride,
+                                  Consumer<String> deltaConsumer, List<String> allowedTools,
+                                  Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
+        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools, observeConsumer);
     }
 
     /**
@@ -85,7 +93,8 @@ public class RunnerService {
 
     private LLMResponse runTurn(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                                 String configDir, String systemPromptOverride,
-                                Consumer<String> deltaConsumer, List<String> allowedTools) {
+                                Consumer<String> deltaConsumer, List<String> allowedTools,
+                                Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
         String runId = request.sessionId();
         if (runId == null || runId.isBlank()) {
             throw new IllegalArgumentException("run_id (sessionId) required");
@@ -96,14 +105,17 @@ public class RunnerService {
         // 같은 runId 재호출 시 Worker 가 이미 살아있으면 세 인자는 무시 (Pool 정책 — run 단위 도구 집합 고정).
         // CR-104: allowedTools = 호출의 도구 목록(원본명) → Worker 가 mcp__aimbase-server__ 변환 후 --allowedTools.
         ClaudeCliWorker worker = workerPool.getOrCreateMain(
-                runId, model, configDir, systemPromptOverride, toolMode, allowedTools);
+                runId, model, configDir, systemPromptOverride, toolMode, allowedTools,
+                request.workingDirectory());
 
         boolean isFirst = firstTurnDone.putIfAbsent(runId, Boolean.TRUE) == null;
         List<UnifiedMessage> messages = request.messages();
 
         try {
-            if (deltaConsumer != null) {
-                return worker.turnStream(messages, isFirst, deltaConsumer);
+            // CR-108: deltaConsumer 또는 observeConsumer 중 하나라도 있으면 스트림 경로
+            // (observeConsumer 만 있어도 turn 도중 도구 관찰을 실시간 흘려야 하므로).
+            if (deltaConsumer != null || observeConsumer != null) {
+                return worker.turnStream(messages, isFirst, deltaConsumer, observeConsumer);
             }
             if (isFirst) {
                 return worker.turnFirst(messages);
@@ -111,7 +123,15 @@ public class RunnerService {
             UnifiedMessage lastUser = lastUserMessage(messages);
             return worker.turn(lastUser);
         } catch (RuntimeException e) {
-            // 예외 시 다음 호출에서 재초기화 가능하도록 마커 회수
+            // CR-109: 예외(특히 turn timeout = ClaudeCliTimeoutException) 시 worker 를 닫는다.
+            // 닫지 않으면 살아있는 claude CLI 프로세스가 누수된다(운영 좀비 누적). shutdownForRun 이
+            // runs 맵에서 RunWorkers 를 제거 + 모든 worker.close() 까지 수행하므로, 다음 호출은
+            // getOrCreateMain 에서 새 worker 로 재초기화된다(재시도 가능).
+            try {
+                workerPool.shutdownForRun(runId);
+            } catch (Exception ce) {
+                log.warn("runTurn 예외 정리 중 shutdownForRun({}) 실패: {}", runId, ce.getMessage());
+            }
             firstTurnDone.remove(runId);
             throw e;
         }

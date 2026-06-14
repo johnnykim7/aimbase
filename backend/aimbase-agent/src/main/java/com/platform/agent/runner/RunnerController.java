@@ -91,7 +91,19 @@ public class RunnerController {
                         delta -> emitNdjsonUnchecked(out, Map.of(
                                 "type", "delta",
                                 "delta", delta != null ? delta : "")),
-                        req.getAllowedTools());
+                        req.getAllowedTools(),
+                        // CR-108: CLI 내부 도구 관찰을 turn 도중 NDJSON 중간 이벤트로 흘림 (실시간 가시화).
+                        // output=null → tool_use(시작), output 채워짐 → tool_result(완료).
+                        observed -> {
+                            Map<String, Object> ev = new LinkedHashMap<>();
+                            ev.put("type", observed.output() == null ? "tool_use" : "tool_result");
+                            if (observed.toolUseId() != null) ev.put("tool_use_id", observed.toolUseId());
+                            if (observed.toolName() != null) ev.put("tool_name", observed.toolName());
+                            if (observed.input() != null) ev.put("input", observed.input());
+                            if (observed.output() != null) ev.put("output", observed.output());
+                            if (observed.durationMs() != null) ev.put("duration_ms", observed.durationMs());
+                            emitNdjsonUnchecked(out, ev);
+                        });
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("type", "result");
                 done.put("run_id", req.getRunId());
@@ -181,7 +193,9 @@ public class RunnerController {
                 : ModelConfig.defaults();
         String model = (req.getModel() != null && !req.getModel().isBlank())
                 ? req.getModel() : props.getDefaultModel();
-        return new LLMRequest(model, messages, null, config, true, req.getRunId());
+        // CR-107 후속: working_directory → CLI cwd 전파 (Worker.pb.directory).
+        return new LLMRequest(model, messages, null, config, true, req.getRunId())
+                .withWorkingDirectory(req.getWorkingDirectory());
     }
 
     private static ClaudeCliCommandBuilder.ToolMode parseToolMode(String raw) {

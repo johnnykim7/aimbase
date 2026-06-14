@@ -302,4 +302,60 @@ class ClaudeCliAdapterTest {
                 .hasMessageContaining("cli_agent_offline")
                 .hasMessageContaining("agent-name=cli-runner-bidding");
     }
+
+    // ─── CR-109: timeout 시 Runner cancel 신호 (좀비 누수 방지) ───
+
+    @Test
+    @DisplayName("CR-109: chat HTTP timeout 시 Runner cancel 신호 전송 (좀비 워커 정리)")
+    void chatTimeoutSendsCancel() {
+        RequestContext.setAgentId("agent-1");
+        AgentEndpoint endpoint = new AgentEndpoint("agent-1", "http://host:8290", "hash");
+        when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
+        // runner 호출이 HTTP timeout 으로 실패 → classifyRunnerFailure = AGENT_TIMEOUT
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("call failed", new java.net.http.HttpTimeoutException("timed out")));
+
+        var future = adapter.chat(sampleRequest());
+        assertThatThrownBy(future::get)
+                .isInstanceOf(ExecutionException.class)
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasMessageContaining("AGENT_TIMEOUT");
+
+        // 핵심: timeout 분류 → run-1 의 워커 정리를 위한 cancel 호출
+        verify(client, times(1)).cancel(eq(endpoint), eq("run-1"), eq("runner-key-xyz"));
+    }
+
+    @Test
+    @DisplayName("CR-109: chat 연결 실패(AGENT_OFFLINE)는 cancel 보내지 않음 — Runner 에 닿지도 못함")
+    void chatOfflineDoesNotSendCancel() {
+        RequestContext.setAgentId("agent-1");
+        AgentEndpoint endpoint = new AgentEndpoint("agent-1", "http://host:8290", "hash");
+        when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("connect failed", new java.net.ConnectException("refused")));
+
+        var future = adapter.chat(sampleRequest());
+        assertThatThrownBy(future::get)
+                .isInstanceOf(ExecutionException.class)
+                .hasMessageContaining("AGENT_OFFLINE");
+
+        verify(client, times(0)).cancel(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("CR-109: chatStream timeout 시에도 Runner cancel 신호 전송")
+    void streamTimeoutSendsCancel() {
+        RequestContext.setAgentId("agent-1");
+        AgentEndpoint endpoint = new AgentEndpoint("agent-1", "http://host:8290", "hash");
+        when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
+        org.mockito.Mockito.doThrow(
+                        new RuntimeException("stream failed", new java.net.http.HttpTimeoutException("timed out")))
+                .when(client).chatStream(eq(endpoint), any(), any(), any(), any(), any(), any());
+
+        assertThatThrownBy(() -> adapter.chatStream(sampleRequest(), c -> {}))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("AGENT_TIMEOUT");
+
+        verify(client, times(1)).cancel(eq(endpoint), eq("run-1"), eq("runner-key-xyz"));
+    }
 }

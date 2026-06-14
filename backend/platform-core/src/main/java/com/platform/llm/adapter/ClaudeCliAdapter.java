@@ -97,6 +97,7 @@ public class ClaudeCliAdapter implements LLMAdapter {
                 // 위젯에 "network error" 로 보이는 부수효과 발생 (운영 검증). 따라서 단순 RuntimeException 으로.
                 String classified = classifyRunnerFailure(re);
                 log.warn("CLI runner unreachable: {} ({})", classified, re.getMessage());
+                cancelIfTimeout(endpoint, effective, classified); // CR-109
                 throw new RuntimeException("cli_runner_unreachable:" + classified + ":" + re.getMessage(), re);
             }
         } catch (ResponseStatusException rse) {
@@ -117,7 +118,30 @@ public class ClaudeCliAdapter implements LLMAdapter {
             // CR-082: stream 경로도 동일 — RuntimeException 으로 일관.
             String classified = classifyRunnerFailure(re);
             log.warn("CLI runner unreachable (stream): {} ({})", classified, re.getMessage());
+            cancelIfTimeout(endpoint, effective, classified); // CR-109
             throw new RuntimeException("cli_runner_unreachable:" + classified + ":" + re.getMessage(), re);
+        }
+    }
+
+    /**
+     * CR-109: BE 측 HTTP timeout(또는 broken pipe) 으로 runner 호출이 끊겼을 때, Runner 에 남아있는
+     * 워커(claude CLI 프로세스)가 좀비로 누수되지 않도록 명시적 cancel 신호를 보낸다.
+     *
+     * <p>AGENT_OFFLINE/연결 거부 같은 "애초에 Runner 에 닿지 못한" 실패는 보낼 대상이 없으므로 제외.
+     * timeout/broken-pipe 처럼 "요청은 갔는데 응답 전에 끊긴" 경우에만 정리 신호를 보낸다.
+     * cancel 호출 자체가 실패해도(베스트에포트) 원래 예외 전파를 막지 않는다.
+     */
+    private void cancelIfTimeout(AgentEndpoint endpoint, LLMRequest request, String classified) {
+        if (!("AGENT_TIMEOUT".equals(classified) || "TURN_BROKEN_PIPE".equals(classified))) {
+            return;
+        }
+        String runId = request.sessionId();
+        if (runId == null || runId.isBlank()) return;
+        try {
+            log.info("CR-109: timeout({}) — Runner cancel 신호 전송 (runId={})", classified, runId);
+            runnerClient.cancel(endpoint, runId, runnerApiKey);
+        } catch (RuntimeException ce) {
+            log.warn("CR-109: Runner cancel 전송 실패 (runId={}): {}", runId, ce.getMessage());
         }
     }
 

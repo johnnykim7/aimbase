@@ -48,6 +48,14 @@ public class RunnerChatRequest {
     @JsonProperty("allowed_tools")
     private List<String> allowedTools;
 
+    /**
+     * CR-107 후속: CLI 프로세스 cwd 로 쓸 작업장 절대경로(워크플로우 run 격리 workspace).
+     * Worker 가 {@code pb.directory()} 로 설정 → HYBRID 모드의 CLI 내장 Read/Bash 가
+     * 상대경로(예: {@code attachments/...})로도 작업장을 정확히 읽는다. null 이면 cwd 미설정(기존 동작).
+     */
+    @JsonProperty("working_directory")
+    private String workingDirectory;
+
     public String getRunId() { return runId; }
     public void setRunId(String runId) { this.runId = runId; }
     public String getModel() { return model; }
@@ -66,4 +74,6 @@ public class RunnerChatRequest {
     public void setForkSession(Boolean forkSession) { this.forkSession = forkSession; }
     public List<String> getAllowedTools() { return allowedTools; }
     public void setAllowedTools(List<String> allowedTools) { this.allowedTools = allowedTools; }
+    public String getWorkingDirectory() { return workingDirectory; }
+    public void setWorkingDirectory(String workingDirectory) { this.workingDirectory = workingDirectory; }
 }

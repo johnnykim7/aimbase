@@ -337,9 +337,12 @@ public class OrchestratorEngine {
                     actionsExecuted = com.platform.tool.ToolCallHandler.drainActionTracking();
                 }
             } else {
+                // CR-107 후속: workspacePath 를 CLI cwd 전파용으로 LLMRequest 에 실어 보낸다.
+                // ClaudeCliAdapter→Runner→Worker.pb.directory 로 흘러 HYBRID CLI 내장 Read/Bash 가
+                // 상대경로(attachments/...)로도 작업장을 읽게 한다. 비-CLI 어댑터는 무시.
                 LLMRequest llmRequest = new LLMRequest(
                         resolvedModel, trimmedMessages, null,
-                        modelConfig, false, sessionId, null, resolvedSchema);
+                        modelConfig, false, sessionId, null, resolvedSchema, workspacePath);
                 try {
                     if (useConnectionGroup) {
                         // CR-015: 커넥션 그룹 기반 호출 — 그룹 전략 + 커넥션 레벨 폴백
@@ -597,9 +600,10 @@ public class OrchestratorEngine {
                         streamSinkWithCitations, cancelled);
             } else {
                 // 도구 비활성/없음 → 단순 스트리밍
+                // CR-107 후속: workspacePath 를 CLI cwd 전파용으로 실어 보낸다(비스트리밍 경로와 동일).
                 LLMRequest llmRequest = new LLMRequest(
                         resolvedModel, trimmedMessages, null,
-                        streamModelConfig, true, sessionId);
+                        streamModelConfig, true, sessionId, null, null, workspacePath);
                 StringBuilder textBuf = new StringBuilder();
                 final TokenUsage[] usageHolder = new TokenUsage[]{null};
                 final String[] idHolder = new String[]{""};

@@ -147,9 +147,12 @@ public class ClaudeCliRunnerClient {
         }
     }
 
+    /** CR-109: cancel 은 정리 신호이므로 짧은 타임아웃 — 장기 chat timeout(기본 300s)을 기다리면 안 된다. */
+    private static final Duration CANCEL_TIMEOUT = Duration.ofSeconds(10);
+
     public void cancel(AgentEndpoint endpoint, String runId, String runnerApiKey) {
         Map<String, Object> body = Map.of("run_id", runId);
-        HttpRequest httpReq = newJsonRequest(endpoint, "/v1/cancel", body, runnerApiKey);
+        HttpRequest httpReq = newJsonRequest(endpoint, "/v1/cancel", body, runnerApiKey, CANCEL_TIMEOUT);
         try {
             HttpResponse<String> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
@@ -165,11 +168,18 @@ public class ClaudeCliRunnerClient {
 
     private HttpRequest newJsonRequest(AgentEndpoint endpoint, String path,
                                         Map<String, Object> body, String runnerApiKey) {
+        return newJsonRequest(endpoint, path, body, runnerApiKey, httpRequestTimeout);
+    }
+
+    /** CR-109: 요청별 타임아웃 오버라이드 오버로드 (cancel 은 짧은 타임아웃 사용). */
+    private HttpRequest newJsonRequest(AgentEndpoint endpoint, String path,
+                                        Map<String, Object> body, String runnerApiKey,
+                                        Duration timeout) {
         try {
             String json = MAPPER.writeValueAsString(body);
             HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(endpoint.runnerEndpoint() + path))
                     .header("Content-Type", "application/json")
-                    .timeout(httpRequestTimeout)  // CR-106: 설정화 (기본 300s)
+                    .timeout(timeout != null ? timeout : httpRequestTimeout)  // CR-106: 설정화 / CR-109: 요청별 override
                     .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8));
             if (runnerApiKey != null && !runnerApiKey.isBlank()) {
                 b.header(API_KEY_HEADER, runnerApiKey);
@@ -192,6 +202,11 @@ public class ClaudeCliRunnerClient {
         }
         if (request.config() != null && request.config().maxTokens() != null) {
             body.put("max_tokens", request.config().maxTokens());
+        }
+        // CR-107 후속: CLI 프로세스 cwd 로 쓸 작업장 절대경로. Runner 가 Worker.pb.directory 로 설정 →
+        // HYBRID CLI 내장 Read/Bash 가 상대경로(attachments/...)로도 작업장을 읽는다. 비면 미전송(기존 동작).
+        if (request.workingDirectory() != null && !request.workingDirectory().isBlank()) {
+            body.put("working_directory", request.workingDirectory());
         }
         // CR-104: 이 호출의 도구 목록(= getToolDefs(toolFilter), API 경로가 모델에 싣는 것과 동일)을
         // 원본 도구명으로 실어 보낸다. Runner 가 mcp__aimbase-server__<tool> 로 변환해 --allowedTools 주입.
@@ -345,6 +360,21 @@ public class ClaudeCliRunnerClient {
         if ("delta".equals(type)) {
             String delta = String.valueOf(evt.getOrDefault("delta", ""));
             consumer.accept(LLMStreamChunk.text(runId, model, delta));
+        } else if ("tool_use".equals(type) || "tool_result".equals(type)) {
+            // CR-108: CLI 내부 도구 관찰을 turn 도중 실시간 운반 — observedToolUse/Result chunk.
+            Object input = evt.get("input");
+            Map<String, Object> inputMap = (input instanceof Map<?, ?>)
+                    ? new HashMap<>((Map<String, Object>) input) : null;
+            Object dur = evt.get("duration_ms");
+            LLMStreamChunk.ObservedTool obs = new LLMStreamChunk.ObservedTool(
+                    evt.get("tool_use_id") != null ? evt.get("tool_use_id").toString() : null,
+                    evt.get("tool_name") != null ? evt.get("tool_name").toString() : null,
+                    inputMap,
+                    evt.get("output") != null ? evt.get("output").toString() : null,
+                    dur instanceof Number n ? n.longValue() : null);
+            consumer.accept("tool_result".equals(type)
+                    ? LLMStreamChunk.observedToolResult(runId, model, obs)
+                    : LLMStreamChunk.observedToolUse(runId, model, obs));
         } else if ("result".equals(type)) {
             TokenUsage usage = parseUsage(evt.get("usage"));
             LLMResponse.FinishReason finish = parseFinishReason(evt.get("finish_reason"));

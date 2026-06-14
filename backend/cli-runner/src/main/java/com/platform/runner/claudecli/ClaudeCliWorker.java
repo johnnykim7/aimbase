@@ -67,6 +67,13 @@ public class ClaudeCliWorker implements AutoCloseable {
      * start() 호출 전에만 setAllowedTools 로 변경 가능.
      */
     private volatile List<String> allowedToolNames;
+    /**
+     * CR-107 후속: CLI 프로세스 cwd(working directory). 워크플로우 run 격리 workspace 절대경로.
+     * 설정 시 start() 가 {@code pb.directory()} 로 적용 → HYBRID 모드의 CLI 내장 Read/Bash 가
+     * 상대경로(attachments/...)로도 작업장을 읽는다. null 이면 미설정(기존 동작 = 프로세스 기본 cwd).
+     * start() 호출 전에만 setWorkingDirectory 로 변경 가능.
+     */
+    private volatile String workingDirectory;
     /** CR-104: --allowedTools 에 붙일 MCP server prefix. resolveMcpConfigJson 의 server 키와 일치해야 함. */
     private static final String MCP_SERVER_PREFIX = "mcp__aimbase-server__";
     /**
@@ -145,6 +152,17 @@ public class ClaudeCliWorker implements AutoCloseable {
         this.allowedToolNames = (toolNames == null || toolNames.isEmpty()) ? null : List.copyOf(toolNames);
     }
 
+    /**
+     * CR-107 후속: start() 호출 전, CLI 프로세스 cwd(작업장 절대경로) 설정.
+     * null/빈 값이면 미적용(프로세스 기본 cwd 유지).
+     */
+    public void setWorkingDirectory(String dir) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set workingDirectory after start()");
+        }
+        this.workingDirectory = (dir == null || dir.isBlank()) ? null : dir;
+    }
+
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
     public synchronized void start() throws IOException {
         if (process != null) {
@@ -158,7 +176,19 @@ public class ClaudeCliWorker implements AutoCloseable {
         }
         pb.environment().remove("CLAUDECODE");   // 중첩 세션 방지
 
-        log.info("ClaudeCliWorker start: cmd={}, configDir={}", cmd, configDir);
+        // CR-107 후속: CLI cwd 를 작업장으로 설정 → HYBRID CLI 내장 Read/Bash 가 상대경로로도 작업장을 읽는다.
+        // 존재하는 디렉토리일 때만 적용(없는 경로면 ProcessBuilder.start 가 IOException → 안전하게 무시).
+        if (workingDirectory != null) {
+            java.io.File wd = new java.io.File(workingDirectory);
+            if (wd.isDirectory()) {
+                pb.directory(wd);
+            } else {
+                log.warn("ClaudeCliWorker: workingDirectory '{}' is not a directory — using default cwd", workingDirectory);
+            }
+        }
+
+        log.info("ClaudeCliWorker start: cmd={}, configDir={}, cwd={}", cmd, configDir,
+                pb.directory() != null ? pb.directory() : "(default)");
         this.process = pb.start();
         this.stdin = new BufferedWriter(new OutputStreamWriter(
                 process.getOutputStream(), StandardCharsets.UTF_8));
@@ -187,7 +217,18 @@ public class ClaudeCliWorker implements AutoCloseable {
      */
     public LLMResponse turnStream(List<UnifiedMessage> messages, boolean first,
                                    Consumer<String> deltaConsumer) {
-        return turnInternal0(messages, first, deltaConsumer);
+        return turnInternal0(messages, first, deltaConsumer, null);
+    }
+
+    /**
+     * CR-108: 텍스트 델타 + CLI 내부 도구 관찰을 turn 도중에 실시간으로 흘리는 스트리밍 턴.
+     * {@code observeConsumer} 는 tool_use(관찰 시작, output=null) / tool_result(완료, output 채워짐)를
+     * 도착 즉시 수신한다 — AGENT_CALL 진행 중에도 도구 흐름을 실시간 적재하기 위함.
+     */
+    public LLMResponse turnStream(List<UnifiedMessage> messages, boolean first,
+                                   Consumer<String> deltaConsumer,
+                                   Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
+        return turnInternal0(messages, first, deltaConsumer, observeConsumer);
     }
 
     public String getSessionId() {
@@ -221,11 +262,12 @@ public class ClaudeCliWorker implements AutoCloseable {
     // ─── 내부 ────────────────────────────────────────────────────────────
 
     private LLMResponse turnInternal(List<UnifiedMessage> messages, boolean first) {
-        return turnInternal0(messages, first, null);
+        return turnInternal0(messages, first, null, null);
     }
 
     private LLMResponse turnInternal0(List<UnifiedMessage> messages, boolean first,
-                                       Consumer<String> deltaConsumer) {
+                                       Consumer<String> deltaConsumer,
+                                       Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
         if (process == null || !process.isAlive()) {
             throw new ClaudeCliException("Worker not running");
         }
@@ -243,7 +285,7 @@ public class ClaudeCliWorker implements AutoCloseable {
             writeUserMessages(messages);
             if (first) firstTurnSent = true;
 
-            return awaitResult(start, deltaConsumer);
+            return awaitResult(start, deltaConsumer, observeConsumer);
         } catch (IOException e) {
             throw new ClaudeCliException("stdin write failed: " + e.getMessage(), e);
         } finally {
@@ -403,7 +445,8 @@ public class ClaudeCliWorker implements AutoCloseable {
         return sb.toString();
     }
 
-    private LLMResponse awaitResult(long startMs, Consumer<String> deltaConsumer) {
+    private LLMResponse awaitResult(long startMs, Consumer<String> deltaConsumer,
+                                     Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
         long deadline = startMs + turnTimeout.toMillis();
         StringBuilder assistantBuffer = new StringBuilder();
         TokenUsage usage = new TokenUsage(0, 0);
@@ -479,6 +522,11 @@ public class ClaudeCliWorker implements AutoCloseable {
                                 observedTools.add(new com.platform.llm.model.ObservedToolEvent(
                                         t.name(), t.input(), null, null));
                             }
+                            // CR-108: tool_use 도착 즉시 실시간 방출 (output 미수신 → null).
+                            if (observeConsumer != null) {
+                                observeConsumer.accept(new com.platform.llm.model.LLMStreamChunk.ObservedTool(
+                                        t.id(), t.name(), t.input(), null, null));
+                            }
                         }
                     }
                 }
@@ -487,9 +535,14 @@ public class ClaudeCliWorker implements AutoCloseable {
                     for (ToolResultObservation tr : extractToolResults(json)) {
                         PendingToolObservation p = pendingTools.remove(tr.toolUseId());
                         if (p != null) {
+                            long durMs = System.currentTimeMillis() - p.startMs();
                             observedTools.add(new com.platform.llm.model.ObservedToolEvent(
-                                    p.name(), p.input(), tr.output(),
-                                    System.currentTimeMillis() - p.startMs()));
+                                    p.name(), p.input(), tr.output(), durMs));
+                            // CR-108: tool_result 도착 즉시 실시간 방출 — output + durationMs 채움.
+                            if (observeConsumer != null) {
+                                observeConsumer.accept(new com.platform.llm.model.LLMStreamChunk.ObservedTool(
+                                        tr.toolUseId(), p.name(), p.input(), tr.output(), durMs));
+                            }
                         }
                     }
                 }

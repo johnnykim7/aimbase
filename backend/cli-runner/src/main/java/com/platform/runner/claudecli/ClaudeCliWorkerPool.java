@@ -92,6 +92,18 @@ public class ClaudeCliWorkerPool {
                                             String systemPrompt,
                                             ClaudeCliCommandBuilder.ToolMode toolMode,
                                             List<String> allowedTools) {
+        return getOrCreateMain(runId, model, configDir, systemPrompt, toolMode, allowedTools, null);
+    }
+
+    /**
+     * CR-107 후속: workingDirectory(작업장 절대경로) override 추가.
+     * 메인 워커가 이미 살아있으면 무시(run 단위 cwd 고정). Worker 가 CLI 프로세스 cwd 로 설정한다.
+     */
+    public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
+                                            String systemPrompt,
+                                            ClaudeCliCommandBuilder.ToolMode toolMode,
+                                            List<String> allowedTools,
+                                            String workingDirectory) {
         RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
         synchronized (rw) {
             if (rw.main != null && rw.main.isAlive()) return rw.main;
@@ -108,6 +120,9 @@ public class ClaudeCliWorkerPool {
                 }
                 if (allowedTools != null && !allowedTools.isEmpty()) {
                     worker.setAllowedTools(allowedTools);
+                }
+                if (workingDirectory != null && !workingDirectory.isBlank()) {
+                    worker.setWorkingDirectory(workingDirectory);
                 }
                 worker.start();
                 rw.main = worker;

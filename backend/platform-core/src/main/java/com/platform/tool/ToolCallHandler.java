@@ -308,6 +308,15 @@ public class ToolCallHandler {
             ToolContext toolContext,
             Map<String, Object> responseSchema) {
 
+        // CR-108: CLI 어댑터는 도구 루프를 자기 프로세스 안에서 완결한다 (CR-050 Phase 9).
+        // 외부 도구 루프(아래 for) 를 돌 필요가 없고, 대신 chatStream 으로 호출해
+        // 내부 도구 관찰(observedTool chunk)을 turn 도중에 받아 즉시 DB 적재한다 —
+        // AGENT_CALL 진행 중에도 도구 흐름이 실시간으로 차오르게 (turn 끝 batch 와 차이).
+        if (com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider())) {
+            return executeCliStreaming(adapter, resolvedModel, messages, config,
+                    sessionId, toolRegistry, toolFilter, toolContext, responseSchema);
+        }
+
         List<UnifiedMessage> mutableMessages = new ArrayList<>(messages);
         LLMResponse response = null;
         // CR-068 (2026-04-26): CR-048 의 sessionToolRegistry.filterActive 가 도구 schema 를 좁혀서
@@ -908,6 +917,84 @@ public class ToolCallHandler {
             eventRecorder.observedTools(runId, ctx.stepId(), parseUuidSafe(ctx.subagentRunId()),
                     response.observedToolEvents());
         }
+    }
+
+    /**
+     * CR-108: CLI 어댑터 전용 실행 — chatStream 으로 호출해 CLI 내부 도구 관찰을 turn 도중에
+     * 받아 즉시 TOOL_USE/TOOL_RESULT 로 적재한다 (AGENT_CALL 진행 중 실시간 가시화).
+     *
+     * <p>CLI 는 도구 루프를 자기 프로세스에서 완결하므로 외부 도구 루프 반복은 없다 (1 turn).
+     * tool_use(output=null) 도착 → 즉시 TOOL_USE insert + toolUseId→iteration 기억.
+     * tool_result 도착 → 같은 iteration 으로 TOOL_RESULT insert (FE 페어링 키 = step+iteration+tool_name).
+     * turn 끝의 observedToolEvents batch 는 이 경로에서 중복이므로 적재하지 않는다.
+     */
+    private LLMResponse executeCliStreaming(
+            LLMAdapter adapter, String resolvedModel, List<UnifiedMessage> messages,
+            ModelConfig config, String sessionId, ToolRegistry toolRegistry,
+            ToolFilterContext toolFilter, ToolContext ctx, Map<String, Object> responseSchema) {
+
+        // CLI 는 도구를 자기 MCP 채널로 받지만, allowed_tools 산출을 위해 도구 목록은 그대로 전달.
+        List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
+        LLMRequest request = new LLMRequest(
+                resolvedModel, messages, filteredTools.isEmpty() ? null : filteredTools,
+                config, true, sessionId, null, responseSchema);
+
+        final java.util.UUID runId = (ctx != null && ctx.workflowRunId() != null)
+                ? parseUuidSafe(ctx.workflowRunId()) : null;
+        final java.util.UUID subRunId = ctx != null ? parseUuidSafe(ctx.subagentRunId()) : null;
+        final String stepId = ctx != null ? ctx.stepId() : null;
+        final boolean canRecord = eventRecorder != null && runId != null;
+
+        StringBuilder textBuf = new StringBuilder();
+        final java.util.concurrent.atomic.AtomicInteger seq = new java.util.concurrent.atomic.AtomicInteger(0);
+        final java.util.Map<String, Integer> useIterByToolId = new java.util.concurrent.ConcurrentHashMap<>();
+        final String[] idHolder = { null };
+        final TokenUsage[] usageHolder = { null };
+        final LLMResponse.FinishReason[] finishHolder = { LLMResponse.FinishReason.END };
+
+        adapter.chatStream(request, chunk -> {
+            if (chunk == null) return;
+            if ("tool_use".equals(chunk.type()) && chunk.observedTool() != null && canRecord) {
+                // 도착 즉시 TOOL_USE insert
+                var ob = chunk.observedTool();
+                int it = seq.getAndIncrement();
+                if (ob.toolUseId() != null) useIterByToolId.put(ob.toolUseId(), it);
+                eventRecorder.toolUse(runId, stepId, it, ob.toolName(), ob.input(), subRunId);
+            } else if ("tool_result".equals(chunk.type()) && chunk.observedTool() != null && canRecord) {
+                var ob = chunk.observedTool();
+                Integer it = ob.toolUseId() != null ? useIterByToolId.get(ob.toolUseId()) : null;
+                String out = ob.output() != null ? ob.output() : "";
+                eventRecorder.toolResult(runId, stepId, it != null ? it : seq.getAndIncrement(),
+                        ob.toolName(), ob.durationMs() != null ? ob.durationMs() : 0L,
+                        true, null, out.length(), subRunId, out);
+            } else if (chunk.delta() != null) {
+                textBuf.append(chunk.delta());
+            }
+            if (chunk.done()) {
+                if (chunk.usage() != null) usageHolder[0] = chunk.usage();
+                if (chunk.finishReason() != null) finishHolder[0] = chunk.finishReason();
+            }
+            if (chunk.id() != null && idHolder[0] == null) idHolder[0] = chunk.id();
+        });
+
+        String text = textBuf.toString();
+        LLMResponse resp = new LLMResponse(
+                idHolder[0] != null ? idHolder[0] : "", resolvedModel,
+                List.of(new ContentBlock.Text(text)),
+                List.of(),
+                usageHolder[0] != null ? usageHolder[0] : new TokenUsage(0, 0),
+                finishHolder[0], 0, 0);
+        // LLM_RESPONSE 만 적재 (도구는 위에서 실시간 적재 완료 — batch 중복 금지).
+        if (canRecord) {
+            int in = resp.usage() != null ? resp.usage().inputTokens() : 0;
+            int outTok = resp.usage() != null ? resp.usage().outputTokens() : 0;
+            String finish = resp.finishReason() != null ? resp.finishReason().name() : null;
+            eventRecorder.llmResponse(runId, stepId, null,
+                    resolvedModel, in, outTok, finish, 0L,
+                    null, subRunId, null, (text != null && !text.isBlank()) ? text : null,
+                    ctx.connectionId());
+        }
+        return resp;
     }
 
     private static java.util.UUID parseUuidSafe(String s) {
