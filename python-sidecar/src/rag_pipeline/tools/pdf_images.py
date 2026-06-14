@@ -20,6 +20,25 @@ _DEFAULT_MAX_PAGES = 20  # PDF_MAX_PAGES_PER_READ
 _JPEG_QUALITY = 80
 
 
+def pdf_page_count_bytes(pdf_bytes: bytes) -> int | None:
+    """PDF 전체 페이지 수 (변환 없이 빠르게). openclaude getPDFPageCount(pdfinfo) 대응.
+
+    이미지화 전 10페이지 분할 가드 판단에 쓴다. pdfplumber 로 메타만 읽어 빠름.
+    실패 시 None (호출부가 가드를 건너뛰고 진행).
+    """
+    if not pdf_bytes:
+        return None
+    try:
+        import pdfplumber
+    except ImportError:
+        return None
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            return len(pdf.pages)
+    except Exception:
+        return None
+
+
 def parse_page_range(pages: str | None) -> tuple[int | None, int | None] | None:
     """openclaude parsePDFPageRange 포팅. 1-indexed.
 
@@ -95,6 +114,8 @@ def pdf_to_images_bytes(
     except ImportError as e:
         return {"success": False, "error": f"pdf2image_missing: {e}"}
 
+    total_pages = pdf_page_count_bytes(pdf_bytes)  # 변환 전 전체 페이지 수 (가드/메타용)
+
     # 페이지 범위 → first/last (1-indexed). max_pages 로 상한 강제.
     if page_range is None:
         first_page = 1
@@ -132,13 +153,17 @@ def pdf_to_images_bytes(
             "data": _b64.b64encode(buf.getvalue()).decode("ascii"),
         })
 
-    # total_pages 는 pdf2image 만으로는 알 수 없어, 범위 미지정 시 변환된 수로 근사.
-    truncated = page_range is None and len(out) >= max_pages
+    # truncated: 범위 미지정인데 전체 페이지가 변환분보다 많으면 잘린 것.
+    if total_pages is not None:
+        truncated = page_range is None and total_pages > len(out)
+    else:
+        truncated = page_range is None and len(out) >= max_pages
 
     return {
         "success": True,
         "images": out,
         "page_count": len(out),
+        "total_pages": total_pages,
         "truncated": truncated,
         "dpi": dpi,
     }

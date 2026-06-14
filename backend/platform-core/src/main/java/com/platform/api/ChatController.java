@@ -484,6 +484,13 @@ public class ChatController {
                         .append(extracted.isEmpty() ? "(텍스트 추출 실패)" : extracted.text())
                         .append("\n\n");
             }
+            // 첨부 경로는 allowSplitGuard=false 라 NEEDS_SPLIT 도달 불가(1회성, 모델 재호출 불가).
+            // 방어적: 도달 시 첫 페이지들이라도 보이게 PAGE_IMAGES 동등 처리.
+            case NEEDS_SPLIT -> {
+                for (PdfVisionResolver.PageImage img : vision.images()) {
+                    blocks.add(ContentBlock.Image.ofBase64(img.mediaType(), img.base64()));
+                }
+            }
         }
     }
 

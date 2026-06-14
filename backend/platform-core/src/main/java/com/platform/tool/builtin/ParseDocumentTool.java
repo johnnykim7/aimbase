@@ -44,6 +44,8 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
 
     private static final int MAX_FILE_BYTES = 50 * 1024 * 1024;
     private static final int MAX_TEXT_RESPONSE_CHARS = 32_000;
+    /** 스키마 설명용 — 실제 상한은 PdfVisionResolver(aimbase.pdf.max-pages-per-read). */
+    private static final int DEFAULT_MAX_PAGES_PER_READ = 20;
 
     private final MCPRagClient ragClient;
     private final WorkspaceProperties workspaceProperties;
@@ -88,6 +90,13 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
                                         "type", "string",
                                         "enum", SUPPORTED_TYPES,
                                         "description", "File format hint. Auto-detected from URL/file extension if omitted; recommended when using 'content'."
+                                ),
+                                "pages", Map.of(
+                                        "type", "string",
+                                        "description", "PDF only. Page range, 1-indexed (e.g. \"1-10\", \"3\", \"11-20\"). "
+                                                + "If the document has too many pages to read at once, this tool returns "
+                                                + "the page count and asks you to call again with this parameter for "
+                                                + "specific ranges (max " + DEFAULT_MAX_PAGES_PER_READ + " pages per call)."
                                 )
                         )
                 )
@@ -161,13 +170,44 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
         String filePath = stringOrNull(input.get("file_path"));
         String content = stringOrNull(input.get("content"));
         String fileType = stringOrNull(input.get("file_type"));
+        String pages = stringOrNull(input.get("pages"));  // CR-095: PDF 페이지 분할 범위
         if (fileType != null) fileType = fileType.toLowerCase(Locale.ROOT);
 
         try {
             if (url != null) {
+                // CR-107: url 로 들어온 PDF 도 content/file_path 갈래와 동일하게 비전 경로로 통일한다.
+                // 기존엔 url 갈래에 PDF 분기가 없어 PDF 가 사이드카 텍스트 추출(pdfplumber)로 새어
+                // 벡터 많은 페이지에서 페이지당 수~십 초 + MCP 180s timeout 으로 막혔다.
+                // file_type 명시값 우선, 없으면 url 확장자로 추론. 확장자가 없으면(예: .../download)
+                // BE 가 받은 바이트 매직넘버(%PDF)로 최종 판정한다.
+                String urlType = fileType != null ? fileType : inferTypeFromUrl(url);
+                if ("pdf".equals(urlType)) {
+                    byte[] bytes = downloadBytes(url);
+                    if (bytes.length > MAX_FILE_BYTES) {
+                        return ToolResult.error("File too large: " + bytes.length + " bytes (max " + MAX_FILE_BYTES + ")")
+                                .withDuration(System.currentTimeMillis() - start);
+                    }
+                    return buildVisionResult(bytes, Path.of(filenameFromUrl(url)), pages, start);
+                }
+                if (urlType.isEmpty()) {
+                    // 확장자 미상 — 바이트를 받아 매직넘버로 PDF 인지 확인. PDF 면 비전, 아니면 사이드카로.
+                    byte[] bytes = downloadBytes(url);
+                    if (bytes.length > MAX_FILE_BYTES) {
+                        return ToolResult.error("File too large: " + bytes.length + " bytes (max " + MAX_FILE_BYTES + ")")
+                                .withDuration(System.currentTimeMillis() - start);
+                    }
+                    if (isPdfMagic(bytes)) {
+                        return buildVisionResult(bytes, Path.of(filenameFromUrl(url)), pages, start);
+                    }
+                    // 비-PDF — base64 로 사이드카 텍스트 추출 (이미 받은 바이트 재사용, url 재다운로드 없음)
+                    String base64 = Base64.getEncoder().encodeToString(bytes);
+                    Map<String, Object> result = ragClient.parseDocument(base64, "");
+                    return buildResult(result, "url:" + url, start);
+                }
+                // 비-PDF 명시 타입(DOCX/XLSX 등) — 기존대로 사이드카가 url 직접 다운로드+추출
                 Map<String, Object> sidecarInput = new LinkedHashMap<>();
                 sidecarInput.put("url", url);
-                sidecarInput.put("file_type", fileType != null ? fileType : "");
+                sidecarInput.put("file_type", urlType);
                 Map<String, Object> result = ragClient.callToolRaw("parse_document", sidecarInput);
                 return buildResult(result, "url:" + url, start);
             } else if (content != null) {
@@ -175,7 +215,7 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
                 // PDF 면 비전 경로(BE 가 디코드해 document/image 블록 주입), 그 외는 사이드카 텍스트 추출.
                 if ("pdf".equals(fileType)) {
                     byte[] bytes = Base64.getDecoder().decode(content);
-                    return buildVisionResult(bytes, Path.of("local.pdf"), start);
+                    return buildVisionResult(bytes, Path.of("local.pdf"), pages, start);
                 }
                 Map<String, Object> result = ragClient.parseDocument(content, fileType != null ? fileType : "");
                 return buildResult(result, "content:base64", start);
@@ -190,7 +230,7 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
                         return ToolResult.error("File too large: " + bytes.length + " bytes (max " + MAX_FILE_BYTES + ")")
                                 .withDuration(System.currentTimeMillis() - start);
                     }
-                    return buildVisionResult(bytes, p, start);
+                    return buildVisionResult(bytes, p, pages, start);
                 }
                 // 비-PDF(DOCX/XLSX/PPTX/CSV/HTML/TXT): 문서를 읽어 텍스트 추출 = 사이드카의 일.
                 // LLM 이 준 file_path 를 BE 가 읽지 않고 그대로 사이드카에 패스(base64 왕복 제거).
@@ -213,9 +253,11 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
      * (≤3MB → document, >3MB → 페이지 이미지화). 미지원 모델이면 어댑터가 처리하거나
      * PdfTextExtractor 폴백(=resolve 의 TEXT_FALLBACK)으로 떨어진다.
      */
-    private ToolResult buildVisionResult(byte[] bytes, Path p, long start) {
+    private ToolResult buildVisionResult(byte[] bytes, Path p, String pages, long start) {
+        // CR-095: allowSplitGuard=true — 도구 경로는 모델이 pages 로 재호출 가능하므로
+        // 페이지 수 임계(기본 10) 초과 시 NEEDS_SPLIT 으로 분할을 모델에게 위임한다.
         com.platform.attachment.PdfVisionResolver.PdfVisionResult vision =
-                pdfVisionResolver.resolve(bytes, true, true);
+                pdfVisionResolver.resolve(bytes, true, true, pages, true);
 
         String filename = p.getFileName().toString();
         java.util.List<com.platform.tool.ToolMessageBlock> injected = new java.util.ArrayList<>();
@@ -223,6 +265,20 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
         Map<String, Object> output = new LinkedHashMap<>();
 
         switch (vision.mode()) {
+            case NEEDS_SPLIT -> {
+                // 통째 처리하면 turn timeout — 모델에게 pages 로 나눠 호출하라고 안내(openclaude 가드).
+                Map<String, Object> splitOut = new LinkedHashMap<>();
+                splitOut.put("status", "too_many_pages");
+                splitOut.put("total_pages", vision.totalPages());
+                splitOut.put("max_pages_per_call", pdfVisionResolver.maxPagesPerRead());
+                splitOut.put("instruction", vision.note());
+                splitOut.put("source", "file:" + p);
+                return new ToolResult(true, splitOut,
+                        "PDF too large (" + vision.totalPages() + " pages) — call again with pages parameter",
+                        List.of(), List.of(),
+                        Map.of("source", "file:" + p, "status", "too_many_pages"),
+                        null, System.currentTimeMillis() - start, List.of());
+            }
             case INLINE_PDF -> {
                 injected.add(com.platform.tool.ToolMessageBlock.document(
                         "application/pdf", vision.pdfBase64(), filename));
@@ -238,6 +294,7 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
                         + (vision.note() != null ? " (" + vision.note() + ")" : "");
                 output.put("mode", "page_images");
                 output.put("page_count", vision.images().size());
+                if (vision.note() != null) output.put("note_pages", vision.note());
                 output.put("source", "file:" + p);
             }
             default -> {
@@ -302,6 +359,64 @@ public class ParseDocumentTool implements EnhancedToolExecutor {
         String ext = name.substring(dot + 1);
         if ("markdown".equals(ext)) return "md";
         return SUPPORTED_TYPES.contains(ext) ? ext : "";
+    }
+
+    /**
+     * CR-107: url 의 경로 끝 확장자로 타입 추론. 쿼리스트링/프래그먼트는 무시한다.
+     * 확장자가 없거나(예: {@code .../download}) 미지원이면 "" 반환 → 호출부가 매직넘버로 판정.
+     */
+    private String inferTypeFromUrl(String url) {
+        try {
+            String path = URI.create(url).getPath();
+            if (path == null) return "";
+            int slash = path.lastIndexOf('/');
+            String name = slash >= 0 ? path.substring(slash + 1) : path;
+            return inferTypeFromPath(Path.of(name.isBlank() ? "x" : name));
+        } catch (RuntimeException e) {
+            return "";
+        }
+    }
+
+    /** CR-107: url 경로 끝 파일명 추출 (비전 결과 메타의 filename 표기용). 없으면 "download.pdf". */
+    private String filenameFromUrl(String url) {
+        try {
+            String path = URI.create(url).getPath();
+            if (path != null) {
+                int slash = path.lastIndexOf('/');
+                String name = slash >= 0 ? path.substring(slash + 1) : path;
+                if (!name.isBlank()) return name;
+            }
+        } catch (RuntimeException ignored) {
+            // fall through
+        }
+        return "download.pdf";
+    }
+
+    /** CR-107: PDF 매직넘버 {@code %PDF} 판정 (url 확장자가 없을 때 비전/텍스트 분기 결정). */
+    private static boolean isPdfMagic(byte[] bytes) {
+        return bytes != null && bytes.length >= 4
+                && bytes[0] == 0x25 && bytes[1] == 0x50 && bytes[2] == 0x44 && bytes[3] == 0x46; // %PDF
+    }
+
+    /**
+     * CR-107: BE 가 url 에서 바이트를 직접 받는다(PDF 비전 경로용). 다운로드는 실측 ~0.03s.
+     * MAX_FILE_BYTES 초과분은 호출부가 별도 체크 — 여기선 받기만 한다.
+     */
+    private byte[] downloadBytes(String url) throws java.io.IOException, InterruptedException {
+        java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(java.time.Duration.ofSeconds(15))
+                .build();
+        java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(java.time.Duration.ofSeconds(60))
+                .GET()
+                .build();
+        java.net.http.HttpResponse<byte[]> resp =
+                client.send(req, java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+        if (resp.statusCode() / 100 != 2) {
+            throw new java.io.IOException("download failed: HTTP " + resp.statusCode() + " for " + url);
+        }
+        return resp.body();
     }
 
     private static String stringOrNull(Object v) {

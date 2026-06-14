@@ -198,6 +198,9 @@ aimbase:
     max-pages-per-read: ${AIMBASE_PDF_MAX_PAGES_PER_READ:20}
     # 페이지 이미지 렌더 해상도 (openclaude pdftoppm -r 100 동일)
     image-dpi: ${AIMBASE_PDF_IMAGE_DPI:100}
+    # 페이지 분할 가드 임계 (도구 경로) — 초과 시 통째 처리 대신 모델에게 pages 분할 호출 안내
+    # openclaude PDF_AT_MENTION_INLINE_THRESHOLD=10 대응 (CR-095 후속)
+    inline-page-threshold: ${AIMBASE_PDF_INLINE_PAGE_THRESHOLD:10}
 
 logging:
   level:

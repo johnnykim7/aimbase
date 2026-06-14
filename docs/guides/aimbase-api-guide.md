@@ -1675,7 +1675,9 @@ BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:upload` 
   - **≤ 3MB & PDF 지원 어댑터**(Anthropic/Bedrock Claude) → base64 `DocumentBlockParam` 통째 — 모델이 PDF 를 직접 비전으로 봄
   - **> 3MB or PDF 미지원 어댑터** → Python 사이드카 `pdf_to_images`(poppler) 로 페이지를 JPEG(100 DPI) 렌더 → `ImageBlockParam` 배열로 전달 (모델이 페이지 이미지를 비전으로 봄). 페이지 상한 기본 20
   - **이미지조차 미지원 어댑터** → 기존 `PdfTextExtractor`(`parse_document` + OCR) 텍스트 폴백 — `"[첨부 문서: {filename}]\n{text}\n\n"` 메시지 앞에 prepend
-- 임계값은 `aimbase.pdf.*` 로 조정: `inline-max-bytes`(3MB), `target-raw-max-bytes`(20MB), `max-pages-per-read`(20), `image-dpi`(100)
+- 임계값은 `aimbase.pdf.*` 로 조정: `inline-max-bytes`(3MB), `target-raw-max-bytes`(20MB), `max-pages-per-read`(20), `image-dpi`(100), `inline-page-threshold`(10)
+
+**페이지 분할 가드 (AGENT 자율 `parse_document` 도구 경로)** — AGENT 가 `parse_document` 로 PDF 를 읽을 때, 페이지 수가 `inline-page-threshold`(기본 10)를 초과하면 서버가 **통째 처리하지 않고** `{status:"too_many_pages", total_pages, instruction}` 를 반환한다. 모델은 안내대로 `pages` 파라미터(`"1-10"`, `"11-20"` 등, 최대 `max-pages-per-read`)로 나눠 재호출한다. 큰 PDF(예: 29페이지)를 한 턴에 통째 읽으려다 발생하던 turn timeout 을 모델 자율 분할로 해소 (openclaude `getPDFPageCount > PDF_AT_MENTION_INLINE_THRESHOLD` 가드 1:1). 위젯/채팅 **첨부** 경로는 1회성(모델 재호출 불가)이라 가드를 적용하지 않고 첫 `max-pages-per-read` 페이지만 싣는다.
 
 > **왜 비전인가**: `parse_document`(unstructured/OCR 직렬, 건당 ~38초)는 표·레이아웃·도표를 뭉갠다. 모델 비전은 페이지를 그림으로 직접 이해 → 복잡한 문서 품질↑·지연↓. OCR 경로(§ 20)는 결정론·오프라인 추출이 필요할 때만.
 
@@ -1883,6 +1885,7 @@ URL 에서 파일을 받아 워크스페이스에 **원본 그대로(바이너�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.11.1 | 2026-06-15 | **CR-095 후속 — PDF 페이지 분할 가드** (§ 18-4). 13MB/29p PDF AGENT_CALL(`parse_document`) 300초 turn timeout 해소. 근본원인=openclaude `getPDFPageCount > PDF_AT_MENTION_INLINE_THRESHOLD(10)` 가드 포팅 누락(3MB 크기 게이트만 가져옴) → >3MB PDF 첫 20p 통째 이미지화로 거대 입력. 해결: 사이드카 `pdf_page_count` MCP 도구 신설(렌더 없이 페이지 수) + `pdf_to_images` `total_pages` 반환 + `PdfVisionResolver` 페이지 가드(`aimbase.pdf.inline-page-threshold:10` 초과 & `pages` 미지정 시 `too_many_pages` 반환 → 모델이 `pages`로 분할 호출) + `parse_document` 도구 `pages` 파라미터 추가. 위젯/채팅 첨부는 1회성이라 가드 미적용(첫 max-pages-per-read). 사이드카 pdf_images 20 + ocr 26 + PdfVisionResolver 14 + tool/mcp.server 회귀 GREEN. 기존 동작 무변경 |
 | v3.11.0 | 2026-06-14 | **CR-107 — URL 파일 다운로드 도구 (`download_file`)** (§ 21). URL 에서 파일을 받아 워크스페이스에 원본 바이너리로 저장하는 네이티브 도구 신설. 입력 `url`(http/https) + `file_path`(+ `overwrite`), 출력 `{file_path, bytes_written, source_url, created, overwritten}`. 경로 검증은 `file_write` 와 동일 화이트리스트(L1 resolver + L2 게이트) 재사용, 다운로드 상한 50MB, connect 15s/request 120s, HTTP 2xx 외 실패, 기존 파일은 `overwrite` 없으면 거부(원본 보존). `file_write`(텍스트)·`parse_document`(다운로드 후 텍스트 변환)와 달리 바이너리 원본을 그대로 저장 — ZIP/이미지 등 후속 처리용. `SdkToolBeanConfig` @Bean 등록 + `McpExposurePolicy.CLI_EXPOSED` 추가(42→43, API/CLI 경로 동일 노출). `DownloadFileToolTest` 7 PASS + platform-core 회귀 GREEN. 기존 동작 무변경(신규 도구만 추가) |
 | v3.10.1 | 2026-06-14 | **CR-105 — § 4-7 소비앱 UI 권장 패턴 보강** (문서만). cancel 응답 `status` 를 그대로 화면에 박지 말 것 — `running` 취소 시 응답이 아직 `running` 이므로 "중지 요청 접수→`중지 중…` 낙관적 표시→SSE `workflow.done` 또는 `GET /runs/{runId}` 폴링으로 terminal 확정" 흐름 + 폴링 예시 코드 + 경계 케이스(중지보다 완료가 빨라 `completed` 로 끝날 수 있음) 추가. API 표면 무변화 |
 | v3.10.0 | 2026-06-14 | **CR-105 — 워크플로우 실행 중지 (협조적)** (§ 4-7). `POST /api/v1/workflows/runs/{runId}/cancel` 신설 — 진행 중 run 을 스텝 경계에서 안전하게 중지. `running` 은 중지 표식만 세우고 백그라운드 실행 루프가 다음 스텝 경계에서 `cancelled` 로 종료(현재 스텝은 끝까지 수행 — 즉시성 없음), `pending_approval` 은 즉시 `cancelled` 전이 + 대기 승인 엔티티 정리, terminal(completed/failed/cancelled) 은 무변경 멱등, 미존재 404. DAG·cyclic 양 실행 경로에 체크포인트 삽입, run 종료 시 표식 정리(메모리 누수 방지). 메모리 플래그라 멀티노드 시 `running` 은 인스턴스 로컬(다른 노드 실행 run 미인터셉트), `pending_approval` 은 DB 기반이라 노드 무관. `WorkflowEngineCancelTest` 9 PASS + workflow 회귀 GREEN. 기존 동작 무변경(신규 엔드포인트만 추가) |

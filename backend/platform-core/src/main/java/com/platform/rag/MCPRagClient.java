@@ -371,6 +371,21 @@ public class MCPRagClient {
     }
 
     /**
+     * Python MCP Server의 pdf_page_count 도구 호출 (CR-095 — 페이지 가드).
+     *
+     * 렌더 없이 페이지 수만 빠르게 센다 (openclaude getPDFPageCount/pdfinfo 대응).
+     * 10페이지 분할 가드 판단에 쓴다.
+     *
+     * @param fileBase64 Base64 인코딩된 PDF
+     * @return {success, page_count} 또는 {success:false, error}
+     */
+    public Map<String, Object> pdfPageCount(String fileBase64) {
+        Map<String, Object> input = Map.of("file_base64", fileBase64);
+        String result = mcpClient.callTool("pdf_page_count", input);
+        return parseJson(result);
+    }
+
+    /**
      * Python MCP Server의 pdf_to_images 도구 호출 (CR-095 — 비전 파싱).
      *
      * PDF 페이지를 JPEG 이미지로 렌더한다 (텍스트 추출/OCR 아님). LLM 이 이미지를

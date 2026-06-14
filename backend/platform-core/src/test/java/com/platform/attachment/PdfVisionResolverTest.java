@@ -13,6 +13,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,7 +34,7 @@ class PdfVisionResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new PdfVisionResolver(ragClient, INLINE_MAX, TARGET_MAX, 20, 100);
+        resolver = new PdfVisionResolver(ragClient, INLINE_MAX, TARGET_MAX, 20, 100, 10);
     }
 
     private byte[] bytesOf(long size) {
@@ -141,11 +142,101 @@ class PdfVisionResolverTest {
                         "success", true,
                         "images", List.of(Map.of("page_number", 1, "media_type", "image/jpeg", "data", "Z")),
                         "page_count", 1,
+                        "total_pages", 30,
                         "truncated", true));
 
         var r = resolver.resolve(huge, true, true);
 
         assertThat(r.mode()).isEqualTo(PdfVisionResolver.Mode.PAGE_IMAGES);
-        assertThat(r.note()).contains("truncated");
+        assertThat(r.note()).contains("Showing first");
+    }
+
+    // ── CR-095 후속: 페이지 분할 가드 (allowSplitGuard=true, 도구 경로) ──
+
+    @Test
+    void manyPages_withGuard_returnsNeedsSplit() {
+        byte[] large = bytesOf(13L * 1024 * 1024);  // 13MB
+        when(ragClient.pdfPageCount(anyString()))
+                .thenReturn(Map.of("success", true, "page_count", 29));  // > 10 임계
+
+        var r = resolver.resolve(large, true, true, null, true);
+
+        assertThat(r.mode()).isEqualTo(PdfVisionResolver.Mode.NEEDS_SPLIT);
+        assertThat(r.totalPages()).isEqualTo(29);
+        assertThat(r.note()).contains("pages parameter");
+        // 가드에 걸리면 이미지화(통째 렌더) 안 함 — turn timeout 방지
+        verify(ragClient, never()).pdfToImages(anyString(), anyString(), anyInt(), anyInt());
+    }
+
+    @Test
+    void manyPages_withPagesSpecified_rendersThatRange() {
+        byte[] large = bytesOf(13L * 1024 * 1024);
+        when(ragClient.pdfToImages(anyString(), eq("1-10"), anyInt(), anyInt()))
+                .thenReturn(Map.of(
+                        "success", true,
+                        "images", List.of(
+                                Map.of("page_number", 1, "media_type", "image/jpeg", "data", "A"),
+                                Map.of("page_number", 2, "media_type", "image/jpeg", "data", "B")),
+                        "page_count", 2,
+                        "total_pages", 29));
+
+        // pages 지정 → 가드 우회, 그 범위만 이미지화. 페이지 수 카운트 호출 안 함.
+        var r = resolver.resolve(large, true, true, "1-10", true);
+
+        assertThat(r.mode()).isEqualTo(PdfVisionResolver.Mode.PAGE_IMAGES);
+        assertThat(r.images()).hasSize(2);
+        verify(ragClient, never()).pdfPageCount(anyString());
+    }
+
+    @Test
+    void fewPages_withGuard_proceedsNormally() {
+        byte[] large = bytesOf(13L * 1024 * 1024);
+        when(ragClient.pdfPageCount(anyString()))
+                .thenReturn(Map.of("success", true, "page_count", 5));  // ≤ 10
+        when(ragClient.pdfToImages(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(Map.of(
+                        "success", true,
+                        "images", List.of(Map.of("page_number", 1, "media_type", "image/jpeg", "data", "X")),
+                        "page_count", 1,
+                        "total_pages", 5));
+
+        var r = resolver.resolve(large, true, true, null, true);
+
+        assertThat(r.mode()).isEqualTo(PdfVisionResolver.Mode.PAGE_IMAGES);
+    }
+
+    @Test
+    void pageCountFails_withGuard_skipsGuardAndProceeds() {
+        byte[] large = bytesOf(13L * 1024 * 1024);
+        when(ragClient.pdfPageCount(anyString()))
+                .thenReturn(Map.of("success", false, "error", "page_count_failed"));
+        when(ragClient.pdfToImages(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(Map.of(
+                        "success", true,
+                        "images", List.of(Map.of("page_number", 1, "media_type", "image/jpeg", "data", "X")),
+                        "page_count", 1));
+
+        // 페이지 수 모르면 가드 건너뛰고 진행 (이미지화) — null 가드는 막지 않음
+        var r = resolver.resolve(large, true, true, null, true);
+
+        assertThat(r.mode()).isEqualTo(PdfVisionResolver.Mode.PAGE_IMAGES);
+    }
+
+    @Test
+    void manyPages_withoutGuard_doesNotSplit() {
+        // 첨부 경로(allowSplitGuard=false) — 가드 미적용, 첫 페이지들 이미지화
+        byte[] large = bytesOf(13L * 1024 * 1024);
+        when(ragClient.pdfToImages(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(Map.of(
+                        "success", true,
+                        "images", List.of(Map.of("page_number", 1, "media_type", "image/jpeg", "data", "X")),
+                        "page_count", 1,
+                        "total_pages", 29,
+                        "truncated", true));
+
+        var r = resolver.resolve(large, true, true, null, false);
+
+        assertThat(r.mode()).isEqualTo(PdfVisionResolver.Mode.PAGE_IMAGES);
+        verify(ragClient, never()).pdfPageCount(anyString());
     }
 }

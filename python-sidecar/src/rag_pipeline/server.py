@@ -902,6 +902,28 @@ def ocr_image(
 
 
 @mcp.tool()
+def pdf_page_count(file_base64: str) -> str:
+    """Count total pages of a PDF without rendering (CR-095 page guard).
+
+    Fast metadata-only read. Used to decide whether a PDF is too large to read
+    in one shot (openclaude getPDFPageCount/pdfinfo 대응).
+
+    Args:
+        file_base64: Base64-encoded PDF content
+    Returns: {"success": true, "page_count": N} or {"success": false, "error": ...}
+    """
+    from rag_pipeline.tools.pdf_images import pdf_page_count_bytes
+    try:
+        pdf_bytes = base64.b64decode(file_base64)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"invalid_base64: {e}"})
+    count = pdf_page_count_bytes(pdf_bytes)
+    if count is None:
+        return json.dumps({"success": False, "error": "page_count_failed"})
+    return json.dumps({"success": True, "page_count": count})
+
+
+@mcp.tool()
 def pdf_to_images(
     file_base64: str,
     pages: str = "",

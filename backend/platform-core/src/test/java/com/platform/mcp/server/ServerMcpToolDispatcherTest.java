@@ -133,7 +133,7 @@ class ServerMcpToolDispatcherTest {
                         PdfVisionResolver.Mode.PAGE_IMAGES, null,
                         List.of(new PdfVisionResolver.PageImage(1, "image/jpeg", "UEFHRTFKUEVH"),
                                 new PdfVisionResolver.PageImage(2, "image/jpeg", "UEFHRTJKUEVH")),
-                        null));
+                        null, 2));
         ToolResult toolResult = new ToolResult(true,
                 Map.of("mode", "inline_pdf"), "PDF attached for vision parsing",
                 List.of(), List.of(), Map.of(), null, 0,
@@ -167,7 +167,7 @@ class ServerMcpToolDispatcherTest {
     void enhanced_tool_pdf_render_failure_falls_back_to_embedded_resource() {
         when(pdfVisionResolver.resolve(any(byte[].class), eq(false), eq(true)))
                 .thenReturn(new PdfVisionResolver.PdfVisionResult(
-                        PdfVisionResolver.Mode.TEXT_FALLBACK, null, List.of(), "sidecar down"));
+                        PdfVisionResolver.Mode.TEXT_FALLBACK, null, List.of(), "sidecar down", null));
         ToolResult toolResult = new ToolResult(true,
                 Map.of("mode", "inline_pdf"), "PDF attached for vision parsing",
                 List.of(), List.of(), Map.of(), null, 0,

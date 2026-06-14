@@ -145,3 +145,28 @@ def test_rgba_mode_converted(fake_pdf2image):
     r = pdf_to_images_bytes(b"%PDF-1.4 fake")
     assert r["success"] is True
     assert r["page_count"] == 1
+
+
+# ── pdf_page_count_bytes (CR-095 후속 페이지 가드) ──
+def test_page_count_empty_returns_none():
+    from rag_pipeline.tools.pdf_images import pdf_page_count_bytes
+    assert pdf_page_count_bytes(b"") is None
+
+
+def test_page_count_via_pdfplumber(monkeypatch):
+    """pdfplumber 모킹으로 페이지 수 반환 검증."""
+    from rag_pipeline.tools import pdf_images
+    import sys
+    import types
+
+    mod = types.ModuleType("pdfplumber")
+
+    class _Pdf:
+        pages = [object()] * 29
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    mod.open = lambda _buf: _Pdf()
+    monkeypatch.setitem(sys.modules, "pdfplumber", mod)
+
+    assert pdf_images.pdf_page_count_bytes(b"%PDF-1.4 fake") == 29

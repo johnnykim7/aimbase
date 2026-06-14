@@ -42,7 +42,7 @@ class ParseDocumentToolTest {
         workspaceProperties = new WorkspaceProperties();
         // CR-095: PDF 비전 게이트. 비-PDF(txt 등) 경로 테스트는 resolver 미호출이므로 실제 인스턴스로 충분.
         com.platform.attachment.PdfVisionResolver pdfVisionResolver =
-                new com.platform.attachment.PdfVisionResolver(ragClient, 3145728L, 20971520L, 20, 100);
+                new com.platform.attachment.PdfVisionResolver(ragClient, 3145728L, 20971520L, 20, 100, 10);
         tool = new ParseDocumentTool(ragClient, workspaceProperties, pdfVisionResolver);
         ctx = ToolContext.minimal("test-tenant", "test-session");
     }
@@ -208,5 +208,91 @@ class ParseDocumentToolTest {
 
         assertThat(r.success()).isFalse();
         assertThat(r.summary()).contains("sidecar down");
+    }
+
+    // ─── CR-107: url 갈래 PDF 비전 통일 (사이드카 텍스트 추출로 새지 않도록) ──────────
+    // downloadBytes 가 실제 HttpClient 를 쓰므로 로컬 HttpServer 로 url 다운로드를 실제 검증한다.
+
+    @Test
+    void execute_urlPdfWithExtension_goesToVisionNotSidecar() throws Exception {
+        // 작은 유효 PDF 바이트 (≤3MB → INLINE_PDF 비전 경로). 사이드카 텍스트 추출은 절대 호출되면 안 됨.
+        byte[] pdf = minimalPdfBytes();
+        try (LocalServer srv = LocalServer.serving("/a.pdf", "application/pdf", pdf)) {
+            ToolResult r = tool.execute(Map.of("url", srv.url("/a.pdf")), ctx);
+
+            assertThat(r.success()).isTrue();
+            Map<?, ?> out = (Map<?, ?>) r.output();
+            assertThat(out.get("mode")).isEqualTo("inline_pdf");   // 비전 경로
+            // 비전 경로는 사이드카 parse_document 를 거치지 않는다 (이게 CR-107 의 핵심).
+            verify(ragClient, never()).callToolRaw(eq("parse_document"), anyMap());
+            verify(ragClient, never()).parseDocument(anyString(), anyString());
+        }
+    }
+
+    @Test
+    void execute_urlPdfWithoutExtension_detectedByMagicAndGoesToVision() throws Exception {
+        // .../download 처럼 확장자 없는 url — 매직넘버(%PDF)로 PDF 판정 → 비전.
+        byte[] pdf = minimalPdfBytes();
+        try (LocalServer srv = LocalServer.serving("/download", "application/pdf", pdf)) {
+            ToolResult r = tool.execute(Map.of("url", srv.url("/download")), ctx);
+
+            assertThat(r.success()).isTrue();
+            Map<?, ?> out = (Map<?, ?>) r.output();
+            assertThat(out.get("mode")).isEqualTo("inline_pdf");
+            verify(ragClient, never()).callToolRaw(eq("parse_document"), anyMap());
+            verify(ragClient, never()).parseDocument(anyString(), anyString());
+        }
+    }
+
+    @Test
+    void execute_urlNonPdfWithoutExtension_fallsBackToSidecarTextExtraction() throws Exception {
+        // 확장자 없고 PDF 도 아님(매직넘버 불일치) → 이미 받은 바이트를 base64 로 사이드카 텍스트 추출.
+        byte[] docxLike = "PK not-a-pdf zip-ish bytes".getBytes();
+        when(ragClient.parseDocument(anyString(), eq("")))
+                .thenReturn(Map.of("text", "extracted text", "metadata", Map.of("file_type", "docx")));
+
+        try (LocalServer srv = LocalServer.serving("/download", "application/octet-stream", docxLike)) {
+            ToolResult r = tool.execute(Map.of("url", srv.url("/download")), ctx);
+
+            assertThat(r.success()).isTrue();
+            Map<?, ?> out = (Map<?, ?>) r.output();
+            assertThat(out.get("text")).isEqualTo("extracted text");
+            verify(ragClient).parseDocument(anyString(), eq(""));   // 사이드카 경로 사용
+        }
+    }
+
+    /** 1페이지 최소 유효 PDF (pdfplumber/poppler 가 열 수 있는 수준은 아니어도 INLINE_PDF 게이트는 바이트크기+%PDF 만 본다). */
+    private static byte[] minimalPdfBytes() {
+        String pdf = "%PDF-1.4\n"
+                + "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+                + "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+                + "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj\n"
+                + "xref\n0 4\n0000000000 65535 f \n"
+                + "trailer<</Root 1 0 R/Size 4>>\nstartxref\n0\n%%EOF";
+        return pdf.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+    }
+
+    /** 테스트용 단발 HTTP 서버 — downloadBytes 의 실제 GET 을 받아준다. */
+    private static final class LocalServer implements AutoCloseable {
+        private final com.sun.net.httpserver.HttpServer server;
+        private LocalServer(com.sun.net.httpserver.HttpServer server) { this.server = server; }
+
+        static LocalServer serving(String path, String contentType, byte[] body) throws Exception {
+            com.sun.net.httpserver.HttpServer s =
+                    com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+            s.createContext(path, exchange -> {
+                exchange.getResponseHeaders().set("Content-Type", contentType);
+                exchange.sendResponseHeaders(200, body.length);
+                try (var os = exchange.getResponseBody()) { os.write(body); }
+            });
+            s.start();
+            return new LocalServer(s);
+        }
+
+        String url(String path) {
+            return "http://127.0.0.1:" + server.getAddress().getPort() + path;
+        }
+
+        @Override public void close() { server.stop(0); }
     }
 }
