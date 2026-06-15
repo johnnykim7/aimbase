@@ -35,6 +35,10 @@ services:
       CLAUDE_CODE_ENABLED: "true"
       CLAUDE_CODE_TIMEOUT_SECONDS: "600"
       CLAUDE_CODE_MAX_TURNS: "50"
+      # CR-111 후속: BE→Runner HTTP timeout 300→660s. 정확도 요구(빠짐없는 fact 추출)로 긴 turn 이
+      # 정상(실측: exhaustive 단일 PDF 268s, 4 PDF 작업은 그 이상). turn-timeout(660) 보다 약간 크게 둬
+      # turn 이 먼저 끊고 BE 가 그 신호를 받게 함(CR-109 동시발동 회피). 넘으면 retry 이어하기(CR-106).
+      ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS: "660"
       CLAUDE_CODE_WORKING_DIRECTORY: /data/workspace
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health || exit 1"]
@@ -85,12 +89,18 @@ services:
       - api
     volumes:
       - ./claude-accounts:/home/appuser/.claude-accounts
+      # CR-107 후속: api 와 동일 workspace 마운트. HYBRID 모드의 CLI 내장 Read/Bash 가
+      # 작업장 파일(/data/workspace/...)을 직접 읽고, Worker 가 cwd 를 작업장으로 설정한다.
+      - ./workspace:/data/workspace
     environment:
       # ── Runner HTTP 서비스 (RunnerProperties: aimbase.runner.*) ──
       AIMBASE_RUNNER_ENABLED: "true"
       AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
+      # CR-111 후속: turn timeout 300→600s. agent async(600s)와 마개-그릇 정렬 — 이전엔 async 만 600s 라
+      # turn 300s 에 먼저 샜다. 정확도 요구로 긴 추론이 정상(실측 268s+). 600s 넘으면 retry 이어하기(CR-106)가 누적 완주.
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
       # CR-104: 서버 MCP endpoint(aimbase-server)만 사용 — 도구 출처를 API 경로와 동일화.
       # local stdio MCP(AIMBASE_MCP_JAR)는 제거 — server 와 도구 중복 + allowedTools(mcp__aimbase-server__*)
       # prefix 정합성 깨짐 방지. 정공 A 의 도구는 모두 서버 MCP endpoint 를 거친다.
