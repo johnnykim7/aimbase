@@ -1,3 +1,11 @@
+spring:
+  mvc:
+    async:
+      # CR-111: /v1/chat/stream 은 StreamingResponseBody(MVC async) — 미설정 시 컨테이너 기본(30s)에 끊겨
+      # 긴 AGENT_CALL turn(PDF 다수 적재 등)이 도구 호출 직후 interrupted 되어 부분 응답으로 종료됐다.
+      # turn timeout(기본 300s)+여유를 포괄하도록 600s 로 상향. ENV AIMBASE_AGENT_ASYNC_TIMEOUT_MS 로 override.
+      request-timeout: ${AIMBASE_AGENT_ASYNC_TIMEOUT_MS:600000}
+
 agent:
   name: my-agent
   aimbase-url: ""          # REQUIRED — Aimbase server URL (e.g. http://aimbase-server:8181)

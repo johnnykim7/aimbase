@@ -128,6 +128,7 @@ public class ClaudeCliRunnerClient {
             }
             String runId = request.sessionId();
             String model = request.model();
+            boolean sawResult = false;
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(resp.body(), StandardCharsets.UTF_8))) {
                 String line;
@@ -135,11 +136,20 @@ public class ClaudeCliRunnerClient {
                     if (line.isBlank()) continue;
                     try {
                         Map<String, Object> evt = MAPPER.readValue(line, MAP_TYPE);
+                        if ("result".equals(evt.get("type"))) sawResult = true;
                         handleStreamEvent(evt, runId, model, chunkConsumer);
                     } catch (Exception parse) {
                         log.trace("Runner stream 라인 파싱 실패 (스킵): {}", line);
                     }
                 }
+            }
+            // CR-111: result(정상 종료) 이벤트 없이 스트림이 끊기면 — agent 의 async timeout(또는 연결 절단)으로
+            // turn 이 도구 호출 직후 interrupted 된 것. 부분 delta 를 정상 완료로 흘려보내면 호출 측이
+            // COMPLETED 로 오판해 다음 워크플로우 스텝에 빈/미완 결과를 넘긴다 → 명시 실패로 승격해 retry 정책에 태운다.
+            // (error 이벤트는 handleStreamEvent 가 이미 예외로 승격하므로 여기 도달 안 함.)
+            if (!sawResult) {
+                throw new RuntimeException(
+                        "Runner stream ended without result event (turn truncated — likely agent async timeout)");
             }
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -208,6 +218,10 @@ public class ClaudeCliRunnerClient {
         if (request.workingDirectory() != null && !request.workingDirectory().isBlank()) {
             body.put("working_directory", request.workingDirectory());
         }
+        // CR-107 디버그: BE 가 agent 로 보내는 working_directory 추적.
+        org.slf4j.LoggerFactory.getLogger(ClaudeCliRunnerClient.class)
+                .info("[CR107-DEBUG] runner body: runId={}, working_directory(sent)={}",
+                        request.sessionId(), request.workingDirectory());
         // CR-104: 이 호출의 도구 목록(= getToolDefs(toolFilter), API 경로가 모델에 싣는 것과 동일)을
         // 원본 도구명으로 실어 보낸다. Runner 가 mcp__aimbase-server__<tool> 로 변환해 --allowedTools 주입.
         // 비어있으면 미전송 → Runner 가 서버 MCP endpoint 노출 전체(CLI_EXPOSED)를 그대로 사용.
