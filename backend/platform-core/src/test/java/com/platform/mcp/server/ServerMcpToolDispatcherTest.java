@@ -37,6 +37,7 @@ class ServerMcpToolDispatcherTest {
     private HookDispatcher hookDispatcher;
     private TokenBucketRateLimiter rateLimiter;
     private PdfVisionResolver pdfVisionResolver;
+    private McpExposurePolicy mcpExposurePolicy;
     private ServerMcpToolDispatcher dispatcher;
 
     @BeforeEach
@@ -44,13 +45,22 @@ class ServerMcpToolDispatcherTest {
         hookDispatcher = mock(HookDispatcher.class);
         rateLimiter = mock(TokenBucketRateLimiter.class);
         pdfVisionResolver = mock(PdfVisionResolver.class);
+        mcpExposurePolicy = mock(McpExposurePolicy.class);
+        // CR-110: 노출 게이트 목 — team_create(내부전용)만 차단. 나머지(web_search/parse_document 등)는 통과.
+        // 이 테스트는 dispatcher 의 Hook/RateLimit/PDF 렌더링 동작 검증이 목적이며, 노출 정책 자체 검증은
+        // McpExposurePolicyTest 담당. 게이트 차단은 rejects_non_cli_exposed_tool(team_create) 케이스가 전담.
+        when(mcpExposurePolicy.isCliExposed(any(ToolExecutor.class))).thenAnswer(inv -> {
+            ToolExecutor t = inv.getArgument(0);
+            return !"team_create".equals(t.getDefinition().name());
+        });
         // 기본: PASSTHROUGH 반환 (BLOCK 아님)
         when(hookDispatcher.dispatch(any(HookEvent.class), any(), any(String.class)))
                 .thenReturn(HookOutput.PASSTHROUGH);
         // 기본: rate limit 통과
         when(rateLimiter.tryAcquire(anyString(), anyInt()))
                 .thenReturn(TokenBucketRateLimiter.RateLimitResult.allowed(60, 59));
-        dispatcher = new ServerMcpToolDispatcher(hookDispatcher, rateLimiter, pdfVisionResolver, 60);
+        dispatcher = new ServerMcpToolDispatcher(hookDispatcher, rateLimiter, pdfVisionResolver,
+                mcpExposurePolicy, 60);
     }
 
     @Test

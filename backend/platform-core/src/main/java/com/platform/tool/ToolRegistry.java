@@ -28,18 +28,32 @@ public class ToolRegistry {
     private final Map<String, ToolExecutor> executors = new ConcurrentHashMap<>();
     private final PlatformMetrics platformMetrics;
     private final List<ToolExecutor> builtins;
+    private final com.platform.mcp.server.McpExposurePolicy mcpExposurePolicy;
 
-    public ToolRegistry(@Lazy List<ToolExecutor> builtins, PlatformMetrics platformMetrics) {
+    /** CR-110: builtin(서버 내장) 도구 이름 집합. 노출 정책은 builtin 에만 적용, 외부 MCP 도구는 항상 통과. */
+    private final java.util.Set<String> builtinNames = ConcurrentHashMap.newKeySet();
+
+    public ToolRegistry(@Lazy List<ToolExecutor> builtins, PlatformMetrics platformMetrics,
+                        com.platform.mcp.server.McpExposurePolicy mcpExposurePolicy) {
         this.platformMetrics = platformMetrics;
         this.builtins = builtins;
+        this.mcpExposurePolicy = mcpExposurePolicy;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     void registerBuiltins() {
-        builtins.forEach(this::register);
+        builtins.forEach(t -> {
+            builtinNames.add(t.getDefinition().name());
+            register(t);
+        });
         log.info("ToolRegistry initialized with {} built-in tool(s): {}",
                 builtins.size(),
                 builtins.stream().map(t -> t.getDefinition().name()).toList());
+    }
+
+    /** CR-110: 해당 도구 이름이 builtin(서버 내장) 인지. 외부 MCP 도구는 false → 노출 정책 미적용. */
+    private boolean isBuiltinName(String name) {
+        return builtinNames.contains(name);
     }
 
     /** MCP 도구 등록 (MCPServerManager에서 호출) */
@@ -60,19 +74,7 @@ public class ToolRegistry {
         return java.util.Collections.unmodifiableSet(executors.keySet());
     }
 
-    /**
-     * CR-072: 지정한 MCP 노출 레벨에 해당하는 도구 실행기 목록.
-     *
-     * <p>{@code McpExposurePolicy.resolve()} 가 결정한 레벨이 일치하는 도구만 반환.
-     * 서버 도구를 MCP endpoint(/mcp/sse) 로 외부 노출할 때 사용.</p>
-     */
-    public List<ToolExecutor> getMcpExposedExecutors(com.platform.tool.McpExposureLevel level) {
-        return executors.values().stream()
-                .filter(e -> com.platform.mcp.server.McpExposurePolicy.resolve(e) == level)
-                .toList();
-    }
-
-    /** LLMRequest.tools에 전달할 모든 도구 정의 */
+    /** LLMRequest.tools에 전달할 모든 도구 정의 (무필터 — 디버그/요약용. 노출 정책 미적용) */
     public List<UnifiedToolDef> getToolDefs() {
         return executors.values().stream()
                 .map(ToolExecutor::getDefinition)
@@ -87,13 +89,24 @@ public class ToolRegistry {
      * @return 필터링된 도구 정의 목록
      */
     public List<UnifiedToolDef> getToolDefs(ToolFilterContext filter) {
-        if (filter == null) {
-            return getToolDefs();
-        }
         return executors.entrySet().stream()
                 .filter(entry -> {
                     String name = entry.getKey();
                     ToolExecutor executor = entry.getValue();
+
+                    // CR-110: 노출 정책 단일 소스 — builtin 서버 도구 중 정책상 노출 안 되는(NONE) 것은
+                    // API 어댑터가 모델에 싣지 않는다. 이로써 API 경로(getToolDefs)와 CLI 노출 경로
+                    // (ServerMcpConfig/Dispatcher)가 동일 집합이 됨(CR-104 불변식 코드 강제).
+                    // 단 외부 MCP 도구(MCPServerManager/RemoteToolDiscovery 가 동적 register)는 노출 정책 대상이 아니므로
+                    // 항상 통과 — 정책은 aimbase builtin 의 CLI 노출 여부만 통제한다.
+                    // CR-068 회귀 가드: "정책상 노출 안 되는 builtin" 만 제외하며 세션/권한 기반 추가 축소는 하지 않는다.
+                    if (isBuiltinName(name)
+                            && mcpExposurePolicy.resolve(executor) != com.platform.tool.McpExposureLevel.CLI) {
+                        return false;
+                    }
+
+                    // filter 가 null 이면 정책 필터만 적용하고 통과 (하위호환).
+                    if (filter == null) return true;
 
                     // 기존: 이름 기반 allow/exclude
                     if (!filter.isToolAllowed(name)) return false;

@@ -13,6 +13,7 @@ import com.platform.tool.ValidationResult;
 import com.platform.tool.model.UnifiedToolDef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -33,8 +34,13 @@ import java.util.Map;
  *
  * 백엔드: {@link MCPRagClient#parseDocument(String, String)}
  *        스캔 PDF 처리는 사이드카 측에서 OCR fallback 처리.
+ *
+ * <p>CR-110: 기본 비활성화. {@code aimbase.parse-document.tool-enabled=true} 일 때만 빈 등록 →
+ * API/CLI 도구 목록에서 제외된다. PDF/문서는 모델/CLI 가 비전으로 직접 읽고, 사이드카 파싱은
+ * {@link MCPRagClient#parseDocument} 직접 호출 경로(첨부 자동 파싱 등, 도구 레지스트리 무관)로만 사용한다.</p>
  */
 @Component
+@ConditionalOnProperty(name = "aimbase.parse-document.tool-enabled", havingValue = "true", matchIfMissing = false)
 public class ParseDocumentTool implements EnhancedToolExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(ParseDocumentTool.class);

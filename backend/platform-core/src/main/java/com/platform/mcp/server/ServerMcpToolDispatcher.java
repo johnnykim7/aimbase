@@ -52,16 +52,19 @@ public class ServerMcpToolDispatcher {
     private final HookDispatcher hookDispatcher;
     private final TokenBucketRateLimiter rateLimiter;
     private final PdfVisionResolver pdfVisionResolver;
+    private final McpExposurePolicy mcpExposurePolicy;
     private final int rateLimitPerMinute;
 
     public ServerMcpToolDispatcher(HookDispatcher hookDispatcher,
                                     TokenBucketRateLimiter rateLimiter,
                                     PdfVisionResolver pdfVisionResolver,
+                                    McpExposurePolicy mcpExposurePolicy,
                                     @Value("${mcp.rate-limit.requests-per-minute:60}")
                                     int rateLimitPerMinute) {
         this.hookDispatcher = hookDispatcher;
         this.rateLimiter = rateLimiter;
         this.pdfVisionResolver = pdfVisionResolver;
+        this.mcpExposurePolicy = mcpExposurePolicy;
         this.rateLimitPerMinute = rateLimitPerMinute;
     }
 
@@ -79,7 +82,7 @@ public class ServerMcpToolDispatcher {
      * </p>
      */
     public McpSchema.CallToolResult dispatch(ToolExecutor tool, String name, Map<String, Object> args) {
-        if (!McpExposurePolicy.isCliExposed(tool)) {
+        if (!mcpExposurePolicy.isCliExposed(tool)) {
             log.warn("Server MCP: blocked non-CLI-exposed tool '{}'", name);
             return errorResult("Tool not exposed via MCP CLI channel");
         }

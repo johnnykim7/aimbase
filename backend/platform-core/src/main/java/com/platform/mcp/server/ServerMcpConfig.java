@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.mcp.agent.McpToolConversion;
 import com.platform.tool.McpExposureLevel;
 import com.platform.tool.ToolExecutor;
-import com.platform.tool.ToolRegistry;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.McpSyncServer;
@@ -42,13 +41,16 @@ public class ServerMcpConfig {
 
     private final List<ToolExecutor> allTools;
     private final ServerMcpToolDispatcher dispatcher;
+    private final McpExposurePolicy mcpExposurePolicy;
     private final org.springframework.context.ApplicationContext applicationContext;
 
     public ServerMcpConfig(@org.springframework.context.annotation.Lazy List<ToolExecutor> allTools,
                             ServerMcpToolDispatcher dispatcher,
+                            McpExposurePolicy mcpExposurePolicy,
                             org.springframework.context.ApplicationContext applicationContext) {
         this.allTools = allTools;
         this.dispatcher = dispatcher;
+        this.mcpExposurePolicy = mcpExposurePolicy;
         this.applicationContext = applicationContext;
     }
 
@@ -92,7 +94,7 @@ public class ServerMcpConfig {
     public void registerExposedTools(ApplicationReadyEvent event) {
         McpSyncServer mcpServer = applicationContext.getBean("serverMcpServer", McpSyncServer.class);
         List<ToolExecutor> exposed = allTools.stream()
-                .filter(t -> McpExposurePolicy.resolve(t) == McpExposureLevel.CLI)
+                .filter(t -> mcpExposurePolicy.resolve(t) == McpExposureLevel.CLI)
                 .toList();
         int added = 0;
         for (ToolExecutor tool : exposed) {
