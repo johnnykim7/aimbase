@@ -278,12 +278,15 @@ public class ClaudeCliRunnerClient {
                 msg.put("content", s + directive);
             } else if (content instanceof List<?> blocks) {
                 // 멀티모달 배열: 마지막 text 블록에 덧붙이거나, 없으면 text 블록 추가.
+                // 블록 Map 은 toAnthropicBlock 이 Map.of(불변)로 만들 수 있으므로 put 대신 새 Map 으로 교체한다.
                 List<Map<String, Object>> blockList = (List<Map<String, Object>>) blocks;
                 boolean appended = false;
                 for (int j = blockList.size() - 1; j >= 0; j--) {
                     Map<String, Object> b = blockList.get(j);
                     if ("text".equals(b.get("type")) && b.get("text") instanceof String bt) {
-                        b.put("text", bt + directive);
+                        Map<String, Object> replaced = new LinkedHashMap<>(b);
+                        replaced.put("text", bt + directive);
+                        blockList.set(j, replaced);
                         appended = true;
                         break;
                     }
@@ -327,7 +330,12 @@ public class ClaudeCliRunnerClient {
                         .filter(b -> b instanceof ContentBlock.Text)
                         .map(b -> ((ContentBlock.Text) b).text())
                         .reduce("", (a, b) -> a + b);
-                out.add(Map.of("role", role, "content", text));
+                // CR-113: 가변 Map — appendSchemaDirectiveToLastUser 가 content 를 교체할 수 있어야 함
+                // (Map.of 불변이면 put 시 UnsupportedOperationException).
+                Map<String, Object> msg = new LinkedHashMap<>();
+                msg.put("role", role);
+                msg.put("content", text);
+                out.add(msg);
             }
         }
         return out;

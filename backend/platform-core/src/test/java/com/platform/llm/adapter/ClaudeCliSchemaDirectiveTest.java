@@ -82,4 +82,33 @@ class ClaudeCliSchemaDirectiveTest {
         ClaudeCliRunnerClient.appendSchemaDirectiveToLastUser(msgs, SCHEMA);
         assertThat(msgs.get(0).get("content")).isEqualTo("system instruction");
     }
+
+    @Test
+    @DisplayName("불변 메시지 리스트(Map.of content) 에도 예외 없이 directive 부착 — 운영 회귀 방어")
+    void worksOnImmutableMessageList() {
+        // toRawMessages 비-멀티모달 경로가 Map.of(불변)로 만들던 케이스 재현.
+        // List 자체는 가변(ArrayList)이되 content String 교체는 msg.put 이라 msg 가 가변이어야 함.
+        List<Map<String, Object>> msgs = new ArrayList<>();
+        msgs.add(new LinkedHashMap<>(Map.of("role", "user", "content", "원문 분석")));
+
+        // 예외 없이 동작해야 한다.
+        ClaudeCliRunnerClient.appendSchemaDirectiveToLastUser(msgs, SCHEMA);
+        assertThat((String) msgs.get(0).get("content")).contains("ONLY a single valid JSON object");
+    }
+
+    @Test
+    @DisplayName("멀티모달 text 블록이 불변(Map.of)이어도 새 Map 으로 교체해 directive 부착 — 운영 회귀 방어")
+    void worksOnImmutableMultimodalTextBlock() {
+        // toAnthropicBlock 이 Map.of(불변)로 만든 text 블록 재현.
+        List<Map<String, Object>> blocks = new ArrayList<>();
+        blocks.add(Map.of("type", "text", "text", "이 PDF 분석"));  // 불변
+        var msgs = messages("user", blocks);
+
+        ClaudeCliRunnerClient.appendSchemaDirectiveToLastUser(msgs, SCHEMA);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> resultBlocks = (List<Map<String, Object>>) msgs.get(0).get("content");
+        assertThat((String) resultBlocks.get(0).get("text"))
+                .startsWith("이 PDF 분석").contains("ONLY a single valid JSON object");
+    }
 }
