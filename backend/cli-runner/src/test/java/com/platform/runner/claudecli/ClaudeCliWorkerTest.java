@@ -196,6 +196,69 @@ class ClaudeCliWorkerTest {
         assertThat(args).doesNotContain("--allowedTools");
     }
 
+    @Test
+    void cr112_result_is_error_true_with_success_subtype_throws() throws IOException {
+        // 사용자가 지목한 진범: CLI 가 socket closed / API 에러를 subtype=success 라도
+        // is_error:true 인 result 이벤트로 둔갑시켜 발행 → COMPLETED 오판 방지를 위해 예외 승격.
+        Path errStub = writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-err1"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","is_error":true,"result":"API Error: socket connection was closed","session_id":"sess-err1","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """);
+        worker = new ClaudeCliWorker(errStub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.start();
+
+        assertThatThrownBy(() -> worker.turnFirst(List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "hi"))))
+                .isInstanceOf(ClaudeCliException.class)
+                .hasMessageContaining("is_error=true")
+                .hasMessageContaining("socket connection was closed");
+    }
+
+    @Test
+    void cr112_result_is_error_true_with_error_subtype_throws() throws IOException {
+        // error_during_execution 등 error_* subtype 도 is_error:true → 동일하게 예외 승격.
+        Path errStub = writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-err2"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"sess-err2","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """);
+        worker = new ClaudeCliWorker(errStub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.start();
+
+        assertThatThrownBy(() -> worker.turnFirst(List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "hi"))))
+                .isInstanceOf(ClaudeCliException.class)
+                .hasMessageContaining("error_during_execution");
+    }
+
+    @Test
+    void cr112_result_is_error_false_returns_normally() throws IOException {
+        // 정상 success(is_error:false) 는 오탐 없이 그대로 반환 — 회귀 방지.
+        Path okStub = writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-ok"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}'
+                  echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"sess-ok","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """);
+        worker = new ClaudeCliWorker(okStub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.start();
+
+        LLMResponse resp = worker.turnFirst(List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "hi")));
+        assertThat(resp.textContent()).isEqualTo("done");
+        assertThat(resp.finishReason()).isEqualTo(LLMResponse.FinishReason.END);
+    }
+
     private Path writeStub(String body) throws IOException {
         Path p = tempDir.resolve("claude-stub-" + System.nanoTime() + ".sh");
         Files.writeString(p, body);

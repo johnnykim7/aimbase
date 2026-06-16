@@ -559,6 +559,24 @@ public class ClaudeCliWorker implements AutoCloseable {
                     }
                     long latency = System.currentTimeMillis() - startMs;
 
+                    // CR-112: CLI 가 socket closed / API 에러를 is_error:true 인 result 이벤트로 둔갑시켜
+                    // 발행하는 경우(claude code stream-json: subtype=success 라도 isApiError=true 면
+                    // is_error:true, error_* subtype 도 is_error:true)를 FinishReason.END 로 정상 반환하면
+                    // 호출 측이 COMPLETED 로 오판해 다음 워크플로우 스텝에 쓰레기 입력(에러 텍스트)을 넘긴다.
+                    // is_error 가 단일 진실 소스(success/error 모든 subtype 공통) → 예외로 승격해
+                    // RunnerService→RunnerController error 이벤트→어댑터→AgentCallStepExecutor→
+                    // WorkflowEngine.executeWithRetry(retry/--resume 이어하기) 정책에 태운다.
+                    if (Boolean.TRUE.equals(json.get("is_error"))) {
+                        String subtype = json.get("subtype") != null ? json.get("subtype").toString() : "unknown";
+                        String errText = (finalText != null && !finalText.isBlank())
+                                ? finalText : "(no result text)";
+                        log.warn("[CLI-RESULT] is_error=true (subtype={}, latency={}ms): {}",
+                                subtype, latency,
+                                errText.length() > 300 ? errText.substring(0, 300) + "..." : errText);
+                        throw new ClaudeCliException(
+                                "CLI result reported is_error=true (subtype=" + subtype + "): " + errText);
+                    }
+
                     // CR-050 Phase 9: CLI 가 도구 루프를 자체적으로 완결하므로 외부에는 항상
                     // 최종 텍스트 + finishReason=END 만 노출. tool_use 는 toolCalls 에 싣지 않는다
                     // (실으면 외부 도구 루프가 재진입 시도 — CLI 내부 완결과 충돌).
