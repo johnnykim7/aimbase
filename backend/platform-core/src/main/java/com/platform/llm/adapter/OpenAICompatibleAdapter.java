@@ -91,7 +91,7 @@ public class OpenAICompatibleAdapter implements LLMAdapter {
             try {
                 ChatCompletion response = client.chat().completions().create(builder.build());
                 long latencyMs = Instant.now().toEpochMilli() - start;
-                return toResponse(response, request.model(), latencyMs);
+                return toResponse(response, request.model(), latencyMs, request.responseSchema());
             } catch (Exception e) {
                 log.error("OpenAI Compatible chat 실패: provider={}, model={}, error={}",
                         provider, modelId, e.getMessage());
@@ -211,11 +211,14 @@ public class OpenAICompatibleAdapter implements LLMAdapter {
         };
     }
 
-    private LLMResponse toResponse(ChatCompletion completion, String modelId, long latencyMs) {
+    private LLMResponse toResponse(ChatCompletion completion, String modelId, long latencyMs,
+                                   Map<String, Object> responseSchema) {
         ChatCompletion.Choice choice = completion.choices().get(0);
         String text = choice.message().content().orElse("");
 
-        List<ContentBlock> content = List.of(new ContentBlock.Text(text));
+        // CR-113: response_schema 가 있으면 텍스트 JSON 을 Structured 블록으로 정규화 (단일 인터페이스).
+        List<ContentBlock> content = StructuredOutputNormalizer.normalize(
+                List.of(new ContentBlock.Text(text)), responseSchema);
         List<ToolCall> toolCalls = parseToolCalls(completion);
 
         long inputTokens = completion.usage().map(u -> u.promptTokens()).orElse(0L);

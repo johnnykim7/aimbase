@@ -113,7 +113,7 @@ public class OllamaAdapter implements LLMAdapter {
                 HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
                 long latencyMs = Instant.now().toEpochMilli() - start;
 
-                return parseOpenAIResponse(resp.body(), request.model(), latencyMs);
+                return parseOpenAIResponse(resp.body(), request.model(), latencyMs, request.responseSchema());
             } catch (Exception e) {
                 throw new RuntimeException("Ollama chat error: " + e.getMessage(), e);
             }
@@ -264,7 +264,8 @@ public class OllamaAdapter implements LLMAdapter {
     }
 
     @SuppressWarnings("unchecked")
-    private LLMResponse parseOpenAIResponse(String body, String modelId, long latencyMs) {
+    private LLMResponse parseOpenAIResponse(String body, String modelId, long latencyMs,
+                                            Map<String, Object> responseSchema) {
         try {
             Map<String, Object> resp = objectMapper.readValue(body, Map.class);
             String id = (String) resp.getOrDefault("id", "ollama_" + System.currentTimeMillis());
@@ -283,9 +284,13 @@ public class OllamaAdapter implements LLMAdapter {
             Object completionTokens = usage != null ? usage.get("completion_tokens") : null;
             int outputTokens = completionTokens != null ? ((Number) completionTokens).intValue() : 0;
 
+            // CR-113: response_schema 가 있으면 텍스트 JSON 을 Structured 블록으로 정규화 (단일 인터페이스).
+            List<ContentBlock> content = StructuredOutputNormalizer.normalize(
+                    List.of(new ContentBlock.Text(text)), responseSchema);
+
             return new LLMResponse(
                     id, modelId,
-                    List.of(new ContentBlock.Text(text)),
+                    content,
                     List.of(),
                     new TokenUsage(inputTokens, outputTokens),
                     LLMResponse.FinishReason.END,

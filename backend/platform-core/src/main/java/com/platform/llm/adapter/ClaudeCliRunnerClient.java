@@ -235,8 +235,68 @@ public class ClaudeCliRunnerClient {
                 body.put("allowed_tools", toolNames);
             }
         }
-        body.put("messages", toRawMessages(request.messages()));
+        List<Map<String, Object>> rawMessages = toRawMessages(request.messages());
+        // CR-113: CLI 는 Anthropic API 의 tool_choice/json_schema 같은 구조화 강제 장치가 없어
+        // schema 를 줘도 자유 텍스트(MD 표/산문/영어)로 흔들린다(운영 실측: structured_data 6/6 null).
+        // 단독 CLI 실측상 "이 schema 의 JSON 만, 펜스/서두 없이" 지시하면 JSON 으로 통일된다.
+        // → 마지막 user 메시지 끝에 schema 강제 지시를 덧붙인다(입구 강제). system prompt 가 아니라
+        //   user 메시지에 붙이는 이유: --system-prompt 는 CLI 기본 프롬프트를 완전 교체하므로
+        //   systemPromptOverride 가 null 인 커넥터(대부분)에서 CLI 기본 동작(도구 가이드 등)이 날아간다.
+        //   출구 정규화는 StructuredOutputNormalizer 가 펜스 제거로 이중 방어.
+        appendSchemaDirectiveToLastUser(rawMessages, request.responseSchema());
+        body.put("messages", rawMessages);
         return body;
+    }
+
+    /**
+     * CR-113: response_schema 가 있으면 마지막 user 메시지 텍스트 끝에 JSON 강제 지시를 덧붙인다.
+     * schema 가 없거나 user 메시지가 없으면 무변경. content 가 멀티모달 배열이면 그 안의 text 블록에 덧붙인다.
+     *
+     * <p>단독 CLI 실측 기준 "raw JSON only / no markdown fence / no preamble" 지시가 가장 안정적으로
+     * JSON 을 끌어낸다.
+     */
+    @SuppressWarnings("unchecked")
+    static void appendSchemaDirectiveToLastUser(List<Map<String, Object>> messages, Map<String, Object> responseSchema) {
+        if (responseSchema == null || responseSchema.isEmpty() || messages == null || messages.isEmpty()) {
+            return;
+        }
+        String schemaJson;
+        try {
+            schemaJson = MAPPER.writeValueAsString(responseSchema);
+        } catch (Exception e) {
+            schemaJson = String.valueOf(responseSchema);
+        }
+        String directive = "\n\n---\nYou MUST respond with ONLY a single valid JSON object that conforms to"
+                + " the following JSON Schema. Output raw JSON only — no markdown code fences, no preamble,"
+                + " no explanation, no text before or after the JSON.\nJSON Schema:\n" + schemaJson;
+
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Map<String, Object> msg = messages.get(i);
+            if (!"user".equals(msg.get("role"))) continue;
+            Object content = msg.get("content");
+            if (content instanceof String s) {
+                msg.put("content", s + directive);
+            } else if (content instanceof List<?> blocks) {
+                // 멀티모달 배열: 마지막 text 블록에 덧붙이거나, 없으면 text 블록 추가.
+                List<Map<String, Object>> blockList = (List<Map<String, Object>>) blocks;
+                boolean appended = false;
+                for (int j = blockList.size() - 1; j >= 0; j--) {
+                    Map<String, Object> b = blockList.get(j);
+                    if ("text".equals(b.get("type")) && b.get("text") instanceof String bt) {
+                        b.put("text", bt + directive);
+                        appended = true;
+                        break;
+                    }
+                }
+                if (!appended) {
+                    Map<String, Object> textBlock = new LinkedHashMap<>();
+                    textBlock.put("type", "text");
+                    textBlock.put("text", directive);
+                    blockList.add(textBlock);
+                }
+            }
+            return; // 마지막 user 메시지 하나만 처리
+        }
     }
 
     /**
@@ -298,7 +358,11 @@ public class ClaudeCliRunnerClient {
         String model = (String) json.getOrDefault("model", request.model());
         String content = (String) json.getOrDefault("content", "");
 
-        List<ContentBlock> blocks = List.of(new ContentBlock.Text(content != null ? content : ""));
+        // CR-113: response_schema 가 있으면 CLI 가 반환한 ```json 펜스 텍스트를 Structured 블록으로
+        // 정규화 (단일 인터페이스 — 소비앱이 모델 종류와 무관하게 structured_data 를 받게 한다).
+        List<ContentBlock> blocks = StructuredOutputNormalizer.normalize(
+                List.of(new ContentBlock.Text(content != null ? content : "")),
+                request.responseSchema());
 
         List<ToolCall> toolCalls = new ArrayList<>();
         Object rawToolCalls = json.get("tool_calls");
