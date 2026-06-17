@@ -188,17 +188,19 @@ public class WorkflowController {
 
     /** CR-102: run 단건 조회 (워크플로우 id 없이) — 횡단 실행 내역 화면에서 상세 진입용. */
     @GetMapping("/runs/{runId}")
-    @Operation(summary = "워크플로우 실행 단건 조회 (횡단)")
-    public ApiResponse<WorkflowRunEntity> getRunById(@PathVariable UUID runId) {
-        return workflowRunRepository.findById(runId)
-                .map(ApiResponse::ok)
+    @Operation(summary = "워크플로우 실행 단건 조회 (횡단)",
+            description = "기존 run 필드 + 현재 스텝의 사람이 읽는 이름(currentStepName)과 전체 스텝 진행 목록(steps)을 함께 반환.")
+    public ApiResponse<WorkflowRunDetail> getRunById(@PathVariable UUID runId) {
+        WorkflowRunEntity run = workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Workflow run not found: " + runId));
+        return ApiResponse.ok(toRunDetail(run));
     }
 
     @GetMapping("/{id}/runs/{runId}")
-    @Operation(summary = "워크플로우 실행 상세 조회")
-    public ApiResponse<WorkflowRunEntity> getRun(@PathVariable String id,
+    @Operation(summary = "워크플로우 실행 상세 조회",
+            description = "기존 run 필드 + 현재 스텝의 사람이 읽는 이름(currentStepName)과 전체 스텝 진행 목록(steps)을 함께 반환.")
+    public ApiResponse<WorkflowRunDetail> getRun(@PathVariable String id,
                                                   @PathVariable UUID runId) {
         WorkflowRunEntity run = workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -206,7 +208,52 @@ public class WorkflowController {
         if (!id.equals(run.getWorkflowId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Run does not belong to workflow");
         }
-        return ApiResponse.ok(run);
+        return ApiResponse.ok(toRunDetail(run));
+    }
+
+    /**
+     * run 엔티티에 WF 정의의 사람이 읽는 스텝 이름을 덧붙여 응답 DTO 로 조립.
+     *
+     * <p>{@code currentStepName} = 현재 스텝 id 에 해당하는 정의 step 의 {@code name}.
+     * {@code steps[]} = 정의 순서대로 {@code {id, name, status}} — 진행바용.
+     * status 도출: stepResults 에 키 존재 → completed / currentStep 일치 시 run 이 terminal 이면
+     * 그 상태, 아니면 running / 그 외 pending. WF 정의를 못 찾으면 두 필드는 null/빈 목록으로 graceful.
+     */
+    private WorkflowRunDetail toRunDetail(WorkflowRunEntity run) {
+        List<Map<String, Object>> defSteps = workflowRepository.findById(run.getWorkflowId())
+                .map(WorkflowEntity::getSteps)
+                .orElse(List.of());
+
+        String currentStep = run.getCurrentStep();
+        String status = run.getStatus();
+        Map<String, Object> stepResults = run.getStepResults() != null ? run.getStepResults() : Map.of();
+        boolean terminal = "completed".equals(status) || "failed".equals(status) || "cancelled".equals(status);
+
+        String currentStepName = null;
+        List<WorkflowRunDetail.StepProgress> steps = new java.util.ArrayList<>();
+        for (Map<String, Object> s : defSteps) {
+            String sid = s.get("id") != null ? s.get("id").toString() : null;
+            String sname = s.get("name") != null ? s.get("name").toString() : sid;
+            if (sid != null && sid.equals(currentStep)) {
+                currentStepName = sname;
+            }
+            String stepStatus;
+            if (sid != null && stepResults.containsKey(sid)) {
+                stepStatus = "completed";
+            } else if (sid != null && sid.equals(currentStep)) {
+                stepStatus = terminal ? status : "running";
+            } else {
+                stepStatus = "pending";
+            }
+            steps.add(new WorkflowRunDetail.StepProgress(sid, sname, stepStatus));
+        }
+
+        return new WorkflowRunDetail(
+                run.getId(), run.getWorkflowId(), run.getSessionId(), status,
+                currentStep, currentStepName, steps,
+                run.getStepResults(), run.getInputData(), run.getError(),
+                run.getStartedAt(), run.getCompletedAt(),
+                run.getParentRunId(), run.getParentStepId());
     }
 
     /**
@@ -352,4 +399,28 @@ public class WorkflowController {
     ) {}
 
     public record ApproveRequest(boolean approved, String reason) {}
+
+    /**
+     * run 단건 조회 응답 — 기존 run 필드를 그대로 미러링(하위호환)하면서
+     * 사람이 읽는 현재 스텝 이름과 전체 스텝 진행 목록을 덧붙인다.
+     */
+    public record WorkflowRunDetail(
+            UUID id,
+            String workflowId,
+            String sessionId,
+            String status,
+            String currentStep,
+            String currentStepName,
+            List<StepProgress> steps,
+            Map<String, Object> stepResults,
+            Map<String, Object> inputData,
+            Map<String, Object> error,
+            java.time.OffsetDateTime startedAt,
+            java.time.OffsetDateTime completedAt,
+            UUID parentRunId,
+            String parentStepId
+    ) {
+        /** 진행바용 스텝 1건. status = completed | running | pending | failed | cancelled. */
+        public record StepProgress(String id, String name, String status) {}
+    }
 }

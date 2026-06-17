@@ -519,6 +519,38 @@ GET /api/v1/workflows/{workflowId}/runs/{runId}
 }
 ```
 
+#### 진행 단계 표시 — `currentStepName` / `steps[]` (run 단건 조회)
+
+run **단건** 조회 2종 — `GET /api/v1/workflows/{id}/runs/{runId}` 과 `GET /api/v1/workflows/runs/{runId}` — 은
+기존 필드에 더해 **사람이 읽는 현재 스텝 이름**과 **전체 스텝 진행 목록**을 함께 반환합니다.
+화면에 "지금 어느 단계인지" / 진행바를 그릴 때 사용합니다.
+
+```json
+{
+  "data": {
+    "status": "running",
+    "currentStep": "verify_and_gapcheck",
+    "currentStepName": "분석 결과 검증 중",
+    "steps": [
+      {"id": "fetch_opportunity",  "name": "공고 정보 불러오는 중", "status": "completed"},
+      {"id": "verify_and_gapcheck","name": "분석 결과 검증 중",     "status": "running"},
+      {"id": "save",               "name": "추출 결과 저장",        "status": "pending"}
+    ]
+  }
+}
+```
+
+- `currentStep` — 스텝 **id**(개발용 식별자, 기존과 동일). `currentStepName` — 그 id 에 해당하는 WF 정의 step 의 `name`.
+- `steps[]` — WF 정의 순서대로 `{id, name, status}`. `status` 값:
+  - `completed` — 결과가 적재된 스텝(`stepResults` 에 키 존재)
+  - `running` — 현재 진행 스텝(run 이 진행 중일 때)
+  - `pending` — 아직 시작 안 한 스텝
+  - run 이 terminal(`completed`/`failed`/`cancelled`)이면 현재 스텝은 그 종료 상태로 표시
+- WF 정의를 찾지 못하면 `currentStepName=null`, `steps=[]` 로 graceful (나머지 필드 정상).
+- **하위호환**: 기존 필드(`currentStep`, `stepResults`, `status`, `startedAt` …)는 그대로 유지 — 신규 필드만 추가.
+- 목록 조회(`GET /workflows/{id}/runs`, `GET /workflows/runs`)에는 추가되지 않습니다. 전체 step 목록이
+  필요하면 `GET /workflows/{id}`(WF 정의)를 한 번 캐싱해 처리하세요.
+
 ### 4-6. 실행 상태
 
 | status | 설명 |
@@ -1885,6 +1917,7 @@ URL 에서 파일을 받아 워크스페이스에 **원본 그대로(바이너�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.12.0 | 2026-06-18 | **run 단건 조회에 진행 단계 이름·진행 목록 추가** (§ 4-5). run **단건** 조회 2종(`GET /workflows/{id}/runs/{runId}`, `GET /workflows/runs/{runId}`) 응답에 `currentStepName`(현재 `currentStep` id 에 해당하는 WF 정의 step 의 사람이 읽는 `name`) + `steps[]`(정의 순서대로 `{id, name, status}`, status = completed/running/pending, run terminal 시 현재 스텝은 종료 상태) 신규 추가. 소비앱이 "지금 어느 단계인지"/진행바를 step id 매핑 캐싱 없이 바로 표시. status·steps 도출은 BE 인메모리 lookup(WF 정의 1회 조회) — DB 스키마/마이그레이션 무변경. WF 정의 미존재 시 `currentStepName=null`·`steps=[]` graceful. 기존 필드(`currentStep`/`stepResults`/`status` …) 그대로 유지 = **하위호환**. 목록 조회(`/runs`)는 미적용(전체 step 은 `GET /workflows/{id}` 캐싱 권장) |
 | v3.11.1 | 2026-06-15 | **CR-095 후속 — PDF 페이지 분할 가드** (§ 18-4). 13MB/29p PDF AGENT_CALL(`parse_document`) 300초 turn timeout 해소. 근본원인=openclaude `getPDFPageCount > PDF_AT_MENTION_INLINE_THRESHOLD(10)` 가드 포팅 누락(3MB 크기 게이트만 가져옴) → >3MB PDF 첫 20p 통째 이미지화로 거대 입력. 해결: 사이드카 `pdf_page_count` MCP 도구 신설(렌더 없이 페이지 수) + `pdf_to_images` `total_pages` 반환 + `PdfVisionResolver` 페이지 가드(`aimbase.pdf.inline-page-threshold:10` 초과 & `pages` 미지정 시 `too_many_pages` 반환 → 모델이 `pages`로 분할 호출) + `parse_document` 도구 `pages` 파라미터 추가. 위젯/채팅 첨부는 1회성이라 가드 미적용(첫 max-pages-per-read). 사이드카 pdf_images 20 + ocr 26 + PdfVisionResolver 14 + tool/mcp.server 회귀 GREEN. 기존 동작 무변경 |
 | v3.11.0 | 2026-06-14 | **CR-107 — URL 파일 다운로드 도구 (`download_file`)** (§ 21). URL 에서 파일을 받아 워크스페이스에 원본 바이너리로 저장하는 네이티브 도구 신설. 입력 `url`(http/https) + `file_path`(+ `overwrite`), 출력 `{file_path, bytes_written, source_url, created, overwritten}`. 경로 검증은 `file_write` 와 동일 화이트리스트(L1 resolver + L2 게이트) 재사용, 다운로드 상한 50MB, connect 15s/request 120s, HTTP 2xx 외 실패, 기존 파일은 `overwrite` 없으면 거부(원본 보존). `file_write`(텍스트)·`parse_document`(다운로드 후 텍스트 변환)와 달리 바이너리 원본을 그대로 저장 — ZIP/이미지 등 후속 처리용. `SdkToolBeanConfig` @Bean 등록 + `McpExposurePolicy.CLI_EXPOSED` 추가(42→43, API/CLI 경로 동일 노출). `DownloadFileToolTest` 7 PASS + platform-core 회귀 GREEN. 기존 동작 무변경(신규 도구만 추가) |
 | v3.10.1 | 2026-06-14 | **CR-105 — § 4-7 소비앱 UI 권장 패턴 보강** (문서만). cancel 응답 `status` 를 그대로 화면에 박지 말 것 — `running` 취소 시 응답이 아직 `running` 이므로 "중지 요청 접수→`중지 중…` 낙관적 표시→SSE `workflow.done` 또는 `GET /runs/{runId}` 폴링으로 terminal 확정" 흐름 + 폴링 예시 코드 + 경계 케이스(중지보다 완료가 빨라 `completed` 로 끝날 수 있음) 추가. API 표면 무변화 |
