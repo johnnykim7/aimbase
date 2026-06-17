@@ -146,18 +146,38 @@ public class WorkflowController {
         }
     }
 
-    // CR-105: 워크플로우 실행 중지 (협조적)
+    // CR-105: 워크플로우 실행 중지 (협조적) / CR-116: force=true 시 강제 취소(CLI worker 즉시 kill)
     @PostMapping("/runs/{runId}/cancel")
-    @Operation(summary = "워크플로우 실행 중지 (협조적)",
-            description = "진행 중인 run 을 협조적으로 중지한다. running 은 다음 스텝 경계에서 멈추고, "
-                    + "pending_approval 은 즉시 cancelled 로 전이한다. 이미 종료된 run 은 변경 없이 반환.")
-    public ApiResponse<WorkflowRunEntity> cancel(@PathVariable UUID runId) {
+    @Operation(summary = "워크플로우 실행 중지",
+            description = "진행 중인 run 을 중지한다. 기본(협조적): running 은 다음 스텝 경계에서 멈추고, "
+                    + "pending_approval 은 즉시 cancelled 로 전이. 이미 종료된 run 은 변경 없이 반환. "
+                    + "CR-116: force=true 면 이 run 이 띄운 CLI worker(AGENT_CALL)를 즉시 kill 하고 즉시 cancelled 로 종료한다 "
+                    + "(스텝 경계까지 기다리지 않음 — hang 한 worker 로 협조적 cancel 이 안 먹는 상황 대비).")
+    public ApiResponse<WorkflowRunEntity> cancel(@PathVariable UUID runId,
+                                                  @RequestParam(value = "force", defaultValue = "false") boolean force) {
         try {
-            WorkflowRunEntity run = workflowEngine.cancelRun(runId);
+            WorkflowRunEntity run = workflowEngine.cancelRun(runId, force);
             return ApiResponse.ok(run);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
+    }
+
+    // CR-116: 워크플로우 run 재실행 — 원 run 의 입력(input_data)으로 같은 워크플로우를 새 run 으로 다시 실행
+    @PostMapping("/runs/{runId}/rerun")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @Operation(summary = "워크플로우 run 재실행",
+            description = "지정 run 의 워크플로우와 입력(input_data)을 그대로 사용해 새 run 으로 다시 실행한다. "
+                    + "원 run 은 보존되고 새 runId 가 발급된다. 취소/실패한 run 을 같은 조건으로 재시도할 때 사용.")
+    public ApiResponse<WorkflowRunEntity> rerun(@PathVariable UUID runId) {
+        WorkflowRunEntity source = workflowRunRepository.findById(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Workflow run not found: " + runId));
+        if (!workflowRepository.existsById(source.getWorkflowId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Workflow not found for rerun: " + source.getWorkflowId());
+        }
+        WorkflowRunEntity run = workflowEngine.execute(source.getWorkflowId(), source.getInputData(), null);
+        return ApiResponse.ok(run);
     }
 
     @GetMapping("/{id}/runs")

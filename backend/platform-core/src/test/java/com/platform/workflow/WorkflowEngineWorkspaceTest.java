@@ -47,7 +47,9 @@ class WorkflowEngineWorkspaceTest {
                 mock(com.platform.workflow.event.WorkflowEventPublisher.class),
                 null,
                 ssProvider,
-                wpProvider);
+                wpProvider,
+                null,   // CR-116: activeCliWorkerRegistryProvider
+                null);  // CR-116: connectionAdapterFactoryProvider
     }
 
     private WorkspaceProperties propsWithBase(String base) {

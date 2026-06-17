@@ -47,7 +47,17 @@ class WorkflowEngineCancelTest {
     private PendingApprovalRepository approvalRepository;
     private PlatformMetrics metrics;
     private WorkflowEventPublisher eventPublisher;
+    private com.platform.agent.ActiveCliWorkerRegistry workerRegistry;
+    private com.platform.llm.ConnectionAdapterFactory adapterFactory;
     private WorkflowEngine engine;
+
+    @SuppressWarnings("unchecked")
+    private static <T> org.springframework.beans.factory.ObjectProvider<T> provider(T value) {
+        org.springframework.beans.factory.ObjectProvider<T> p =
+                mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(p.getIfAvailable()).thenReturn(value);
+        return p;
+    }
 
     @BeforeEach
     void setUp() {
@@ -55,6 +65,8 @@ class WorkflowEngineCancelTest {
         approvalRepository = mock(PendingApprovalRepository.class);
         metrics = mock(PlatformMetrics.class);
         eventPublisher = mock(WorkflowEventPublisher.class);
+        workerRegistry = mock(com.platform.agent.ActiveCliWorkerRegistry.class);
+        adapterFactory = mock(com.platform.llm.ConnectionAdapterFactory.class);
         engine = new WorkflowEngine(
                 mock(WorkflowRepository.class),
                 runRepository,
@@ -65,7 +77,9 @@ class WorkflowEngineCancelTest {
                 eventPublisher,
                 null,
                 null,
-                null);
+                null,
+                provider(workerRegistry),       // CR-116
+                provider(adapterFactory));       // CR-116
     }
 
     private WorkflowRunEntity run(UUID id, String status) {
@@ -184,5 +198,64 @@ class WorkflowEngineCancelTest {
         UUID id = UUID.randomUUID();
         assertThat(engine.requestCancel(id)).isTrue();
         assertThat(engine.requestCancel(id)).isFalse();
+    }
+
+    @Nested
+    @DisplayName("CR-116 force=true — CLI worker 즉시 kill + 즉시 cancelled")
+    class ForceCancel {
+        @Test
+        @DisplayName("running + force → worker.cleanupSession 호출 + status=cancelled 저장 + 이벤트/메트릭 발행")
+        void forceKillsWorkerAndTerminates() {
+            UUID id = UUID.randomUUID();
+            WorkflowRunEntity r = run(id, "running");
+            when(runRepository.findById(id)).thenReturn(Optional.of(r));
+            when(runRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var w1 = new com.platform.agent.ActiveCliWorkerRegistry.WorkerRef("subagent-aaa", "conn-1");
+            var w2 = new com.platform.agent.ActiveCliWorkerRegistry.WorkerRef("subagent-bbb", "conn-1");
+            when(workerRegistry.workersOf(id.toString())).thenReturn(List.of(w1, w2));
+            com.platform.llm.adapter.LLMAdapter adapter = mock(com.platform.llm.adapter.LLMAdapter.class);
+            when(adapterFactory.getAdapter("conn-1")).thenReturn(adapter);
+
+            WorkflowRunEntity result = engine.cancelRun(id, true);
+
+            verify(adapter).cleanupSession("subagent-aaa");
+            verify(adapter).cleanupSession("subagent-bbb");
+            assertThat(result.getStatus()).isEqualTo("cancelled");
+            assertThat(result.getCompletedAt()).isNotNull();
+            verify(runRepository).saveAndFlush(r);
+            verify(metrics).recordWorkflowExecution("cancelled");
+            verify(eventPublisher).runCompleted(eq(id), any(), eq("cancelled"), org.mockito.ArgumentMatchers.anyLong());
+        }
+
+        @Test
+        @DisplayName("활성 worker 없어도 force → kill 호출 0건이지만 즉시 cancelled")
+        void forceWithNoWorkersStillTerminates() {
+            UUID id = UUID.randomUUID();
+            WorkflowRunEntity r = run(id, "running");
+            when(runRepository.findById(id)).thenReturn(Optional.of(r));
+            when(runRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(workerRegistry.workersOf(id.toString())).thenReturn(List.of());
+
+            WorkflowRunEntity result = engine.cancelRun(id, true);
+
+            assertThat(result.getStatus()).isEqualTo("cancelled");
+            verify(adapterFactory, never()).getAdapter(any());
+            verify(eventPublisher).runCompleted(eq(id), any(), eq("cancelled"), org.mockito.ArgumentMatchers.anyLong());
+        }
+
+        @Test
+        @DisplayName("force=false(기본) → 협조적 동작 유지 (worker 조회/kill 안 함)")
+        void nonForceStaysCooperative() {
+            UUID id = UUID.randomUUID();
+            WorkflowRunEntity r = run(id, "running");
+            when(runRepository.findById(id)).thenReturn(Optional.of(r));
+
+            WorkflowRunEntity result = engine.cancelRun(id, false);
+
+            assertThat(result.getStatus()).isEqualTo("running");
+            verify(workerRegistry, never()).workersOf(any());
+            verify(runRepository, never()).saveAndFlush(any());
+        }
     }
 }

@@ -55,6 +55,10 @@ public class WorkflowEngine {
     // CR-107 후속: 워크플로우 run 마다 격리 workspace 경로를 만들기 위한 base. 옵셔널.
     private final com.platform.config.WorkspaceProperties workspaceProperties;
 
+    // CR-116: 강제 취소 시 run→CLI worker 역추적 + worker kill 용. 옵셔널(미주입 시 force 는 협조적 표식만).
+    private final com.platform.agent.ActiveCliWorkerRegistry activeCliWorkerRegistry;
+    private final com.platform.llm.ConnectionAdapterFactory connectionAdapterFactory;
+
     /**
      * CR-105: 협조적 중지 요청 집합 — {@link #requestCancel(UUID)} 가 runId 를 넣고,
      * DAG/cyclic 실행 루프가 스텝 경계에서 {@link #isCancelRequested(String)} 로 검사한다.
@@ -72,7 +76,9 @@ public class WorkflowEngine {
                           com.platform.workflow.event.WorkflowEventPublisher eventPublisher,
                           org.springframework.beans.factory.ObjectProvider<com.platform.workflow.event.WorkflowRunEventRecorder> eventRecorderProvider,
                           org.springframework.beans.factory.ObjectProvider<com.platform.session.SessionStore> sessionStoreProvider,
-                          org.springframework.beans.factory.ObjectProvider<com.platform.config.WorkspaceProperties> workspacePropertiesProvider) {
+                          org.springframework.beans.factory.ObjectProvider<com.platform.config.WorkspaceProperties> workspacePropertiesProvider,
+                          org.springframework.beans.factory.ObjectProvider<com.platform.agent.ActiveCliWorkerRegistry> activeCliWorkerRegistryProvider,
+                          org.springframework.beans.factory.ObjectProvider<com.platform.llm.ConnectionAdapterFactory> connectionAdapterFactoryProvider) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -85,6 +91,9 @@ public class WorkflowEngine {
         this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
         this.sessionStore = sessionStoreProvider != null ? sessionStoreProvider.getIfAvailable() : null;
         this.workspaceProperties = workspacePropertiesProvider != null ? workspacePropertiesProvider.getIfAvailable() : null;
+        // CR-116: 옵셔널 — 미주입 환경(일부 단위 테스트)에서는 force 가 협조적 표식만 남긴다.
+        this.activeCliWorkerRegistry = activeCliWorkerRegistryProvider != null ? activeCliWorkerRegistryProvider.getIfAvailable() : null;
+        this.connectionAdapterFactory = connectionAdapterFactoryProvider != null ? connectionAdapterFactoryProvider.getIfAvailable() : null;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
@@ -128,6 +137,18 @@ public class WorkflowEngine {
      * @throws IllegalArgumentException run 미존재 시
      */
     public WorkflowRunEntity cancelRun(UUID runId) {
+        return cancelRun(runId, false);
+    }
+
+    /**
+     * 워크플로우 run 중지. CR-116: {@code force=true} 면 협조적 표식에 더해 해당 run 이 띄운 CLI worker 를
+     * 즉시 kill 하고 run 을 즉시 cancelled 로 종료한다(스텝 경계까지 기다리지 않음).
+     *
+     * <p>협조적 cancel(force=false)은 백그라운드 루프가 스텝 경계에서만 표식을 검사하므로, hang 한
+     * CLI worker(예: CLI-INIT 미도달 600s 대기)를 기다리는 스텝 안에 막혀 있으면 즉효가 없다. force 는
+     * {@link ActiveCliWorkerRegistry}로 worker(childSessionId)를 역추적해 직접 kill 하여 그 교착을 끊는다.
+     */
+    public WorkflowRunEntity cancelRun(UUID runId, boolean force) {
         WorkflowRunEntity run = workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Workflow run not found: " + runId));
 
@@ -158,9 +179,50 @@ public class WorkflowEngine {
             return run;
         }
 
-        // running (또는 그 외 진행 상태) — 표식만 세우고 백그라운드 루프에 맡긴다.
+        // running (또는 그 외 진행 상태) — 협조적 표식은 항상 세운다(백그라운드 루프 폴백 + 멀티노드 안전).
         requestCancel(runId);
+
+        if (force) {
+            // CR-116: 강제 취소 — 이 run 이 띄운 CLI worker 를 즉시 kill 하고 run 을 즉시 cancelled 로 종료.
+            killWorkersForRun(runId);
+            run.setStatus("cancelled");
+            run.setCompletedAt(OffsetDateTime.now());
+            workflowRunRepository.saveAndFlush(run);
+            platformMetrics.recordWorkflowExecution("cancelled");
+            if (eventPublisher != null) {
+                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "cancelled", runDurationMs(run));
+            }
+            clearCancel(runId.toString());
+            log.info("Run '{}' force-cancelled (CLI workers killed)", runId);
+        }
         return run;
+    }
+
+    /**
+     * CR-116: 해당 run 이 현재 띄운 CLI worker(AGENT_CALL)를 모두 kill 한다(best-effort).
+     * {@link ActiveCliWorkerRegistry}에서 (childSessionId, connectionId)를 역추적하고, connectionId 의
+     * 어댑터 {@code cleanupSession(childSessionId)}(=Runner cancel 신호, CR-114 와 동일 부품)으로 정리한다.
+     * registry/adapterFactory 가 주입되지 않은 환경(일부 테스트)이면 무동작 — 협조적 표식만 남는다.
+     */
+    private void killWorkersForRun(UUID runId) {
+        if (activeCliWorkerRegistry == null || connectionAdapterFactory == null) {
+            log.warn("CR-116: force cancel 요청됐으나 worker registry/adapterFactory 미주입 — 협조적 표식만 적용 (run={})", runId);
+            return;
+        }
+        var workers = activeCliWorkerRegistry.workersOf(runId.toString());
+        if (workers.isEmpty()) {
+            log.info("CR-116: run '{}' 에 활성 CLI worker 없음 (이미 종료됐거나 비-CLI 경로)", runId);
+            return;
+        }
+        for (var w : workers) {
+            if (w.connectionId() == null || w.connectionId().isBlank()) continue;
+            try {
+                connectionAdapterFactory.getAdapter(w.connectionId()).cleanupSession(w.childSessionId());
+                log.info("CR-116: killed CLI worker run={} childSession={}", runId, w.childSessionId());
+            } catch (Exception e) {
+                log.warn("CR-116: worker kill 실패 run={} childSession={}: {}", runId, w.childSessionId(), e.getMessage());
+            }
+        }
     }
 
     /** 실행 루프 체크포인트 — 이 run 에 중지 요청이 걸려 있는지. */

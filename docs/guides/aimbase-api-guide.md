@@ -610,6 +610,35 @@ async function cancelRun(runId) {
 
 > 경계 케이스: `running` 을 취소했는데 그 사이 워크플로우가 마지막 스텝까지 끝나버리면 최종 status 가 `completed` 일 수 있습니다(중지보다 완료가 빨랐던 경우). UI 는 "중지됨"만이 아니라 **terminal 상태 자체**를 받아 표시하세요.
 
+#### 강제 취소 `?force=true` [CR-116]
+
+협조적 cancel(§ 4-7 기본)은 **다음 스텝 경계에서만** 표식을 검사합니다. 그래서 진행 중인 한 스텝(특히 AGENT_CALL 의 CLI worker)이 **응답 전 hang** 하면(예: CLI 초기화 미도달로 turn timeout 까지 대기) 협조적 cancel 이 즉시 먹지 않습니다. 이때 `force=true` 를 쓰면 그 교착을 끊습니다.
+
+```bash
+curl -X POST "/api/v1/workflows/runs/{runId}/cancel?force=true"
+# → { "data": { "id": "run_xxx", "status": "cancelled" } }   # 즉시 cancelled
+```
+
+- **같은 엔드포인트**입니다. `force` 파라미터를 생략하면(또는 `false`) 기존 협조적 동작 그대로 — **하위호환**.
+- `force=true` 동작: 이 run 이 띄운 CLI worker(AGENT_CALL)를 **즉시 kill** 하고 run 을 **즉시 `cancelled`** 로 종료(스텝 경계까지 기다리지 않음). 응답 status 가 바로 `cancelled` 이므로 § 4-7 의 후속 폴링이 필요 없습니다.
+- 협조적 표식도 함께 남겨, worker 매핑을 못 찾는 경우(이미 종료/멀티노드)에도 다음 스텝 경계 폴백이 작동합니다.
+- `pending_approval`/terminal 은 기본 cancel 과 동일하게 처리(force 무관).
+
+> 권장: 평상시엔 협조적 cancel(`force` 없음)을 쓰고, "취소를 눌렀는데 한참 안 멈춘다" 싶을 때 사용자에게 **강제 취소** 버튼을 노출하세요.
+
+#### 재실행 [CR-116]
+
+종료된(또는 취소한) run 을 **같은 워크플로우 + 같은 입력**으로 새 run 으로 다시 실행합니다.
+
+```bash
+curl -X POST /api/v1/workflows/runs/{runId}/rerun
+# → 202 Accepted, { "data": { "id": "<새 runId>", "status": "running", ... } }
+```
+
+- 원 run 의 `input_data` 와 `workflowId` 를 그대로 사용 — 새 `runId` 가 발급되고 **원 run 은 보존**됩니다.
+- 응답의 새 `runId` 로 § 4-5 조회/§ 17-6 SSE 구독을 이어가세요.
+- run 미존재 / 해당 워크플로우 미존재 시 `404`.
+
 ### 4-8. 삭제
 
 ```bash
@@ -1031,7 +1060,8 @@ GET /api/v1/agents/active
 | PUT | `/workflows/{id}` | 수정 |
 | DELETE | `/workflows/{id}` | 삭제 |
 | POST | `/workflows/{id}/run` | 실행 |
-| POST | `/workflows/runs/{runId}/cancel` | 실행 중지 (협조적) [CR-105] |
+| POST | `/workflows/runs/{runId}/cancel` | 실행 중지 (협조적) [CR-105] / `?force=true` 강제 취소 — CLI worker 즉시 kill [CR-116] |
+| POST | `/workflows/runs/{runId}/rerun` | 재실행 — 같은 입력으로 새 run [CR-116] |
 | POST | `/workflows/runs/{runId}/approve` | HUMAN_INPUT 스텝 승인/거부 |
 | GET | `/workflows/{id}/runs` | 실행 이력 |
 | GET | `/workflows/{id}/runs/{runId}` | 실행 결과 조회 |
@@ -1917,6 +1947,7 @@ URL 에서 파일을 받아 워크스페이스에 **원본 그대로(바이너�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.13.0 | 2026-06-18 | **CR-116 — 워크플로우 run 강제 취소 + 재실행** (§ 4-7). ① **강제 취소**: 기존 `POST /workflows/runs/{runId}/cancel` 에 `?force=true` 파라미터 추가(같은 엔드포인트, 미지정 시 기존 협조적 동작 = **하위호환**). 협조적 cancel 은 스텝 경계에서만 표식을 검사해, AGENT_CALL 의 CLI worker 가 응답 전 hang 하면 즉시 안 먹는다 → `force=true` 면 그 run 이 띄운 CLI worker 를 즉시 kill(`ActiveCliWorkerRegistry` 로 workflowRunId→childSessionId 역추적 후 CR-114 와 동일 Runner cancel 부품 재사용) 하고 즉시 `cancelled` 로 종료(후속 폴링 불요). worker 매핑 못 찾는 경우 협조적 표식 폴백. ② **재실행**: `POST /workflows/runs/{runId}/rerun` 신설 — 원 run 의 `input_data`+`workflowId` 로 새 run 실행(원 run 보존, 새 runId 반환, 202). DB 스키마/마이그레이션 무변경(인메모리 레지스트리, input_data 기존 컬럼). 단위 — ActiveCliWorkerRegistry 5 + WorkflowEngineCancel force 3 + 회귀 GREEN(71 PASS) |
 | v3.12.0 | 2026-06-18 | **run 단건 조회에 진행 단계 이름·진행 목록 추가** (§ 4-5). run **단건** 조회 2종(`GET /workflows/{id}/runs/{runId}`, `GET /workflows/runs/{runId}`) 응답에 `currentStepName`(현재 `currentStep` id 에 해당하는 WF 정의 step 의 사람이 읽는 `name`) + `steps[]`(정의 순서대로 `{id, name, status}`, status = completed/running/pending, run terminal 시 현재 스텝은 종료 상태) 신규 추가. 소비앱이 "지금 어느 단계인지"/진행바를 step id 매핑 캐싱 없이 바로 표시. status·steps 도출은 BE 인메모리 lookup(WF 정의 1회 조회) — DB 스키마/마이그레이션 무변경. WF 정의 미존재 시 `currentStepName=null`·`steps=[]` graceful. 기존 필드(`currentStep`/`stepResults`/`status` …) 그대로 유지 = **하위호환**. 목록 조회(`/runs`)는 미적용(전체 step 은 `GET /workflows/{id}` 캐싱 권장) |
 | v3.11.1 | 2026-06-15 | **CR-095 후속 — PDF 페이지 분할 가드** (§ 18-4). 13MB/29p PDF AGENT_CALL(`parse_document`) 300초 turn timeout 해소. 근본원인=openclaude `getPDFPageCount > PDF_AT_MENTION_INLINE_THRESHOLD(10)` 가드 포팅 누락(3MB 크기 게이트만 가져옴) → >3MB PDF 첫 20p 통째 이미지화로 거대 입력. 해결: 사이드카 `pdf_page_count` MCP 도구 신설(렌더 없이 페이지 수) + `pdf_to_images` `total_pages` 반환 + `PdfVisionResolver` 페이지 가드(`aimbase.pdf.inline-page-threshold:10` 초과 & `pages` 미지정 시 `too_many_pages` 반환 → 모델이 `pages`로 분할 호출) + `parse_document` 도구 `pages` 파라미터 추가. 위젯/채팅 첨부는 1회성이라 가드 미적용(첫 max-pages-per-read). 사이드카 pdf_images 20 + ocr 26 + PdfVisionResolver 14 + tool/mcp.server 회귀 GREEN. 기존 동작 무변경 |
 | v3.11.0 | 2026-06-14 | **CR-107 — URL 파일 다운로드 도구 (`download_file`)** (§ 21). URL 에서 파일을 받아 워크스페이스에 원본 바이너리로 저장하는 네이티브 도구 신설. 입력 `url`(http/https) + `file_path`(+ `overwrite`), 출력 `{file_path, bytes_written, source_url, created, overwritten}`. 경로 검증은 `file_write` 와 동일 화이트리스트(L1 resolver + L2 게이트) 재사용, 다운로드 상한 50MB, connect 15s/request 120s, HTTP 2xx 외 실패, 기존 파일은 `overwrite` 없으면 거부(원본 보존). `file_write`(텍스트)·`parse_document`(다운로드 후 텍스트 변환)와 달리 바이너리 원본을 그대로 저장 — ZIP/이미지 등 후속 처리용. `SdkToolBeanConfig` @Bean 등록 + `McpExposurePolicy.CLI_EXPOSED` 추가(42→43, API/CLI 경로 동일 노출). `DownloadFileToolTest` 7 PASS + platform-core 회귀 GREEN. 기존 동작 무변경(신규 도구만 추가) |

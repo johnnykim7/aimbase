@@ -49,7 +49,8 @@ class AgentOrchestratorTest {
                         AgentType.GENERAL, "범용 에이전트", null, false));
 
         SubagentRunner runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory,
+                new com.platform.agent.ActiveCliWorkerRegistry());
         orchestrator = new AgentOrchestrator(runner);
     }
 

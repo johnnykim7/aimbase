@@ -77,6 +77,8 @@ public class SubagentRunner {
     private final AgentTypeRegistry agentTypeRegistry;
     private final PlanService planService;
     private final ConnectionAdapterFactory connectionAdapterFactory;
+    /** CR-116: 강제 취소가 worker 를 역추적하도록 workflowRunId→childSessionId 매핑 등록. */
+    private final ActiveCliWorkerRegistry activeCliWorkerRegistry;
 
     public SubagentRunner(OrchestratorEngine orchestratorEngine,
                           SubagentRunRepository subagentRunRepository,
@@ -85,7 +87,8 @@ public class SubagentRunner {
                           SubagentLifecycleManager lifecycleManager,
                           AgentTypeRegistry agentTypeRegistry,
                           PlanService planService,
-                          ConnectionAdapterFactory connectionAdapterFactory) {
+                          ConnectionAdapterFactory connectionAdapterFactory,
+                          ActiveCliWorkerRegistry activeCliWorkerRegistry) {
         this.orchestratorEngine = orchestratorEngine;
         this.subagentRunRepository = subagentRunRepository;
         this.worktreeManager = worktreeManager;
@@ -94,6 +97,7 @@ public class SubagentRunner {
         this.agentTypeRegistry = agentTypeRegistry;
         this.planService = planService;
         this.connectionAdapterFactory = connectionAdapterFactory;
+        this.activeCliWorkerRegistry = activeCliWorkerRegistry;
     }
 
     /**
@@ -121,6 +125,10 @@ public class SubagentRunner {
         String childSessionId = (request.resumeSessionId() != null && !request.resumeSessionId().isBlank())
                 ? request.resumeSessionId()
                 : "subagent-" + UUID.randomUUID();
+
+        // CR-116: 이 AGENT_CALL 의 worker 를 워크플로우 run 에 연결 — 강제 취소가 역추적해 kill 할 수 있도록.
+        // (workflowRunId/connectionId 가 없는 비워크플로우 경로면 register 가 무동작)
+        activeCliWorkerRegistry.register(request.workflowRunId(), childSessionId, request.connectionId());
 
         // 1. Worktree 격리 설정
         WorktreeContext worktreeCtx = null;
@@ -224,6 +232,10 @@ public class SubagentRunner {
             cleanupWorktree(context);
             dispatchStopHook(context, result);
             return result;
+        } finally {
+            // CR-116: 모든 종료 경로(정상/timeout/실패)에서 worker 레지스트리 해제 — 누수 방지.
+            activeCliWorkerRegistry.unregister(
+                    context.getRequest().workflowRunId(), context.getChildSessionId());
         }
     }
 
@@ -253,6 +265,9 @@ public class SubagentRunner {
             } finally {
                 STREAM_SINK.remove();
                 com.platform.tenant.TenantContext.clear();
+                // CR-116: 백그라운드 종료 시에도 worker 레지스트리 해제.
+                activeCliWorkerRegistry.unregister(
+                        context.getRequest().workflowRunId(), context.getChildSessionId());
             }
         });
 

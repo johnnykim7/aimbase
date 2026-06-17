@@ -49,7 +49,8 @@ class SubagentRunnerCr114Test {
     @BeforeEach
     void setUp() {
         runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory,
+                new com.platform.agent.ActiveCliWorkerRegistry());
 
         lenient().when(hookDispatcher.dispatch(any(), any())).thenReturn(HookOutput.PASSTHROUGH);
         lenient().when(subagentRunRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
