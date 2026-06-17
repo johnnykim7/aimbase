@@ -34,4 +34,13 @@ public interface LLMAdapter {
     default AdapterCapability capabilities() {
         return AdapterCapability.NONE;
     }
+
+    /**
+     * CR-114: run(또는 서브에이전트 turn) 정상 종료 시 어댑터별 세션 자원을 결정적으로 정리한다.
+     *
+     * <p>기본은 no-op. worker pool 을 두는 어댑터(예: {@code ClaudeCliAdapter})만 오버라이드하여
+     * 해당 sessionId 의 워커(claude CLI 프로세스)를 닫는다. CR-109 가 timeout/실패 경로만 정리했던 것과 달리,
+     * 정상 완료(success) 경로에서도 호출되어 좀비 워커 누수를 막는다. best-effort — 정리 실패가 호출처 흐름을 막지 않는다.
+     */
+    default void cleanupSession(String sessionId) { }
 }

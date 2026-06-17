@@ -5,6 +5,7 @@ import com.platform.domain.SubagentRunEntity;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookEvent;
 import com.platform.hook.HookInput;
+import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.TokenUsage;
 import com.platform.llm.model.UnifiedMessage;
@@ -75,6 +76,7 @@ public class SubagentRunner {
     private final SubagentLifecycleManager lifecycleManager;
     private final AgentTypeRegistry agentTypeRegistry;
     private final PlanService planService;
+    private final ConnectionAdapterFactory connectionAdapterFactory;
 
     public SubagentRunner(OrchestratorEngine orchestratorEngine,
                           SubagentRunRepository subagentRunRepository,
@@ -82,7 +84,8 @@ public class SubagentRunner {
                           HookDispatcher hookDispatcher,
                           SubagentLifecycleManager lifecycleManager,
                           AgentTypeRegistry agentTypeRegistry,
-                          PlanService planService) {
+                          PlanService planService,
+                          ConnectionAdapterFactory connectionAdapterFactory) {
         this.orchestratorEngine = orchestratorEngine;
         this.subagentRunRepository = subagentRunRepository;
         this.worktreeManager = worktreeManager;
@@ -90,6 +93,7 @@ public class SubagentRunner {
         this.lifecycleManager = lifecycleManager;
         this.agentTypeRegistry = agentTypeRegistry;
         this.planService = planService;
+        this.connectionAdapterFactory = connectionAdapterFactory;
     }
 
     /**
@@ -311,6 +315,9 @@ public class SubagentRunner {
         // null 이면 GENERAL 의 무제한 동작 유지.
         ToolFilterContext toolFilter = buildToolFilter(typeConfig);
 
+        // CR-107 디버그: 서브에이전트가 받은 workspacePath 추적.
+        log.info("[CR107-DEBUG] SubagentRunner chatRequest: childSessionId={}, req.workspacePath={}",
+                context.getChildSessionId(), req.workspacePath());
         // OrchestratorEngine에 ChatRequest 위임
         // CR-102: workflowRunId/stepId/subagentRunId 전파 — 도구 루프 이벤트를 run 타임라인에 연결
         ChatRequest chatRequest = new ChatRequest(
@@ -371,10 +378,33 @@ public class SubagentRunner {
                     durationMs, startedAt);
         }
 
+        // CR-114: AGENT_CALL 정상 완료 — CLI worker 가 Runner pool 에 좀비로 남지 않도록 결정적 정리.
+        // resume(timeout retry 이어하기) 대상 세션은 다음 retry 가 살아있는 워커를 재사용할 수 있으므로 건드리지 않는다.
+        // CLI 외 어댑터는 cleanupSession 기본 no-op 이라 worker 가 없는데 cancel 을 부르는 오류가 없다. best-effort.
+        cleanupCliWorker(req, context.getChildSessionId());
+
         return SubagentResult.completed(
                 context.getSubagentRunId(), context.getChildSessionId(),
                 output, structured, response.usage(), durationMs,
                 startedAt, worktreePath, branchName);
+    }
+
+    /**
+     * CR-114: 정상 완료된 서브에이전트 turn 의 CLI 워커를 닫는다. resume 신규 실행에만 적용(retry 이어하기 보호).
+     * 어댑터는 connectionId 라우팅으로 재현해 얻고, CLI 어댑터만 실제 정리(나머지는 no-op)한다.
+     */
+    private void cleanupCliWorker(SubagentRequest req, String childSessionId) {
+        if (req.resumeSessionId() != null && !req.resumeSessionId().isBlank()) {
+            return; // resume 이어하기 대상 — 워커를 닫지 않는다.
+        }
+        if (req.connectionId() == null || req.connectionId().isBlank()) {
+            return; // connectionId 없으면 modelRouter 라우팅(CLI 아님) — worker pool 자체가 없다.
+        }
+        try {
+            connectionAdapterFactory.getAdapter(req.connectionId()).cleanupSession(childSessionId);
+        } catch (Exception e) {
+            log.warn("CR-114: 정상 완료 후 worker cleanup 실패 (childSession={}): {}", childSessionId, e.getMessage());
+        }
     }
 
     // ── 훅 디스패치 ──

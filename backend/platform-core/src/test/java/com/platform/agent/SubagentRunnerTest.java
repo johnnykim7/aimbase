@@ -3,6 +3,7 @@ package com.platform.agent;
 import com.platform.domain.SubagentRunEntity;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookOutput;
+import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.TokenUsage;
 import com.platform.orchestrator.ChatResponse;
@@ -38,13 +39,14 @@ class SubagentRunnerTest {
     @Mock private SubagentLifecycleManager lifecycleManager;
     @Mock private AgentTypeRegistry agentTypeRegistry;
     @Mock private PlanService planService;
+    @Mock private ConnectionAdapterFactory connectionAdapterFactory;
 
     private SubagentRunner runner;
 
     @BeforeEach
     void setUp() {
         runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory);
 
         lenient().when(hookDispatcher.dispatch(any(), any()))
                 .thenReturn(HookOutput.PASSTHROUGH);

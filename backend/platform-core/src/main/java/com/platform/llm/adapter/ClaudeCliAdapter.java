@@ -146,6 +146,24 @@ public class ClaudeCliAdapter implements LLMAdapter {
     }
 
     /**
+     * CR-114: AGENT_CALL(CLI 자율주행) 이 <b>정상 완료</b>된 뒤, Runner pool 에 남는 워커(claude CLI 프로세스)를
+     * 결정적으로 닫는다. CR-109 의 {@link #cancelIfTimeout}(timeout/실패 catch 경로)와 같은 {@code runnerClient.cancel}
+     * 신호를 공유하되, 이쪽은 예외 없이 끝난 success 경로에서 호출된다. completed run 은 같은 sessionId 로 다시 호출될 일이
+     * 없으므로 워커를 닫지 않으면 pool 에 영구 좀비로 남는다(운영 8시간 생존 0cb2ae03 사례). best-effort.
+     */
+    @Override
+    public void cleanupSession(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return;
+        try {
+            AgentEndpoint endpoint = resolveEndpoint();
+            log.info("CR-114: 정상 완료 — Runner cancel 신호 전송 (runId={})", sessionId);
+            runnerClient.cancel(endpoint, sessionId, runnerApiKey);
+        } catch (RuntimeException e) {
+            log.warn("CR-114: 정상 완료 후 worker 정리 실패 (runId={}): {}", sessionId, e.getMessage());
+        }
+    }
+
+    /**
      * CR-082: runner 호출 실패의 원인을 진단 로그/에러 메시지에 식별 가능한 사유 코드로 분류.
      * 정확한 사유보다 "어디서 끊겼는지" 단서 하나가 운영 진단을 빠르게 한다.
      */

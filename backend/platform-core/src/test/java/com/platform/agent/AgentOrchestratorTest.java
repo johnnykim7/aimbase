@@ -1,5 +1,6 @@
 package com.platform.agent;
 
+import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.TokenUsage;
 import com.platform.orchestrator.ChatResponse;
@@ -33,6 +34,7 @@ class AgentOrchestratorTest {
     @Mock private SubagentLifecycleManager lifecycleManager;
     @Mock private AgentTypeRegistry agentTypeRegistry;
     @Mock private PlanService planService;
+    @Mock private ConnectionAdapterFactory connectionAdapterFactory;
 
     private AgentOrchestrator orchestrator;
 
@@ -47,7 +49,7 @@ class AgentOrchestratorTest {
                         AgentType.GENERAL, "범용 에이전트", null, false));
 
         SubagentRunner runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
-                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService);
+                worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory);
         orchestrator = new AgentOrchestrator(runner);
     }
 
