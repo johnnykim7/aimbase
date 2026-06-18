@@ -235,6 +235,63 @@ class ServerMcpToolDispatcherTest {
         verify(hookDispatcher, times(1)).dispatch(eq(HookEvent.POST_TOOL_USE_FAILURE), any(), eq("parse_document"));
     }
 
+    // ── CR-117: 서버 MCP 도구가 run 격리 작업장(workspacePath)을 ToolContext 로 받는지 검증 ──
+
+    @Test
+    void cr117_workspace_header_propagated_into_toolcontext() {
+        java.util.concurrent.atomic.AtomicReference<ToolContext> captured =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        ToolExecutor tool = capturingEnhancedTool("file_write", captured);
+
+        com.platform.llm.adapter.RequestContext.setWorkspacePath(
+                "/data/workspace/bidding_system/runs/316d510c");
+        try {
+            McpSchema.CallToolResult result = dispatcher.dispatch(tool, "file_write", Map.of());
+            assertThat(result.isError()).isFalse();
+        } finally {
+            com.platform.llm.adapter.RequestContext.clear();
+        }
+
+        assertThat(captured.get()).isNotNull();
+        assertThat(captured.get().workspacePath())
+                .isEqualTo("/data/workspace/bidding_system/runs/316d510c");
+    }
+
+    @Test
+    void cr117_no_workspace_header_falls_back_to_null_workspacePath() {
+        java.util.concurrent.atomic.AtomicReference<ToolContext> captured =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        ToolExecutor tool = capturingEnhancedTool("file_write", captured);
+
+        // RequestContext 미설정 → 기존 minimal(null,null) 동작 = workspacePath null
+        com.platform.llm.adapter.RequestContext.clear();
+        McpSchema.CallToolResult result = dispatcher.dispatch(tool, "file_write", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(captured.get()).isNotNull();
+        assertThat(captured.get().workspacePath()).isNull();
+    }
+
+    private static ToolExecutor capturingEnhancedTool(
+            String name, java.util.concurrent.atomic.AtomicReference<ToolContext> sink) {
+        UnifiedToolDef def = new UnifiedToolDef(name, "test", Map.of("type", "object"));
+        ToolResult result = new ToolResult(true, Map.of("ok", true), "wrote",
+                List.of(), List.of(), Map.of(), null, 0);
+        return new EnhancedToolExecutor() {
+            @Override
+            public UnifiedToolDef getDefinition() { return def; }
+
+            @Override
+            public ToolContractMeta getContractMeta() { return contractMeta(name); }
+
+            @Override
+            public ToolResult execute(Map<String, Object> input, ToolContext ctx) {
+                sink.set(ctx);
+                return result;
+            }
+        };
+    }
+
     private static ToolExecutor stubEnhancedTool(String name, ToolResult result) {
         UnifiedToolDef def = new UnifiedToolDef(name, "test", Map.of("type", "object"));
         return new EnhancedToolExecutor() {

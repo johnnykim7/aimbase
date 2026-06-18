@@ -259,6 +259,92 @@ class ClaudeCliWorkerTest {
         assertThat(resp.finishReason()).isEqualTo(LLMResponse.FinishReason.END);
     }
 
+    @Test
+    void cr117_workingDirectory_injects_workspace_header_into_aimbase_server_mcp_config() throws IOException {
+        Path argsDump = tempDir.resolve("args-ws-" + System.nanoTime() + ".txt");
+        Path argStub = writeStub("""
+                #!/bin/bash
+                echo "$@" > '%s'
+                echo '{"type":"system","subtype":"init","session_id":"sess-ws"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-ws","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(argsDump.toString()));
+
+        // aimbase-server 항목이 있는 MCP config (CR-072 서버 노출 형태)
+        String mcpConfig = """
+                {"mcpServers":{"aimbase-server":{"type":"sse","url":"http://h/mcp/sse",\
+                "headers":{"X-API-Key":"k"}}}}""";
+        worker = new ClaudeCliWorker(argStub.toString(), null, null, false, null,
+                Duration.ofSeconds(10), mcpConfig);
+        // run 격리 작업장 (실존 디렉토리)
+        Path runWs = Files.createDirectory(tempDir.resolve("runs-" + System.nanoTime()));
+        worker.setWorkingDirectory(runWs.toString());
+        worker.start();
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        String args = Files.readString(argsDump);
+        // --mcp-config JSON 에 workspace 헤더가 run 작업장 경로로 주입되어야 한다.
+        assertThat(args).contains("X-Aimbase-Workspace-Path");
+        assertThat(args).contains(runWs.toString());
+        // 기존 헤더(X-API-Key)는 보존
+        assertThat(args).contains("X-API-Key");
+    }
+
+    @Test
+    void cr117_no_workingDirectory_leaves_mcp_config_untouched() throws IOException {
+        Path argsDump = tempDir.resolve("args-nows-" + System.nanoTime() + ".txt");
+        Path argStub = writeStub("""
+                #!/bin/bash
+                echo "$@" > '%s'
+                echo '{"type":"system","subtype":"init","session_id":"sess-nows"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-nows","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(argsDump.toString()));
+
+        String mcpConfig = """
+                {"mcpServers":{"aimbase-server":{"type":"sse","url":"http://h/mcp/sse"}}}""";
+        worker = new ClaudeCliWorker(argStub.toString(), null, null, false, null,
+                Duration.ofSeconds(10), mcpConfig);
+        // setWorkingDirectory 미호출 → 헤더 주입 없이 기존 동작 보존
+        worker.start();
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        String args = Files.readString(argsDump);
+        assertThat(args).doesNotContain("X-Aimbase-Workspace-Path");
+    }
+
+    @Test
+    void cr117_workingDirectory_without_aimbase_server_leaves_config_untouched() throws IOException {
+        Path argsDump = tempDir.resolve("args-local-" + System.nanoTime() + ".txt");
+        Path argStub = writeStub("""
+                #!/bin/bash
+                echo "$@" > '%s'
+                echo '{"type":"system","subtype":"init","session_id":"sess-local"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-local","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(argsDump.toString()));
+
+        // 서버 MCP 미노출 (stdio-only 'aimbase' 키만) → 헤더 주입 대상 없음
+        String mcpConfig = """
+                {"mcpServers":{"aimbase":{"command":"java","args":["-jar","x.jar","--mcp-stdio"]}}}""";
+        worker = new ClaudeCliWorker(argStub.toString(), null, null, false, null,
+                Duration.ofSeconds(10), mcpConfig);
+        Path runWs = Files.createDirectory(tempDir.resolve("runs-local-" + System.nanoTime()));
+        worker.setWorkingDirectory(runWs.toString());
+        worker.start();
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        String args = Files.readString(argsDump);
+        // aimbase-server 항목이 없으므로 헤더 미주입 (기존 동작 보존)
+        assertThat(args).doesNotContain("X-Aimbase-Workspace-Path");
+    }
+
     private Path writeStub(String body) throws IOException {
         Path p = tempDir.resolve("claude-stub-" + System.nanoTime() + ".sh");
         Files.writeString(p, body);

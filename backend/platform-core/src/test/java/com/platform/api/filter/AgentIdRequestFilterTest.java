@@ -87,6 +87,35 @@ class AgentIdRequestFilterTest {
     }
 
     @Test
+    @DisplayName("CR-117: X-Aimbase-Workspace-Path 헤더가 chain 진행 중 RequestContext 에 set")
+    void workspaceHeaderPresent() throws Exception {
+        when(request.getHeader("X-Aimbase-Workspace-Path"))
+                .thenReturn("/data/workspace/bidding_system/runs/316d510c");
+
+        String[] captured = {"unset"};
+        org.mockito.Mockito.doAnswer(inv -> {
+            captured[0] = RequestContext.getWorkspacePath();
+            return null;
+        }).when(chain).doFilter(request, response);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(captured[0]).isEqualTo("/data/workspace/bidding_system/runs/316d510c");
+        // 종료 후 clear 확인
+        assertThat(RequestContext.getWorkspacePath()).isNull();
+    }
+
+    @Test
+    @DisplayName("CR-117: workspace 헤더 없으면 미설정 (default/general 폴백 경로)")
+    void workspaceHeaderMissing() throws Exception {
+        when(request.getHeader("X-Aimbase-Workspace-Path")).thenReturn(null);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(RequestContext.getWorkspacePath()).isNull();
+    }
+
+    @Test
     @DisplayName("chain 예외가 던져져도 finally 에서 clear")
     void exceptionInChainStillClears() {
         when(request.getHeader("X-Aimbase-Agent-Id")).thenReturn("agent-zzz");

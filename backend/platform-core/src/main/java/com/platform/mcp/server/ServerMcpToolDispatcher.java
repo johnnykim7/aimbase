@@ -11,6 +11,8 @@ import com.platform.policy.TokenBucketRateLimiter;
 import com.platform.tool.EnhancedToolExecutor;
 import com.platform.tool.McpResultTruncator;
 import com.platform.tenant.TenantContext;
+import com.platform.tool.ApprovalState;
+import com.platform.tool.PermissionLevel;
 import com.platform.tool.ToolContext;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.ToolMessageBlock;
@@ -116,8 +118,9 @@ public class ServerMcpToolDispatcher {
                 // 버린다 — parse_document PDF 비전 결과가 CLI 에 도달하지 못하는 원인.
                 // ToolResult 를 직접 받아 텍스트는 bridge 와 동일하게 렌더하고(ToolResultRenderer),
                 // newMessages 는 MCP 멀티모달 content 블록으로 변환해 같은 tool result 에 실어 보낸다.
-                // ToolContext 는 bridge 와 동일하게 minimal(null, null) — 기존 경로와 행동 동일성 보존.
-                ToolResult toolResult = enhanced.execute(safeArgs, ToolContext.minimal(null, null));
+                // CR-117: ToolContext.workspacePath 를 CLI 워커가 보낸 run 격리 cwd 로 채운다
+                // (X-Aimbase-Workspace-Path 헤더 → RequestContext). 누락 시 null → minimal 동일(폴백 보존).
+                ToolResult toolResult = enhanced.execute(safeArgs, buildToolContext());
                 result = ToolResultRenderer.render(toolResult);
                 mediaBlocks = toMediaContent(toolResult.newMessages());
             } else {
@@ -222,6 +225,26 @@ public class ServerMcpToolDispatcher {
     private static String documentUri(String filename) {
         String safe = (filename == null || filename.isBlank()) ? "document" : filename;
         return "aimbase://tool-result/" + URLEncoder.encode(safe, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * CR-117: 서버 MCP 도구 실행용 ToolContext.
+     * {@link ToolContext#minimal} 과 동일하되 workspacePath 만 CLI 워커가 보낸 run 격리 cwd
+     * (X-Aimbase-Workspace-Path 헤더 → {@link RequestContext#getWorkspacePath()}) 로 채운다.
+     * 헤더 누락 시 null → WorkspaceResolver 가 default/general 폴백 (기존 동작 보존).
+     * tenantId/sessionId 는 기존 minimal 과 동일하게 null — 행동 동일성 유지.
+     */
+    private ToolContext buildToolContext() {
+        String workspacePath = RequestContext.getWorkspacePath();
+        if (workspacePath == null || workspacePath.isBlank()) {
+            return ToolContext.minimal(null, null);
+        }
+        // minimal 과 동일 (tenantId/sessionId=null, READ_ONLY/NOT_REQUIRED) + workspacePath 주입.
+        return new ToolContext(
+                null, null, null, null, null, null, null, null,
+                PermissionLevel.READ_ONLY, ApprovalState.NOT_REQUIRED,
+                workspacePath, false, 0
+        );
     }
 
     private String resolveSessionId() {

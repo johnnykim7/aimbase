@@ -15,12 +15,23 @@ public final class RequestContext {
     private static final ThreadLocal<String> AGENT_ID = new ThreadLocal<>();
     /** CR-075: 위젯 토큰의 user_ref — 헤더 누락 시 자동 라우팅 키. */
     private static final ThreadLocal<String> USER_REF = new ThreadLocal<>();
+    /**
+     * CR-117: CLI 워커가 X-Aimbase-Workspace-Path 헤더로 전달하는 run 격리 작업장 절대경로.
+     * 서버 MCP 도구(file_write 등)가 ToolContext.workspacePath 로 채워, 내장 도구 cwd 와 동일 작업장을 보게 한다.
+     * 누락 시 null → WorkspaceResolver 가 default/general 폴백 (기존 동작 보존).
+     */
+    private static final ThreadLocal<String> WORKSPACE_PATH = new ThreadLocal<>();
 
     private RequestContext() {}
 
     public static void setAgentId(String id) { AGENT_ID.set(id); }
 
     public static String getAgentId() { return AGENT_ID.get(); }
+
+    /** CR-117: 서버 MCP 도구의 run 격리 작업장 경로 (CLI 내장 도구 cwd 와 동일). */
+    public static void setWorkspacePath(String path) { WORKSPACE_PATH.set(path); }
+
+    public static String getWorkspacePath() { return WORKSPACE_PATH.get(); }
 
     /** CR-075: JwtAuthenticationFilter 가 widget 토큰 인증 시 set. */
     public static void setUserRef(String ref) { USER_REF.set(ref); }
@@ -44,5 +55,6 @@ public final class RequestContext {
     public static void clear() {
         AGENT_ID.remove();
         USER_REF.remove();
+        WORKSPACE_PATH.remove();
     }
 }

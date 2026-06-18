@@ -55,6 +55,24 @@ class RequestContextTest {
     }
 
     @Test
+    @DisplayName("CR-117: setWorkspacePath/getWorkspacePath 라운드트립")
+    void workspacePathRoundtrip() {
+        assertThat(RequestContext.getWorkspacePath()).isNull();
+        RequestContext.setWorkspacePath("/data/workspace/t/runs/abc");
+        assertThat(RequestContext.getWorkspacePath()).isEqualTo("/data/workspace/t/runs/abc");
+    }
+
+    @Test
+    @DisplayName("CR-117: clear 는 agentId 와 workspacePath 를 함께 정리")
+    void clearRemovesWorkspacePath() {
+        RequestContext.setAgentId("agent-1");
+        RequestContext.setWorkspacePath("/data/workspace/t/runs/abc");
+        RequestContext.clear();
+        assertThat(RequestContext.getAgentId()).isNull();
+        assertThat(RequestContext.getWorkspacePath()).isNull();
+    }
+
+    @Test
     @DisplayName("ThreadLocal — 다른 스레드는 독립")
     void threadLocalIsolation() throws Exception {
         RequestContext.setAgentId("agent-main");

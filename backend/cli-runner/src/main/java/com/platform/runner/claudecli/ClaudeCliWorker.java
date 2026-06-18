@@ -738,6 +738,52 @@ public class ClaudeCliWorker implements AutoCloseable {
      * tool_mode 는 application.yml 의 platform.llm.anthropic-cli.tool-mode 가 default,
      * 호출처가 setToolMode(...) 로 override.
      */
+    /** CR-117: 서버 MCP 도구가 run 격리 작업장을 보도록 X-Aimbase-Workspace-Path 헤더 키. */
+    private static final String WORKSPACE_HEADER = "X-Aimbase-Workspace-Path";
+
+    /**
+     * CR-117: MCP config 의 aimbase-server.headers 에 {@code X-Aimbase-Workspace-Path} 헤더를 주입한다.
+     *
+     * <p>CLI 가 서버 MCP(file_write 등)를 호출할 때 이 헤더로 run 격리 cwd 를 전달 →
+     * {@link com.platform.mcp.server.ServerMcpToolDispatcher} 가 ToolContext.workspacePath 로 채워
+     * 내장 도구 cwd 와 동일 작업장을 보게 한다. CR-107 이 cwd(pb.directory)만 전파하고
+     * 서버 MCP 도구는 default/general 폴백을 타던 이원화를 해소.
+     *
+     * <p>workingDir 가 null 이거나 mcpConfig 에 aimbase-server 항목이 없으면 원본을 그대로 반환(기존 동작 보존).
+     */
+    @SuppressWarnings("unchecked")
+    private static String injectWorkspaceHeader(String mcpConfig, String workingDir) {
+        if (workingDir == null || workingDir.isBlank()
+                || mcpConfig == null || mcpConfig.isBlank()) {
+            return mcpConfig;
+        }
+        try {
+            Map<String, Object> root = MAPPER.readValue(mcpConfig, MAP_TYPE);
+            Object serversObj = root.get("mcpServers");
+            if (!(serversObj instanceof Map)) {
+                return mcpConfig;
+            }
+            Map<String, Object> servers = (Map<String, Object>) serversObj;
+            Object serverObj = servers.get("aimbase-server");
+            if (!(serverObj instanceof Map)) {
+                return mcpConfig;   // 서버 MCP 미노출 (NATIVE/stdio-only) — 헤더 불필요
+            }
+            Map<String, Object> server = (Map<String, Object>) serverObj;
+            Object headersObj = server.get("headers");
+            Map<String, Object> headers = (headersObj instanceof Map)
+                    ? (Map<String, Object>) headersObj
+                    : new LinkedHashMap<>();
+            headers.put(WORKSPACE_HEADER, workingDir);
+            server.put("headers", headers);
+            return MAPPER.writeValueAsString(root);
+        } catch (Exception e) {
+            // 파싱/직렬화 실패 시 원본 유지 — 기능 안전 폴백.
+            log.warn("ClaudeCliWorker: failed to inject workspace header into MCP config — using original: {}",
+                    e.getMessage());
+            return mcpConfig;
+        }
+    }
+
     private List<String> buildCommand() {
         // CR-104: 원본 도구명 → mcp__aimbase-server__<tool> 로 변환해 --allowedTools 주입.
         // CLI 가 MCP 서버에서 받는 도구는 server prefix 가 붙으므로 allowedTools 매칭도 같은 prefix 필요.
@@ -750,7 +796,7 @@ public class ClaudeCliWorker implements AutoCloseable {
         }
         return ClaudeCliCommandBuilder.builder(binaryPath)
                 .toolMode(toolMode)               // null 이면 빌더 default(AIMBASE)
-                .mcpConfigJson(mcpConfigJson)
+                .mcpConfigJson(injectWorkspaceHeader(mcpConfigJson, workingDirectory))
                 .allowedTools(mcpAllowed)         // CR-104: null 이면 빌더가 무시
                 .streamJson(true)
                 .verbose(true)
