@@ -16,6 +16,10 @@ services:
       context: ./backend
       dockerfile: platform-core/Dockerfile
     platform: linux/amd64
+    # 좀비 자식 프로세스(claude CLI / git / LSP 등) 자동 회수 — PID 1 tini init.
+    # api 가 fork 한 외부 프로세스가 종료 후 reap 안 돼 좀비 누적 → PID 고갈 → Redis fork 실패 마비.
+    # init 이 고아 자식을 즉시 reap 하므로 발생 코드 경로와 무관하게 PID 고갈을 영구 차단한다.
+    init: true
     restart: unless-stopped
     ports:
       - "8280:8080"
@@ -52,6 +56,7 @@ services:
     build:
       context: ./python-sidecar
       dockerfile: Dockerfile
+    init: true   # 좀비 자식(외부 파싱/OCR 바이너리 등) 자동 회수 — PID 고갈 방지
     restart: unless-stopped
     ports:
       - "8281:8000"
@@ -84,6 +89,7 @@ services:
       context: ./backend
       dockerfile: aimbase-agent/Dockerfile
     platform: linux/amd64
+    init: true   # 좀비 claude CLI 워커 자식 자동 회수 — PID 고갈 방지
     restart: unless-stopped
     depends_on:
       - api
