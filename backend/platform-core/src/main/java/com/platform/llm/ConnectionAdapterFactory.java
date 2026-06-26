@@ -311,6 +311,9 @@ public class ConnectionAdapterFactory {
                 // CR-103: 워크플로우 경로(LLM_CALL/AGENT_CALL)는 X-Aimbase-Agent-Id/user_ref 가 없으므로
                 // 커넥터 config.agent_name 으로 Runner 라우팅. null 이면 헤더/user_ref 만으로 동작(기존).
                 String routingAgentName = (String) conn.getConfig().get("agent_name");
+                // CR-117: CLI 본체 Agent 서브에이전트 허용 여부. 키 없음/null = true(현행 유지).
+                // false 명시 시에만 차단. Boolean/String 둘 다 허용(FE 폼은 "true"/"false" 문자열).
+                boolean subagentEnabled = parseBooleanConfig(conn.getConfig().get("subagent_enabled"), true);
                 yield new ClaudeCliAdapter(
                         claudeCliRunnerClient,
                         agentRegistryService,
@@ -319,7 +322,8 @@ public class ConnectionAdapterFactory {
                         configDirOpt,
                         systemPromptOverride,
                         runnerApiKey,
-                        routingAgentName);
+                        routingAgentName,
+                        subagentEnabled);
             }
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Unsupported adapter type: " + adapterType);
@@ -333,6 +337,21 @@ public class ConnectionAdapterFactory {
      *  - 빈 값/키 없음: 전체 차단
      *  - 쉼표 구분 tenantId 리스트: 일치하는 테넌트만 허용
      */
+    /**
+     * CR-117: connection.config 의 boolean 값을 안전 파싱. JSONB 역직렬화 결과가
+     * {@link Boolean} 일 수도, FE 폼 저장으로 {@link String}("true"/"false") 일 수도 있다.
+     * null/빈 값/미인식이면 {@code defaultValue}.
+     */
+    private static boolean parseBooleanConfig(Object raw, boolean defaultValue) {
+        if (raw == null) return defaultValue;
+        if (raw instanceof Boolean b) return b;
+        if (raw instanceof String s) {
+            if (s.isBlank()) return defaultValue;
+            return Boolean.parseBoolean(s.trim());
+        }
+        return defaultValue;
+    }
+
     private boolean isCliEnabledForCurrentTenant() {
         String allowed = platformSettings.getString(CLI_ENABLED_TENANTS_KEY, "");
         if (allowed == null || allowed.isBlank()) return false;

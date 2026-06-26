@@ -52,6 +52,13 @@ public class ClaudeCliAdapter implements LLMAdapter {
     private final String runnerApiKey;
     /** CR-103: 커넥터 config.agent_name — 워크플로우 경로 라우팅 폴백 키 (null 허용). */
     private final String routingAgentName;
+    /**
+     * CR-117: CLI 본체 {@code Agent} 서브에이전트 허용 여부 (connection.config.subagent_enabled).
+     * true(기본) = 현행(자율 서브에이전트 허용). false 면 Runner 에 disallow_subagent 신호를 보내
+     * {@code --disallowedTools Agent} 가 주입된다. CLI subagent 는 제어 불가(관찰만)이므로 OFF 는
+     * "spawn 자체 차단" 용도 — depth 가드/정책 적용이 아니라 도구 노출 제거다.
+     */
+    private final boolean subagentEnabled;
 
     public ClaudeCliAdapter(ClaudeCliRunnerClient runnerClient,
                              AgentRegistryService agentRegistry,
@@ -60,7 +67,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
                              String configDir,
                              String systemPromptOverride,
                              String runnerApiKey,
-                             String routingAgentName) {
+                             String routingAgentName,
+                             boolean subagentEnabled) {
         this.runnerClient = runnerClient;
         this.agentRegistry = agentRegistry;
         this.defaultModel = defaultModel;
@@ -69,6 +77,7 @@ public class ClaudeCliAdapter implements LLMAdapter {
         this.systemPromptOverride = systemPromptOverride;
         this.runnerApiKey = runnerApiKey;
         this.routingAgentName = routingAgentName;
+        this.subagentEnabled = subagentEnabled;
     }
 
     @Override
@@ -89,7 +98,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
             LLMRequest effective = ensureModel(request);
             try {
                 LLMResponse resp = runnerClient.chat(
-                        endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey);
+                        endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey,
+                        subagentEnabled); // CR-117
                 return CompletableFuture.completedFuture(resp);
             } catch (RuntimeException re) {
                 // CR-082: runner 호출 자체 실패 — 사유를 식별 가능한 prefix 로 감싸 RuntimeException 전파.
@@ -113,7 +123,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
         LLMRequest effective = ensureModel(request);
         try {
             runnerClient.chatStream(
-                    endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey, chunkConsumer);
+                    endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey,
+                    chunkConsumer, subagentEnabled); // CR-117
         } catch (RuntimeException re) {
             // CR-082: stream 경로도 동일 — RuntimeException 으로 일관.
             String classified = classifyRunnerFailure(re);

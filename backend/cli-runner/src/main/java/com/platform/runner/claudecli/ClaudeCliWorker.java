@@ -68,6 +68,12 @@ public class ClaudeCliWorker implements AutoCloseable {
      */
     private volatile List<String> allowedToolNames;
     /**
+     * CR-117: CLI 본체 {@code Agent} 서브에이전트 차단 여부. true 면 buildCommand 가
+     * {@code --disallowedTools Agent} 를 주입해 자율 서브에이전트 spawn 을 막는다.
+     * 기본 false(=현행: subagent 허용). connection.config.subagent_enabled=false 일 때만 true.
+     */
+    private volatile boolean disallowSubagent;
+    /**
      * CR-107 후속: CLI 프로세스 cwd(working directory). 워크플로우 run 격리 workspace 절대경로.
      * 설정 시 start() 가 {@code pb.directory()} 로 적용 → HYBRID 모드의 CLI 내장 Read/Bash 가
      * 상대경로(attachments/...)로도 작업장을 읽는다. null 이면 미설정(기존 동작 = 프로세스 기본 cwd).
@@ -150,6 +156,18 @@ public class ClaudeCliWorker implements AutoCloseable {
             throw new IllegalStateException("Worker already started; cannot set allowedTools after start()");
         }
         this.allowedToolNames = (toolNames == null || toolNames.isEmpty()) ? null : List.copyOf(toolNames);
+    }
+
+    /**
+     * CR-117: start() 호출 전, CLI 본체 {@code Agent} 서브에이전트 차단 여부 설정.
+     * true 면 buildCommand 가 {@code --disallowedTools Agent} 를 주입한다. 같은 runId 워커가
+     * 이미 살아있으면 호출처에서 무시(Pool 정책 — run 단위 도구 집합 고정).
+     */
+    public void setDisallowSubagent(boolean disallow) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set disallowSubagent after start()");
+        }
+        this.disallowSubagent = disallow;
     }
 
     /**
@@ -794,10 +812,14 @@ public class ClaudeCliWorker implements AutoCloseable {
                     .map(n -> MCP_SERVER_PREFIX + n)
                     .toList();
         }
+        // CR-117: subagent OFF 면 CLI 본체 Agent 도구를 --disallowedTools 로 차단(자율 서브에이전트 spawn 방지).
+        // 기본(disallowSubagent=false)이면 null → 빌더 미적용 = 현행 동작(subagent 허용).
+        List<String> disallowed = disallowSubagent ? List.of("Agent") : null;
         return ClaudeCliCommandBuilder.builder(binaryPath)
                 .toolMode(toolMode)               // null 이면 빌더 default(AIMBASE)
                 .mcpConfigJson(injectWorkspaceHeader(mcpConfigJson, workingDirectory))
                 .allowedTools(mcpAllowed)         // CR-104: null 이면 빌더가 무시
+                .disallowedTools(disallowed)      // CR-117: null 이면 빌더가 무시
                 .streamJson(true)
                 .verbose(true)
                 .resume(resumeSessionId, forkSession)

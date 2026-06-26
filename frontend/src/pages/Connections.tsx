@@ -119,6 +119,8 @@ export default function Connections() {
       "Config Dir": (cfg.config_dir as string) ?? "",
       "Runner API Key": (cfg.runner_api_key as string) ?? "",
       "System Prompt Override": (cfg.system_prompt_override as string) ?? "",
+      // CR-117: CLI 본체 Agent 서브에이전트 허용 여부. 키 없음 = 기본 ON(현행).
+      "Subagent Enabled": cfg.subagent_enabled === false || cfg.subagent_enabled === "false" ? "false" : "true",
     });
     setShowModal(true);
   };
@@ -147,6 +149,8 @@ export default function Connections() {
       config_dir: form["Config Dir"],
       runner_api_key: form["Runner API Key"],
       system_prompt_override: form["System Prompt Override"],
+      // CR-117: "false" 일 때만 차단 — 그 외(미설정 포함)는 true(현행 유지)
+      subagent_enabled: form["Subagent Enabled"] === "false" ? false : true,
     };
 
     if (editingConn) {
@@ -357,6 +361,17 @@ export default function Connections() {
                 </FormField>
                 <FormField label="System Prompt Override (선택)">
                   <textarea style={{ ...inputStyle, minHeight: 80 }} placeholder="--append-system-prompt 로 주입할 추가 지침" value={form["System Prompt Override"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "System Prompt Override": e.target.value }))} />
+                </FormField>
+                {/* CR-117: CLI 본체 Agent 서브에이전트 허용 토글. 기본 ON(현행). OFF 면 --disallowedTools Agent 주입. */}
+                <FormField label="Subagent 허용">
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={form["Subagent Enabled"] !== "false"}
+                      onChange={(e) => setForm((p) => ({ ...p, "Subagent Enabled": e.target.checked ? "true" : "false" }))}
+                    />
+                    <span>CLI 자율 서브에이전트(Agent) 허용 — 끄면 spawn 차단. 제어는 불가하고 spawn 여부만 결정합니다.</span>
+                  </label>
                 </FormField>
               </>
             )}

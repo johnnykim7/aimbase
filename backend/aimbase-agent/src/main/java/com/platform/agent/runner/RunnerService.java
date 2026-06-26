@@ -46,7 +46,14 @@ public class RunnerService {
     /** CR-104: allowedTools(원본 도구명) 전달 오버로드. */
     public LLMResponse chat(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                             String configDir, String systemPromptOverride, List<String> allowedTools) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, null, allowedTools, null);
+        return chat(request, toolMode, configDir, systemPromptOverride, allowedTools, false);
+    }
+
+    /** CR-117: disallowSubagent(CLI 본체 Agent 서브에이전트 차단) 전달 오버로드. */
+    public LLMResponse chat(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
+                            String configDir, String systemPromptOverride, List<String> allowedTools,
+                            boolean disallowSubagent) {
+        return runTurn(request, toolMode, configDir, systemPromptOverride, null, allowedTools, null, disallowSubagent);
     }
 
     public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
@@ -59,7 +66,7 @@ public class RunnerService {
     public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                                   String configDir, String systemPromptOverride,
                                   Consumer<String> deltaConsumer, List<String> allowedTools) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools, null);
+        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools, null, false);
     }
 
     /** CR-108: 도구 관찰 실시간 콜백(observeConsumer) 전달 오버로드. */
@@ -67,7 +74,18 @@ public class RunnerService {
                                   String configDir, String systemPromptOverride,
                                   Consumer<String> deltaConsumer, List<String> allowedTools,
                                   Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools, observeConsumer);
+        return chatStream(request, toolMode, configDir, systemPromptOverride,
+                deltaConsumer, allowedTools, observeConsumer, false);
+    }
+
+    /** CR-117: disallowSubagent(CLI 본체 Agent 서브에이전트 차단) 전달 오버로드. */
+    public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
+                                  String configDir, String systemPromptOverride,
+                                  Consumer<String> deltaConsumer, List<String> allowedTools,
+                                  Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer,
+                                  boolean disallowSubagent) {
+        return runTurn(request, toolMode, configDir, systemPromptOverride,
+                deltaConsumer, allowedTools, observeConsumer, disallowSubagent);
     }
 
     /**
@@ -94,7 +112,8 @@ public class RunnerService {
     private LLMResponse runTurn(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                                 String configDir, String systemPromptOverride,
                                 Consumer<String> deltaConsumer, List<String> allowedTools,
-                                Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
+                                Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer,
+                                boolean disallowSubagent) {
         String runId = request.sessionId();
         if (runId == null || runId.isBlank()) {
             throw new IllegalArgumentException("run_id (sessionId) required");
@@ -106,7 +125,7 @@ public class RunnerService {
         // CR-104: allowedTools = 호출의 도구 목록(원본명) → Worker 가 mcp__aimbase-server__ 변환 후 --allowedTools.
         ClaudeCliWorker worker = workerPool.getOrCreateMain(
                 runId, model, configDir, systemPromptOverride, toolMode, allowedTools,
-                request.workingDirectory());
+                request.workingDirectory(), disallowSubagent);
 
         boolean isFirst = firstTurnDone.putIfAbsent(runId, Boolean.TRUE) == null;
         List<UnifiedMessage> messages = request.messages();

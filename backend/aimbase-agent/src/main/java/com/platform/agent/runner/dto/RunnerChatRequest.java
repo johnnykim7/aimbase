@@ -56,6 +56,14 @@ public class RunnerChatRequest {
     @JsonProperty("working_directory")
     private String workingDirectory;
 
+    /**
+     * CR-117: CLI 본체 {@code Agent} 서브에이전트 차단 여부.
+     * true 면 Runner 가 {@code --disallowedTools Agent} 를 주입해 자율 서브에이전트 spawn 을 막는다.
+     * null/false = 현행(subagent 허용). connection.config.subagent_enabled=false 일 때만 true 로 전송됨.
+     */
+    @JsonProperty("disallow_subagent")
+    private Boolean disallowSubagent;
+
     public String getRunId() { return runId; }
     public void setRunId(String runId) { this.runId = runId; }
     public String getModel() { return model; }
@@ -76,4 +84,6 @@ public class RunnerChatRequest {
     public void setAllowedTools(List<String> allowedTools) { this.allowedTools = allowedTools; }
     public String getWorkingDirectory() { return workingDirectory; }
     public void setWorkingDirectory(String workingDirectory) { this.workingDirectory = workingDirectory; }
+    public Boolean getDisallowSubagent() { return disallowSubagent; }
+    public void setDisallowSubagent(Boolean disallowSubagent) { this.disallowSubagent = disallowSubagent; }
 }

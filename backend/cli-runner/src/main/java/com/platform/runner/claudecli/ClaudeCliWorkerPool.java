@@ -104,6 +104,21 @@ public class ClaudeCliWorkerPool {
                                             ClaudeCliCommandBuilder.ToolMode toolMode,
                                             List<String> allowedTools,
                                             String workingDirectory) {
+        return getOrCreateMain(runId, model, configDir, systemPrompt, toolMode,
+                allowedTools, workingDirectory, false);
+    }
+
+    /**
+     * CR-117: disallowSubagent(CLI 본체 Agent 서브에이전트 차단) override 추가.
+     * 메인 워커가 이미 살아있으면 무시(run 단위 도구 집합 고정). true 면 Worker 가
+     * {@code --disallowedTools Agent} 를 주입한다. 기본 false = 현행(subagent 허용).
+     */
+    public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
+                                            String systemPrompt,
+                                            ClaudeCliCommandBuilder.ToolMode toolMode,
+                                            List<String> allowedTools,
+                                            String workingDirectory,
+                                            boolean disallowSubagent) {
         RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
         synchronized (rw) {
             if (rw.main != null && rw.main.isAlive()) return rw.main;
@@ -123,6 +138,9 @@ public class ClaudeCliWorkerPool {
                 }
                 if (workingDirectory != null && !workingDirectory.isBlank()) {
                     worker.setWorkingDirectory(workingDirectory);
+                }
+                if (disallowSubagent) {
+                    worker.setDisallowSubagent(true); // CR-117: CLI 본체 Agent 서브에이전트 차단
                 }
                 worker.start();
                 rw.main = worker;

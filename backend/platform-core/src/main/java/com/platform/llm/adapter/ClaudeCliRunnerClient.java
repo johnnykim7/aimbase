@@ -97,7 +97,14 @@ public class ClaudeCliRunnerClient {
 
     public LLMResponse chat(AgentEndpoint endpoint, LLMRequest request, String toolMode,
                              String configDir, String systemPromptOverride, String runnerApiKey) {
-        Map<String, Object> body = buildBody(request, toolMode, configDir, systemPromptOverride);
+        return chat(endpoint, request, toolMode, configDir, systemPromptOverride, runnerApiKey, true);
+    }
+
+    /** CR-117: subagentEnabled(CLI 본체 Agent 서브에이전트 허용 여부) 전달 오버로드. */
+    public LLMResponse chat(AgentEndpoint endpoint, LLMRequest request, String toolMode,
+                             String configDir, String systemPromptOverride, String runnerApiKey,
+                             boolean subagentEnabled) {
+        Map<String, Object> body = buildBody(request, toolMode, configDir, systemPromptOverride, subagentEnabled);
         HttpRequest httpReq = newJsonRequest(endpoint, "/v1/chat", body, runnerApiKey);
 
         try {
@@ -117,7 +124,15 @@ public class ClaudeCliRunnerClient {
     public void chatStream(AgentEndpoint endpoint, LLMRequest request, String toolMode,
                             String configDir, String systemPromptOverride, String runnerApiKey,
                             Consumer<LLMStreamChunk> chunkConsumer) {
-        Map<String, Object> body = buildBody(request, toolMode, configDir, systemPromptOverride);
+        chatStream(endpoint, request, toolMode, configDir, systemPromptOverride, runnerApiKey,
+                chunkConsumer, true);
+    }
+
+    /** CR-117: subagentEnabled(CLI 본체 Agent 서브에이전트 허용 여부) 전달 오버로드. */
+    public void chatStream(AgentEndpoint endpoint, LLMRequest request, String toolMode,
+                            String configDir, String systemPromptOverride, String runnerApiKey,
+                            Consumer<LLMStreamChunk> chunkConsumer, boolean subagentEnabled) {
+        Map<String, Object> body = buildBody(request, toolMode, configDir, systemPromptOverride, subagentEnabled);
         HttpRequest httpReq = newJsonRequest(endpoint, "/v1/chat/stream", body, runnerApiKey);
 
         try {
@@ -201,11 +216,14 @@ public class ClaudeCliRunnerClient {
     }
 
     private static Map<String, Object> buildBody(LLMRequest request, String toolMode,
-                                                   String configDir, String systemPromptOverride) {
+                                                   String configDir, String systemPromptOverride,
+                                                   boolean subagentEnabled) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("run_id", request.sessionId() != null ? request.sessionId() : UUID.randomUUID().toString());
         body.put("model", request.model());
         if (toolMode != null && !toolMode.isBlank()) body.put("tool_mode", toolMode);
+        // CR-117: subagent OFF 일 때만 차단 신호 전송 — 기본(true)이면 미전송 = 현행 동작(Agent 허용).
+        if (!subagentEnabled) body.put("disallow_subagent", true);
         if (configDir != null && !configDir.isBlank()) body.put("config_dir", configDir);
         if (systemPromptOverride != null && !systemPromptOverride.isBlank()) {
             body.put("system_prompt_override", systemPromptOverride);

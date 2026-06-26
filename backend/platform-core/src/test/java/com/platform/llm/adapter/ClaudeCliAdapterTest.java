@@ -21,6 +21,7 @@ import java.util.concurrent.ExecutionException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -41,7 +42,8 @@ class ClaudeCliAdapterTest {
                 client, agentRegistry,
                 "claude-sonnet-4-5", "AIMBASE",
                 "/path/.claude", null, "runner-key-xyz",
-                null /* routingAgentName — 기존 테스트는 헤더/user_ref 경로만 검증 */);
+                null /* routingAgentName — 기존 테스트는 헤더/user_ref 경로만 검증 */,
+                true /* subagentEnabled — CR-117 기본 */);
     }
 
     @AfterEach
@@ -104,12 +106,12 @@ class ClaudeCliAdapterTest {
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
         when(client.chat(eq(endpoint), any(), eq("AIMBASE"), eq("/path/.claude"),
-                any(), eq("runner-key-xyz"))).thenReturn(expected);
+                any(), eq("runner-key-xyz"), anyBoolean())).thenReturn(expected);
 
         LLMResponse resp = adapter.chat(sampleRequest()).get();
         assertThat(resp.textContent()).isEqualTo("ok");
         verify(client, times(1)).chat(eq(endpoint), any(), eq("AIMBASE"),
-                eq("/path/.claude"), any(), eq("runner-key-xyz"));
+                eq("/path/.claude"), any(), eq("runner-key-xyz"), anyBoolean());
     }
 
     @Test
@@ -129,12 +131,12 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 0L, 0.0);
-        when(client.chat(any(), any(), any(), any(), any(), any())).thenReturn(expected);
+        when(client.chat(any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
 
         adapter.chat(noModel).get();
 
         org.mockito.ArgumentCaptor<LLMRequest> captor = org.mockito.ArgumentCaptor.forClass(LLMRequest.class);
-        verify(client).chat(any(), captor.capture(), any(), any(), any(), any());
+        verify(client).chat(any(), captor.capture(), any(), any(), any(), any(), anyBoolean());
         assertThat(captor.getValue().model()).isEqualTo("claude-sonnet-4-5");
     }
 
@@ -160,7 +162,7 @@ class ClaudeCliAdapterTest {
 
         verify(client, times(1)).chatStream(
                 eq(endpoint), any(), eq("AIMBASE"), eq("/path/.claude"),
-                any(), eq("runner-key-xyz"), any());
+                any(), eq("runner-key-xyz"), any(), anyBoolean());
     }
 
     // ─── CR-075: user_ref 자동 라우팅 폴백 ───
@@ -178,7 +180,7 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any())).thenReturn(expected);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
 
         LLMResponse resp = adapter.chat(sampleRequest()).get();
         assertThat(resp.textContent()).isEqualTo("ok");
@@ -226,7 +228,7 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any())).thenReturn(expected);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
 
         adapter.chat(sampleRequest()).get();
 
@@ -242,7 +244,7 @@ class ClaudeCliAdapterTest {
         return new ClaudeCliAdapter(
                 client, agentRegistry,
                 "claude-sonnet-4-5", "AIMBASE",
-                "/path/.claude", null, "runner-key-xyz", agentName);
+                "/path/.claude", null, "runner-key-xyz", agentName, true);
     }
 
     @Test
@@ -258,7 +260,7 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any())).thenReturn(expected);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
 
         LLMResponse resp = wf.chat(sampleRequest()).get();
         assertThat(resp.textContent()).isEqualTo("ok");
@@ -281,7 +283,7 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any())).thenReturn(expected);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
 
         wf.chat(sampleRequest()).get();
 
@@ -312,7 +314,7 @@ class ClaudeCliAdapterTest {
         AgentEndpoint endpoint = new AgentEndpoint("agent-1", "http://host:8290", "hash");
         when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
         // runner 호출이 HTTP timeout 으로 실패 → classifyRunnerFailure = AGENT_TIMEOUT
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any()))
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean()))
                 .thenThrow(new RuntimeException("call failed", new java.net.http.HttpTimeoutException("timed out")));
 
         var future = adapter.chat(sampleRequest());
@@ -331,7 +333,7 @@ class ClaudeCliAdapterTest {
         RequestContext.setAgentId("agent-1");
         AgentEndpoint endpoint = new AgentEndpoint("agent-1", "http://host:8290", "hash");
         when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any()))
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean()))
                 .thenThrow(new RuntimeException("connect failed", new java.net.ConnectException("refused")));
 
         var future = adapter.chat(sampleRequest());
@@ -350,7 +352,7 @@ class ClaudeCliAdapterTest {
         when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
         org.mockito.Mockito.doThrow(
                         new RuntimeException("stream failed", new java.net.http.HttpTimeoutException("timed out")))
-                .when(client).chatStream(eq(endpoint), any(), any(), any(), any(), any(), any());
+                .when(client).chatStream(eq(endpoint), any(), any(), any(), any(), any(), any(), anyBoolean());
 
         assertThatThrownBy(() -> adapter.chatStream(sampleRequest(), c -> {}))
                 .isInstanceOf(RuntimeException.class)

@@ -70,7 +70,8 @@ public class RunnerController {
         ClaudeCliCommandBuilder.ToolMode toolMode = parseToolMode(req.getToolMode());
 
         LLMResponse resp = service.chat(llmRequest, toolMode, req.getConfigDir(),
-                req.getSystemPromptOverride(), req.getAllowedTools());
+                req.getSystemPromptOverride(), req.getAllowedTools(),
+                Boolean.TRUE.equals(req.getDisallowSubagent())); // CR-117
         return toResponse(req.getRunId(), resp);
     }
 
@@ -103,7 +104,8 @@ public class RunnerController {
                             if (observed.output() != null) ev.put("output", observed.output());
                             if (observed.durationMs() != null) ev.put("duration_ms", observed.durationMs());
                             emitNdjsonUnchecked(out, ev);
-                        });
+                        },
+                        Boolean.TRUE.equals(req.getDisallowSubagent())); // CR-117
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("type", "result");
                 done.put("run_id", req.getRunId());
@@ -194,6 +196,9 @@ public class RunnerController {
         String model = (req.getModel() != null && !req.getModel().isBlank())
                 ? req.getModel() : props.getDefaultModel();
         // CR-107 후속: working_directory → CLI cwd 전파 (Worker.pb.directory).
+        org.slf4j.LoggerFactory.getLogger(RunnerController.class)
+                .info("[CR107-DEBUG] toLlmRequest: runId={}, working_directory(received)={}",
+                        req.getRunId(), req.getWorkingDirectory());
         return new LLMRequest(model, messages, null, config, true, req.getRunId())
                 .withWorkingDirectory(req.getWorkingDirectory());
     }

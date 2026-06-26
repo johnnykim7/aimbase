@@ -197,6 +197,50 @@ class ClaudeCliWorkerTest {
     }
 
     @Test
+    void cr117subagent_disallowSubagent_injects_disallowedTools_Agent_flag() throws IOException {
+        Path argsDump = tempDir.resolve("args-sa-" + System.nanoTime() + ".txt");
+        Path argStub = writeStub("""
+                #!/bin/bash
+                echo "$@" > '%s'
+                echo '{"type":"system","subtype":"init","session_id":"sess-sa"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-sa","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(argsDump.toString()));
+
+        worker = new ClaudeCliWorker(argStub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.setDisallowSubagent(true); // CR-117: subagent OFF
+        worker.start();
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        String args = Files.readString(argsDump);
+        assertThat(args).contains("--disallowedTools Agent");
+    }
+
+    @Test
+    void cr117subagent_default_does_not_inject_disallowedTools() throws IOException {
+        Path argsDump = tempDir.resolve("args-sa2-" + System.nanoTime() + ".txt");
+        Path argStub = writeStub("""
+                #!/bin/bash
+                echo "$@" > '%s'
+                echo '{"type":"system","subtype":"init","session_id":"sess-sa2"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-sa2","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(argsDump.toString()));
+
+        worker = new ClaudeCliWorker(argStub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        // setDisallowSubagent 미호출 — 기본 ON(현행: subagent 허용)
+        worker.start();
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        String args = Files.readString(argsDump);
+        assertThat(args).doesNotContain("--disallowedTools");
+    }
+
+    @Test
     void cr112_result_is_error_true_with_success_subtype_throws() throws IOException {
         // 사용자가 지목한 진범: CLI 가 socket closed / API 에러를 subtype=success 라도
         // is_error:true 인 result 이벤트로 둔갑시켜 발행 → COMPLETED 오판 방지를 위해 예외 승격.
