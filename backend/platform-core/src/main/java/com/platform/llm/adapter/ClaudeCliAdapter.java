@@ -273,11 +273,69 @@ public class ClaudeCliAdapter implements LLMAdapter {
     }
 
     private LLMRequest ensureModel(LLMRequest request) {
-        if (request.model() != null && !request.model().isBlank()) return request;
+        LLMRequest req = stripBuiltinToolGuidance(request);  // CR-117: CLI 경로 도구 카탈로그 제거
+        if (req.model() != null && !req.model().isBlank()) return req;
         if (defaultModel == null || defaultModel.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "ClaudeCliAdapter: model 미지정 + connection defaultModel 도 없음");
         }
-        return request.withModel(defaultModel);
+        return req.withModel(defaultModel);
+    }
+
+    /** CR-117: builtin_* 도구 카탈로그 구간 시작 마커(CLI 경로엔 불필요·해로움). */
+    private static final String TOOL_GUIDANCE_START = "## Tool-specific guidance";
+    /** CR-117: 카탈로그 구간 끝 마커 — 이 헤더부터는 일반 지침이라 유지한다(자르기 구간의 끝). */
+    private static final String TOOL_GUIDANCE_END = "# Output efficiency";
+
+    /**
+     * CR-117: CLI 경로 SYSTEM 프롬프트에서 builtin_* 도구 카탈로그 구간만 제거한다
+     * ("## Tool-specific guidance" ~ "# Output efficiency" 직전).
+     *
+     * <p>이 카탈로그는 SDK agent 기준으로 쓰여 builtin_file_read/glob/grep 같은 이름을 안내하는데,
+     * Claude CLI 어댑터 경로에선 그 이름이 CLI MCP 에 없어 "No such tool available: builtin_file_read" 로 실패하고
+     * Read 로 폴백하는 중복·재시도가 생긴다. 또 "read ALL in ONE turn" 안내가 한 turn 페이지 누적(32MB)도 부추긴다.
+     * CLI 는 자기 네이티브 도구(Read/Glob/Grep)를 이미 알므로 도구 카탈로그가 불필요 → CLI 경로에서만 잘라낸다.
+     *
+     * <p>카탈로그 앞의 일반 작업 지침(# Doing tasks 등)과 뒤의 # Output efficiency/# Tone and style 은 유지한다.
+     * END 마커가 없으면(프롬프트 변형) 안전하게 START 이후 전부 제거. assemble/SDK agent 경로는 본 어댑터를 안 타므로 영향 없다.
+     */
+    private LLMRequest stripBuiltinToolGuidance(LLMRequest request) {
+        if (request.messages() == null || request.messages().isEmpty()) return request;
+        boolean changed = false;
+        java.util.List<com.platform.llm.model.UnifiedMessage> out =
+                new java.util.ArrayList<>(request.messages().size());
+        for (com.platform.llm.model.UnifiedMessage m : request.messages()) {
+            if (m.role() != com.platform.llm.model.UnifiedMessage.Role.SYSTEM || m.content() == null) {
+                out.add(m);
+                continue;
+            }
+            java.util.List<com.platform.llm.model.ContentBlock> newBlocks =
+                    new java.util.ArrayList<>(m.content().size());
+            for (com.platform.llm.model.ContentBlock b : m.content()) {
+                if (b instanceof com.platform.llm.model.ContentBlock.Text t
+                        && t.text() != null && t.text().contains(TOOL_GUIDANCE_START)) {
+                    newBlocks.add(new com.platform.llm.model.ContentBlock.Text(stripCatalog(t.text())));
+                    changed = true;
+                } else {
+                    newBlocks.add(b);
+                }
+            }
+            out.add(new com.platform.llm.model.UnifiedMessage(m.role(), newBlocks));
+        }
+        if (changed) {
+            log.debug("CR-117: stripped builtin_* tool catalog from CLI system prompt");
+        }
+        return changed ? request.withMessages(out) : request;
+    }
+
+    /** START~END 구간만 제거하고 앞뒤를 잇는다. END 없으면 START 이후 전부 제거. */
+    private static String stripCatalog(String text) {
+        int start = text.indexOf(TOOL_GUIDANCE_START);
+        if (start < 0) return text;
+        int end = text.indexOf(TOOL_GUIDANCE_END, start);
+        String before = text.substring(0, start).stripTrailing();
+        if (end < 0) return before;
+        String after = text.substring(end);
+        return before + "\n\n" + after;
     }
 }

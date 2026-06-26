@@ -59,4 +59,9 @@ public record LLMRequest(
     public LLMRequest withWorkingDirectory(String dir) {
         return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, dir);
     }
+
+    /** CR-117: messages 만 교체한 복사본 (CLI 어댑터의 시스템 프롬프트 정리용) */
+    public LLMRequest withMessages(List<UnifiedMessage> newMessages) {
+        return new LLMRequest(model, newMessages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory);
+    }
 }

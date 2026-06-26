@@ -108,4 +108,15 @@ class AgentCallStepExecutorCr106Test {
         assertThat(AgentCallStepExecutor.isTurnTimeoutFailure(null)).isFalse();
         assertThat(AgentCallStepExecutor.isTurnTimeoutFailure("No such tool")).isFalse();
     }
+
+    // CR-117: 32MB(too large) 실패 판정 — 재시도 시 "더 잘게 읽어라" 힌트 주입 트리거.
+    @Test
+    void isPayloadTooLargeFailure_matchesTooLargeVariants() {
+        assertThat(AgentCallStepExecutor.isPayloadTooLargeFailure(
+                "AGENT_CALL failed: Request too large (max 32MB). Try with a smaller file.")).isTrue();
+        assertThat(AgentCallStepExecutor.isPayloadTooLargeFailure("request_too_large")).isTrue();
+        assertThat(AgentCallStepExecutor.isPayloadTooLargeFailure("exceeds 32MB")).isTrue();
+        assertThat(AgentCallStepExecutor.isPayloadTooLargeFailure(null)).isFalse();
+        assertThat(AgentCallStepExecutor.isPayloadTooLargeFailure("turn timeout")).isFalse();
+    }
 }

@@ -107,6 +107,12 @@ public class ForeachStepExecutor implements StepExecutor {
         int maxConcurrency = Math.max(1, asInt(config.get("max_concurrency"), DEFAULT_MAX_CONCURRENCY));
         String onItemError = asString(config.get("on_item_error"), "fail").toLowerCase();
         String collect = asString(config.get("collect"), "append").toLowerCase();
+        // CR-117: 자식 단위 재시도 횟수 (총 시도 = 1 + itemRetryMax). 기본 0 = 재시도 없음(현행).
+        // 빈응답/timeout 류 실패 시 그 자식만 --resume 이어하기로 재시도(부모 step 전체 재실행 회피).
+        int itemRetryMax = Math.max(0, asInt(config.get("item_retry_max"), 0));
+        // CR-117: 실패율 임계치. 지정 시 failed/total 가 초과하면 step 전체 FAILED 승격
+        // (on_item_error=continue 가 부분 누락을 "완료"로 둔갑시키는 것 차단). 미지정(<0)=현행.
+        double maxFailedRatio = asDouble(config.get("max_failed_ratio"), -1.0);
 
         Object bodyObj = config.get("body");
         if (!(bodyObj instanceof Map)) {
@@ -138,10 +144,21 @@ public class ForeachStepExecutor implements StepExecutor {
         }
 
         List<Map<String, Object>> results = "parallel".equals(mode)
-                ? runParallel(step, context, items, itemVar, bodyStep, bodyExecutor, maxConcurrency, onItemError)
-                : runSequential(step, context, items, itemVar, bodyStep, bodyExecutor, onItemError);
+                ? runParallel(step, context, items, itemVar, bodyStep, bodyExecutor, maxConcurrency, onItemError, itemRetryMax)
+                : runSequential(step, context, items, itemVar, bodyStep, bodyExecutor, onItemError, itemRetryMax);
 
         long failed = results.stream().filter(r -> "failed".equals(r.get("status"))).count();
+
+        // CR-117: 실패율 임계치 초과 시 step 전체 FAILED 승격. on_item_error=continue 라도 부분 누락이
+        // 임계를 넘으면 "완료" 둔갑을 막는다(빈 결과가 후속 스텝에 흘러가는 것 차단).
+        if (maxFailedRatio >= 0.0 && !items.isEmpty()) {
+            double ratio = (double) failed / items.size();
+            if (ratio > maxFailedRatio) {
+                throw new IllegalStateException(
+                        "FOREACH step '" + step.id() + "': failed ratio " + String.format("%.2f", ratio)
+                                + " (" + failed + "/" + items.size() + ") exceeds max_failed_ratio " + maxFailedRatio);
+            }
+        }
 
         // 3) 결과 수집 (collect)
         if ("merge".equals(collect)) {
@@ -196,10 +213,10 @@ public class ForeachStepExecutor implements StepExecutor {
     private List<Map<String, Object>> runSequential(WorkflowStep step, StepContext context,
                                                      List<Object> items, String itemVar,
                                                      WorkflowStep bodyStep, StepExecutor bodyExecutor,
-                                                     String onItemError) {
+                                                     String onItemError, int itemRetryMax) {
         List<Map<String, Object>> results = new ArrayList<>(items.size());
         for (int i = 0; i < items.size(); i++) {
-            results.add(runOne(step, context, items.get(i), i, itemVar, bodyStep, bodyExecutor, onItemError));
+            results.add(runOne(step, context, items.get(i), i, itemVar, bodyStep, bodyExecutor, onItemError, itemRetryMax));
         }
         return results;
     }
@@ -207,18 +224,24 @@ public class ForeachStepExecutor implements StepExecutor {
     private List<Map<String, Object>> runParallel(WorkflowStep step, StepContext context,
                                                    List<Object> items, String itemVar,
                                                    WorkflowStep bodyStep, StepExecutor bodyExecutor,
-                                                   int maxConcurrency, String onItemError) {
+                                                   int maxConcurrency, String onItemError, int itemRetryMax) {
         Semaphore gate = new Semaphore(maxConcurrency);
+        // VT 는 부모 ThreadLocal 을 상속하지 않으므로 TenantContext 를 캡처해 각 VT 안에서 재주입.
+        // 누락 시 body(AGENT_CALL→SubagentRunner.save 등)가 잘못된 DataSource(=master)로 라우팅되어
+        // "relation \"subagent_runs\" does not exist" 로 전원 실패 (DB-per-Tenant 격리, BIZ-003).
+        final String tenantId = com.platform.tenant.TenantContext.getTenantId();
         List<CompletableFuture<Map<String, Object>>> futures = new ArrayList<>(items.size());
         for (int i = 0; i < items.size(); i++) {
             final int idx = i;
             final Object item = items.get(i);
             futures.add(CompletableFuture.supplyAsync(() -> {
+                if (tenantId != null) com.platform.tenant.TenantContext.setTenantId(tenantId);
                 gate.acquireUninterruptibly();
                 try {
-                    return runOne(step, context, item, idx, itemVar, bodyStep, bodyExecutor, onItemError);
+                    return runOne(step, context, item, idx, itemVar, bodyStep, bodyExecutor, onItemError, itemRetryMax);
                 } finally {
                     gate.release();
+                    com.platform.tenant.TenantContext.clear();
                 }
             }, Executors.newVirtualThreadPerTaskExecutor()));
         }
@@ -236,30 +259,56 @@ public class ForeachStepExecutor implements StepExecutor {
         return results;
     }
 
-    /** 단일 원소 처리 — item/index 주입 후 body 위임. on_item_error 정책 적용. */
+    /**
+     * 단일 원소 처리 — item/index 주입 후 body 위임. on_item_error 정책 적용.
+     *
+     * <p>CR-117: 자식 단위 재시도. body 실행이 실패하면 그 자식만 최대 {@code itemRetryMax} 회 재시도한다
+     * (부모 step 전체 재실행 회피 — 이미 성공한 형제 자식 낭비 방지). 직전 실패 메시지를
+     * {@link StepContext#withRetryFailure} 로 다음 attempt 에 실어, body 가 AGENT_CALL 이면
+     * AgentCallStepExecutor 가 timeout/빈응답 류일 때 결정적 childSessionId 로 {@code --resume} 이어하기를 적용한다.
+     * 자식 stepId({@code parent.body[index]})가 결정적 멱등 키라 형제 간 세션 충돌이 없다.
+     */
     private Map<String, Object> runOne(WorkflowStep step, StepContext context, Object item, int index,
                                        String itemVar, WorkflowStep bodyStep, StepExecutor bodyExecutor,
-                                       String onItemError) {
+                                       String onItemError, int itemRetryMax) {
         StepContext itemCtx = injectItem(context, item, index, itemVar);
-        try {
-            Map<String, Object> r = bodyExecutor.execute(withItemId(bodyStep, index), itemCtx);
-            Map<String, Object> enriched = new LinkedHashMap<>(r != null ? r : Map.of());
-            enriched.putIfAbsent("status", "ok");
-            enriched.put("index", index);
-            return enriched;
-        } catch (Exception e) {
-            if ("continue".equals(onItemError)) {
-                log.warn("FOREACH step '{}' item[{}] failed (on_item_error=continue): {}",
-                        step.id(), index, e.getMessage());
-                Map<String, Object> err = new LinkedHashMap<>();
-                err.put("status", "failed");
-                err.put("error", e.getMessage());
-                err.put("index", index);
-                return err;
+        WorkflowStep itemStep = withItemId(bodyStep, index);
+        int maxAttempts = 1 + Math.max(0, itemRetryMax);
+        Exception last = null;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                Map<String, Object> r = bodyExecutor.execute(itemStep, itemCtx);
+                Map<String, Object> enriched = new LinkedHashMap<>(r != null ? r : Map.of());
+                enriched.putIfAbsent("status", "ok");
+                enriched.put("index", index);
+                if (attempt > 1) enriched.put("retried_attempts", attempt);
+                return enriched;
+            } catch (Exception e) {
+                last = e;
+                if (attempt < maxAttempts) {
+                    log.warn("FOREACH step '{}' item[{}] attempt {}/{} failed: {} — retrying child",
+                            step.id(), index, attempt, maxAttempts, e.getMessage());
+                    // 다음 attempt 에 직전 실패 메시지 주입 → AGENT_CALL 이면 timeout/빈응답류 판정해 --resume.
+                    itemCtx = itemCtx.withRetryFailure(e.getMessage());
+                }
             }
-            throw new RuntimeException(
-                    "FOREACH step '" + step.id() + "' item[" + index + "] failed: " + e.getMessage(), e);
         }
+
+        // 재시도 상한까지 실패 — on_item_error 정책 적용.
+        if ("continue".equals(onItemError)) {
+            log.warn("FOREACH step '{}' item[{}] failed after {} attempt(s) (on_item_error=continue): {}",
+                    step.id(), index, maxAttempts, last != null ? last.getMessage() : "unknown");
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("status", "failed");
+            err.put("error", last != null ? last.getMessage() : "unknown");
+            err.put("index", index);
+            err.put("attempts", maxAttempts);
+            return err;
+        }
+        throw new RuntimeException(
+                "FOREACH step '" + step.id() + "' item[" + index + "] failed after " + maxAttempts
+                        + " attempt(s): " + (last != null ? last.getMessage() : "unknown"), last);
     }
 
     // ─── 변수 주입 ────────────────────────────────────────────────────────
@@ -332,6 +381,16 @@ public class ForeachStepExecutor implements StepExecutor {
         if (v == null) return def;
         try {
             return Integer.parseInt(v.toString().trim());
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
+    private static double asDouble(Object v, double def) {
+        if (v instanceof Number n) return n.doubleValue();
+        if (v == null) return def;
+        try {
+            return Double.parseDouble(v.toString().trim());
         } catch (NumberFormatException e) {
             return def;
         }

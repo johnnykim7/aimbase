@@ -384,8 +384,10 @@ public class SubagentRunner {
         // 응답이 텍스트도 구조화도 비어있으면 — 모델이 'structured_output' 같은 종료 도구로
         // 마무리하지 않고 빈 응답으로 끝낸 케이스. 워크플로우 retry 정책에 태우기 위해 실패로 표시한다.
         // (모델 동작 변동성에 대한 안전망. 정상 흐름은 무영향.)
-        if ((output == null || output.isBlank()) && structured == null) {
-            log.warn("Subagent run {} produced empty output and no structured data — treating as FAILED",
+        // CR-117: requireTextOutput(기본 true)일 때만 빈응답=FAILED. false 면 도구만 쓰고 끝내는
+        // 에이전트(빈 텍스트가 정상)를 허용 → 빈응답도 COMPLETED 로 통과.
+        if (req.requireTextOutput() && (output == null || output.isBlank()) && structured == null) {
+            log.warn("Subagent run {} produced empty output and no structured data — treating as FAILED (require_text_output=true)",
                     context.getSubagentRunId());
             return SubagentResult.failed(
                     context.getSubagentRunId(), context.getChildSessionId(),

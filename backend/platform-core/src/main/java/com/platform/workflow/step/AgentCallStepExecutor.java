@@ -141,6 +141,15 @@ public class AgentCallStepExecutor implements StepExecutor {
             throw new IllegalArgumentException("AGENT_CALL step requires 'prompt' in config");
         }
 
+        // CR-117: 직전 attempt 가 "Request too large (32MB)" 류로 실패했으면, 한 turn 에 PDF 페이지를
+        // 너무 많이 누적해 읽은 것이다(진범). 재시도 프롬프트에 "더 잘게 읽어라" 힌트를 앞에 붙인다.
+        // 미리 정밀 분할하지 않고(추정은 빗나감), 에러가 알려주면 그때 적응적으로 줄인다 — 사용자 결정.
+        if (isPayloadTooLargeFailure(context.previousAttemptFailure())) {
+            prompt = TOO_LARGE_RETRY_HINT + "\n\n" + prompt;
+            log.info("AGENT_CALL step '{}' (run={}): previous attempt hit 32MB limit — injecting smaller-read hint",
+                    stepId, context.workflowRunId());
+        }
+
         String model = (String) config.get("model");
         String connectionId = (String) config.get("connection_id");
         String isolationStr = (String) config.getOrDefault("isolation", "NONE");
@@ -161,6 +170,11 @@ public class AgentCallStepExecutor implements StepExecutor {
                     stepId, context.workflowRunId(), resumeSessionId);
         }
 
+        // CR-117: 빈응답=실패 판정 토글. 기본 true(extract_facts 류 fact 추출은 텍스트를 내야 함).
+        // config.require_text_output=false 면 도구만 쓰고 끝내는 에이전트 허용(빈응답 통과).
+        // JSON boolean(false) 또는 템플릿 치환으로 들어온 문자열("false") 둘 다 false 로 인식.
+        boolean requireTextOutput = !isFalsey(config.get("require_text_output"));
+
         // CR-102: 워크플로우 run/step 연결 키 전파 — 서브에이전트 내부 도구 루프 이벤트를 run 타임라인에 적재
         // CR-107 후속: 부모 run 의 workspacePath 전파 → 서브에이전트가 TOOL_CALL(download_file) 이 쓴
         // run 격리 workspace 를 본다(새 childSessionId 의 tenant/project 폴백 단절 해소).
@@ -168,7 +182,8 @@ public class AgentCallStepExecutor implements StepExecutor {
                 description, prompt, model, connectionId,
                 isolation, false, timeoutMs,
                 config, context.sessionId(), com.platform.agent.AgentType.GENERAL,
-                context.workflowRunId(), stepId, resumeSessionId, context.workspacePath());
+                context.workflowRunId(), stepId, resumeSessionId, context.workspacePath(),
+                requireTextOutput);
     }
 
     /**
@@ -181,6 +196,32 @@ public class AgentCallStepExecutor implements StepExecutor {
         if (failureMessage == null) return false;
         String lower = failureMessage.toLowerCase();
         return lower.contains("timeout") || lower.contains("timed out");
+    }
+
+    /**
+     * CR-117: 직전 실패가 Anthropic API "Request too large (max 32MB)" 류인지 판정.
+     * CLI 가 이 에러를 {@code is_error:true} result 로 둔갑 발행하고(CR-112), ClaudeCliWorker 가
+     * 예외로 승격 → AgentCallStepExecutor 가 "AGENT_CALL failed: ...too large..." 로 전파한다.
+     * 한 turn 에 PDF 페이지를 과다 누적해 32MB 를 넘긴 경우 → 재시도 시 "더 잘게 읽어라" 힌트 주입.
+     */
+    static boolean isPayloadTooLargeFailure(String failureMessage) {
+        if (failureMessage == null) return false;
+        String lower = failureMessage.toLowerCase();
+        return lower.contains("too large") || lower.contains("32mb") || lower.contains("request_too_large");
+    }
+
+    /** CR-117: 32MB 재시도 시 프롬프트 앞에 붙이는 힌트 — 한 turn 누적을 줄여 32MB 회피. */
+    static final String TOO_LARGE_RETRY_HINT =
+            "[재시도 안내] 직전 시도에서 한 번에 너무 많은 PDF 페이지를 읽어 요청이 32MB 한계를 초과해 실패했습니다. "
+            + "이번에는 한 turn(한 응답)에 PDF 를 5~10페이지씩만 읽으세요. "
+            + "한 범위를 읽고 → 핵심을 메모한 뒤 → 다음 범위를 읽는 식으로 진행하고, "
+            + "여러 페이지 범위를 한 turn 에 몰아서 읽지 마세요. 마지막 페이지까지 가되 누적은 작게 유지하세요.";
+
+    /** CR-117: JSON boolean false 또는 문자열 "false"(템플릿 치환 결과) 를 false 로 인식. null/그 외=false 아님. */
+    static boolean isFalsey(Object v) {
+        if (v instanceof Boolean b) return !b;
+        if (v instanceof String s) return "false".equalsIgnoreCase(s.trim());
+        return false;
     }
 
     /**

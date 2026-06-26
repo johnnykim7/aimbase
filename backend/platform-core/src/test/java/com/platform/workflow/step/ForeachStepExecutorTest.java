@@ -432,4 +432,126 @@ class ForeachStepExecutorTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("nested FOREACH");
     }
+
+    // ═══════════════════════════════════════════════
+    // CR-117: 자식 단위 재시도 (item_retry_max)
+    // ═══════════════════════════════════════════════
+
+    /** N번 실패 후 성공하는 fake — 자식 재시도 검증용. url 별 시도 횟수 카운팅. */
+    static class FlakyBody implements StepExecutor {
+        final WorkflowStep.StepType type;
+        final java.util.Map<String, Integer> attempts = new java.util.concurrent.ConcurrentHashMap<>();
+        final int failTimes; // 각 url 이 처음 failTimes 번은 실패, 그 다음 성공
+
+        FlakyBody(WorkflowStep.StepType type, int failTimes) { this.type = type; this.failTimes = failTimes; }
+
+        @Override public WorkflowStep.StepType supports() { return type; }
+
+        @Override
+        public Map<String, Object> execute(WorkflowStep step, StepContext context) {
+            String url = context.resolve("{{item.url}}");
+            int n = attempts.merge(url, 1, Integer::sum);
+            if (n <= failTimes) throw new RuntimeException("flaky fail #" + n + " for " + url);
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("output", "parsed:" + url + "@try" + n);
+            return r;
+        }
+    }
+
+    @Test
+    @DisplayName("CR-117 item_retry_max=2 — 1회 실패 후 재시도로 성공, 부모 실패 안 함")
+    void itemRetrySucceedsAfterTransientFailure() {
+        FlakyBody body = new FlakyBody(WorkflowStep.StepType.TOOL_CALL, 1); // 첫 시도만 실패
+        when(applicationContext.getBeansOfType(StepExecutor.class)).thenReturn(Map.of("fake", body));
+        StepContext ctx = ctxWithSamples(sampleMaps("u0", "u1"));
+
+        Map<String, Object> config = baseConfig("sequential");
+        config.put("item_retry_max", 2);
+
+        Map<String, Object> out = executor.execute(foreachStep(config), ctx);
+
+        assertThat(out.get("failed_count")).isEqualTo(0);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> results = (List<Map<String, Object>>) out.get("results");
+        assertThat(results).allSatisfy(r -> assertThat(r.get("status")).isEqualTo("ok"));
+        // 각 url 2회 시도(1실패+1성공) — 재시도가 자식 단위로만 일어남
+        assertThat(body.attempts.get("u0")).isEqualTo(2);
+        assertThat(body.attempts.get("u1")).isEqualTo(2);
+        assertThat(results.get(0).get("retried_attempts")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("CR-117 item_retry_max 상한 초과 — on_item_error=continue 면 그 자식만 failed(attempts 기록)")
+    void itemRetryExhaustedContinue() {
+        FlakyBody body = new FlakyBody(WorkflowStep.StepType.TOOL_CALL, 99); // 항상 실패
+        when(applicationContext.getBeansOfType(StepExecutor.class)).thenReturn(Map.of("fake", body));
+        StepContext ctx = ctxWithSamples(sampleMaps("u0"));
+
+        Map<String, Object> config = baseConfig("sequential");
+        config.put("item_retry_max", 2);          // 총 3회 시도
+        config.put("on_item_error", "continue");
+
+        Map<String, Object> out = executor.execute(foreachStep(config), ctx);
+
+        assertThat(out.get("failed_count")).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> results = (List<Map<String, Object>>) out.get("results");
+        assertThat(results.get(0).get("status")).isEqualTo("failed");
+        assertThat(results.get(0).get("attempts")).isEqualTo(3);
+        assertThat(body.attempts.get("u0")).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("CR-117 item_retry_max 미지정(기본 0) — 재시도 없음(현행 동작)")
+    void noRetryByDefault() {
+        FlakyBody body = new FlakyBody(WorkflowStep.StepType.TOOL_CALL, 99);
+        when(applicationContext.getBeansOfType(StepExecutor.class)).thenReturn(Map.of("fake", body));
+        StepContext ctx = ctxWithSamples(sampleMaps("u0"));
+
+        Map<String, Object> config = baseConfig("sequential");
+        config.put("on_item_error", "continue");
+
+        Map<String, Object> out = executor.execute(foreachStep(config), ctx);
+
+        assertThat(out.get("failed_count")).isEqualTo(1);
+        assertThat(body.attempts.get("u0")).isEqualTo(1); // 1회만 시도
+    }
+
+    // ═══════════════════════════════════════════════
+    // CR-117: 실패율 임계치 (max_failed_ratio)
+    // ═══════════════════════════════════════════════
+
+    @Test
+    @DisplayName("CR-117 max_failed_ratio 초과 — continue 라도 step 전체 FAILED 승격")
+    void maxFailedRatioPromotesToStepFailure() {
+        FakeBodyExecutor body = wireBody(WorkflowStep.StepType.TOOL_CALL);
+        body.throwOnUrl3 = true;
+        // 3개 중 1개(u3) 실패 = 0.33 > 0.2 임계 → step FAIL
+        StepContext ctx = ctxWithSamples(sampleMaps("u0", "u3", "u2"));
+
+        Map<String, Object> config = baseConfig("sequential");
+        config.put("on_item_error", "continue");
+        config.put("max_failed_ratio", 0.2);
+
+        assertThatThrownBy(() -> executor.execute(foreachStep(config), ctx))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("exceeds max_failed_ratio");
+    }
+
+    @Test
+    @DisplayName("CR-117 max_failed_ratio 이내 — 실패 있어도 step 완료(continue 유지)")
+    void maxFailedRatioWithinThreshold() {
+        FakeBodyExecutor body = wireBody(WorkflowStep.StepType.TOOL_CALL);
+        body.throwOnUrl3 = true;
+        // 4개 중 1개 실패 = 0.25 <= 0.5 임계 → step 완료
+        StepContext ctx = ctxWithSamples(sampleMaps("u0", "u3", "u2", "u1"));
+
+        Map<String, Object> config = baseConfig("sequential");
+        config.put("on_item_error", "continue");
+        config.put("max_failed_ratio", 0.5);
+
+        Map<String, Object> out = executor.execute(foreachStep(config), ctx);
+        assertThat(out.get("failed_count")).isEqualTo(1);
+    }
+
 }
