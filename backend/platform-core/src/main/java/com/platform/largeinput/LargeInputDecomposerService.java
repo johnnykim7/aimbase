@@ -70,7 +70,8 @@ public class LargeInputDecomposerService {
         if (source.bytes() == null) {
             throw new IllegalArgumentException("CR-120: source has no bytes and no inline text");
         }
-        // PDF 가정 (MVP). SourceLoader 가 mimeType 으로 이미 거름.
+        // 여기 도달 = bytes 가 있고 inlineText 가 아닌 소스 = PDF (TextSourceLoader 는 inlineText 로 적재해
+        // 위 isInlineText() 경로로 빠진다). 텍스트는 타입 무관 크기로 분해 여부 결정(LARGE_INPUT 본래 의도).
         return decomposePdf(source, policy);
     }
 
