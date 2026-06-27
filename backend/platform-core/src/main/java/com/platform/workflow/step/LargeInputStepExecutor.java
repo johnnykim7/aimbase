@@ -1,6 +1,7 @@
 package com.platform.workflow.step;
 
 import com.platform.attachment.AttachmentService;
+import com.platform.config.WorkspaceProperties;
 import com.platform.domain.ChatAttachmentEntity;
 import com.platform.domain.LargeInputJobEntity;
 import com.platform.largeinput.*;
@@ -19,6 +20,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -49,6 +53,7 @@ public class LargeInputStepExecutor implements StepExecutor {
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final ModelRouter modelRouter;
     private final MCPRagClient ragClient;
+    private final WorkspaceProperties workspaceProperties;
 
     @Value("${largeinput.policy:auto}")
     private String systemPolicy;
@@ -71,7 +76,8 @@ public class LargeInputStepExecutor implements StepExecutor {
                                   LargeInputJobRepository jobRepository,
                                   ConnectionAdapterFactory connectionAdapterFactory,
                                   ModelRouter modelRouter,
-                                  MCPRagClient ragClient) {
+                                  MCPRagClient ragClient,
+                                  WorkspaceProperties workspaceProperties) {
         this.attachmentService = attachmentService;
         this.sourceLoaders = sourceLoaders;
         this.decomposer = decomposer;
@@ -82,6 +88,7 @@ public class LargeInputStepExecutor implements StepExecutor {
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.modelRouter = modelRouter;
         this.ragClient = ragClient;
+        this.workspaceProperties = workspaceProperties;
     }
 
     @Override
@@ -382,26 +389,80 @@ public class LargeInputStepExecutor implements StepExecutor {
         String inlineInput = str(config.get("input"), null);
 
         if (sourceFile != null && !sourceFile.isBlank()) {
-            UUID attachmentId;
-            try {
-                attachmentId = UUID.fromString(sourceFile.trim());
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("LARGE_INPUT step '" + step.id()
-                        + "': source_file is not a valid attachment_id: " + sourceFile);
-            }
-            ChatAttachmentEntity att = attachmentService.loadOwned(attachmentId, context.sessionId());
-            byte[] bytes = attachmentService.readBytes(att);
-            String mime = att.getMediaType();
-            SourceLoader loader = sourceLoaders.stream()
-                    .filter(l -> l.supports(mime)).findFirst()
-                    .orElseThrow(() -> new IllegalStateException("LARGE_INPUT: no SourceLoader for mime " + mime));
-            return loader.load(attachmentId.toString(), mime, bytes);
+            String trimmed = sourceFile.trim();
+            // source_file 은 두 형태를 받는다:
+            //  ① attachment_id(UUID) → AttachmentService 로 세션 소유 attachment 바이트 로드
+            //  ② 작업장 경로 → whitelist 검증 후 BE 가 직접 읽기 (ParseDocumentTool file_path 패턴)
+            // 운영 워크플로우(opportunity-analysis)가 download 한 작업장 파일 경로를 그대로 쓰게 하기 위함.
+            return isUuid(trimmed)
+                    ? loadAttachment(UUID.fromString(trimmed), context)
+                    : loadWorkspaceFile(step, trimmed);
         }
         if (inlineInput != null) {
             return new LargeInputSource("inline", "text/plain", null, inlineInput, null);
         }
         throw new IllegalArgumentException("LARGE_INPUT step '" + step.id()
-                + "': either source_file (attachment_id) or input (inline text) is required");
+                + "': either source_file (attachment_id or workspace path) or input (inline text) is required");
+    }
+
+    /** ① attachment_id 경로 — 세션 소유 attachment 바이트 로드. */
+    private LargeInputSource loadAttachment(UUID attachmentId, StepContext context) {
+        ChatAttachmentEntity att = attachmentService.loadOwned(attachmentId, context.sessionId());
+        byte[] bytes = attachmentService.readBytes(att);
+        String mime = att.getMediaType();
+        return pickLoader(mime).load(attachmentId.toString(), mime, bytes);
+    }
+
+    /**
+     * ② 작업장 경로 경로 — whitelist 검증 후 BE 가 직접 읽는다(ParseDocumentTool file_path 패턴).
+     * mime 메타가 없으므로 확장자로 추론. 운영 download_attachments 가 떨군 작업장 파일을 그대로 분석.
+     */
+    private LargeInputSource loadWorkspaceFile(WorkflowStep step, String rawPath) {
+        Path base = Path.of(workspaceProperties.getBase());
+        Path p = Path.of(rawPath);
+        // 상대경로면 작업장 base 기준으로 해석(예: "attachments/x.pdf" → <base>/attachments/x.pdf)
+        Path abs = (p.isAbsolute() ? p : base.resolve(p)).toAbsolutePath().normalize();
+        if (!workspaceProperties.isInsideWhitelist(abs)) {
+            throw new IllegalArgumentException("LARGE_INPUT step '" + step.id()
+                    + "': source_file path is outside workspace whitelist: " + abs);
+        }
+        if (!Files.isReadable(abs)) {
+            throw new IllegalArgumentException("LARGE_INPUT step '" + step.id()
+                    + "': source_file not found or unreadable in workspace: " + abs);
+        }
+        byte[] bytes;
+        try {
+            bytes = Files.readAllBytes(abs);
+        } catch (IOException e) {
+            throw new IllegalStateException("LARGE_INPUT step '" + step.id()
+                    + "': failed to read workspace file " + abs + ": " + e.getMessage(), e);
+        }
+        String mime = guessMimeFromName(abs.getFileName().toString());
+        return pickLoader(mime).load(abs.toString(), mime, bytes);
+    }
+
+    private SourceLoader pickLoader(String mime) {
+        return sourceLoaders.stream()
+                .filter(l -> l.supports(mime)).findFirst()
+                .orElseThrow(() -> new IllegalStateException("LARGE_INPUT: no SourceLoader for mime " + mime));
+    }
+
+    private static boolean isUuid(String s) {
+        try {
+            UUID.fromString(s);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** 확장자 → MIME (MVP: PDF만 분해 지원, 그 외는 일반 타입으로 두고 SourceLoader 가 거름). */
+    private static String guessMimeFromName(String name) {
+        String lower = name.toLowerCase();
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        if (lower.endsWith(".txt")) return "text/plain";
+        if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        return "application/octet-stream";
     }
 
     private boolean isLikelyLarge(LargeInputSource source) {
