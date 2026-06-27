@@ -163,8 +163,12 @@ public class AgentCallStepExecutor implements StepExecutor {
         // CR-106: 직전 attempt 가 turn timeout 류로 실패했으면, 이 step·run 의 결정적 childSessionId 를
         // resumeSessionId 로 넘긴다 → 같은 CLI run_id 로 Worker 재사용 + --resume 이어하기(작업장 누적 위 계속).
         // timeout 류가 아니면 null → SubagentRunner 가 새 세션 발급(깨끗이 재시도). 첫 시도도 null.
+        // CR-119: 32MB(payload too large)는 같은 파일을 다시 보내는 resume 이 독이다(또 32MB → 무한 반복).
+        // timeout 류처럼 보여도(메시지에 timeout 단어가 섞여도) too-large 가 우선 — fresh 세션으로 재시도해
+        // 위 TOO_LARGE_RETRY_HINT(누적 축소)가 효과를 내게 한다. too-large 가 아닐 때만 timeout resume 적용.
         String resumeSessionId = null;
-        if (enableResume && isTurnTimeoutFailure(context.previousAttemptFailure())) {
+        boolean tooLarge = isPayloadTooLargeFailure(context.previousAttemptFailure());
+        if (enableResume && !tooLarge && isTurnTimeoutFailure(context.previousAttemptFailure())) {
             resumeSessionId = deterministicSessionId(context.workflowRunId(), stepId);
             log.info("AGENT_CALL step '{}' (run={}): previous attempt timed out — resuming same CLI session '{}'",
                     stepId, context.workflowRunId(), resumeSessionId);

@@ -119,4 +119,24 @@ class AgentCallStepExecutorCr106Test {
         assertThat(AgentCallStepExecutor.isPayloadTooLargeFailure(null)).isFalse();
         assertThat(AgentCallStepExecutor.isPayloadTooLargeFailure("turn timeout")).isFalse();
     }
+
+    // CR-119: 32MB(too large)는 resume(같은 파일 재전송) 금지 — fresh 세션으로 재시도해 축소 힌트가 효과를 낸다.
+    @Test
+    void retryAfterTooLarge_noResume_evenWhenMessageAlsoMentionsTimeout() {
+        // 32MB 메시지에 timeout 단어가 섞여도(둔갑 경로 잔재) too-large 가 우선 → resume 안 함.
+        StepContext ctx = new StepContext("run-1", "wf-1", "sess-1", Map.of(), Map.of())
+                .withRetryFailure("CLI result reported is_error=true: Request too large (max 32MB) — turn timed out");
+        SubagentRequest req = captureRequest(ctx);
+        assertThat(req.resumeSessionId()).isNull();
+    }
+
+    // CR-119: too-large 가 아닌 순수 timeout 은 기존대로 resume(이어하기) 유지 — 회귀 가드.
+    @Test
+    void retryAfterPureTimeout_stillResumes() {
+        StepContext ctx = new StepContext("run-1", "wf-1", "sess-1", Map.of(), Map.of())
+                .withRetryFailure("AGENT_CALL failed: Subagent execution timed out");
+        SubagentRequest req = captureRequest(ctx);
+        String expected = AgentCallStepExecutor.deterministicSessionId("run-1", "step-A");
+        assertThat(req.resumeSessionId()).isEqualTo(expected);
+    }
 }

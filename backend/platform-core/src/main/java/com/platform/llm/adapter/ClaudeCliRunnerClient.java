@@ -149,13 +149,17 @@ public class ClaudeCliRunnerClient {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     if (line.isBlank()) continue;
+                    Map<String, Object> evt;
                     try {
-                        Map<String, Object> evt = MAPPER.readValue(line, MAP_TYPE);
-                        if ("result".equals(evt.get("type"))) sawResult = true;
-                        handleStreamEvent(evt, runId, model, chunkConsumer);
+                        evt = MAPPER.readValue(line, MAP_TYPE);
                     } catch (Exception parse) {
+                        // JSON 파싱 실패 라인만 스킵. handleStreamEvent 의 의도적 예외 승격(CR-119 32MB
+                        // is_error 둔갑 등)은 절대 삼키면 안 되므로 parse 와 handle 의 try 범위를 분리한다.
                         log.trace("Runner stream 라인 파싱 실패 (스킵): {}", line);
+                        continue;
                     }
+                    if ("result".equals(evt.get("type"))) sawResult = true;
+                    handleStreamEvent(evt, runId, model, chunkConsumer);
                 }
             }
             // CR-111: result(정상 종료) 이벤트 없이 스트림이 끊기면 — agent 의 async timeout(또는 연결 절단)으로
@@ -480,6 +484,19 @@ public class ClaudeCliRunnerClient {
                     ? LLMStreamChunk.observedToolResult(runId, model, obs)
                     : LLMStreamChunk.observedToolUse(runId, model, obs));
         } else if ("result".equals(type)) {
+            // CR-119: CLI 가 socket closed / API 에러(특히 "Request too large (max 32MB)")를
+            // is_error:true 인 result 이벤트로 둔갑 발행한다(CR-112 패턴, 비스트림 ClaudeCliWorker:594 에서만 처리됐음).
+            // 스트림 경로(chatStream)도 동일하게 예외로 승격하되, 원본 error 텍스트("too large" 등)를 메시지에
+            // 보존해야 상위(AgentCallStepExecutor.isPayloadTooLargeFailure)가 32MB 류로 정확히 분류 → resume(같은
+            // 파일 재전송) 대신 fresh+축소 힌트로 재시도한다. 보존 안 하면 "turn truncated...timeout" 으로 둔갑돼
+            // timeout 분기로 새서 resume 무한반복 → 35MB 도면 빈 응답 (운영 run 4185860e item[3] 실측).
+            if (Boolean.TRUE.equals(evt.get("is_error"))) {
+                Object subtype = evt.get("subtype");
+                String errText = String.valueOf(evt.getOrDefault("error",
+                        evt.getOrDefault("message", evt.getOrDefault("result", "unknown CLI error"))));
+                throw new RuntimeException(
+                        "CLI result reported is_error=true (subtype=" + subtype + "): " + errText);
+            }
             TokenUsage usage = parseUsage(evt.get("usage"));
             LLMResponse.FinishReason finish = parseFinishReason(evt.get("finish_reason"));
             List<ToolCall> toolCalls = new ArrayList<>();
