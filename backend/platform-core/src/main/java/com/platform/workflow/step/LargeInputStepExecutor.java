@@ -471,7 +471,7 @@ public class LargeInputStepExecutor implements StepExecutor {
             // 운영 워크플로우(opportunity-analysis)가 download 한 작업장 파일 경로를 그대로 쓰게 하기 위함.
             return isUuid(trimmed)
                     ? loadAttachment(UUID.fromString(trimmed), context)
-                    : loadWorkspaceFile(step, trimmed);
+                    : loadWorkspaceFile(step, trimmed, context);
         }
         if (inlineInput != null) {
             return new LargeInputSource("inline", "text/plain", null, inlineInput, null);
@@ -492,8 +492,14 @@ public class LargeInputStepExecutor implements StepExecutor {
      * ② 작업장 경로 경로 — whitelist 검증 후 BE 가 직접 읽는다(ParseDocumentTool file_path 패턴).
      * mime 메타가 없으므로 확장자로 추론. 운영 download_attachments 가 떨군 작업장 파일을 그대로 분석.
      */
-    private LargeInputSource loadWorkspaceFile(WorkflowStep step, String rawPath) {
-        Path base = Path.of(workspaceProperties.getBase());
+    private LargeInputSource loadWorkspaceFile(WorkflowStep step, String rawPath, StepContext context) {
+        // run 격리 작업장({base}/{tenant}/runs/{runId}, StepContext.workspacePath)을 base 로 우선 사용.
+        // TOOL_CALL(download_attachments)/AGENT_CALL 이 파일을 떨구는 run 디렉토리와 동일하게 맞춰,
+        // 글로벌 base(/data/workspace)에서 못 찾던 버그(CR-120)를 해소. null=하위호환 폴백.
+        String wsPath = context == null ? null : context.workspacePath();
+        Path base = (wsPath != null && !wsPath.isBlank())
+                ? Path.of(wsPath)
+                : Path.of(workspaceProperties.getBase());
         Path p = Path.of(rawPath);
         // 상대경로면 작업장 base 기준으로 해석(예: "attachments/x.pdf" → <base>/attachments/x.pdf)
         Path abs = (p.isAbsolute() ? p : base.resolve(p)).toAbsolutePath().normalize();
