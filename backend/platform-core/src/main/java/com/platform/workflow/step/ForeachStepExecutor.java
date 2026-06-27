@@ -1,11 +1,15 @@
 package com.platform.workflow.step;
 
 import com.platform.workflow.StepContext;
+import com.platform.workflow.event.WorkflowRunEventRecorder;
 import com.platform.workflow.model.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
+
+import java.util.UUID;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -74,9 +78,21 @@ public class ForeachStepExecutor implements StepExecutor {
     static final String INDEX_VAR = "index";
 
     private final ApplicationContext applicationContext;
+    /**
+     * CR-090 후속: FOREACH 자식 body 의 STEP_START/END 를 직접 발행하기 위한 레코더.
+     * <p>FOREACH 는 {@code bodyExecutor.execute()} 를 직접 호출해 {@link com.platform.workflow.WorkflowEngine}
+     * 의 top-level STEP_START 발행 루프를 우회한다. 그래서 자식 body(특히 AGENT_CALL)가 도구를
+     * 부르기 전에는 {@code 부모.body[N]} step_id 이벤트가 전혀 없어, FE 채팅흐름 뷰가 반복 카드를
+     * 못 그리고 "반복 항목을 처리 중…" 만 띄운다(빈 컨테이너). 자식 시작 즉시 STEP_START 를 발행하면
+     * TOOL_CALL 자식(즉시 TOOL_USE)과 동일하게 AGENT_CALL 자식도 시작 시점부터 반복 카드가 보인다.
+     * <p>{@code ObjectProvider} 로 지연 주입 — 비워크플로우/테스트 경로(레코더 미등록)에서도 null 안전.
+     */
+    private final WorkflowRunEventRecorder eventRecorder;
 
-    public ForeachStepExecutor(ApplicationContext applicationContext) {
+    public ForeachStepExecutor(ApplicationContext applicationContext,
+                               ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider) {
         this.applicationContext = applicationContext;
+        this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
     }
 
     @Override
@@ -149,8 +165,18 @@ public class ForeachStepExecutor implements StepExecutor {
 
         long failed = results.stream().filter(r -> "failed".equals(r.get("status"))).count();
 
+        // 전건 실패는 on_item_error=continue / max_failed_ratio 설정과 무관하게 항상 step FAILED 승격.
+        // 모든 item 이 실패했는데 "완료(✅)"로 둔갑해 빈 결과가 후속 스텝에 흘러가던 문제 차단
+        // (사용자 결정: 전건 실패면 스텝 실패 → run 종료). 부분 실패는 아래 max_failed_ratio 정책에 위임.
+        boolean allFailed = failed == items.size();
+        if (allFailed) {
+            throw new IllegalStateException(
+                    "FOREACH step '" + step.id() + "': all " + items.size()
+                            + " item(s) failed — step FAILED (last error in item results)");
+        }
+
         // CR-117: 실패율 임계치 초과 시 step 전체 FAILED 승격. on_item_error=continue 라도 부분 누락이
-        // 임계를 넘으면 "완료" 둔갑을 막는다(빈 결과가 후속 스텝에 흘러가는 것 차단).
+        // 임계를 넘으면 "완료" 둔갑을 막는다(빈 결과가 후속 스텝에 흘러가는 것 차단). 미지정(<0)=현행(부분 통과).
         if (maxFailedRatio >= 0.0 && !items.isEmpty()) {
             double ratio = (double) failed / items.size();
             if (ratio > maxFailedRatio) {
@@ -276,6 +302,15 @@ public class ForeachStepExecutor implements StepExecutor {
         int maxAttempts = 1 + Math.max(0, itemRetryMax);
         Exception last = null;
 
+        // CR-090 후속: 자식 STEP_START 를 body 실행 진입 전에 1회 발행. FOREACH 는 top-level STEP_START
+        // 발행 루프를 우회하므로, 이 발행이 없으면 AGENT_CALL 자식이 첫 도구를 부르기 전까지 `부모.body[N]`
+        // 이벤트가 0건 → FE 가 반복 카드를 못 그린다. 시작 즉시 발행해 빈 반복 카드라도 보이게 한다.
+        UUID runUuid = parseRunUuid(context.workflowRunId());
+        long childStart = System.currentTimeMillis();
+        if (eventRecorder != null && runUuid != null) {
+            eventRecorder.stepStart(runUuid, itemStep.id(), bodyStep.type().name());
+        }
+
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 Map<String, Object> r = bodyExecutor.execute(itemStep, itemCtx);
@@ -283,6 +318,11 @@ public class ForeachStepExecutor implements StepExecutor {
                 enriched.putIfAbsent("status", "ok");
                 enriched.put("index", index);
                 if (attempt > 1) enriched.put("retried_attempts", attempt);
+                // 자식 STEP_END — FE 가 이 반복을 "완료"로 확정(없을 땐 부모 종료/마지막 블록 추론에 의존).
+                if (eventRecorder != null && runUuid != null) {
+                    eventRecorder.stepEnd(runUuid, itemStep.id(), System.currentTimeMillis() - childStart,
+                            estimateChildOutputSize(enriched));
+                }
                 return enriched;
             } catch (Exception e) {
                 last = e;
@@ -295,20 +335,45 @@ public class ForeachStepExecutor implements StepExecutor {
             }
         }
 
+        // 재시도 상한까지 실패 — 자식 STEP_FAILED 발행(continue/throw 양쪽 공통). FE 가 이 반복을
+        // 실패(❌ 사유)로 정확히 표시한다(없을 땐 빈응답 추정 배지로만 보임).
+        String reason = last != null ? last.getMessage() : "unknown";
+        if (eventRecorder != null && runUuid != null) {
+            eventRecorder.stepFailed(runUuid, itemStep.id(), System.currentTimeMillis() - childStart,
+                    reason, maxAttempts);
+        }
+
         // 재시도 상한까지 실패 — on_item_error 정책 적용.
         if ("continue".equals(onItemError)) {
             log.warn("FOREACH step '{}' item[{}] failed after {} attempt(s) (on_item_error=continue): {}",
-                    step.id(), index, maxAttempts, last != null ? last.getMessage() : "unknown");
+                    step.id(), index, maxAttempts, reason);
             Map<String, Object> err = new LinkedHashMap<>();
             err.put("status", "failed");
-            err.put("error", last != null ? last.getMessage() : "unknown");
+            err.put("error", reason);
             err.put("index", index);
             err.put("attempts", maxAttempts);
             return err;
         }
         throw new RuntimeException(
                 "FOREACH step '" + step.id() + "' item[" + index + "] failed after " + maxAttempts
-                        + " attempt(s): " + (last != null ? last.getMessage() : "unknown"), last);
+                        + " attempt(s): " + reason, last);
+    }
+
+    /** workflowRunId(String) → UUID. null/형식오류면 null(이벤트 미발행 — 비워크플로우/테스트 경로 안전). */
+    private static UUID parseRunUuid(String workflowRunId) {
+        if (workflowRunId == null || workflowRunId.isBlank()) return null;
+        try {
+            return UUID.fromString(workflowRunId);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /** 자식 결과 본문 크기 추정 — STEP_END output_size payload 용(대략값). */
+    private static int estimateChildOutputSize(Map<String, Object> result) {
+        Object out = result.get("output");
+        if (out == null) return 0;
+        return out.toString().length();
     }
 
     // ─── 변수 주입 ────────────────────────────────────────────────────────

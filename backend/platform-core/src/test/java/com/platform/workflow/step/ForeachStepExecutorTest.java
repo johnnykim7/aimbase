@@ -5,7 +5,9 @@ import com.platform.workflow.model.WorkflowStep;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
+import com.platform.workflow.event.WorkflowRunEventRecorder;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -32,7 +34,11 @@ class ForeachStepExecutorTest {
     @BeforeEach
     void setUp() {
         applicationContext = mock(ApplicationContext.class);
-        executor = new ForeachStepExecutor(applicationContext);
+        // EventRecorder 미주입(getIfAvailable=null) — 단위 테스트는 이벤트 발행 부수효과를 검증하지 않는다.
+        @SuppressWarnings("unchecked")
+        ObjectProvider<WorkflowRunEventRecorder> noRecorder = mock(ObjectProvider.class);
+        when(noRecorder.getIfAvailable()).thenReturn(null);
+        executor = new ForeachStepExecutor(applicationContext, noRecorder);
     }
 
     // ─── fake body executor: item_var 의 필드를 echo, 호출 순서/스레드 기록 ───
@@ -451,7 +457,10 @@ class ForeachStepExecutorTest {
         public Map<String, Object> execute(WorkflowStep step, StepContext context) {
             String url = context.resolve("{{item.url}}");
             int n = attempts.merge(url, 1, Integer::sum);
-            if (n <= failTimes) throw new RuntimeException("flaky fail #" + n + " for " + url);
+            // url 에 "ok" 가 들어가면 항상 성공 — 전건실패 승격(allFailed)을 피해 "그 자식만 failed" 를
+            // 검증하려는 테스트가 성공 형제 1개를 끼워넣을 수 있게 한다.
+            boolean alwaysOk = url != null && url.contains("ok");
+            if (!alwaysOk && n <= failTimes) throw new RuntimeException("flaky fail #" + n + " for " + url);
             Map<String, Object> r = new LinkedHashMap<>();
             r.put("output", "parsed:" + url + "@try" + n);
             return r;
@@ -483,9 +492,10 @@ class ForeachStepExecutorTest {
     @Test
     @DisplayName("CR-117 item_retry_max 상한 초과 — on_item_error=continue 면 그 자식만 failed(attempts 기록)")
     void itemRetryExhaustedContinue() {
-        FlakyBody body = new FlakyBody(WorkflowStep.StepType.TOOL_CALL, 99); // 항상 실패
+        FlakyBody body = new FlakyBody(WorkflowStep.StepType.TOOL_CALL, 99); // u0 는 항상 실패
         when(applicationContext.getBeansOfType(StepExecutor.class)).thenReturn(Map.of("fake", body));
-        StepContext ctx = ctxWithSamples(sampleMaps("u0"));
+        // 성공 형제(u-ok) 1개를 끼워 전건실패 승격을 피하고 "그 자식(u0)만 failed" 를 검증한다.
+        StepContext ctx = ctxWithSamples(sampleMaps("u0", "u-ok"));
 
         Map<String, Object> config = baseConfig("sequential");
         config.put("item_retry_max", 2);          // 총 3회 시도
@@ -496,7 +506,7 @@ class ForeachStepExecutorTest {
         assertThat(out.get("failed_count")).isEqualTo(1);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> results = (List<Map<String, Object>>) out.get("results");
-        assertThat(results.get(0).get("status")).isEqualTo("failed");
+        assertThat(results.get(0).get("status")).isEqualTo("failed"); // u0
         assertThat(results.get(0).get("attempts")).isEqualTo(3);
         assertThat(body.attempts.get("u0")).isEqualTo(3);
     }
@@ -504,9 +514,10 @@ class ForeachStepExecutorTest {
     @Test
     @DisplayName("CR-117 item_retry_max 미지정(기본 0) — 재시도 없음(현행 동작)")
     void noRetryByDefault() {
-        FlakyBody body = new FlakyBody(WorkflowStep.StepType.TOOL_CALL, 99);
+        FlakyBody body = new FlakyBody(WorkflowStep.StepType.TOOL_CALL, 99); // u0 는 항상 실패
         when(applicationContext.getBeansOfType(StepExecutor.class)).thenReturn(Map.of("fake", body));
-        StepContext ctx = ctxWithSamples(sampleMaps("u0"));
+        // 성공 형제(u-ok) 1개를 끼워 전건실패 승격을 피한다 — 기본(재시도 0) 동작만 검증.
+        StepContext ctx = ctxWithSamples(sampleMaps("u0", "u-ok"));
 
         Map<String, Object> config = baseConfig("sequential");
         config.put("on_item_error", "continue");
