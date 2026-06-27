@@ -1,5 +1,6 @@
 package com.platform.workflow.step;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.attachment.AttachmentService;
 import com.platform.config.WorkspaceProperties;
 import com.platform.domain.ChatAttachmentEntity;
@@ -42,6 +43,7 @@ import java.util.concurrent.Semaphore;
 public class LargeInputStepExecutor implements StepExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(LargeInputStepExecutor.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final AttachmentService attachmentService;
     private final List<SourceLoader> sourceLoaders;
@@ -114,6 +116,7 @@ public class LargeInputStepExecutor implements StepExecutor {
                 (Map<String, Object>) raw.get("output_schema"),
                 str(config.get("analysis_goal"), ""),
                 str(config.get("reference_input"), null),
+                str(config.get("custom_instruction"), null),
                 (Map<String, Object>) raw.get("extra"));
 
         if (action.needsReference() && (params.referenceInput() == null || params.referenceInput().isBlank())) {
@@ -201,16 +204,26 @@ public class LargeInputStepExecutor implements StepExecutor {
         // ── 6) 계층 Reduce (성공 청크만) ───────────────────────────────────
         job.setStatus(LargeInputJobEntity.Status.REDUCING);
         job = jobRepository.save(job);
-        List<String> successFragments = runs.stream().filter(r -> r.ok).map(r -> r.text).toList();
+        // 청크 결과를 reduce 입력으로 — structured_data 가 있으면 JSON 문자열로 포함해 보존한다
+        // (텍스트만 넘기면 청크 구조화 결과가 reduce 에서 유실됨).
+        List<String> successFragments = runs.stream().filter(r -> r.ok).map(this::fragmentOf).toList();
         AnalysisInstruction reduceInstr = action.buildReduceInstruction(params);
         Map<String, Object> reduceTree = new LinkedHashMap<>();
         final LLMAdapter fAdapter = adapter;
         final String fModel = resolvedModel;
         final java.util.concurrent.atomic.AtomicInteger reduceSeq = new java.util.concurrent.atomic.AtomicInteger();
+        // 계층 텍스트 머지(중간 레벨) → 최종 1개 텍스트로 수렴.
         String reduced = reduceService.reduce(successFragments, reduceInstr,
                 (sys, prompt) -> callLlmText(fAdapter, fModel, sys, prompt, null, reduceMaxTokens,
                         sessionBase + "-r" + reduceSeq.getAndIncrement()),
                 reduceTree);
+        // output_schema 가 있으면 최종 머지 텍스트를 한 번 더 구조화 호출해 진짜 Map 을 만든다
+        // (청크는 structured 인데 reduce 산출물이 텍스트면 verify 가 JSON 을 못 받는 갭 해소).
+        Map<String, Object> reducedStructured = null;
+        if (responseSchema != null && reduced != null && !reduced.isBlank()) {
+            reducedStructured = reduceToStructured(adapter, resolvedModel, reduceInstr.system(),
+                    reduced, responseSchema, sessionBase + "-rs");
+        }
         job.setReduceTree(reduceTree);
         job = jobRepository.save(job);
 
@@ -235,7 +248,8 @@ public class LargeInputStepExecutor implements StepExecutor {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("output", reduced != null ? reduced : "");
-        result.put("structured_data", reduced);
+        // output_schema 가 있고 구조화에 성공했으면 진짜 Map, 아니면 텍스트(하위호환).
+        result.put("structured_data", reducedStructured != null ? reducedStructured : reduced);
         result.put("coverage_report", coverageReport);
         result.put("total_chunks", chunks.size());
         result.put("completed", completed);
@@ -395,6 +409,43 @@ public class LargeInputStepExecutor implements StepExecutor {
                     log.warn("CR-120: cleanupSession 실패(sessionId={}): {}", sessionId, ce.getMessage());
                 }
             }
+        }
+    }
+
+    /**
+     * 청크 결과 → reduce 입력 fragment. structured_data 가 있으면 텍스트와 함께 JSON 으로 직렬화해
+     * reduce 가 구조를 잃지 않게 한다. structured 없으면 텍스트 그대로.
+     */
+    private String fragmentOf(ChunkRun run) {
+        if (run.structured != null && !run.structured.isEmpty()) {
+            try {
+                String json = MAPPER.writeValueAsString(run.structured);
+                String text = run.text != null && !run.text.isBlank() ? run.text + "\n" : "";
+                return text + json;
+            } catch (Exception e) {
+                log.warn("CR-120: chunk structured 직렬화 실패(idx={}) — 텍스트로 폴백: {}",
+                        run.chunk.chunkIndex(), e.getMessage());
+            }
+        }
+        return run.text != null ? run.text : "";
+    }
+
+    /**
+     * 최종 머지 텍스트를 output_schema 로 한 번 더 구조화 호출 → 진짜 Map.
+     * 청크는 structured 인데 reduce 산출물이 텍스트가 되던 갭(A1)을 메운다. 실패하면 null(텍스트 폴백).
+     */
+    private Map<String, Object> reduceToStructured(LLMAdapter adapter, String resolvedModel, String system,
+                                                   String mergedText, Map<String, Object> responseSchema,
+                                                   String sessionId) {
+        String prompt = "Convert the following consolidated analysis into the required structured output. "
+                + "Preserve every item faithfully — do not drop or invent.\n\n" + mergedText;
+        try {
+            LLMResponse resp = callLlm(adapter, resolvedModel, system,
+                    List.of(new ContentBlock.Text(prompt)), responseSchema, reduceMaxTokens, sessionId);
+            return extractStructured(resp);
+        } catch (RuntimeException e) {
+            log.warn("CR-120: reduce 구조화 호출 실패 — 텍스트 결과로 폴백: {}", e.getMessage());
+            return null;
         }
     }
 

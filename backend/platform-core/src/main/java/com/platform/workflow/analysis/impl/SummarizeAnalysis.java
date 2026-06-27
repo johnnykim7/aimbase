@@ -23,6 +23,7 @@ public class SummarizeAnalysis implements DocumentAnalysis {
             Summarize ONE fragment of a large document concisely but completely — \
             capture every key point in this fragment, omit nothing important. \
             Focus areas: {{focus_areas}}. Goal: {{analysis_goal}}.
+            {{custom_instruction}}
 
             Fragment:
             {{chunk}}""";
@@ -31,6 +32,7 @@ public class SummarizeAnalysis implements DocumentAnalysis {
             Combine these fragment summaries into one coherent summary of the whole document. \
             Preserve all distinct points, remove redundancy, keep it faithful. \
             Focus areas: {{focus_areas}}. Goal: {{analysis_goal}}.
+            {{custom_instruction}}
 
             Fragment summaries:
             {{fragments}}""";
@@ -60,6 +62,7 @@ public class SummarizeAnalysis implements DocumentAnalysis {
         Map<String, Object> v = new HashMap<>();
         v.put("focus_areas", p.focusAreasJoined());
         v.put("analysis_goal", p.analysisGoalOrEmpty());
+        v.put("custom_instruction", p.customInstructionOrEmpty());
         return v;
     }
 }

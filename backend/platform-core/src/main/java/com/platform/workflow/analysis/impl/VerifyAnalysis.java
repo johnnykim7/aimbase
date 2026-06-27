@@ -28,6 +28,7 @@ public class VerifyAnalysis implements DocumentAnalysis {
             wrong values, missing clauses, contradictions. \
             For each finding give a verdict (MATCH | MISMATCH | MISSING) and cite the fragment's location. \
             Focus areas: {{focus_areas}}. Goal: {{analysis_goal}}.
+            {{custom_instruction}}
 
             Reference standard:
             {{reference_input}}
@@ -40,6 +41,7 @@ public class VerifyAnalysis implements DocumentAnalysis {
             Keep every distinct discrepancy with its verdict and location, merge duplicates, \
             and produce an overall compliance assessment. \
             Focus areas: {{focus_areas}}. Goal: {{analysis_goal}}.
+            {{custom_instruction}}
 
             Reference standard:
             {{reference_input}}
@@ -92,6 +94,7 @@ public class VerifyAnalysis implements DocumentAnalysis {
         v.put("focus_areas", p.focusAreasJoined());
         v.put("analysis_goal", p.analysisGoalOrEmpty());
         v.put("reference_input", p.referenceInputOrEmpty());
+        v.put("custom_instruction", p.customInstructionOrEmpty());
         return v;
     }
 }

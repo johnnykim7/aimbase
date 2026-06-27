@@ -70,7 +70,7 @@ class AnalysisActionRegistryTest {
     @DisplayName("verify map instruction 은 reference_input 을 본문에 포함한다")
     void verifyInjectsReference() {
         AnalysisParams params = new AnalysisParams(
-                List.of("가격"), null, "리스크 점검", "기준 단가 1000원", null);
+                List.of("가격"), null, "리스크 점검", "기준 단가 1000원", null, null);
         AnalysisInstruction instr = registry.get("verify").buildMapInstruction(params);
         // 렌더 mock 이 자리표시자를 그대로 두지만, VerifyAnalysis 가 vars 에 reference_input 을 넣었는지
         // 검증하려면 실제 렌더가 필요 → 여기서는 템플릿에 {{reference_input}} 자리표시자 존재만 확인
@@ -87,5 +87,35 @@ class AnalysisActionRegistryTest {
         assertThat(extract.validateChunkResult(Map.of("output", "fact: 가격 1000원")).valid()).isTrue();
         assertThat(extract.validateChunkResult(Map.of("structured_data", Map.of("items", List.of("a")))).valid())
                 .isTrue();
+    }
+
+    @Test
+    @DisplayName("custom_instruction — 소비앱 도메인 지시문이 map/reduce 프롬프트에 실제로 주입된다(범용 통로)")
+    void customInstructionInjectedIntoPrompt() {
+        // 실제 렌더링 동작으로 검증 — 폴백 템플릿 + 실제 renderTemplate(자리표시자 치환).
+        PromptTemplateService realTemplates = new PromptTemplateService(
+                mock(com.platform.repository.PromptTemplateRepository.class));
+        ExtractAnalysis extract = new ExtractAnalysis(realTemplates);
+
+        String domain = "USFK RFP analyst: classify fulfillmentParty (CLIENT_UPLOAD/PLATFORM_GENERATED/SYSTEM_FORM)";
+        AnalysisParams params = new AnalysisParams(
+                List.of("계약기간"), null, "fact 추출", null, domain, null);
+
+        assertThat(extract.buildMapInstruction(params).prompt()).contains(domain);
+        assertThat(extract.buildReduceInstruction(params).prompt()).contains(domain);
+        assertThat(extract.actionId()).isEqualTo("extract"); // 도메인 action 신설 없이 범용 extract 재사용
+    }
+
+    @Test
+    @DisplayName("custom_instruction 없으면 빈 문자열로 치환(프롬프트 깨지지 않음)")
+    void customInstructionAbsentRendersEmpty() {
+        PromptTemplateService realTemplates = new PromptTemplateService(
+                mock(com.platform.repository.PromptTemplateRepository.class));
+        ExtractAnalysis extract = new ExtractAnalysis(realTemplates);
+        AnalysisParams params = new AnalysisParams(null, null, null, null, null, null);
+
+        String prompt = extract.buildMapInstruction(params).prompt();
+        assertThat(prompt).doesNotContain("{{custom_instruction}}");
+        assertThat(prompt).contains("{{chunk}}"); // chunk 는 엔진이 나중에 채우므로 남아있어야 함
     }
 }

@@ -26,6 +26,7 @@ public class ExtractAnalysis implements DocumentAnalysis {
             Focus areas: {{focus_areas}}. Goal: {{analysis_goal}}.
             Each extracted item MUST cite its source location (page range of this fragment) in a "source_ref" field.
             If the fragment contains nothing relevant, return an empty list — do not invent.
+            {{custom_instruction}}
 
             Fragment:
             {{chunk}}""";
@@ -34,6 +35,7 @@ public class ExtractAnalysis implements DocumentAnalysis {
             You are consolidating extracted items from multiple fragments of one document. \
             Merge duplicates, preserve every distinct item and its source_ref, and keep the union complete. \
             Focus areas: {{focus_areas}}. Goal: {{analysis_goal}}.
+            {{custom_instruction}}
 
             Fragments' extracted items:
             {{fragments}}""";
@@ -83,6 +85,7 @@ public class ExtractAnalysis implements DocumentAnalysis {
         Map<String, Object> v = new HashMap<>();
         v.put("focus_areas", p.focusAreasJoined());
         v.put("analysis_goal", p.analysisGoalOrEmpty());
+        v.put("custom_instruction", p.customInstructionOrEmpty());
         return v;
     }
 }
