@@ -8,6 +8,8 @@ const PALETTE_ITEMS = [
   { type: "agent", label: "에이전트", icon: "🧬", color: "#0891b2" },
   { type: "evaluator_loop", label: "평가-최적화 루프", icon: "🔁", color: "#8b5cf6" },
   { type: "sub_workflow", label: "서브 워크플로우", icon: "🔗", color: "#0d9488" },
+  { type: "foreach", label: "반복 (FOREACH)", icon: "🔂", color: "#ca8a04" },
+  { type: "large_input", label: "대용량 입력", icon: "📚", color: "#0ea5e9" },
 ] as const;
 
 export function NodePalette() {

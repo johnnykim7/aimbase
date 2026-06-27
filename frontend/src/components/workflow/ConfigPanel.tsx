@@ -142,14 +142,29 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
   const stepType = (node.data.type as string) ?? "action";
 
   // CR-055: EVALUATOR_LOOP의 generator/evaluator/pass_criteria는 중첩 객체로 저장되어야 함
-  const JSON_CONFIG_KEYS = ["response_schema", "input", "generator", "evaluator", "pass_criteria"];
+  // CR-120: LARGE_INPUT output_schema(JSON), FOREACH body(중첩 스텝)도 객체 보존
+  const JSON_CONFIG_KEYS = ["response_schema", "input", "generator", "evaluator", "pass_criteria", "output_schema", "body"];
+  // CR-120: 쉼표 구분 문자열 → 배열로 직렬화할 키
+  const CSV_ARRAY_KEYS = ["focus_areas"];
 
   const handleSave = () => {
     const parsed: Record<string, unknown> = { ...config };
     JSON_CONFIG_KEYS.forEach((key) => {
       const val = config[key];
-      if (val && typeof val === "string" && val.trim().startsWith("{")) {
-        try { parsed[key] = JSON.parse(val); } catch { /* keep as string */ }
+      if (val && typeof val === "string") {
+        const t = val.trim();
+        if (t.startsWith("{") || t.startsWith("[")) {
+          try { parsed[key] = JSON.parse(val); } catch { /* keep as string */ }
+        }
+      }
+    });
+    // CR-120: 쉼표 구분 → 배열 (빈 값은 키 제거)
+    CSV_ARRAY_KEYS.forEach((key) => {
+      const val = config[key];
+      if (typeof val === "string") {
+        const arr = val.split(",").map((s) => s.trim()).filter(Boolean);
+        if (arr.length > 0) parsed[key] = arr;
+        else delete parsed[key];
       }
     });
     onUpdate(node.id, { ...node.data, label, config: parsed });
@@ -584,6 +599,100 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
           label: "입력 매핑 (JSON)",
           placeholder: '{\n  "zip_path": "{{input.zip_path}}",\n  "prompt": "코드 리뷰해줘"\n}',
           multiline: true,
+        },
+      ];
+    case "FOREACH":
+    case "foreach":
+      // body(중첩 스텝)는 캔버스 그룹 서브노드로 편집 — 여기선 반복 제어만.
+      return [
+        { key: "items", label: "반복 컬렉션", placeholder: "{{fetch.output.notices}} (List 변수 참조)" },
+        { key: "item_var", label: "원소 변수명", placeholder: "item (기본값)" },
+        {
+          key: "mode",
+          label: "실행 방식",
+          placeholder: "sequential",
+          type: "select",
+          options: [
+            { value: "sequential", label: "sequential — 순차" },
+            { value: "parallel", label: "parallel — 병렬" },
+          ],
+        },
+        { key: "max_concurrency", label: "최대 동시 실행 (parallel)", placeholder: "5 (기본)" },
+        { key: "max_items", label: "처리 상한", placeholder: "100 (기본, 초과 시 FAIL)" },
+        {
+          key: "on_item_error",
+          label: "원소 실패 시",
+          placeholder: "fail",
+          type: "select",
+          options: [
+            { value: "fail", label: "fail — 즉시 중단" },
+            { value: "continue", label: "continue — 계속" },
+          ],
+        },
+        {
+          key: "collect",
+          label: "결과 수집 방식",
+          placeholder: "append",
+          type: "select",
+          options: [
+            { value: "append", label: "append — List 누적" },
+            { value: "merge", label: "merge — TipTap 문서 병합" },
+            { value: "none", label: "none — 미수집" },
+          ],
+        },
+      ];
+    case "LARGE_INPUT":
+    case "large_input":
+      return [
+        {
+          key: "analysis_action",
+          label: "분석 동작",
+          placeholder: "extract",
+          type: "select",
+          options: [
+            { value: "extract", label: "extract — 항목 추출" },
+            { value: "summarize", label: "summarize — 요약" },
+            { value: "verify", label: "verify — 기준 대조 검증 (reference 필수)" },
+          ],
+        },
+        { key: "source_file", label: "소스 파일", placeholder: "attachment_id(UUID) 또는 작업장 경로 — {{item.targetPath}}" },
+        { key: "input", label: "또는 인라인 텍스트", placeholder: "source_file 대신 직접 텍스트", multiline: true },
+        {
+          key: "connection_id",
+          label: "LLM 연결",
+          placeholder: ctx.connError ? "연결 ID 직접 입력" : "연결 선택 (비우면 자동 라우팅)",
+          type: ctx.connError ? "text" : "select",
+          options: ctx.connectionOptions,
+        },
+        { key: "model", label: "모델", placeholder: "auto (기본)" },
+        { key: "custom_instruction", label: "도메인 지시문 (custom_instruction)", placeholder: "map/reduce 프롬프트에 주입될 범용 도메인 지시", multiline: true },
+        { key: "analysis_goal", label: "분석 목적 (analysis_goal)", placeholder: "선택", multiline: true },
+        { key: "reference_input", label: "비교 기준 (verify 전용)", placeholder: "verify 동작 시 필수 — 대조 기준", multiline: true },
+        { key: "focus_areas", label: "집중 영역 (쉼표 구분)", placeholder: "가격, 납기, 위약금" },
+        { key: "output_schema", label: "출력 스키마 (JSON)", placeholder: '{"type":"object","properties":{...}}', multiline: true },
+        { key: "max_parallel", label: "청크 병렬 상한", placeholder: "5 (기본)" },
+        { key: "item_retry_max", label: "청크 재시도 횟수", placeholder: "1 (기본)" },
+        {
+          key: "require_full_coverage",
+          label: "전수 커버리지 강제",
+          placeholder: "true",
+          type: "select",
+          options: [
+            { value: "true", label: "true — 누락 청크 있으면 FAIL" },
+            { value: "false", label: "false — 부분 결과 허용" },
+          ],
+        },
+        {
+          key: "large_input_mode",
+          label: "분해 모드",
+          placeholder: "auto",
+          type: "select",
+          options: [
+            { value: "auto", label: "auto — 크기 따라 자동 (CLI는 force)" },
+            { value: "force", label: "force — 항상 분해" },
+            { value: "forbid", label: "forbid — 큰 입력 거부" },
+            { value: "off", label: "off — 분해 안 함 (청크 1개)" },
+          ],
         },
       ];
     default:

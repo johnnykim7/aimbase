@@ -22,12 +22,22 @@ import { NodePalette } from "../components/workflow/NodePalette";
 import { ConfigPanel } from "../components/workflow/ConfigPanel";
 import { StudioToolbar } from "../components/workflow/StudioToolbar";
 import WorkflowNode from "../components/workflow/nodes/WorkflowNode";
+import ForeachGroupNode from "../components/workflow/nodes/ForeachGroupNode";
 import { flowToWorkflow, hasCycle } from "../components/workflow/utils/flowToWorkflow";
 import { workflowToFlow, autoLayout } from "../components/workflow/utils/workflowToFlow";
 import { useWorkflows, useCreateWorkflow } from "../hooks/useWorkflows";
 import { useUpdateWorkflow, useRunWorkflow } from "../hooks/useWorkflows";
 
-const nodeTypes = { workflowNode: WorkflowNode };
+const nodeTypes = { workflowNode: WorkflowNode, foreachGroup: ForeachGroupNode };
+
+// FOREACH 그룹 크기 상수 (workflowToFlow 와 동일)
+const GROUP_W = 232; // CHILD_WIDTH(200) + PADDING_X*2(32)
+const GROUP_H = 132; // PADDING_TOP(56) + CHILD_HEIGHT(60) + PADDING_BOTTOM(16)
+const GROUP_PAD_TOP = 56;
+const GROUP_PAD_X = 16;
+
+// FOREACH body 로 들어갈 수 있는 스텝 타입 (단일 body)
+const BODY_ELIGIBLE = new Set(["llm", "tool", "agent", "large_input", "sub_workflow"]);
 
 let idCounter = 0;
 function nextId() {
@@ -106,6 +116,55 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
 
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
 
+      // FOREACH = 그룹 컨테이너 노드
+      if (type === "foreach") {
+        const newGroup: Node = {
+          id: nextId(),
+          type: "foreachGroup",
+          position,
+          style: { width: GROUP_W, height: GROUP_H },
+          data: { label: label || type, type, config: {}, hasBody: false },
+        };
+        setNodes((nds) => [...nds, newGroup]);
+        setDirty(true);
+        return;
+      }
+
+      // body-eligible 노드를 FOREACH 그룹 위에 떨구면 서브노드(body)로 편입.
+      // 그룹당 body 1개 — 이미 있으면 일반 노드로 떨어뜨린다(교체는 기존 삭제 후 재드롭).
+      const groupHit = nodes.find((n) => {
+        if (n.type !== "foreachGroup") return false;
+        const w = (n.style?.width as number) ?? GROUP_W;
+        const h = (n.style?.height as number) ?? GROUP_H;
+        return (
+          position.x >= n.position.x && position.x <= n.position.x + w &&
+          position.y >= n.position.y && position.y <= n.position.y + h
+        );
+      });
+
+      if (groupHit && BODY_ELIGIBLE.has(type)) {
+        const alreadyHasBody = nodes.some((n) => n.parentId === groupHit.id);
+        if (alreadyHasBody) {
+          alert("FOREACH 는 body 스텝 1개만 가질 수 있습니다. 기존 body 를 삭제한 뒤 다시 추가하세요.");
+          return;
+        }
+        const childNode: Node = {
+          id: `${groupHit.id}__body`,
+          type: "workflowNode",
+          parentId: groupHit.id,
+          extent: "parent",
+          position: { x: GROUP_PAD_X, y: GROUP_PAD_TOP },
+          data: { label: label || type, type, config: {} },
+        };
+        setNodes((nds) =>
+          nds
+            .map((n) => (n.id === groupHit.id ? { ...n, data: { ...n.data, hasBody: true } } : n))
+            .concat(childNode)
+        );
+        setDirty(true);
+        return;
+      }
+
       const newNode: Node = {
         id: nextId(),
         type: "workflowNode",
@@ -116,7 +175,7 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
       setNodes((nds) => [...nds, newNode]);
       setDirty(true);
     },
-    [screenToFlowPosition, setNodes]
+    [screenToFlowPosition, setNodes, nodes]
   );
 
   const onNodeClick = useCallback(
@@ -142,7 +201,21 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
 
   const handleNodeDelete = useCallback(
     (nodeId: string) => {
-      setNodes((nds) => nds.filter((n) => n.id !== nodeId));
+      setNodes((nds) => {
+        const target = nds.find((n) => n.id === nodeId);
+        // 그룹 삭제 → 서브노드(body)도 함께 삭제
+        if (target?.type === "foreachGroup") {
+          return nds.filter((n) => n.id !== nodeId && n.parentId !== nodeId);
+        }
+        // 서브노드(body) 삭제 → 부모 그룹 hasBody=false 복원
+        if (target?.parentId) {
+          const parentId = target.parentId;
+          return nds
+            .filter((n) => n.id !== nodeId)
+            .map((n) => (n.id === parentId ? { ...n, data: { ...n.data, hasBody: false } } : n));
+        }
+        return nds.filter((n) => n.id !== nodeId);
+      });
       setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
       setSelectedNode(null);
       setDirty(true);

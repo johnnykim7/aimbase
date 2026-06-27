@@ -1,9 +1,17 @@
 import type { Node, Edge } from "@xyflow/react";
 import dagre from "dagre";
 import type { Workflow } from "../../../types/workflow";
+import { BE_TO_FE_TYPE } from "./flowToWorkflow";
 
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 60;
+
+// FOREACH 그룹 노드 / 그 안의 body 서브노드 레이아웃 상수
+const GROUP_PADDING_TOP = 56;   // 그룹 헤더 높이
+const GROUP_PADDING_X = 16;
+const GROUP_PADDING_BOTTOM = 16;
+const CHILD_WIDTH = 200;
+const CHILD_HEIGHT = 60;
 
 /**
  * WorkflowEntity → React Flow 노드/엣지 변환
@@ -12,16 +20,43 @@ export function workflowToFlow(workflow: Workflow): { nodes: Node[]; edges: Edge
   const steps = workflow.steps ?? [];
   if (steps.length === 0) return { nodes: [], edges: [] };
 
-  const nodes: Node[] = steps.map((step, i) => ({
-    id: step.id,
-    type: "workflowNode",
-    position: { x: 0, y: i * 120 },
-    data: {
-      label: step.name,
-      type: step.type,
-      config: step.config ?? {},
-    },
-  }));
+  const nodes: Node[] = [];
+  const childNodes: Node[] = []; // 그룹 서브노드는 부모 뒤에 push (React Flow 는 부모가 먼저 와야 함)
+
+  steps.forEach((step, i) => {
+    const cfg = (step.config ?? {}) as Record<string, unknown>;
+    const body = cfg.body as { type?: string; config?: Record<string, unknown> } | undefined;
+    const isForeachGroup = step.type === "FOREACH" && body != null && typeof body === "object";
+
+    if (isForeachGroup) {
+      // body 를 부모 config 에서 분리 — 서브노드로 펼치고, 저장 시 flowToWorkflow 가 다시 접는다.
+      const { body: _body, ...parentConfig } = cfg;
+      void _body;
+      nodes.push({
+        id: step.id,
+        type: "foreachGroup",
+        position: { x: 0, y: i * 220 },
+        style: { width: CHILD_WIDTH + GROUP_PADDING_X * 2, height: GROUP_PADDING_TOP + CHILD_HEIGHT + GROUP_PADDING_BOTTOM },
+        data: { label: step.name, type: step.type, config: parentConfig, hasBody: true },
+      });
+      const childType = BE_TO_FE_TYPE[body!.type ?? ""] ?? (body!.type ?? "llm");
+      childNodes.push({
+        id: `${step.id}__body`,
+        type: "workflowNode",
+        parentId: step.id,
+        extent: "parent",
+        position: { x: GROUP_PADDING_X, y: GROUP_PADDING_TOP },
+        data: { label: childLabel(childType), type: childType, config: body!.config ?? {} },
+      });
+    } else {
+      nodes.push({
+        id: step.id,
+        type: "workflowNode",
+        position: { x: 0, y: i * 120 },
+        data: { label: step.name, type: step.type, config: cfg },
+      });
+    }
+  });
 
   const edges: Edge[] = [];
   const edgeSet = new Set<string>();
@@ -75,7 +110,21 @@ export function workflowToFlow(workflow: Workflow): { nodes: Node[]; edges: Edge
     }
   }
 
-  return autoLayout(nodes, edges);
+  // 그룹 서브노드는 autoLayout(dagre) 대상에서 제외 — 부모 상대좌표 고정 후 합친다.
+  const laid = autoLayout(nodes, edges);
+  return { nodes: [...laid.nodes, ...childNodes], edges: laid.edges };
+}
+
+/** body 서브노드 표시 라벨 (FE 팔레트 라벨과 일치) */
+function childLabel(feType: string): string {
+  const map: Record<string, string> = {
+    llm: "LLM 호출",
+    tool: "도구 실행",
+    agent: "에이전트",
+    sub_workflow: "서브 워크플로우",
+    large_input: "대용량 입력",
+  };
+  return map[feType] ?? feType;
 }
 
 /**

@@ -22,6 +22,10 @@ const TYPE_STYLES: Record<string, { color: string; icon: string }> = {
   EVALUATOR_LOOP: { color: "#8b5cf6", icon: "🔁" },
   sub_workflow: { color: "#0d9488", icon: "🔗" },
   SUB_WORKFLOW: { color: "#0d9488", icon: "🔗" },
+  foreach: { color: "#ca8a04", icon: "🔂" },
+  FOREACH: { color: "#ca8a04", icon: "🔂" },
+  large_input: { color: "#0ea5e9", icon: "📚" },
+  LARGE_INPUT: { color: "#0ea5e9", icon: "📚" },
 };
 
 const STATUS_COLORS: Record<string, string> = {
