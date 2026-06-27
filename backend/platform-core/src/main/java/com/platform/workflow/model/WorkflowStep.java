@@ -20,6 +20,9 @@ public record WorkflowStep(
         // CR-084 P2: 런타임 표현식/LLM 출력으로 N개 후보 중 1개 동적 선택 (CONDITION 2갈래 일반화)
         ROUTER,
         // CR-087: 런타임 컬렉션의 각 원소에 body step 을 적용 (동적 fan-out, LangGraph Send/map 대응)
-        FOREACH
+        FOREACH,
+        // CR-120: 대용량 입력 전수 분석 — 자율주행 밖 결정론적 청크분해 → 청크별 독립처리(전수) →
+        // 계층 Reduce → 누락검증. 32MB(Anthropic API 물리한계)를 애초에 안 치게 하는 범용 엔진.
+        LARGE_INPUT
     }
 }
