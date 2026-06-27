@@ -328,7 +328,10 @@ public class SubagentRunner {
         // CR-093 Phase 2: AgentTypeRegistry 의 allowedTools 를 ToolFilterContext 로 실제 주입.
         // readOnly 타입(PLAN/EXPLORE/GUIDE/VERIFICATION)은 readOnlyMode 도 함께 켠다 — 도구 메타의 readOnly 플래그로 이중 방어.
         // null 이면 GENERAL 의 무제한 동작 유지.
-        ToolFilterContext toolFilter = buildToolFilter(typeConfig);
+        // CR-118: AGENT_CALL config 의 tools/exclude_tools/read_only 도 ToolFilterContext 로 변환해 AgentType 필터와 병합.
+        //   → 워크플로우별 도구 노출 제어(getToolDefs(filter) → CLI --allowedTools, CR-104 불변식). builtin_* 노이즈를
+        //   전역 변경 없이 해당 워크플로우 한정으로 제거한다.
+        ToolFilterContext toolFilter = buildToolFilter(typeConfig, req.config());
 
         // CR-107 디버그: 서브에이전트가 받은 workspacePath 추적.
         log.info("[CR107-DEBUG] SubagentRunner chatRequest: childSessionId={}, req.workspacePath={}",
@@ -568,19 +571,82 @@ public class SubagentRunner {
     }
 
     /**
-     * CR-093 Phase 2: AgentTypeRegistry.AgentTypeConfig → ToolFilterContext.
-     * allowedTools 가 null(=GENERAL) 이면 필터 미적용. 그 외에는 화이트리스트 + readOnly 강제.
+     * CR-093 Phase 2 + CR-118: AgentType 필터 와 워크플로우 config 필터를 병합한 ToolFilterContext.
+     *
+     * <p>두 출처:
+     * <ul>
+     *   <li><b>AgentType</b> (AgentTypeRegistry): allowedTools(null=GENERAL 무제한) + readOnly.</li>
+     *   <li><b>config</b> (AGENT_CALL step): {@code tools}(허용 화이트리스트) / {@code exclude_tools}(제외) /
+     *       {@code read_only}(읽기전용 강제). 워크플로우별 도구 노출 제어용(CR-118).</li>
+     * </ul>
+     *
+     * <p>병합 규칙:
+     * <ul>
+     *   <li>allow: 양쪽 모두 지정되면 <b>교집합</b>(둘 다 좁히는 화이트리스트), 한쪽만 지정되면 그것, 둘 다 없으면 null.</li>
+     *   <li>exclude: config.exclude_tools (AgentType 엔 exclude 개념 없음).</li>
+     *   <li>readOnly: AgentType.readOnly <b>OR</b> config.read_only — 둘 중 하나라도 true 면 true.</li>
+     * </ul>
+     *
+     * <p>세 조건이 모두 비어(GENERAL + config 필터 없음) 있으면 null 반환 → 전역 노출 정책만 적용(기존 동작).
      */
-    ToolFilterContext buildToolFilter(AgentTypeRegistry.AgentTypeConfig typeConfig) {
-        if (typeConfig == null || typeConfig.allowedTools() == null) {
+    ToolFilterContext buildToolFilter(AgentTypeRegistry.AgentTypeConfig typeConfig, Map<String, Object> config) {
+        java.util.Set<String> typeAllow = (typeConfig != null) ? typeConfig.allowedTools() : null;
+        boolean typeReadOnly = (typeConfig != null) && typeConfig.readOnly();
+
+        List<String> configAllow = toStringList(config != null ? config.get("tools") : null);
+        List<String> configExclude = toStringList(config != null ? config.get("exclude_tools") : null);
+        boolean configReadOnly = truthy(config != null ? config.get("read_only") : null);
+
+        // allow 병합: 둘 다 있으면 교집합, 한쪽만 있으면 그것.
+        List<String> mergedAllow;
+        if (typeAllow != null && configAllow != null) {
+            mergedAllow = configAllow.stream().filter(typeAllow::contains).toList();
+        } else if (typeAllow != null) {
+            mergedAllow = List.copyOf(typeAllow);
+        } else {
+            mergedAllow = configAllow; // null 가능
+        }
+
+        boolean readOnly = typeReadOnly || configReadOnly;
+
+        // 셋 다 비어 있으면 필터 없음(null) → 전역 노출 정책만(기존 GENERAL 동작 보존).
+        boolean noAllow = (mergedAllow == null || mergedAllow.isEmpty());
+        boolean noExclude = (configExclude == null || configExclude.isEmpty());
+        if (noAllow && noExclude && !readOnly) {
             return null;
         }
+
         return new ToolFilterContext(
-                java.util.List.copyOf(typeConfig.allowedTools()),
+                noAllow ? null : mergedAllow,
+                noExclude ? null : configExclude,
+                null,
                 null, null,
-                null, null,
-                typeConfig.readOnly() ? Boolean.TRUE : null
+                readOnly ? Boolean.TRUE : null
         );
+    }
+
+    /** CR-118: config 의 List/단일 문자열 값을 {@code List<String>} 로 정규화. 비거나 타입 불일치면 null. */
+    private static List<String> toStringList(Object v) {
+        if (v instanceof List<?> list) {
+            List<String> out = list.stream()
+                    .filter(java.util.Objects::nonNull)
+                    .map(Object::toString)
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+            return out.isEmpty() ? null : out;
+        }
+        if (v instanceof String s && !s.isBlank()) {
+            return List.of(s.trim());
+        }
+        return null;
+    }
+
+    /** CR-118: JSON boolean true 또는 문자열 "true"(템플릿 치환 결과) 를 true 로 인식. */
+    private static boolean truthy(Object v) {
+        if (v instanceof Boolean b) return b;
+        if (v instanceof String s) return "true".equalsIgnoreCase(s.trim());
+        return false;
     }
 
     private void cleanupWorktree(SubagentContext context) {
