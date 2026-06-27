@@ -58,6 +58,7 @@ export type WorkflowRunEventType =
   | "STEP_START"
   | "TOOL_USE"
   | "TOOL_RESULT"
+  | "LLM_REQUEST"
   | "LLM_RESPONSE"
   | "STEP_END"
   | "STEP_FAILED";

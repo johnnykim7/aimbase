@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { workflowsApi } from "../api/workflows";
 import {
   AlertTriangle,
+  ArrowDownToLine,
   Ban,
   Bot,
   CheckCircle2,
@@ -41,6 +42,7 @@ const EVENT_VISUALS: Record<WorkflowRunEventType, { icon: LucideIcon; color: Bad
   STEP_START:   { icon: Play,          color: "muted" },
   TOOL_USE:     { icon: Wrench,        color: "accent" },
   TOOL_RESULT:  { icon: CheckCircle2,  color: "success" },
+  LLM_REQUEST:  { icon: ArrowDownToLine, color: "accent" },
   LLM_RESPONSE: { icon: Bot,           color: "purple" },
   STEP_END:     { icon: Flag,          color: "success" },
   STEP_FAILED:  { icon: AlertTriangle, color: "danger" },
@@ -48,6 +50,7 @@ const EVENT_VISUALS: Record<WorkflowRunEventType, { icon: LucideIcon; color: Bad
 
 /** 본문 전문이 있을 수 있는 이벤트만 펼침 허용 (CR-102 적재 대상과 동일). */
 const EXPANDABLE: WorkflowRunEventType[] = [
+  "LLM_REQUEST",
   "LLM_RESPONSE",
   "TOOL_USE",
   "TOOL_RESULT",

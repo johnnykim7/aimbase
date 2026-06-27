@@ -25,6 +25,9 @@ public class WorkflowRunEventEntity {
         STEP_START,
         TOOL_USE,
         TOOL_RESULT,
+        // CR: 입력 프롬프트는 우리가 호출 직전에 손에 들고 있는 값 → 응답을 기다리지 않고 즉시 적재.
+        // LLM_RESPONSE 와 분리해 응답 생성 중(running)에도 입력이 보이게 한다 (promptText 만 채움).
+        LLM_REQUEST,
         LLM_RESPONSE,
         STEP_END,
         STEP_FAILED

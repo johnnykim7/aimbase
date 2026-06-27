@@ -10,7 +10,14 @@ import type { WorkflowRunEvent } from "../types/workflow";
  */
 
 export type ChatFlowBlock =
-  | { kind: "text"; text: string; model?: string; connection?: string }
+  | {
+      kind: "text";
+      text: string;
+      model?: string;
+      connection?: string;
+      /** "input": LLM_CALL 에 우리가 넣은 입력 프롬프트. undefined/"output": 모델 응답. */
+      role?: "input" | "output";
+    }
   | {
       kind: "tool_use";
       id: string;
@@ -116,6 +123,20 @@ export function runEventsToChat(
         s.stepType = str(p.step_type) ?? s.stepType;
         break;
 
+      case "LLM_REQUEST": {
+        // 입력 프롬프트 — 우리가 호출 직전에 적재. 응답을 기다리지 않으므로 running 중에도 표시된다.
+        const model = str(p.model);
+        const connId = str(p.connection_id);
+        const connection = connId ? connNames?.get(connId) ?? connId : undefined;
+        if (model && !s.model) s.model = model;
+        if (connection && !s.connection) s.connection = connection;
+        const text = str(e.prompt_text);
+        if (text) {
+          s.blocks.push({ kind: "text", text, model, connection, role: "input" });
+        }
+        break;
+      }
+
       case "LLM_RESPONSE": {
         const model = str(p.model);
         const connId = str(p.connection_id);
@@ -124,7 +145,7 @@ export function runEventsToChat(
         if (connection && !s.connection) s.connection = connection;
         const text = str(e.response_text);
         if (text) {
-          s.blocks.push({ kind: "text", text, model, connection });
+          s.blocks.push({ kind: "text", text, model, connection, role: "output" });
         }
         break;
       }
@@ -225,10 +246,11 @@ function inferIterationStatus(
   if (hasError) return "failed";
   if (parentStatus !== "running") return parentStatus;
 
-  // 끝이 텍스트 응답 = 에이전트가 도구 루프를 끝내고 최종 답을 낸 것 → 완료.
+  // 끝이 응답 텍스트 = 에이전트가 도구 루프를 끝내고 최종 답을 낸 것 → 완료.
   // (도구 호출이 더 이어지면 마지막 블록이 tool_use 라 이 분기를 안 탄다.)
+  // ★입력 프롬프트(role==="input")는 "답"이 아니므로 제외 — 입력만으로 완료 판정하면 오표시.
   const lastBlock = blocks[blocks.length - 1];
-  if (lastBlock?.kind === "text") return "ok";
+  if (lastBlock?.kind === "text" && lastBlock.role !== "input") return "ok";
 
   return "running";
 }
@@ -300,7 +322,8 @@ function foldForeachIterations(steps: ChatFlowStep[]): ChatFlowStep[] {
         s.status !== "running" &&
         last?.kind === "tool_use" &&
         !!last.result &&
-        !it.blocks.some((b) => b.kind === "text")
+        // 응답 텍스트(role!=="input") 가 한 번도 없을 때만 빈응답. 입력 프롬프트는 "응답"이 아님.
+        !it.blocks.some((b) => b.kind === "text" && b.role !== "input")
       ) {
         it.emptyResponseSuspected = true;
       }

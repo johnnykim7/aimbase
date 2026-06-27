@@ -134,6 +134,8 @@ public class LlmCallStepExecutor implements StepExecutor {
         // max_tokens 지정 = 소비앱이 출력 크기를 선언한 것 → 그 값으로 1차 호출(에스컬레이션 왕복 제거).
         // 미지정 = 크기 미상 → 4096 부터 시작해 잘릴 때만 Phase 2/3 로 올림(비용 절감).
         int phase1Tokens = configCeiling != null ? configCeiling : INITIAL_MAX_TOKENS;
+        // 입력은 호출 전에 확정된 값 → 응답을 기다리지 않고 즉시 적재 (응답 생성 중에도 화면에 입력 표시).
+        recordLlmRequest(context, step.id(), resolvedModel, system, prompt, connectionId);
         long phase1Start = System.currentTimeMillis();
         LLMResponse response = streamTokens
                 ? callLlmStreaming(adapter, resolvedModel, system, prompt, phase1Tokens, context,
@@ -518,6 +520,27 @@ public class LlmCallStepExecutor implements StepExecutor {
         }
     }
 
+    /** CR-102: 프롬프트 입력(system + prompt) 본문 조립 — LLM_REQUEST/LLM_RESPONSE 적재 공용. */
+    private static String buildPromptBody(String system, String prompt) {
+        return (system != null && !system.isBlank())
+                ? "[SYSTEM]\n" + system + "\n\n[PROMPT]\n" + prompt
+                : prompt;
+    }
+
+    /**
+     * 입력 프롬프트(LLM_REQUEST) 적재 — Phase 1 메인 호출 직전 1회.
+     *
+     * <p>입력은 호출 전에 확정된 값이라 응답을 기다리지 않고 즉시 적재 → 응답 생성 중에도 화면에 입력 표시.
+     * 자동분할 plan/part/merge 까지 매번 적재하면 노이즈가 커서 메인 호출 1건만 발행한다.
+     */
+    private void recordLlmRequest(StepContext context, String stepId, String resolvedModel,
+                                  String system, String prompt, String connectionId) {
+        if (eventRecorder == null) return;
+        UUID runId = parseUuid(context.workflowRunId());
+        if (runId == null) return;
+        eventRecorder.llmRequest(runId, stepId, null, resolvedModel, buildPromptBody(system, prompt), connectionId);
+    }
+
     /**
      * CR-090: LLM_RESPONSE 이벤트 발행 헬퍼.
      *
@@ -533,9 +556,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         int out = response.usage() != null ? response.usage().outputTokens() : 0;
         String finishReason = response.finishReason() != null ? response.finishReason().name() : null;
         // CR-102: 프롬프트 입력(system + prompt) ↔ 응답 본문 전문 적재 (품질 정독용)
-        String promptBody = (system != null && !system.isBlank())
-                ? "[SYSTEM]\n" + system + "\n\n[PROMPT]\n" + prompt
-                : prompt;
+        String promptBody = buildPromptBody(system, prompt);
         String responseBody = response.textContent();
         // 구조화 출력(response_schema)이면 응답이 tool_use 블록이라 textContent 가 빈 문자열 —
         // structured_data 를 직렬화해 본문으로 적재 (안 하면 정독 불가).

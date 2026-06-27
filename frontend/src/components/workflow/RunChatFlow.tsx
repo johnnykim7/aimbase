@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Bot, CheckCircle2, ChevronRight, Loader2, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, Bot, CheckCircle2, ChevronRight, Loader2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ToolUseBlock } from "../chat/blocks/ToolUseBlock";
 import { TextBlock } from "../chat/blocks/TextBlock";
@@ -61,9 +61,44 @@ const WorkingIndicator = ({ stepType }: { stepType?: string }) => {
   );
 };
 
+/**
+ * 입력 프롬프트 블록 — 우리가 LLM_CALL 에 넣은 입력(system+prompt)을 기본 접힘으로 표시.
+ * 프롬프트는 수십 KB 까지 가므로 펼쳐두면 화면이 길어진다 → 헤더 클릭 시 펼침.
+ */
+const InputPromptBlock = ({ text }: { text: string }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-md border border-sky-200 bg-sky-50/50 dark:border-sky-900/50 dark:bg-sky-950/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-sky-100/50 dark:hover:bg-sky-900/30"
+      >
+        <ChevronRight
+          className={cn("size-3.5 shrink-0 transition-transform text-sky-600", open && "rotate-90")}
+        />
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+          <ArrowDownToLine className="size-3" />
+          입력 프롬프트
+        </span>
+        <span className="ml-auto font-mono text-[10px] text-muted-foreground/60">
+          {text.length.toLocaleString()}자
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-sky-200 p-2.5 dark:border-sky-900/50">
+          <TextBlock text={text} />
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** 블록 1개 렌더 — text / tool_use(에이전트 호출 구분). step 본문·iteration 본문 공용. */
 const FlowBlock = ({ b, idx }: { b: ChatFlowBlock; idx: number }) => {
   if (b.kind === "text") {
+    // 입력 프롬프트는 접이식 카드로 (응답과 구분 + 긴 본문 접기). 응답은 그대로 표시.
+    if (b.role === "input") return <InputPromptBlock text={b.text} />;
     return <TextBlock text={b.text} />;
   }
   // tool_use — isAgent 면 들여쓰기 + 보라 보더 + 봇 배지로 "에이전트 호출" 구분
@@ -87,7 +122,8 @@ const FlowBlock = ({ b, idx }: { b: ChatFlowBlock; idx: number }) => {
 /** iteration 헤더 요약 — "도구 N · 응답 M" 형태로 무슨 일을 했는지 한 줄 표기. */
 function summarizeBlocks(blocks: ChatFlowBlock[]): string {
   const tools = blocks.filter((b) => b.kind === "tool_use");
-  const texts = blocks.filter((b) => b.kind === "text");
+  // 입력 프롬프트(role==="input")는 "응답"이 아니므로 응답 카운트에서 제외.
+  const texts = blocks.filter((b) => b.kind === "text" && b.role !== "input");
   const parts: string[] = [];
   if (tools.length) {
     // 도구명 중복 제거해 앞 3개만 미리보기

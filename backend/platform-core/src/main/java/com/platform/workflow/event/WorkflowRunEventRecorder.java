@@ -92,6 +92,23 @@ public class WorkflowRunEventRecorder {
         publish(e);
     }
 
+    /**
+     * 입력 프롬프트(promptBody) 적재 — LLM 호출 "직전"에 발행한다.
+     *
+     * <p>입력은 우리가 모델에 보내기 전에 이미 확정한 값이므로, 응답(LLM_RESPONSE)을 기다리지 않고
+     * 즉시 적재해 응답 생성 중(running)에도 화면에서 입력을 볼 수 있게 한다. responseText/토큰은 비운다.
+     * connectionId 는 payload 메타로만 (LLM_RESPONSE 와 동일 규약).
+     */
+    public void llmRequest(UUID runId, String stepId, Integer iteration,
+                           String model, String promptBody, String connectionId) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (model != null) payload.put("model", model);
+        if (connectionId != null && !connectionId.isBlank()) payload.put("connection_id", connectionId);
+        WorkflowRunEventEntity e = buildEvent(runId, stepId, iteration, EventType.LLM_REQUEST, null, null, payload, null, null);
+        e.setPromptText(promptBody);
+        publish(e);
+    }
+
     public void llmResponse(UUID runId, String stepId, Integer iteration,
                             String model, int inputTokens, int outputTokens,
                             String finishReason, long durationMs,
