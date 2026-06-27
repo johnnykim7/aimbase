@@ -59,7 +59,8 @@ class LargeInputStepExecutorSourceTest {
                 mock(ConnectionAdapterFactory.class),
                 mock(ModelRouter.class),
                 ragClient,
-                workspaceProperties);
+                workspaceProperties,
+                mock(com.platform.workflow.event.WorkflowRunEventRecorder.class));
     }
 
     private LargeInputSource invokeLoadSource(Map<String, Object> config) throws Exception {

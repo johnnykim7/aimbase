@@ -56,6 +56,7 @@ public class LargeInputStepExecutor implements StepExecutor {
     private final ModelRouter modelRouter;
     private final MCPRagClient ragClient;
     private final WorkspaceProperties workspaceProperties;
+    private final com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder;
 
     @Value("${largeinput.policy:auto}")
     private String systemPolicy;
@@ -79,7 +80,8 @@ public class LargeInputStepExecutor implements StepExecutor {
                                   ConnectionAdapterFactory connectionAdapterFactory,
                                   ModelRouter modelRouter,
                                   MCPRagClient ragClient,
-                                  WorkspaceProperties workspaceProperties) {
+                                  WorkspaceProperties workspaceProperties,
+                                  com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder) {
         this.attachmentService = attachmentService;
         this.sourceLoaders = sourceLoaders;
         this.decomposer = decomposer;
@@ -91,6 +93,7 @@ public class LargeInputStepExecutor implements StepExecutor {
         this.modelRouter = modelRouter;
         this.ragClient = ragClient;
         this.workspaceProperties = workspaceProperties;
+        this.eventRecorder = eventRecorder;
     }
 
     @Override
@@ -175,9 +178,19 @@ public class LargeInputStepExecutor implements StepExecutor {
         // CLI 어댑터 좀비 워커 정리(CR-109/114)를 위한 결정적 sessionId base.
         // 청크별로 "-c{index}" 를 붙여 각 청크 호출이 자기 워커를 cleanupSession 으로 닫게 한다.
         String sessionBase = context.workflowRunId() + "-li-" + step.id();
+        // CR-120: run 격리 작업장 절대경로 — CLI 어댑터 cwd 로 전파해 CLI 의 자율 파일쓰기(Write)가
+        // 쓰기 가능한 작업장에서 동작하게 한다(누락 시 cwd=/app → EACCES → 도구 실패/timeout).
+        String workspacePath = context.workspacePath();
+
+        // CR-120 진행 가시화: 청크 map LLM 호출을 LLM_REQUEST/LLM_RESPONSE 이벤트로 발행해
+        // 실행 세션 화면(FOREACH 반복 카드)에 "청크 N/M 처리 중/완료"가 보이게 한다.
+        // step.id() 는 FOREACH 위임 시 `extract_facts.body[N]` → FE 가 그 반복 카드에 정확히 귀속.
+        UUID progressRunId = parseUuid(context.workflowRunId());
+        String progressStepId = step.id();
 
         List<ChunkRun> runs = mapChunks(chunks, action, mapInstr, adapter, resolvedModel,
-                responseSchema, pdfBytes, maxParallel, itemRetryMax, sessionBase);
+                responseSchema, pdfBytes, maxParallel, itemRetryMax, sessionBase, workspacePath,
+                progressRunId, progressStepId, connectionId);
 
         // chunk_results + 카운터 적재
         List<Map<String, Object>> chunkResults = new ArrayList<>(runs.size());
@@ -204,6 +217,14 @@ public class LargeInputStepExecutor implements StepExecutor {
         // ── 6) 계층 Reduce (성공 청크만) ───────────────────────────────────
         job.setStatus(LargeInputJobEntity.Status.REDUCING);
         job = jobRepository.save(job);
+        // 진행 가시화: Reduce 진입 신호(청크 iteration 과 겹치지 않게 9000 대역).
+        long reduceStart = System.currentTimeMillis();
+        if (progressRunId != null) {
+            try {
+                eventRecorder.llmRequest(progressRunId, progressStepId, 9000, resolvedModel,
+                        "🧩 계층 Reduce — " + completed + "개 청크 결과를 통합하는 중…", connectionId);
+            } catch (RuntimeException ignore) { /* fire-and-forget */ }
+        }
         // 청크 결과를 reduce 입력으로 — structured_data 가 있으면 JSON 문자열로 포함해 보존한다
         // (텍스트만 넘기면 청크 구조화 결과가 reduce 에서 유실됨).
         List<String> successFragments = runs.stream().filter(r -> r.ok).map(this::fragmentOf).toList();
@@ -215,17 +236,28 @@ public class LargeInputStepExecutor implements StepExecutor {
         // 계층 텍스트 머지(중간 레벨) → 최종 1개 텍스트로 수렴.
         String reduced = reduceService.reduce(successFragments, reduceInstr,
                 (sys, prompt) -> callLlmText(fAdapter, fModel, sys, prompt, null, reduceMaxTokens,
-                        sessionBase + "-r" + reduceSeq.getAndIncrement()),
+                        sessionBase + "-r" + reduceSeq.getAndIncrement(), workspacePath),
                 reduceTree);
         // output_schema 가 있으면 최종 머지 텍스트를 한 번 더 구조화 호출해 진짜 Map 을 만든다
         // (청크는 structured 인데 reduce 산출물이 텍스트면 verify 가 JSON 을 못 받는 갭 해소).
         Map<String, Object> reducedStructured = null;
         if (responseSchema != null && reduced != null && !reduced.isBlank()) {
             reducedStructured = reduceToStructured(adapter, resolvedModel, reduceInstr.system(),
-                    reduced, responseSchema, sessionBase + "-rs");
+                    reduced, responseSchema, sessionBase + "-rs", workspacePath);
         }
         job.setReduceTree(reduceTree);
         job = jobRepository.save(job);
+        // 진행 가시화: Reduce 완료 + 최종 통합 결과 본문.
+        if (progressRunId != null) {
+            String finalBody = "🧩 통합 완료\n\n"
+                    + (reducedStructured != null ? safeJson(reducedStructured)
+                       : (reduced != null ? reduced : ""));
+            try {
+                eventRecorder.llmResponse(progressRunId, progressStepId, 9001, resolvedModel, 0, 0,
+                        "STOP", System.currentTimeMillis() - reduceStart,
+                        null, null, null, finalBody, connectionId);
+            } catch (RuntimeException ignore) { /* fire-and-forget */ }
+        }
 
         // ── 7) 검증 ────────────────────────────────────────────────────────
         job.setStatus(LargeInputJobEntity.Status.VERIFYING);
@@ -273,9 +305,11 @@ public class LargeInputStepExecutor implements StepExecutor {
     private List<ChunkRun> mapChunks(List<LargeInputChunk> chunks, DocumentAnalysis action,
                                      AnalysisInstruction mapInstr, LLMAdapter adapter, String resolvedModel,
                                      Map<String, Object> responseSchema, byte[] pdfBytes,
-                                     int maxParallel, int itemRetryMax, String sessionBase) {
+                                     int maxParallel, int itemRetryMax, String sessionBase, String workspacePath,
+                                     UUID progressRunId, String progressStepId, String connectionId) {
         Semaphore gate = new Semaphore(Math.max(1, maxParallel));
         final String tenantId = TenantContext.getTenantId();
+        final int totalChunks = chunks.size();
         List<CompletableFuture<ChunkRun>> futures = new ArrayList<>(chunks.size());
         for (LargeInputChunk chunk : chunks) {
             futures.add(CompletableFuture.supplyAsync(() -> {
@@ -284,7 +318,8 @@ public class LargeInputStepExecutor implements StepExecutor {
                 try {
                     return runChunk(chunk, action, mapInstr, adapter, resolvedModel,
                             responseSchema, pdfBytes, itemRetryMax,
-                            sessionBase + "-c" + chunk.chunkIndex());
+                            sessionBase + "-c" + chunk.chunkIndex(), workspacePath,
+                            progressRunId, progressStepId, connectionId, totalChunks);
                 } finally {
                     gate.release();
                     TenantContext.clear();
@@ -299,14 +334,21 @@ public class LargeInputStepExecutor implements StepExecutor {
     /** 단일 청크: 텍스트/이미지에 맞게 메시지 조립 → LLM 호출 → 검증 → (실패 시) 재시도. */
     private ChunkRun runChunk(LargeInputChunk chunk, DocumentAnalysis action, AnalysisInstruction mapInstr,
                               LLMAdapter adapter, String resolvedModel, Map<String, Object> responseSchema,
-                              byte[] pdfBytes, int itemRetryMax, String chunkSessionId) {
+                              byte[] pdfBytes, int itemRetryMax, String chunkSessionId, String workspacePath,
+                              UUID progressRunId, String progressStepId, String connectionId, int totalChunks) {
         ChunkRun run = new ChunkRun(chunk);
         int maxAttempts = 1 + Math.max(0, itemRetryMax);
+        // 진행 이벤트의 iteration = 청크 인덱스 → 화면에서 청크별 카드로 누적.
+        Integer iter = chunk.chunkIndex();
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            long chunkStart = System.currentTimeMillis();
             try {
                 List<ContentBlock> userBlocks = buildChunkBlocks(chunk, mapInstr.prompt(), pdfBytes);
+                // 호출 직전: "청크 N/M (p.범위) 처리 중" + 프롬프트 본문을 LLM_REQUEST 로 발행.
+                emitChunkRequest(progressRunId, progressStepId, iter, resolvedModel, connectionId,
+                        chunk, totalChunks, attempt, maxAttempts, userBlocks);
                 LLMResponse resp = callLlm(adapter, resolvedModel, mapInstr.system(), userBlocks,
-                        responseSchema, mapMaxTokens, chunkSessionId);
+                        responseSchema, mapMaxTokens, chunkSessionId, workspacePath);
                 Map<String, Object> chunkResult = new LinkedHashMap<>();
                 chunkResult.put("output", resp.textContent());
                 Map<String, Object> structured = extractStructured(resp);
@@ -319,9 +361,16 @@ public class LargeInputStepExecutor implements StepExecutor {
                 run.ok = true;
                 run.text = resp.textContent();
                 run.structured = structured;
+                // 응답 후: 청크 결과 본문을 LLM_RESPONSE 로 발행(화면 본문 채움).
+                emitChunkResponse(progressRunId, progressStepId, iter, resolvedModel, connectionId,
+                        chunk, totalChunks, resp, structured, System.currentTimeMillis() - chunkStart);
                 return run;
             } catch (Exception e) {
                 run.failureReason = e.getMessage();
+                // 실패도 화면에 보이게(빈칸 대신 사유). 마지막 시도면 청크 FAILED 로 표시.
+                emitChunkFailure(progressRunId, progressStepId, iter, resolvedModel, connectionId,
+                        chunk, totalChunks, attempt, maxAttempts, e.getMessage(),
+                        System.currentTimeMillis() - chunkStart);
                 if (attempt < maxAttempts) {
                     log.warn("CR-120 chunk[{}] {} attempt {}/{} failed: {} — retrying",
                             chunk.chunkIndex(), chunk.pageRange(), attempt, maxAttempts, e.getMessage());
@@ -333,6 +382,77 @@ public class LargeInputStepExecutor implements StepExecutor {
         }
         run.ok = false;
         return run;
+    }
+
+    // ─── 진행 이벤트 발행 (CR-120 가시화) ─────────────────────────────────────
+    // recorder 는 fire-and-forget(Virtual Thread INSERT, 예외 삼킴) → hot path 영향 0.
+    // step_id 는 FOREACH 위임 시 `extract_facts.body[N]`, iteration=청크 인덱스 →
+    // FE 가 해당 반복 카드에 청크별로 누적 표시한다.
+
+    /** 청크 LLM 호출 직전 — "청크 N/M (p.범위) 처리 중" + 프롬프트 본문을 LLM_REQUEST 로. */
+    private void emitChunkRequest(UUID runId, String stepId, Integer iter, String model, String connId,
+                                  LargeInputChunk chunk, int total, int attempt, int maxAttempts,
+                                  List<ContentBlock> userBlocks) {
+        if (runId == null) return;
+        StringBuilder b = new StringBuilder();
+        b.append("⏳ 청크 ").append(chunk.chunkIndex() + 1).append("/").append(total)
+                .append(" (페이지 ").append(chunk.pageRange()).append(", ").append(chunk.type()).append(")");
+        if (attempt > 1) b.append(" — 재시도 ").append(attempt).append("/").append(maxAttempts);
+        b.append("\n\n").append(promptPreview(userBlocks));
+        try {
+            eventRecorder.llmRequest(runId, stepId, iter, model, b.toString(), connId);
+        } catch (RuntimeException ignore) { /* fire-and-forget */ }
+    }
+
+    /** 청크 LLM 응답 후 — 결과 본문을 LLM_RESPONSE 로(화면 본문 채움). */
+    private void emitChunkResponse(UUID runId, String stepId, Integer iter, String model, String connId,
+                                   LargeInputChunk chunk, int total, LLMResponse resp,
+                                   Map<String, Object> structured, long durationMs) {
+        if (runId == null) return;
+        int inTok = resp.usage() != null ? resp.usage().inputTokens() : 0;
+        int outTok = resp.usage() != null ? resp.usage().outputTokens() : 0;
+        String finish = resp.finishReason() != null ? resp.finishReason().name() : null;
+        String body = "✅ 청크 " + (chunk.chunkIndex() + 1) + "/" + total
+                + " (페이지 " + chunk.pageRange() + ") 완료\n\n"
+                + (structured != null ? safeJson(structured) : resp.textContent());
+        try {
+            eventRecorder.llmResponse(runId, stepId, iter, model, inTok, outTok, finish, durationMs,
+                    null, null, null, body, connId);
+        } catch (RuntimeException ignore) { /* fire-and-forget */ }
+    }
+
+    /** 청크 실패 — 사유를 LLM_RESPONSE 로(빈칸 대신 표시). 마지막 시도면 FAILED 명시. */
+    private void emitChunkFailure(UUID runId, String stepId, Integer iter, String model, String connId,
+                                  LargeInputChunk chunk, int total, int attempt, int maxAttempts,
+                                  String reason, long durationMs) {
+        if (runId == null) return;
+        boolean last = attempt >= maxAttempts;
+        String body = (last ? "❌ 청크 " : "⚠️ 청크 ") + (chunk.chunkIndex() + 1) + "/" + total
+                + " (페이지 " + chunk.pageRange() + ") "
+                + (last ? "실패" : "재시도 예정 (" + attempt + "/" + maxAttempts + ")")
+                + "\n사유: " + (reason != null ? reason : "(미상)");
+        try {
+            eventRecorder.llmResponse(runId, stepId, iter, model, 0, 0,
+                    last ? "FAILED" : "RETRY", durationMs, null, null, null, body, connId);
+        } catch (RuntimeException ignore) { /* fire-and-forget */ }
+    }
+
+    /** userBlocks 에서 텍스트 프롬프트만 추려 앞부분 미리보기(이미지 블록은 [image] 로 요약). */
+    private static String promptPreview(List<ContentBlock> blocks) {
+        StringBuilder sb = new StringBuilder();
+        int images = 0;
+        for (ContentBlock b : blocks) {
+            if (b instanceof ContentBlock.Text t) sb.append(t.text()).append("\n");
+            else images++;
+        }
+        if (images > 0) sb.append("[이미지 ").append(images).append("장 첨부]");
+        String s = sb.toString();
+        return s.length() <= 1000 ? s : s.substring(0, 1000) + "…";
+    }
+
+    private static String safeJson(Map<String, Object> m) {
+        try { return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(m); }
+        catch (Exception e) { return String.valueOf(m); }
     }
 
     /**
@@ -387,15 +507,19 @@ public class LargeInputStepExecutor implements StepExecutor {
      */
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel, String system,
                                 List<ContentBlock> userBlocks, Map<String, Object> responseSchema,
-                                int maxTokens, String sessionId) {
+                                int maxTokens, String sessionId, String workspacePath) {
         List<UnifiedMessage> messages = new ArrayList<>();
         if (system != null && !system.isBlank()) {
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, system));
         }
         messages.add(UnifiedMessage.ofUserContent(userBlocks));
         ModelConfig cfg = new ModelConfig(null, maxTokens, null, null, null, null);
+        // workingDirectory 전파: CLI 어댑터면 worker cwd 가 run 작업장(쓰기 가능)이 된다.
+        // 누락 시 cwd=default(/app, 쓰기 불가) → CLI 가 자율적으로 결과를 Write 하려다 EACCES 로 깨지고
+        // 그 재시도/실패가 "Client failed to initialize calling tool"/turn timeout 으로 번졌다(실측).
+        // NATIVE 자율성은 그대로 두고 쓰기 가능한 cwd 만 준다. API 어댑터는 이 필드를 무시한다.
         LLMRequest request = new LLMRequest(resolvedModel, messages, null, cfg, false, sessionId, null,
-                responseSchema, null);
+                responseSchema, workspacePath);
         try {
             return adapter.chat(request).get();
         } catch (Exception e) {
@@ -436,12 +560,12 @@ public class LargeInputStepExecutor implements StepExecutor {
      */
     private Map<String, Object> reduceToStructured(LLMAdapter adapter, String resolvedModel, String system,
                                                    String mergedText, Map<String, Object> responseSchema,
-                                                   String sessionId) {
+                                                   String sessionId, String workspacePath) {
         String prompt = "Convert the following consolidated analysis into the required structured output. "
                 + "Preserve every item faithfully — do not drop or invent.\n\n" + mergedText;
         try {
             LLMResponse resp = callLlm(adapter, resolvedModel, system,
-                    List.of(new ContentBlock.Text(prompt)), responseSchema, reduceMaxTokens, sessionId);
+                    List.of(new ContentBlock.Text(prompt)), responseSchema, reduceMaxTokens, sessionId, workspacePath);
             return extractStructured(resp);
         } catch (RuntimeException e) {
             log.warn("CR-120: reduce 구조화 호출 실패 — 텍스트 결과로 폴백: {}", e.getMessage());
@@ -451,9 +575,10 @@ public class LargeInputStepExecutor implements StepExecutor {
 
     /** Reduce 콜백용 텍스트 전용 호출. */
     private String callLlmText(LLMAdapter adapter, String resolvedModel, String system, String prompt,
-                               Map<String, Object> responseSchema, int maxTokens, String sessionId) {
+                               Map<String, Object> responseSchema, int maxTokens, String sessionId,
+                               String workspacePath) {
         LLMResponse resp = callLlm(adapter, resolvedModel, system,
-                List.of(new ContentBlock.Text(prompt)), responseSchema, maxTokens, sessionId);
+                List.of(new ContentBlock.Text(prompt)), responseSchema, maxTokens, sessionId, workspacePath);
         return resp.textContent();
     }
 
