@@ -121,21 +121,26 @@ public class LargeInputStepExecutor implements StepExecutor {
                     + "' requires reference_input (needsReference=true)");
         }
 
-        String backend = str(config.get("execution_backend"), "llm_call").toLowerCase();
-        LargeInputPolicy policy = LargeInputPolicy.resolve(
-                str(config.get("large_input_mode"), null), null, systemPolicy);
-        // AGENT_CALL/CLI 백엔드는 자율주행이 크기를 통제 못 함 → auto 를 force 로 정규화
-        if (!"llm_call".equals(backend) && policy == LargeInputPolicy.AUTO) {
-            policy = LargeInputPolicy.FORCE;
-            log.info("CR-120 step '{}': backend={} → AUTO normalized to FORCE", step.id(), backend);
-        }
-
         int maxParallel = asInt(config.get("max_parallel"), 5);
         int itemRetryMax = asInt(config.get("item_retry_max"), 1);
         boolean requireFullCoverage = asBool(config.get("require_full_coverage"), true);
         String model = str(config.get("model"), "auto");
         String connectionId = str(config.get("connection_id"), null);
         Map<String, Object> responseSchema = (Map<String, Object>) raw.get("output_schema");
+
+        // 청크 처리 어댑터를 먼저 해석한다(connection_id 가 처리 백엔드를 결정 — CLI vs API).
+        // 별도 execution_backend 플래그는 없앴다(connection_id 로 단일화).
+        LLMAdapter adapter = resolveAdapter(connectionId, model);
+        String resolvedModel = resolveModel(connectionId, model);
+
+        LargeInputPolicy policy = LargeInputPolicy.resolve(
+                str(config.get("large_input_mode"), null), null, systemPolicy);
+        // CLI(자율주행) 어댑터는 컨텍스트 크기를 우리가 사전측정 못 함 → auto 를 force 로 정규화
+        // (LLM API 어댑터는 우리가 청크를 직접 주입해 크기 통제 → auto 그대로).
+        if (policy == LargeInputPolicy.AUTO && adapter instanceof com.platform.llm.adapter.ClaudeCliAdapter) {
+            policy = LargeInputPolicy.FORCE;
+            log.info("CR-120 step '{}': CLI adapter → AUTO normalized to FORCE", step.id());
+        }
 
         // ── 2) 소스 로딩 ───────────────────────────────────────────────────
         LargeInputSource source = loadSource(step, config, context);
@@ -158,17 +163,18 @@ public class LargeInputStepExecutor implements StepExecutor {
         job.setTotalChunks(chunks.size());
         job.setStatus(LargeInputJobEntity.Status.PROCESSING);
         job = jobRepository.save(job);
-        log.info("CR-120 step '{}': {} chunks (action={}, backend={}, policy={})",
-                step.id(), chunks.size(), actionId, backend, policy);
+        log.info("CR-120 step '{}': {} chunks (action={}, policy={}, adapter={})",
+                step.id(), chunks.size(), actionId, policy, adapter.getClass().getSimpleName());
 
         // ── 5) map (병렬, 멀티모달) ────────────────────────────────────────
-        LLMAdapter adapter = resolveAdapter(connectionId, model);
-        String resolvedModel = resolveModel(connectionId, model);
         AnalysisInstruction mapInstr = action.buildMapInstruction(params);
         byte[] pdfBytes = source.bytes();
+        // CLI 어댑터 좀비 워커 정리(CR-109/114)를 위한 결정적 sessionId base.
+        // 청크별로 "-c{index}" 를 붙여 각 청크 호출이 자기 워커를 cleanupSession 으로 닫게 한다.
+        String sessionBase = context.workflowRunId() + "-li-" + step.id();
 
         List<ChunkRun> runs = mapChunks(chunks, action, mapInstr, adapter, resolvedModel,
-                responseSchema, pdfBytes, maxParallel, itemRetryMax);
+                responseSchema, pdfBytes, maxParallel, itemRetryMax, sessionBase);
 
         // chunk_results + 카운터 적재
         List<Map<String, Object>> chunkResults = new ArrayList<>(runs.size());
@@ -200,8 +206,10 @@ public class LargeInputStepExecutor implements StepExecutor {
         Map<String, Object> reduceTree = new LinkedHashMap<>();
         final LLMAdapter fAdapter = adapter;
         final String fModel = resolvedModel;
+        final java.util.concurrent.atomic.AtomicInteger reduceSeq = new java.util.concurrent.atomic.AtomicInteger();
         String reduced = reduceService.reduce(successFragments, reduceInstr,
-                (sys, prompt) -> callLlmText(fAdapter, fModel, sys, prompt, null, reduceMaxTokens, context),
+                (sys, prompt) -> callLlmText(fAdapter, fModel, sys, prompt, null, reduceMaxTokens,
+                        sessionBase + "-r" + reduceSeq.getAndIncrement()),
                 reduceTree);
         job.setReduceTree(reduceTree);
         job = jobRepository.save(job);
@@ -251,7 +259,7 @@ public class LargeInputStepExecutor implements StepExecutor {
     private List<ChunkRun> mapChunks(List<LargeInputChunk> chunks, DocumentAnalysis action,
                                      AnalysisInstruction mapInstr, LLMAdapter adapter, String resolvedModel,
                                      Map<String, Object> responseSchema, byte[] pdfBytes,
-                                     int maxParallel, int itemRetryMax) {
+                                     int maxParallel, int itemRetryMax, String sessionBase) {
         Semaphore gate = new Semaphore(Math.max(1, maxParallel));
         final String tenantId = TenantContext.getTenantId();
         List<CompletableFuture<ChunkRun>> futures = new ArrayList<>(chunks.size());
@@ -261,7 +269,8 @@ public class LargeInputStepExecutor implements StepExecutor {
                 gate.acquireUninterruptibly();
                 try {
                     return runChunk(chunk, action, mapInstr, adapter, resolvedModel,
-                            responseSchema, pdfBytes, itemRetryMax);
+                            responseSchema, pdfBytes, itemRetryMax,
+                            sessionBase + "-c" + chunk.chunkIndex());
                 } finally {
                     gate.release();
                     TenantContext.clear();
@@ -276,14 +285,14 @@ public class LargeInputStepExecutor implements StepExecutor {
     /** 단일 청크: 텍스트/이미지에 맞게 메시지 조립 → LLM 호출 → 검증 → (실패 시) 재시도. */
     private ChunkRun runChunk(LargeInputChunk chunk, DocumentAnalysis action, AnalysisInstruction mapInstr,
                               LLMAdapter adapter, String resolvedModel, Map<String, Object> responseSchema,
-                              byte[] pdfBytes, int itemRetryMax) {
+                              byte[] pdfBytes, int itemRetryMax, String chunkSessionId) {
         ChunkRun run = new ChunkRun(chunk);
         int maxAttempts = 1 + Math.max(0, itemRetryMax);
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 List<ContentBlock> userBlocks = buildChunkBlocks(chunk, mapInstr.prompt(), pdfBytes);
                 LLMResponse resp = callLlm(adapter, resolvedModel, mapInstr.system(), userBlocks,
-                        responseSchema, mapMaxTokens);
+                        responseSchema, mapMaxTokens, chunkSessionId);
                 Map<String, Object> chunkResult = new LinkedHashMap<>();
                 chunkResult.put("output", resp.textContent());
                 Map<String, Object> structured = extractStructured(resp);
@@ -357,28 +366,43 @@ public class LargeInputStepExecutor implements StepExecutor {
 
     // ─── LLM 호출 (멀티모달 USER 블록 지원) ──────────────────────────────────
 
+    /**
+     * 청크/Reduce LLM 호출. {@code sessionId} 는 CLI 어댑터의 좀비 워커 정리(CR-109/114) 키 —
+     * 결정적 청크별 id 를 넣어 호출 후 {@link LLMAdapter#cleanupSession}(CLI 만 동작)으로 워커를 닫는다.
+     * LLM API 어댑터는 cleanupSession 이 no-op 이라 무해.
+     */
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel, String system,
-                                List<ContentBlock> userBlocks, Map<String, Object> responseSchema, int maxTokens) {
+                                List<ContentBlock> userBlocks, Map<String, Object> responseSchema,
+                                int maxTokens, String sessionId) {
         List<UnifiedMessage> messages = new ArrayList<>();
         if (system != null && !system.isBlank()) {
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, system));
         }
         messages.add(UnifiedMessage.ofUserContent(userBlocks));
         ModelConfig cfg = new ModelConfig(null, maxTokens, null, null, null, null);
-        LLMRequest request = new LLMRequest(resolvedModel, messages, null, cfg, false, null, null,
+        LLMRequest request = new LLMRequest(resolvedModel, messages, null, cfg, false, sessionId, null,
                 responseSchema, null);
         try {
             return adapter.chat(request).get();
         } catch (Exception e) {
             throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
+        } finally {
+            // CLI 어댑터면 이 청크 전용 워커를 결정적으로 닫는다(좀비 누수 차단). API 어댑터는 no-op.
+            if (sessionId != null && !sessionId.isBlank()) {
+                try {
+                    adapter.cleanupSession(sessionId);
+                } catch (RuntimeException ce) {
+                    log.warn("CR-120: cleanupSession 실패(sessionId={}): {}", sessionId, ce.getMessage());
+                }
+            }
         }
     }
 
     /** Reduce 콜백용 텍스트 전용 호출. */
     private String callLlmText(LLMAdapter adapter, String resolvedModel, String system, String prompt,
-                               Map<String, Object> responseSchema, int maxTokens, StepContext context) {
+                               Map<String, Object> responseSchema, int maxTokens, String sessionId) {
         LLMResponse resp = callLlm(adapter, resolvedModel, system,
-                List.of(new ContentBlock.Text(prompt)), responseSchema, maxTokens);
+                List.of(new ContentBlock.Text(prompt)), responseSchema, maxTokens, sessionId);
         return resp.textContent();
     }
 
