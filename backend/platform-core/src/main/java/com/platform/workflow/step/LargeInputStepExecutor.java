@@ -308,7 +308,13 @@ public class LargeInputStepExecutor implements StepExecutor {
         jobRepository.save(job);
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("output", reduced != null ? reduced : "");
+        // ★결과 이중 적재 제거(CR-120): reduced 는 reducedStructured 의 JSON 문자열이라, output 에 또 담으면
+        //   같은 fact 가 output(문자열)+structured_data(Map) 양쪽에 들어가 결과가 2배가 된다(실측 78만 자의
+        //   절반이 중복). 후속 스텝(verify)이 {{...output}} 으로 전체를 받으면 context 폭발. → structured 가
+        //   있으면 output 은 프리뷰만 두고, fact 본체는 structured_data 로만 전달한다. 소비앱은 후속 스텝에서
+        //   {{step.structured_data}} 를 참조한다(문자열 전체가 필요하면 그쪽을 직렬화). structured 없을 때
+        //   (텍스트 폴백)는 기존대로 reduced 를 output 에(하위호환).
+        result.put("output", reducedStructured != null ? preview(reduced) : (reduced != null ? reduced : ""));
         // output_schema 가 있고 구조화에 성공했으면 진짜 Map, 아니면 텍스트(하위호환).
         result.put("structured_data", reducedStructured != null ? reducedStructured : reduced);
         result.put("coverage_report", coverageReport);
