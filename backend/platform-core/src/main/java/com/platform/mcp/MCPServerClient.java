@@ -31,6 +31,17 @@ public class MCPServerClient implements AutoCloseable {
     private McpSyncClient client;
     private boolean initialized = false;
 
+    /**
+     * 세션 생명주기 직렬화 락 — connect/callTool/discoverTools/list·readResource/reconnect/close 가
+     * 단일 공유 {@link #client}(SSE 세션 1개)를 동시에 만지면, 한 스레드의 reconnect(close+교체)가
+     * 진행 중인 다른 스레드의 세션을 무효화한다("MCP session with server terminated" → 상호 reconnect race).
+     * 세션을 쓰는 동안과 교체하는 동안을 같은 락으로 상호배제해 race 를 원천 제거한다.
+     *
+     * <p>대가: 한 서버(=사이드카 1개)에 대한 호출이 직렬화된다(병렬 호출은 줄 섬). 정확성 우선 —
+     * 동시성이 필요하면 서버별 세션 풀이 다음 단계.
+     */
+    private final Object sessionLock = new Object();
+
     // reconnect 시 동일 파라미터로 client 를 재생성하기 위해 보존.
     private final UrlSplit urlSplit;
     private final int requestTimeoutSeconds;
@@ -90,16 +101,18 @@ public class MCPServerClient implements AutoCloseable {
      * 죽은 session_id 로 보낸 POST 가 404("Could not find session") 를 받아도 SDK 가 이를
      * 응답으로 전파하지 못해 requestTimeout 풀타임아웃이 나는 문제를 해소한다.
      */
-    public synchronized void reconnect() {
-        try {
-            if (client != null) client.close();
-        } catch (Exception e) {
-            log.warn("MCP server '{}' reconnect: error closing stale client: {}", serverId, e.getMessage());
+    public void reconnect() {
+        synchronized (sessionLock) {
+            try {
+                if (client != null) client.close();
+            } catch (Exception e) {
+                log.warn("MCP server '{}' reconnect: error closing stale client: {}", serverId, e.getMessage());
+            }
+            this.client = buildClient();
+            this.initialized = false;
+            connectLocked();
+            log.info("MCP server '{}' reconnected (new SSE session)", serverId);
         }
-        this.client = buildClient();
-        this.initialized = false;
-        connect();
-        log.info("MCP server '{}' reconnected (new SSE session)", serverId);
     }
 
     /**
@@ -151,6 +164,13 @@ public class MCPServerClient implements AutoCloseable {
      * listTools(), callTool() 호출 전에 반드시 호출해야 함.
      */
     public void connect() {
+        synchronized (sessionLock) {
+            connectLocked();
+        }
+    }
+
+    /** {@link #sessionLock} 을 이미 보유한 상태에서 호출되는 초기화 본체. */
+    private void connectLocked() {
         if (!initialized) {
             McpSchema.InitializeResult result = client.initialize();
             initialized = true;
@@ -166,12 +186,14 @@ public class MCPServerClient implements AutoCloseable {
      * @return UnifiedToolDef 목록 (ToolRegistry에 등록 가능한 형태)
      */
     public List<UnifiedToolDef> discoverTools() {
-        ensureConnected();
-        List<McpSchema.Tool> mcpTools = client.listTools().tools();
-        log.info("Discovered {} tool(s) from MCP server '{}'", mcpTools.size(), serverId);
-        return mcpTools.stream()
-                .map(this::toUnifiedToolDef)
-                .toList();
+        synchronized (sessionLock) {
+            ensureConnectedLocked();
+            List<McpSchema.Tool> mcpTools = client.listTools().tools();
+            log.info("Discovered {} tool(s) from MCP server '{}'", mcpTools.size(), serverId);
+            return mcpTools.stream()
+                    .map(this::toUnifiedToolDef)
+                    .toList();
+        }
     }
 
     /**
@@ -181,26 +203,29 @@ public class MCPServerClient implements AutoCloseable {
      * @return 실행 결과 문자열
      */
     public String callTool(String toolName, Map<String, Object> input) {
-        ensureConnected();
-        McpSchema.CallToolResult result;
-        try {
-            result = client.callTool(new McpSchema.CallToolRequest(toolName, input));
-        } catch (Exception e) {
-            // 죽은 SSE 세션(사이드카 재기동 등)에 걸리면 requestTimeout 풀타임아웃/IO 예외가 난다.
-            // 1회 재연결 후 재시도 — 죽은 session_id 대신 새 세션으로 호출한다.
-            log.warn("MCP tool '{}' call failed ({}), reconnecting and retrying once", toolName, e.getMessage());
-            reconnect();
-            result = client.callTool(new McpSchema.CallToolRequest(toolName, input));
-        }
+        synchronized (sessionLock) {
+            ensureConnectedLocked();
+            McpSchema.CallToolResult result;
+            try {
+                result = client.callTool(new McpSchema.CallToolRequest(toolName, input));
+            } catch (Exception e) {
+                // 죽은 SSE 세션(사이드카 재기동 등)에 걸리면 requestTimeout 풀타임아웃/IO 예외가 난다.
+                // 1회 재연결 후 재시도 — 죽은 session_id 대신 새 세션으로 호출한다.
+                // sessionLock 보유 중이라 다른 스레드의 진행 호출을 무효화하지 않는다(race 제거).
+                log.warn("MCP tool '{}' call failed ({}), reconnecting and retrying once", toolName, e.getMessage());
+                reconnect();
+                result = client.callTool(new McpSchema.CallToolRequest(toolName, input));
+            }
 
-        if (Boolean.TRUE.equals(result.isError())) {
-            log.warn("MCP tool '{}' returned an error result", toolName);
-        }
+            if (Boolean.TRUE.equals(result.isError())) {
+                log.warn("MCP tool '{}' returned an error result", toolName);
+            }
 
-        return result.content().stream()
-                .filter(c -> c instanceof McpSchema.TextContent)
-                .map(c -> ((McpSchema.TextContent) c).text())
-                .collect(Collectors.joining("\n"));
+            return result.content().stream()
+                    .filter(c -> c instanceof McpSchema.TextContent)
+                    .map(c -> ((McpSchema.TextContent) c).text())
+                    .collect(Collectors.joining("\n"));
+        }
     }
 
     /**
@@ -208,23 +233,25 @@ public class MCPServerClient implements AutoCloseable {
      * @return 리소스 목록 (URI, name, description, mimeType)
      */
     public List<Map<String, Object>> listResources() {
-        ensureConnected();
-        try {
-            McpSchema.ListResourcesResult result = client.listResources();
-            return result.resources().stream()
-                    .map(r -> {
-                        Map<String, Object> m = new java.util.LinkedHashMap<>();
-                        m.put("uri", r.uri());
-                        m.put("name", r.name());
-                        if (r.description() != null) m.put("description", r.description());
-                        if (r.mimeType() != null) m.put("mimeType", r.mimeType());
-                        m.put("serverId", serverId);
-                        return m;
-                    })
-                    .toList();
-        } catch (Exception e) {
-            log.warn("listResources failed for server '{}': {}", serverId, e.getMessage());
-            return List.of();
+        synchronized (sessionLock) {
+            ensureConnectedLocked();
+            try {
+                McpSchema.ListResourcesResult result = client.listResources();
+                return result.resources().stream()
+                        .map(r -> {
+                            Map<String, Object> m = new java.util.LinkedHashMap<>();
+                            m.put("uri", r.uri());
+                            m.put("name", r.name());
+                            if (r.description() != null) m.put("description", r.description());
+                            if (r.mimeType() != null) m.put("mimeType", r.mimeType());
+                            m.put("serverId", serverId);
+                            return m;
+                        })
+                        .toList();
+            } catch (Exception e) {
+                log.warn("listResources failed for server '{}': {}", serverId, e.getMessage());
+                return List.of();
+            }
         }
     }
 
@@ -234,26 +261,28 @@ public class MCPServerClient implements AutoCloseable {
      * @return 콘텐츠 맵 { uri, mimeType, content, type }
      */
     public Map<String, Object> readResource(String uri) {
-        ensureConnected();
-        McpSchema.ReadResourceResult result = client.readResource(
-                new McpSchema.ReadResourceRequest(uri));
+        synchronized (sessionLock) {
+            ensureConnectedLocked();
+            McpSchema.ReadResourceResult result = client.readResource(
+                    new McpSchema.ReadResourceRequest(uri));
 
-        Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("uri", uri);
+            Map<String, Object> response = new java.util.LinkedHashMap<>();
+            response.put("uri", uri);
 
-        if (result.contents() != null && !result.contents().isEmpty()) {
-            var content = result.contents().get(0);
-            if (content instanceof McpSchema.TextResourceContents textContent) {
-                response.put("type", "text");
-                response.put("mimeType", textContent.mimeType());
-                response.put("content", textContent.text());
-            } else if (content instanceof McpSchema.BlobResourceContents blobContent) {
-                response.put("type", "blob");
-                response.put("mimeType", blobContent.mimeType());
-                response.put("content", blobContent.blob());
+            if (result.contents() != null && !result.contents().isEmpty()) {
+                var content = result.contents().get(0);
+                if (content instanceof McpSchema.TextResourceContents textContent) {
+                    response.put("type", "text");
+                    response.put("mimeType", textContent.mimeType());
+                    response.put("content", textContent.text());
+                } else if (content instanceof McpSchema.BlobResourceContents blobContent) {
+                    response.put("type", "blob");
+                    response.put("mimeType", blobContent.mimeType());
+                    response.put("content", blobContent.blob());
+                }
             }
+            return response;
         }
-        return response;
     }
 
     public boolean isInitialized() {
@@ -262,18 +291,21 @@ public class MCPServerClient implements AutoCloseable {
 
     @Override
     public void close() {
-        try {
-            client.close();
-            initialized = false;
-            log.info("Disconnected from MCP server '{}'", serverId);
-        } catch (Exception e) {
-            log.warn("Error closing MCP client for server '{}': {}", serverId, e.getMessage());
+        synchronized (sessionLock) {
+            try {
+                client.close();
+                initialized = false;
+                log.info("Disconnected from MCP server '{}'", serverId);
+            } catch (Exception e) {
+                log.warn("Error closing MCP client for server '{}': {}", serverId, e.getMessage());
+            }
         }
     }
 
-    private void ensureConnected() {
+    /** {@link #sessionLock} 을 이미 보유한 상태에서 호출되는 연결 보장 본체. */
+    private void ensureConnectedLocked() {
         if (!initialized) {
-            connect();
+            connectLocked();
         }
     }
 
