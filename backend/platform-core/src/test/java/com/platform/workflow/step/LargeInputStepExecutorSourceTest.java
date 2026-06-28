@@ -59,6 +59,7 @@ class LargeInputStepExecutorSourceTest {
                 mock(ConnectionAdapterFactory.class),
                 mock(ModelRouter.class),
                 ragClient,
+                mock(com.platform.largeinput.PopplerPdfRenderer.class),
                 workspaceProperties,
                 mock(com.platform.workflow.event.WorkflowRunEventRecorder.class));
     }

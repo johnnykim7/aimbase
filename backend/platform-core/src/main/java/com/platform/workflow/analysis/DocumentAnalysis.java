@@ -36,6 +36,27 @@ public interface DocumentAnalysis {
     default boolean needsReference() { return false; }
 
     /**
+     * CR-120: "수집형" 동작이면 true — 청크 결과를 코드로 병합(LLM 0회)하고 마지막에 1회만 정리한다.
+     *
+     * <p>extract 처럼 결과가 <b>배열 누적</b>(fact 목록)인 동작은, 청크별 결과를 LLM 으로 "통합"할 필요가
+     * 없다 — 그냥 이어붙이면 된다(청크는 페이지 범위가 안 겹쳐 중복도 거의 없음). 기존 계층 LLM reduce 는
+     * body 하나에 reduce 호출이 십수 번 발생해 reduce 가 map 의 3.7배까지 걸렸다(실측 body[2] map 262초 vs
+     * reduce 973초). 수집형은 {@link #mergeStructured}/{@link #mergeText} 로 코드 병합 후 1회 정리만 한다.
+     *
+     * <p>summarize(요약)/verify(판정 종합)는 false — 합치면 더 줄이거나 종합해야 하므로 LLM reduce 가 본질.
+     */
+    default boolean collectionReduce() { return false; }
+
+    /**
+     * 수집형({@link #collectionReduce()}=true)일 때 청크 structured 결과들을 코드로 병합한다.
+     * 예: extract 는 각 청크의 {@code {facts:[...]}} 의 facts 배열을 이어붙여 {@code {facts:[전체]}} 반환.
+     * 기본 구현은 빈 Map(수집형 아닌 동작은 호출되지 않음).
+     */
+    default Map<String, Object> mergeStructured(java.util.List<Map<String, Object>> chunkStructured) {
+        return Map.of();
+    }
+
+    /**
      * 청크 처리 결과(LLM 구조화/텍스트 출력) 동작별 검증. 기본 통과.
      * 위반 시 엔진이 재시도 후 청크 FAILED 로 표시(CR-119).
      */

@@ -24,8 +24,10 @@ public class HierarchicalReduceService {
 
     private static final Logger log = LoggerFactory.getLogger(HierarchicalReduceService.class);
 
-    /** 한 Reduce 묶음에 넣을 최대 fragment 문자 합계. 넘으면 묶음을 더 잘게 나눈다. */
-    @Value("${largeinput.reduce-budget-chars:60000}")
+    // 한 Reduce 묶음에 넣을 최대 fragment 문자 합계. 넘으면 묶음을 더 잘게 나눈다.
+    // CR-120: 60K 는 큰 청크 출력(실측 38K)을 두 개도 못 묶어 단독 그룹화 → 수렴 실패. 120K 로 키워
+    // 38K 청크 3개를 한 그룹에 묶고, reduce-max-tokens(16384≈64K자) 출력으로 통합해 크기가 줄게 한다.
+    @Value("${largeinput.reduce-budget-chars:120000}")
     private int reduceBudgetChars;
 
     /** 한 묶음 최대 fragment 개수 (문자 예산과 별개 상한). */
@@ -62,6 +64,22 @@ public class HierarchicalReduceService {
         int level = 0;
         while (current.size() > 1 && level < reduceMaxLevels) {
             List<List<String>> groups = group(current);
+
+            // ── 수렴 안전장치 (CR-120) ──────────────────────────────────────
+            // group 이 입력 개수만큼 그대로면(N fragment → N group) 이 레벨은 아무것도 합치지 못한다.
+            // 원인: fragment 하나가 이미 reduceBudgetChars 를 넘어 단독 그룹이 되는 경우(큰 청크 출력).
+            // 이대로 두면 다음 레벨도 동일 → max_levels 까지 헛돌며 reduce 가 수렴하지 않는다(실측 r20+).
+            // → 진전이 없으면 즉시 중단하고 남은 것을 결합해 반환(무한 reduce 차단).
+            if (groups.size() >= current.size()) {
+                log.warn("CR-120 reduce no-progress at level {} ({} fragments → {} groups) — "
+                        + "fragment too large for budget {}. Stopping to avoid non-convergence.",
+                        level, current.size(), groups.size(), reduceBudgetChars);
+                levels.add(level(level, current.size(), 1));
+                reduceTree.put("levels", levels);
+                reduceTree.put("no_progress_stop", true);
+                return String.join("\n\n---\n\n", current);
+            }
+
             List<String> next = new ArrayList<>(groups.size());
             for (List<String> g : groups) {
                 String merged = String.join("\n\n---\n\n", g);

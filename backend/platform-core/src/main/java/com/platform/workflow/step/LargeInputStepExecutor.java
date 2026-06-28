@@ -55,6 +55,7 @@ public class LargeInputStepExecutor implements StepExecutor {
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final ModelRouter modelRouter;
     private final MCPRagClient ragClient;
+    private final com.platform.largeinput.PopplerPdfRenderer popplerRenderer;
     private final WorkspaceProperties workspaceProperties;
     private final com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder;
 
@@ -64,7 +65,10 @@ public class LargeInputStepExecutor implements StepExecutor {
     @Value("${largeinput.map-max-tokens:8192}")
     private int mapMaxTokens;
 
-    @Value("${largeinput.reduce-max-tokens:8192}")
+    // CR-120: reduce 는 여러 청크 fragment 를 "통합"하므로 출력이 입력 못지않게 커야 수렴한다.
+    // 8192(약 30K자)면 큰 청크(38K) 합본을 통합한 출력이 잘려, 합쳐도 크기가 안 줄어 무한 reduce
+    // (레벨마다 그룹 그대로 → max_levels 까지 헛돎, 실측 r20+). 16384 로 상향해 통합 출력 여유 확보.
+    @Value("${largeinput.reduce-max-tokens:16384}")
     private int reduceMaxTokens;
 
     @Value("${largeinput.image-dpi:100}")
@@ -80,6 +84,7 @@ public class LargeInputStepExecutor implements StepExecutor {
                                   ConnectionAdapterFactory connectionAdapterFactory,
                                   ModelRouter modelRouter,
                                   MCPRagClient ragClient,
+                                  com.platform.largeinput.PopplerPdfRenderer popplerRenderer,
                                   WorkspaceProperties workspaceProperties,
                                   com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder) {
         this.attachmentService = attachmentService;
@@ -92,6 +97,7 @@ public class LargeInputStepExecutor implements StepExecutor {
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.modelRouter = modelRouter;
         this.ragClient = ragClient;
+        this.popplerRenderer = popplerRenderer;
         this.workspaceProperties = workspaceProperties;
         this.eventRecorder = eventRecorder;
     }
@@ -227,25 +233,46 @@ public class LargeInputStepExecutor implements StepExecutor {
                         "🧩 계층 Reduce — " + completed + "개 청크 결과를 통합하는 중…", connectionId);
             } catch (RuntimeException ignore) { /* fire-and-forget */ }
         }
-        // 청크 결과를 reduce 입력으로 — structured_data 가 있으면 JSON 문자열로 포함해 보존한다
-        // (텍스트만 넘기면 청크 구조화 결과가 reduce 에서 유실됨).
-        List<String> successFragments = runs.stream().filter(r -> r.ok).map(this::fragmentOf).toList();
         AnalysisInstruction reduceInstr = action.buildReduceInstruction(params);
         Map<String, Object> reduceTree = new LinkedHashMap<>();
         final LLMAdapter fAdapter = adapter;
         final String fModel = resolvedModel;
-        final java.util.concurrent.atomic.AtomicInteger reduceSeq = new java.util.concurrent.atomic.AtomicInteger();
-        // 계층 텍스트 머지(중간 레벨) → 최종 1개 텍스트로 수렴.
-        String reduced = reduceService.reduce(successFragments, reduceInstr,
-                (sys, prompt) -> callLlmText(fAdapter, fModel, sys, prompt, null, reduceMaxTokens,
-                        sessionBase + "-r" + reduceSeq.getAndIncrement(), workspacePath),
-                reduceTree);
-        // output_schema 가 있으면 최종 머지 텍스트를 한 번 더 구조화 호출해 진짜 Map 을 만든다
-        // (청크는 structured 인데 reduce 산출물이 텍스트면 verify 가 JSON 을 못 받는 갭 해소).
+        String reduced;
         Map<String, Object> reducedStructured = null;
-        if (responseSchema != null && reduced != null && !reduced.isBlank()) {
-            reducedStructured = reduceToStructured(adapter, resolvedModel, reduceInstr.system(),
-                    reduced, responseSchema, sessionBase + "-rs", workspacePath);
+
+        if (action.collectionReduce()) {
+            // ── 수집형(extract 등): 코드로 배열 병합(LLM 0회) + 마지막 1회만 정리 ──
+            // 기존 계층 LLM reduce 는 body 하나에 reduce 호출 십수 번(973초). 수집형은 청크 structured 를
+            // 코드로 concat 한 뒤, 정리(중복제거/정돈)가 필요하면 LLM 1회만 호출한다.
+            List<Map<String, Object>> chunkStructured = runs.stream()
+                    .filter(r -> r.ok && r.structured != null && !r.structured.isEmpty())
+                    .map(r -> r.structured).toList();
+            Map<String, Object> mergedMap = action.mergeStructured(chunkStructured);
+            // structured 가 하나도 없으면(텍스트 출력만) 텍스트 fragment 단순 결합으로 폴백.
+            if (mergedMap == null || mergedMap.isEmpty()) {
+                reduced = runs.stream().filter(r -> r.ok).map(this::fragmentOf)
+                        .collect(java.util.stream.Collectors.joining("\n\n"));
+            } else {
+                reducedStructured = mergedMap;        // 코드 병합 = 최종 structured (LLM 0회)
+                reduced = safeJson(mergedMap);
+            }
+            reduceTree.put("levels", List.of(Map.of("mode", "code-merge",
+                    "chunks", chunkStructured.size(), "llm_calls", 0)));
+            log.info("CR-120 step '{}': collection reduce — code-merged {} chunk results (LLM 0 calls)",
+                    step.id(), chunkStructured.size());
+        } else {
+            // ── 요약/검증형: 기존 계층 LLM reduce (합치며 줄이거나 종합해야 하므로 LLM 본질) ──
+            List<String> successFragments = runs.stream().filter(r -> r.ok).map(this::fragmentOf).toList();
+            final java.util.concurrent.atomic.AtomicInteger reduceSeq = new java.util.concurrent.atomic.AtomicInteger();
+            reduced = reduceService.reduce(successFragments, reduceInstr,
+                    (sys, prompt) -> callLlmText(fAdapter, fModel, sys, prompt, null, reduceMaxTokens,
+                            sessionBase + "-r" + reduceSeq.getAndIncrement(), workspacePath),
+                    reduceTree);
+            // output_schema 가 있으면 최종 머지 텍스트를 한 번 더 구조화 호출해 진짜 Map 을 만든다.
+            if (responseSchema != null && reduced != null && !reduced.isBlank()) {
+                reducedStructured = reduceToStructured(adapter, resolvedModel, reduceInstr.system(),
+                        reduced, responseSchema, sessionBase + "-rs", workspacePath);
+            }
         }
         job.setReduceTree(reduceTree);
         job = jobRepository.save(job);
@@ -440,7 +467,11 @@ public class LargeInputStepExecutor implements StepExecutor {
         } catch (RuntimeException ignore) { /* fire-and-forget */ }
     }
 
-    /** userBlocks 에서 텍스트 프롬프트만 추려 앞부분 미리보기(이미지 블록은 [image] 로 요약). */
+    /** 청크 프롬프트 본문 상한(자). 이미지 청크는 안내문뿐이라 전문, 텍스트 청크는 첫 N자까지 노출.
+     *  1000 이면 화면에서 펼쳐도 잘려 의미 파악 불가였음(CR-120 후속) → 16KB 로 완화. */
+    private static final int PROMPT_PREVIEW_MAX = 16384;
+
+    /** userBlocks 에서 텍스트 프롬프트만 추려 미리보기(이미지 블록은 [image] 로 요약). */
     private static String promptPreview(List<ContentBlock> blocks) {
         StringBuilder sb = new StringBuilder();
         int images = 0;
@@ -450,7 +481,9 @@ public class LargeInputStepExecutor implements StepExecutor {
         }
         if (images > 0) sb.append("[이미지 ").append(images).append("장 첨부]");
         String s = sb.toString();
-        return s.length() <= 1000 ? s : s.substring(0, 1000) + "…";
+        if (s.length() <= PROMPT_PREVIEW_MAX) return s;
+        // 초과분은 "…(이하 생략, 총 N자)" 로 명시 — 잘렸다는 사실과 원본 길이를 사람이 알 수 있게.
+        return s.substring(0, PROMPT_PREVIEW_MAX) + "\n…(이하 생략, 총 " + s.length() + "자)";
     }
 
     private static String safeJson(Map<String, Object> m) {
@@ -487,10 +520,12 @@ public class LargeInputStepExecutor implements StepExecutor {
 
     private List<PdfVisionPage> renderPages(byte[] pdfBytes, String sourceFilePath, LargeInputChunk chunk) {
         int maxPages = chunk.pageEnd() - chunk.pageStart() + 1;
-        // CR-120: 작업장 공유 경로가 있으면 base64 전송 없이 file_path 호출(전송량 0, 180초 timeout 진범 제거).
-        // 없으면(attachment 바이트 등 디스크 파일 부재) 기존 base64 폴백.
+        // CR-120: 작업장 공유 경로가 있으면 BE 가 poppler(pdftoppm)를 직접 호출해 렌더한다.
+        //   사이드카 MCP/SSE 왕복·base64 응답(청크당 ~27MB)·단일세션 동시호출 race(180초 timeout 진범)가
+        //   전부 사라진다(렌더는 어차피 poppler 가 하는 일, 바이너리는 BE 컨테이너에 이미 있음).
+        //   경로가 없으면(attachment 바이트 등 디스크 파일 부재) 기존 사이드카 base64 폴백.
         Map<String, Object> r = (sourceFilePath != null && !sourceFilePath.isBlank())
-                ? ragClient.pdfToImagesByPath(sourceFilePath, chunk.pageRange(), imageDpi, maxPages)
+                ? popplerRenderer.pdfToImages(sourceFilePath, chunk.pageRange(), imageDpi, maxPages)
                 : ragClient.pdfToImages(Base64.getEncoder().encodeToString(pdfBytes),
                         chunk.pageRange(), imageDpi, maxPages);
         if (!Boolean.TRUE.equals(r.get("success")) || !(r.get("images") instanceof List<?> images)) {

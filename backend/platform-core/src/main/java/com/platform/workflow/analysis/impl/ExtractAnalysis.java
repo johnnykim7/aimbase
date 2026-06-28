@@ -49,6 +49,38 @@ public class ExtractAnalysis implements DocumentAnalysis {
     @Override
     public String actionId() { return "extract"; }
 
+    /**
+     * 추출은 "배열 누적"이라 청크 결과를 LLM 으로 통합할 필요가 없다 — 코드로 이어붙이고 마지막 1회만 정리.
+     * 기존 계층 LLM reduce 는 body 하나에 reduce 호출이 십수 번 발생해 reduce 가 map 의 3.7배(973초)까지
+     * 걸렸다(실측). collectionReduce=true 로 코드 병합 경로를 쓴다.
+     */
+    @Override
+    public boolean collectionReduce() { return true; }
+
+    /**
+     * 청크별 structured 결과의 <b>배열 필드</b>를 키별로 이어붙인다.
+     * extract 출력은 {@code {facts:[...]}} 형태(output_schema 가 정한 키) — 각 청크의 같은 키 List 를 concat.
+     * 배열 아닌 스칼라 필드는 첫 청크 값 보존(문서 단위 메타 가정). 빈/널 청크는 건너뜀.
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> mergeStructured(java.util.List<Map<String, Object>> chunkStructured) {
+        Map<String, Object> merged = new java.util.LinkedHashMap<>();
+        for (Map<String, Object> chunk : chunkStructured) {
+            if (chunk == null || chunk.isEmpty()) continue;
+            for (Map.Entry<String, Object> e : chunk.entrySet()) {
+                Object val = e.getValue();
+                if (val instanceof java.util.List<?> list) {
+                    ((java.util.List<Object>) merged.computeIfAbsent(e.getKey(), k -> new java.util.ArrayList<>()))
+                            .addAll(list);
+                } else {
+                    merged.putIfAbsent(e.getKey(), val); // 스칼라 메타는 첫 값 보존
+                }
+            }
+        }
+        return merged;
+    }
+
     @Override
     public AnalysisInstruction buildMapInstruction(AnalysisParams params) {
         String tpl = templates.getTemplateOrFallback(MAP_KEY, MAP_FALLBACK);

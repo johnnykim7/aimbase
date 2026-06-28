@@ -29,6 +29,7 @@ public class LargeInputDecomposerService {
     private static final Logger log = LoggerFactory.getLogger(LargeInputDecomposerService.class);
 
     private final MCPRagClient ragClient;
+    private final PopplerPdfRenderer popplerRenderer;
     private final PdfTextExtractor pdfTextExtractor;
 
     /** 텍스트형 판별 임계 (자/페이지). 이 이상이면 TEXT, 미만이면 IMAGE 로 렌더. */
@@ -51,8 +52,10 @@ public class LargeInputDecomposerService {
     @Value("${largeinput.image-dpi:100}")
     private int imageDpi;
 
-    public LargeInputDecomposerService(MCPRagClient ragClient, PdfTextExtractor pdfTextExtractor) {
+    public LargeInputDecomposerService(MCPRagClient ragClient, PopplerPdfRenderer popplerRenderer,
+                                       PdfTextExtractor pdfTextExtractor) {
         this.ragClient = ragClient;
+        this.popplerRenderer = popplerRenderer;
         this.pdfTextExtractor = pdfTextExtractor;
     }
 
@@ -103,10 +106,21 @@ public class LargeInputDecomposerService {
         int totalPages = source.totalPages() != null ? source.totalPages() : fetchPageCount(base64, filePath);
         if (totalPages <= 0) totalPages = 1; // 페이지 수 불명 → 단일 청크 폴백
 
-        // 텍스트/이미지 판별 (판정용 — PdfTextExtractor 는 32KB 절단해도 charsPerPage 추정엔 충분)
-        PdfTextExtractor.ExtractResult sample = pdfTextExtractor.extract(bytes);
-        int sampledPages = sample.pages() != null && sample.pages() > 0 ? sample.pages() : totalPages;
-        double charsPerPage = (double) sample.text().length() / Math.max(1, sampledPages);
+        // 텍스트/이미지 판별. 작업장 경로가 있으면 BE 가 poppler(pdftotext)로 직접 판별한다.
+        //   사이드카 parse_document(+OCR 폴백)는 무거운 PDF(35MB)에서 360초를 허비했다(실측). pdftotext 는
+        //   같은 파일을 0.3초에 처리(샘플 N페이지만). 판별엔 charsPerPage 만 필요하므로 OCR 폴백 불필요
+        //   (스캔이면 텍스트 0 → IMAGE → 비전 렌더로 처리). file_path 없으면(attachment 바이트) 기존 폴백.
+        double charsPerPage;
+        if (filePath != null && !filePath.isBlank()) {
+            String sampleText = popplerRenderer.extractTextSample(filePath);
+            int denom = Math.min(popplerRenderer.textSamplePages(), Math.max(1, totalPages));
+            charsPerPage = (double) sampleText.length() / denom;
+        } else {
+            // 폴백(디스크 파일 부재): 기존 사이드카 기반 PdfTextExtractor.
+            PdfTextExtractor.ExtractResult sample = pdfTextExtractor.extract(bytes);
+            int sampledPages = sample.pages() != null && sample.pages() > 0 ? sample.pages() : totalPages;
+            charsPerPage = (double) sample.text().length() / Math.max(1, sampledPages);
+        }
         boolean isText = charsPerPage >= textPerPageThreshold;
 
         log.info("CR-120 decompose: totalPages={}, charsPerPage={}, type={}, policy={}, viaPath={}",
@@ -114,16 +128,16 @@ public class LargeInputDecomposerService {
                 filePath != null && !filePath.isBlank());
 
         if (policy == LargeInputPolicy.OFF) {
-            return List.of(singleChunk(source, totalPages, isText, base64));
+            return List.of(singleChunk(source, totalPages, isText, base64, filePath));
         }
         return isText
-                ? decomposeTextPdf(base64, totalPages)
+                ? decomposeTextPdf(base64, filePath, totalPages)
                 : decomposeImagePdf(base64, filePath, totalPages);
     }
 
-    /** 텍스트형: parse_document 로 전문 추출(절단 없음) 후 char 예산으로 페이지 경계 분할. */
-    private List<LargeInputChunk> decomposeTextPdf(String base64, int totalPages) {
-        String fullText = parseFullText(base64);
+    /** 텍스트형: pdftotext(작업장 경로) 또는 parse_document 로 전문 추출 후 char 예산으로 페이지 경계 분할. */
+    private List<LargeInputChunk> decomposeTextPdf(String base64, String filePath, int totalPages) {
+        String fullText = parseFullText(base64, filePath);
         // 페이지별 경계 정보가 사이드카에서 안 오므로 char 예산 슬라이스 + 균등 페이지 안분(메타용)으로 근사.
         List<LargeInputChunk> chunks = new ArrayList<>();
         if (fullText.length() <= chunkBudgetChars) {
@@ -173,9 +187,9 @@ public class LargeInputDecomposerService {
     private double sampleAvgBase64PerPage(String base64, String filePath, int totalPages) {
         int sampleCount = Math.min(3, totalPages);
         try {
-            // CR-120: file_path 있으면 사이드카가 디스크에서 직접 읽음(전체 PDF 전송 생략).
+            // CR-120: file_path 있으면 BE 가 poppler 직접 호출(사이드카 왕복·base64응답·세션race 제거).
             Map<String, Object> r = (filePath != null && !filePath.isBlank())
-                    ? ragClient.pdfToImagesByPath(filePath, "1-" + sampleCount, imageDpi, sampleCount)
+                    ? popplerRenderer.pdfToImages(filePath, "1-" + sampleCount, imageDpi, sampleCount)
                     : ragClient.pdfToImages(base64, "1-" + sampleCount, imageDpi, sampleCount);
             if (Boolean.TRUE.equals(r.get("success")) && r.get("images") instanceof List<?> images
                     && !images.isEmpty()) {
@@ -196,9 +210,10 @@ public class LargeInputDecomposerService {
         return chunkBudgetBytes;
     }
 
-    private LargeInputChunk singleChunk(LargeInputSource source, int totalPages, boolean isText, String base64) {
+    private LargeInputChunk singleChunk(LargeInputSource source, int totalPages, boolean isText,
+                                        String base64, String filePath) {
         if (isText) {
-            String full = parseFullText(base64);
+            String full = parseFullText(base64, filePath);
             return new LargeInputChunk(0, 1, totalPages, LargeInputChunk.Type.TEXT, full, utf8Bytes(full));
         }
         return new LargeInputChunk(0, 1, totalPages, LargeInputChunk.Type.IMAGE, null, source.bytes().length);
@@ -206,22 +221,30 @@ public class LargeInputDecomposerService {
 
     // ─── 사이드카 호출 헬퍼 ────────────────────────────────────────────────────
 
-    private String parseFullText(String base64) {
+    private String parseFullText(String base64, String filePath) {
+        // CR-120: 작업장 경로가 있으면 BE 가 poppler pdftotext 로 전체 텍스트를 직접 뽑는다(사이드카 0).
+        //   기존 사이드카 parse_document(+OCR)는 무거운 PDF 에서 360초 timeout 후 빈 텍스트였다(body[5] 18분).
+        if (filePath != null && !filePath.isBlank()) {
+            String full = popplerRenderer.extractFullText(filePath);
+            if (full != null && !full.isBlank()) return full;
+            // pdftotext 가 빈 결과(스캔 PDF 등)면 텍스트형으로 잘못 온 것 — 빈 문자열 반환(상위가 처리).
+            return full != null ? full : "";
+        }
+        // 폴백(디스크 파일 부재): 사이드카 parse_document → PdfTextExtractor.
         try {
             Map<String, Object> r = ragClient.parseDocument(base64, "pdf");
             if (r.get("content") instanceof String s && !s.isBlank()) return s;
         } catch (Exception e) {
             log.warn("CR-120: parse_document failed — using PdfTextExtractor(절단가능): {}", e.getMessage());
         }
-        // 폴백: PdfTextExtractor (32KB 절단 가능하나 없는 것보단 나음)
         return pdfTextExtractor.extract(Base64.getDecoder().decode(base64)).text();
     }
 
     private int fetchPageCount(String base64, String filePath) {
         try {
-            // CR-120: file_path 있으면 사이드카가 디스크에서 직접 읽음(전체 PDF 전송 생략).
+            // CR-120: file_path 있으면 BE 가 pdfinfo 직접 호출(사이드카 왕복 제거).
             Map<String, Object> r = (filePath != null && !filePath.isBlank())
-                    ? ragClient.pdfPageCountByPath(filePath)
+                    ? popplerRenderer.pageCount(filePath)
                     : ragClient.pdfPageCount(base64);
             if (Boolean.TRUE.equals(r.get("success")) && r.get("page_count") instanceof Number n) {
                 return n.intValue();
