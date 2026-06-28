@@ -386,6 +386,19 @@ public class MCPRagClient {
     }
 
     /**
+     * CR-120: 작업장 파일 경로 기반 페이지 카운트 — 전체 PDF base64 전송 생략.
+     * BE/사이드카가 같은 작업장 볼륨(/data/workspace)을 공유하므로 경로만 넘기고
+     * 사이드카가 디스크에서 직접 읽는다(PARSE_ALLOWED_ROOTS 화이트리스트 내).
+     *
+     * @param filePath 작업장 내 PDF 절대경로(사이드카가 보는 경로)
+     */
+    public Map<String, Object> pdfPageCountByPath(String filePath) {
+        Map<String, Object> input = Map.of("file_path", filePath);
+        String result = mcpClient.callTool("pdf_page_count", input);
+        return parseJson(result);
+    }
+
+    /**
      * Python MCP Server의 pdf_to_images 도구 호출 (CR-095 — 비전 파싱).
      *
      * PDF 페이지를 JPEG 이미지로 렌더한다 (텍스트 추출/OCR 아님). LLM 이 이미지를
@@ -406,6 +419,30 @@ public class MCPRagClient {
                 "max_pages", maxPages
         );
 
+        String result = mcpClient.callTool("pdf_to_images", input);
+        return parseJson(result);
+    }
+
+    /**
+     * CR-120: 작업장 파일 경로 기반 페이지 이미지화 — 전체 PDF base64 전송 생략.
+     *
+     * <p>기존 {@link #pdfToImages(String, String, int, int)} 는 청크마다 전체 PDF 를 base64 로
+     * 인코딩해 사이드카에 통째로 보냈다(100p PDF · 13청크면 전체 PDF 를 13회 전송 → 180초 timeout 의
+     * 진범). 작업장 볼륨이 BE/사이드카 공유이므로 경로만 넘기면 사이드카가 디스크에서 직접 읽어
+     * 해당 페이지 범위만 렌더한다(openclaude pdftoppm filePath 직접 처리와 동형). 전송량 0.
+     *
+     * @param filePath 작업장 내 PDF 절대경로(사이드카가 보는 경로, PARSE_ALLOWED_ROOTS 내)
+     * @param pages    페이지 범위(1-indexed). null/빈값=전체(maxPages 상한)
+     * @param dpi      렌더 해상도
+     * @param maxPages 한 번에 변환할 최대 페이지 수
+     */
+    public Map<String, Object> pdfToImagesByPath(String filePath, String pages, int dpi, int maxPages) {
+        Map<String, Object> input = Map.of(
+                "file_path", filePath,
+                "pages", pages != null ? pages : "",
+                "dpi", dpi,
+                "max_pages", maxPages
+        );
         String result = mcpClient.callTool("pdf_to_images", input);
         return parseJson(result);
     }

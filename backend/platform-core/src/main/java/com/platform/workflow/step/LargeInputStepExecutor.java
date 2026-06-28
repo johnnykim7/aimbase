@@ -175,6 +175,8 @@ public class LargeInputStepExecutor implements StepExecutor {
         // ── 5) map (병렬, 멀티모달) ────────────────────────────────────────
         AnalysisInstruction mapInstr = action.buildMapInstruction(params);
         byte[] pdfBytes = source.bytes();
+        // CR-120: 작업장 공유 경로가 있으면 청크 렌더 시 전체 PDF base64 전송을 생략한다(전송량 0).
+        String sourceFilePath = source.filePath();
         // CLI 어댑터 좀비 워커 정리(CR-109/114)를 위한 결정적 sessionId base.
         // 청크별로 "-c{index}" 를 붙여 각 청크 호출이 자기 워커를 cleanupSession 으로 닫게 한다.
         String sessionBase = context.workflowRunId() + "-li-" + step.id();
@@ -189,7 +191,7 @@ public class LargeInputStepExecutor implements StepExecutor {
         String progressStepId = step.id();
 
         List<ChunkRun> runs = mapChunks(chunks, action, mapInstr, adapter, resolvedModel,
-                responseSchema, pdfBytes, maxParallel, itemRetryMax, sessionBase, workspacePath,
+                responseSchema, pdfBytes, sourceFilePath, maxParallel, itemRetryMax, sessionBase, workspacePath,
                 progressRunId, progressStepId, connectionId);
 
         // chunk_results + 카운터 적재
@@ -304,7 +306,7 @@ public class LargeInputStepExecutor implements StepExecutor {
 
     private List<ChunkRun> mapChunks(List<LargeInputChunk> chunks, DocumentAnalysis action,
                                      AnalysisInstruction mapInstr, LLMAdapter adapter, String resolvedModel,
-                                     Map<String, Object> responseSchema, byte[] pdfBytes,
+                                     Map<String, Object> responseSchema, byte[] pdfBytes, String sourceFilePath,
                                      int maxParallel, int itemRetryMax, String sessionBase, String workspacePath,
                                      UUID progressRunId, String progressStepId, String connectionId) {
         Semaphore gate = new Semaphore(Math.max(1, maxParallel));
@@ -317,7 +319,7 @@ public class LargeInputStepExecutor implements StepExecutor {
                 gate.acquireUninterruptibly();
                 try {
                     return runChunk(chunk, action, mapInstr, adapter, resolvedModel,
-                            responseSchema, pdfBytes, itemRetryMax,
+                            responseSchema, pdfBytes, sourceFilePath, itemRetryMax,
                             sessionBase + "-c" + chunk.chunkIndex(), workspacePath,
                             progressRunId, progressStepId, connectionId, totalChunks);
                 } finally {
@@ -334,7 +336,8 @@ public class LargeInputStepExecutor implements StepExecutor {
     /** 단일 청크: 텍스트/이미지에 맞게 메시지 조립 → LLM 호출 → 검증 → (실패 시) 재시도. */
     private ChunkRun runChunk(LargeInputChunk chunk, DocumentAnalysis action, AnalysisInstruction mapInstr,
                               LLMAdapter adapter, String resolvedModel, Map<String, Object> responseSchema,
-                              byte[] pdfBytes, int itemRetryMax, String chunkSessionId, String workspacePath,
+                              byte[] pdfBytes, String sourceFilePath, int itemRetryMax, String chunkSessionId,
+                              String workspacePath,
                               UUID progressRunId, String progressStepId, String connectionId, int totalChunks) {
         ChunkRun run = new ChunkRun(chunk);
         int maxAttempts = 1 + Math.max(0, itemRetryMax);
@@ -343,7 +346,7 @@ public class LargeInputStepExecutor implements StepExecutor {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             long chunkStart = System.currentTimeMillis();
             try {
-                List<ContentBlock> userBlocks = buildChunkBlocks(chunk, mapInstr.prompt(), pdfBytes);
+                List<ContentBlock> userBlocks = buildChunkBlocks(chunk, mapInstr.prompt(), pdfBytes, sourceFilePath);
                 // 호출 직전: "청크 N/M (p.범위) 처리 중" + 프롬프트 본문을 LLM_REQUEST 로 발행.
                 emitChunkRequest(progressRunId, progressStepId, iter, resolvedModel, connectionId,
                         chunk, totalChunks, attempt, maxAttempts, userBlocks);
@@ -459,7 +462,8 @@ public class LargeInputStepExecutor implements StepExecutor {
      * 청크 → USER 메시지 블록. 텍스트형은 프롬프트 {{chunk}} 에 텍스트 삽입,
      * 이미지형은 프롬프트 텍스트 블록 + 페이지 이미지 블록들을 멀티모달로 조립.
      */
-    private List<ContentBlock> buildChunkBlocks(LargeInputChunk chunk, String promptTemplate, byte[] pdfBytes) {
+    private List<ContentBlock> buildChunkBlocks(LargeInputChunk chunk, String promptTemplate,
+                                                byte[] pdfBytes, String sourceFilePath) {
         if (chunk.type() == LargeInputChunk.Type.TEXT) {
             String prompt = promptTemplate.replace("{{chunk}}", chunk.text() != null ? chunk.text() : "");
             return List.of(new ContentBlock.Text(prompt));
@@ -469,7 +473,7 @@ public class LargeInputStepExecutor implements StepExecutor {
                 "[document pages " + chunk.pageRange() + " are attached below as images]");
         List<ContentBlock> blocks = new ArrayList<>();
         blocks.add(new ContentBlock.Text(prompt));
-        for (PdfVisionPage page : renderPages(pdfBytes, chunk)) {
+        for (PdfVisionPage page : renderPages(pdfBytes, sourceFilePath, chunk)) {
             blocks.add(ContentBlock.Image.ofBase64(page.mediaType(), page.base64()));
         }
         if (blocks.size() == 1) {
@@ -481,10 +485,14 @@ public class LargeInputStepExecutor implements StepExecutor {
 
     private record PdfVisionPage(String mediaType, String base64) {}
 
-    private List<PdfVisionPage> renderPages(byte[] pdfBytes, LargeInputChunk chunk) {
-        String base64 = Base64.getEncoder().encodeToString(pdfBytes);
+    private List<PdfVisionPage> renderPages(byte[] pdfBytes, String sourceFilePath, LargeInputChunk chunk) {
         int maxPages = chunk.pageEnd() - chunk.pageStart() + 1;
-        Map<String, Object> r = ragClient.pdfToImages(base64, chunk.pageRange(), imageDpi, maxPages);
+        // CR-120: 작업장 공유 경로가 있으면 base64 전송 없이 file_path 호출(전송량 0, 180초 timeout 진범 제거).
+        // 없으면(attachment 바이트 등 디스크 파일 부재) 기존 base64 폴백.
+        Map<String, Object> r = (sourceFilePath != null && !sourceFilePath.isBlank())
+                ? ragClient.pdfToImagesByPath(sourceFilePath, chunk.pageRange(), imageDpi, maxPages)
+                : ragClient.pdfToImages(Base64.getEncoder().encodeToString(pdfBytes),
+                        chunk.pageRange(), imageDpi, maxPages);
         if (!Boolean.TRUE.equals(r.get("success")) || !(r.get("images") instanceof List<?> images)) {
             return List.of();
         }
@@ -644,7 +652,9 @@ public class LargeInputStepExecutor implements StepExecutor {
                     + "': failed to read workspace file " + abs + ": " + e.getMessage(), e);
         }
         String mime = guessMimeFromName(abs.getFileName().toString());
-        return pickLoader(mime).load(abs.toString(), mime, bytes);
+        // CR-120: 작업장 파일은 사이드카가 공유 볼륨에서 직접 읽을 수 있으므로 절대경로를 입힌다.
+        // → PDF 분해/렌더가 base64 통째 전송 대신 file_path 호출을 쓴다(전송량 0).
+        return pickLoader(mime).load(abs.toString(), mime, bytes).withFilePath(abs.toString());
     }
 
     private SourceLoader pickLoader(String mime) {

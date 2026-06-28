@@ -901,22 +901,41 @@ def ocr_image(
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
+def _read_pdf_bytes(file_path: str, file_base64: str) -> bytes:
+    """CR-120: PDF 바이트 소스 해석 — file_path 우선, 없으면 base64.
+
+    file_path 가 주어지면 PARSE_ALLOWED_ROOTS 화이트리스트 검증 후 디스크에서 직접 읽는다
+    (BE 가 작업장 경로만 넘기고 전체 PDF base64 전송을 생략하는 경로 — openclaude pdftoppm
+    filePath 직접 처리와 동형). 작업장은 BE/사이드카가 같은 볼륨을 공유(/data/workspace).
+    file_path 미지정 시 기존 base64 경로(attachment 바이트 등 디스크 파일이 없는 소스).
+    """
+    if file_path and file_path.strip():
+        from rag_pipeline.tools.parser import _validate_local_path
+        p = _validate_local_path(file_path.strip())
+        return p.read_bytes()
+    return base64.b64decode(file_base64)
+
+
 @mcp.tool()
-def pdf_page_count(file_base64: str) -> str:
+def pdf_page_count(file_base64: str = "", file_path: str = "") -> str:
     """Count total pages of a PDF without rendering (CR-095 page guard).
 
     Fast metadata-only read. Used to decide whether a PDF is too large to read
     in one shot (openclaude getPDFPageCount/pdfinfo 대응).
 
+    Source priority: file_path > file_base64. file_path 가 주어지면 디스크에서 직접 읽어
+    전체 PDF 전송을 생략한다(CR-120, PARSE_ALLOWED_ROOTS 화이트리스트 내).
+
     Args:
-        file_base64: Base64-encoded PDF content
+        file_base64: Base64-encoded PDF content (file_path 미지정 시)
+        file_path: Local PDF path within PARSE_ALLOWED_ROOTS (작업장 공유 경로)
     Returns: {"success": true, "page_count": N} or {"success": false, "error": ...}
     """
     from rag_pipeline.tools.pdf_images import pdf_page_count_bytes
     try:
-        pdf_bytes = base64.b64decode(file_base64)
+        pdf_bytes = _read_pdf_bytes(file_path, file_base64)
     except Exception as e:
-        return json.dumps({"success": False, "error": f"invalid_base64: {e}"})
+        return json.dumps({"success": False, "error": f"pdf_source_failed: {e}"})
     count = pdf_page_count_bytes(pdf_bytes)
     if count is None:
         return json.dumps({"success": False, "error": "page_count_failed"})
@@ -925,10 +944,11 @@ def pdf_page_count(file_base64: str) -> str:
 
 @mcp.tool()
 def pdf_to_images(
-    file_base64: str,
+    file_base64: str = "",
     pages: str = "",
     dpi: int = 100,
     max_pages: int = 20,
+    file_path: str = "",
 ) -> str:
     """Render PDF pages to JPEG images for vision parsing (CR-095).
 
@@ -937,17 +957,21 @@ def pdf_to_images(
     Used when a PDF is too large for a base64 document block (>3MB) or when the
     model lacks native PDF support — the BE sends these images as image blocks.
 
+    Source priority: file_path > file_base64. file_path 가 주어지면 디스크에서 직접 읽어
+    청크마다 전체 PDF base64 를 전송하던 비용을 제거한다(CR-120 — BE→사이드카 운반 0).
+
     Args:
-        file_base64: Base64-encoded PDF content
+        file_base64: Base64-encoded PDF content (file_path 미지정 시)
         pages: Page range, 1-indexed (e.g. "1-5", "3", "10-"). Empty = all (up to max_pages)
         dpi: Render resolution (default 100, matches openclaude)
         max_pages: Max pages to render in one call (default 20, polyfill cap)
+        file_path: Local PDF path within PARSE_ALLOWED_ROOTS (작업장 공유 경로)
     """
     from rag_pipeline.tools.pdf_images import pdf_to_images_bytes
     try:
-        pdf_bytes = base64.b64decode(file_base64)
+        pdf_bytes = _read_pdf_bytes(file_path, file_base64)
     except Exception as e:
-        return json.dumps({"success": False, "error": f"invalid_base64: {e}"})
+        return json.dumps({"success": False, "error": f"pdf_source_failed: {e}"})
     result = pdf_to_images_bytes(
         pdf_bytes,
         pages=pages or None,

@@ -97,7 +97,10 @@ public class LargeInputDecomposerService {
     private List<LargeInputChunk> decomposePdf(LargeInputSource source, LargeInputPolicy policy) {
         byte[] bytes = source.bytes();
         String base64 = Base64.getEncoder().encodeToString(bytes);
-        int totalPages = source.totalPages() != null ? source.totalPages() : fetchPageCount(base64);
+        // CR-120: 작업장 공유 경로가 있으면 사이드카 호출을 file_path 로(전체 PDF base64 전송 생략).
+        // 없으면(attachment 바이트 등) base64. PdfSource(byte[]) 는 그대로 두되 사이드카 운반만 경로화.
+        String filePath = source.filePath();
+        int totalPages = source.totalPages() != null ? source.totalPages() : fetchPageCount(base64, filePath);
         if (totalPages <= 0) totalPages = 1; // 페이지 수 불명 → 단일 청크 폴백
 
         // 텍스트/이미지 판별 (판정용 — PdfTextExtractor 는 32KB 절단해도 charsPerPage 추정엔 충분)
@@ -106,15 +109,16 @@ public class LargeInputDecomposerService {
         double charsPerPage = (double) sample.text().length() / Math.max(1, sampledPages);
         boolean isText = charsPerPage >= textPerPageThreshold;
 
-        log.info("CR-120 decompose: totalPages={}, charsPerPage={}, type={}, policy={}",
-                totalPages, String.format("%.0f", charsPerPage), isText ? "TEXT" : "IMAGE", policy);
+        log.info("CR-120 decompose: totalPages={}, charsPerPage={}, type={}, policy={}, viaPath={}",
+                totalPages, String.format("%.0f", charsPerPage), isText ? "TEXT" : "IMAGE", policy,
+                filePath != null && !filePath.isBlank());
 
         if (policy == LargeInputPolicy.OFF) {
             return List.of(singleChunk(source, totalPages, isText, base64));
         }
         return isText
                 ? decomposeTextPdf(base64, totalPages)
-                : decomposeImagePdf(base64, totalPages);
+                : decomposeImagePdf(base64, filePath, totalPages);
     }
 
     /** 텍스트형: parse_document 로 전문 추출(절단 없음) 후 char 예산으로 페이지 경계 분할. */
@@ -146,8 +150,8 @@ public class LargeInputDecomposerService {
      * 이미지형: 첫 3장 샘플 렌더 → 평균 base64/p 역산 → budget ÷ 평균 = 청크당 페이지 수.
      * CR-117 의 5배 빗나감(1장 추정)을 첫 3장 실측 평균으로 해소.
      */
-    private List<LargeInputChunk> decomposeImagePdf(String base64, int totalPages) {
-        double avgBase64PerPage = sampleAvgBase64PerPage(base64, totalPages);
+    private List<LargeInputChunk> decomposeImagePdf(String base64, String filePath, int totalPages) {
+        double avgBase64PerPage = sampleAvgBase64PerPage(base64, filePath, totalPages);
         int pagesPerChunk = (int) Math.floor(chunkBudgetBytes / Math.max(1.0, avgBase64PerPage));
         pagesPerChunk = clamp(pagesPerChunk, 1, maxPagesPerChunk);
 
@@ -166,10 +170,13 @@ public class LargeInputDecomposerService {
     }
 
     /** 첫 maxSample(3) 장 렌더해 평균 base64 길이 역산. 실패 시 보수적 큰 값(1장=청크). */
-    private double sampleAvgBase64PerPage(String base64, int totalPages) {
+    private double sampleAvgBase64PerPage(String base64, String filePath, int totalPages) {
         int sampleCount = Math.min(3, totalPages);
         try {
-            Map<String, Object> r = ragClient.pdfToImages(base64, "1-" + sampleCount, imageDpi, sampleCount);
+            // CR-120: file_path 있으면 사이드카가 디스크에서 직접 읽음(전체 PDF 전송 생략).
+            Map<String, Object> r = (filePath != null && !filePath.isBlank())
+                    ? ragClient.pdfToImagesByPath(filePath, "1-" + sampleCount, imageDpi, sampleCount)
+                    : ragClient.pdfToImages(base64, "1-" + sampleCount, imageDpi, sampleCount);
             if (Boolean.TRUE.equals(r.get("success")) && r.get("images") instanceof List<?> images
                     && !images.isEmpty()) {
                 long total = 0;
@@ -210,9 +217,12 @@ public class LargeInputDecomposerService {
         return pdfTextExtractor.extract(Base64.getDecoder().decode(base64)).text();
     }
 
-    private int fetchPageCount(String base64) {
+    private int fetchPageCount(String base64, String filePath) {
         try {
-            Map<String, Object> r = ragClient.pdfPageCount(base64);
+            // CR-120: file_path 있으면 사이드카가 디스크에서 직접 읽음(전체 PDF 전송 생략).
+            Map<String, Object> r = (filePath != null && !filePath.isBlank())
+                    ? ragClient.pdfPageCountByPath(filePath)
+                    : ragClient.pdfPageCount(base64);
             if (Boolean.TRUE.equals(r.get("success")) && r.get("page_count") instanceof Number n) {
                 return n.intValue();
             }
