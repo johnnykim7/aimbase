@@ -129,3 +129,83 @@ services:
       timeout: 5s
       retries: 10
       start_period: 40s
+
+  # ── Claude CLI Runner Agent (AXOPM 전용 — 이름/테넌트만 분리, OAuth계정·키는 bidding과 공유) ──
+  # adapter='anthropic-cli' + config.agent_name='cli-runner-axopm' 인 axopm_companyA 워크플로우 LLM_CALL 라우팅 대상.
+  # claude-accounts 볼륨/RUNNER_API_KEY 를 bidding agent 와 공유 → 동일 OAuth 계정·키 사용(요청사항).
+  # 이름(AGENT_NAME)·테넌트(AGENT_TENANT_ID)·포트(8292/8293)만 분리. axopm_companyA DB 에 자기 등록(heartbeat).
+  aimbase-agent-axopm:
+    build:
+      context: ./backend
+      dockerfile: aimbase-agent/Dockerfile
+    platform: linux/amd64
+    init: true   # 좀비 claude CLI 워커 자식 자동 회수 — PID 고갈 방지
+    restart: unless-stopped
+    depends_on:
+      - api
+    volumes:
+      - ./claude-accounts:/home/appuser/.claude-accounts   # bidding 과 동일 OAuth 계정 공유
+      - ./workspace:/data/workspace
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"   # 키 공유
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "5"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:-plat-77111309dc1043758c474444b4a36605}"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-axopm"
+      SERVER_PORT: "8292"   # 8290 → 8292 (bidding agent 와 충돌 회피)
+      AGENT_NAME: "cli-runner-axopm"   # 이름 분리
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"   # 등록키 공유
+      AGENT_TENANT_ID: "axopm_companyA"   # ★ axopm_companyA DB 에 등록 — 라우팅 핵심
+      AGENT_MCP_PORT: "8293"   # 8291 → 8293 (충돌 회피)
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-axopm:8292"   # 자기 서비스명:포트
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8292/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # ── Claude CLI Runner Agent (WorkMap 전용 — 이름/테넌트만 분리, OAuth계정·키는 bidding과 공유) ──
+  # adapter='anthropic-cli' + config.agent_name='cli-runner-workmap' 인 workmap 워크플로우 LLM_CALL 라우팅 대상.
+  # claude-accounts 볼륨/RUNNER_API_KEY 를 bidding agent 와 공유 → 동일 OAuth 계정·키 사용(요청사항).
+  # 이름(AGENT_NAME)·테넌트(AGENT_TENANT_ID)·포트(8294/8295)만 분리. workmap DB 에 자기 등록(heartbeat).
+  aimbase-agent-workmap:
+    build:
+      context: ./backend
+      dockerfile: aimbase-agent/Dockerfile
+    platform: linux/amd64
+    init: true   # 좀비 claude CLI 워커 자식 자동 회수 — PID 고갈 방지
+    restart: unless-stopped
+    depends_on:
+      - api
+    volumes:
+      - ./claude-accounts:/home/appuser/.claude-accounts   # bidding 과 동일 OAuth 계정 공유
+      - ./workspace:/data/workspace
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"   # 키 공유
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "5"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:-plat-77111309dc1043758c474444b4a36605}"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-workmap"
+      SERVER_PORT: "8294"   # 8292 → 8294 (기존 agent 와 충돌 회피)
+      AGENT_NAME: "cli-runner-workmap"   # 이름 분리
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"   # 등록키 공유
+      AGENT_TENANT_ID: "workmap"   # ★ workmap DB 에 등록 — 라우팅 핵심
+      AGENT_MCP_PORT: "8295"   # 8293 → 8295 (충돌 회피)
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-workmap:8294"   # 자기 서비스명:포트
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8294/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
