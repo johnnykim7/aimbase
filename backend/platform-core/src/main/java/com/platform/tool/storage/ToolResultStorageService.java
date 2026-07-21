@@ -2,11 +2,14 @@ package com.platform.tool.storage;
 
 import com.platform.domain.ToolResultStorageEntity;
 import com.platform.repository.ToolResultStorageRepository;
+import com.platform.tenant.TenantContext;
+import com.platform.tenant.TenantDataSourceManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.OffsetDateTime;
 import java.util.Optional;
@@ -25,9 +28,16 @@ public class ToolResultStorageService {
     private static final long TTL_HOURS = 24;
 
     private final ToolResultStorageRepository repository;
+    /** CR-122: 만료 스케줄러의 테넌트 순회용. */
+    private final TenantDataSourceManager tenantDataSourceManager;
+    private final TransactionTemplate transactionTemplate;
 
-    public ToolResultStorageService(ToolResultStorageRepository repository) {
+    public ToolResultStorageService(ToolResultStorageRepository repository,
+                                     TenantDataSourceManager tenantDataSourceManager,
+                                     TransactionTemplate transactionTemplate) {
         this.repository = repository;
+        this.tenantDataSourceManager = tenantDataSourceManager;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /** 원본 content를 저장하고 result_id 반환. */
@@ -76,17 +86,32 @@ public class ToolResultStorageService {
         return ReadResult.ok(entity);
     }
 
-    /** 매일 03:00에 만료 레코드 삭제. */
+    /**
+     * 매일 03:00에 만료 레코드 삭제.
+     *
+     * <p>CR-122: {@code tool_result_storage} 는 테넌트 테이블이므로 테넌트별로 순회한다.
+     * 이전엔 {@link TenantContext} 없이 조회해 master DB 로 라우팅됐고, master 엔 해당 테이블이
+     * 없어 매일 조용히 실패(catch 로 삼킴)하며 만료 레코드가 전혀 정리되지 않았다.</p>
+     *
+     * <p>순회 메서드에는 {@code @Transactional} 을 걸지 않는다 — 트랜잭션이 첫 테넌트 커넥션에
+     * 묶이면 이후 테넌트 라우팅이 어긋난다. 테넌트별 삭제만 {@link TransactionTemplate} 으로 감싼다.</p>
+     */
     @Scheduled(cron = "0 0 3 * * *")
-    @Transactional
     public void expireOldResults() {
-        try {
-            int removed = repository.deleteExpired(OffsetDateTime.now());
-            if (removed > 0) {
-                log.info("Expired and removed {} tool_result_storage rows", removed);
+        for (String tenantId : tenantDataSourceManager.getAllCachedDataSources().keySet()) {
+            try {
+                TenantContext.setTenantId(tenantId);
+                Integer removed = transactionTemplate.execute(
+                        status -> repository.deleteExpired(OffsetDateTime.now()));
+                if (removed != null && removed > 0) {
+                    log.info("Expired and removed {} tool_result_storage rows (tenant={})",
+                            removed, tenantId);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to expire tool_result_storage for tenant {}: {}", tenantId, e.getMessage());
+            } finally {
+                TenantContext.clear();
             }
-        } catch (Exception e) {
-            log.warn("Failed to expire tool_result_storage: {}", e.getMessage());
         }
     }
 

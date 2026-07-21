@@ -3,6 +3,8 @@ package com.platform.attachment;
 import com.platform.domain.ChatAttachmentEntity;
 import com.platform.repository.ChatAttachmentRepository;
 import com.platform.storage.StorageService;
+import com.platform.tenant.TenantDataSourceManager;
+import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -11,9 +13,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -27,12 +31,16 @@ class AttachmentGcSchedulerTest {
 
     @Mock private ChatAttachmentRepository repo;
     @Mock private StorageService storage;
+    @Mock private TenantDataSourceManager tenantDataSourceManager;
 
     private AttachmentGcScheduler scheduler;
 
     @BeforeEach
     void setUp() {
-        scheduler = new AttachmentGcScheduler(repo, storage);
+        // CR-122: GC 는 캐시된 테넌트를 순회한다. 기존 케이스는 테넌트 1개 기준으로 동작 동일.
+        when(tenantDataSourceManager.getAllCachedDataSources())
+                .thenReturn(Map.of("tenant-a", mock(HikariDataSource.class)));
+        scheduler = new AttachmentGcScheduler(repo, storage, tenantDataSourceManager);
     }
 
     @Test
@@ -71,6 +79,38 @@ class AttachmentGcSchedulerTest {
         // storage 는 a 실패했지만 b 는 시도, DB 정리는 둘 다 진행
         verify(storage).delete("/p/b");
         verify(repo, times(2)).deleteById(any(UUID.class));
+    }
+
+    /**
+     * CR-122 회귀 가드: chat_attachments 는 테넌트 테이블이므로 캐시된 테넌트마다 조회해야 한다.
+     * 이전엔 테넌트 컨텍스트 없이 1회만 조회해 master DB 로 라우팅됐고 매번 실패했다.
+     */
+    @Test
+    void purgeExpired_iteratesEveryCachedTenant() {
+        when(tenantDataSourceManager.getAllCachedDataSources()).thenReturn(Map.of(
+                "tenant-a", mock(HikariDataSource.class),
+                "tenant-b", mock(HikariDataSource.class),
+                "tenant-c", mock(HikariDataSource.class)));
+        when(repo.findTop100ByExpiresAtBefore(any())).thenReturn(List.of());
+
+        scheduler.purgeExpired();
+
+        verify(repo, times(3)).findTop100ByExpiresAtBefore(any());
+    }
+
+    /** CR-122: 한 테넌트에서 실패해도 나머지 테넌트 GC 는 계속된다. */
+    @Test
+    void purgeExpired_continuesWhenOneTenantFails() {
+        when(tenantDataSourceManager.getAllCachedDataSources()).thenReturn(Map.of(
+                "tenant-a", mock(HikariDataSource.class),
+                "tenant-b", mock(HikariDataSource.class)));
+        when(repo.findTop100ByExpiresAtBefore(any()))
+                .thenThrow(new RuntimeException("relation does not exist"))
+                .thenReturn(List.of());
+
+        scheduler.purgeExpired();
+
+        verify(repo, times(2)).findTop100ByExpiresAtBefore(any());
     }
 
     private static ChatAttachmentEntity fixture(UUID id, String path) {

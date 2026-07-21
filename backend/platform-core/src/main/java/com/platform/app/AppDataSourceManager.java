@@ -30,6 +30,10 @@ public class AppDataSourceManager {
     private final JdbcTemplate masterJdbcTemplate;
     private final Map<String, HikariDataSource> appDataSources = new ConcurrentHashMap<>();
 
+    /** CR-122: App DB 접속 비밀번호 단일 출처 — {@code TenantDataSourceManager} 와 동일 규약. */
+    @org.springframework.beans.factory.annotation.Value("${platform.default-db-password:platform}")
+    private String defaultDbPassword;
+
     public AppDataSourceManager(@Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate) {
         this.masterJdbcTemplate = masterJdbcTemplate;
     }
@@ -39,21 +43,28 @@ public class AppDataSourceManager {
      */
     public Map<Object, Object> loadAllAppDataSources() {
         Map<Object, Object> dataSources = new HashMap<>();
+        List<Map<String, Object>> apps;
         try {
-            List<Map<String, Object>> apps = masterJdbcTemplate.queryForList(
-                "SELECT id, db_host, db_port, db_name, db_username, db_password_encrypted " +
+            apps = masterJdbcTemplate.queryForList(
+                "SELECT id, db_host, db_port, db_name, db_username " +
                 "FROM apps WHERE status = 'active'"
             );
+        } catch (Exception e) {
+            log.warn("Could not load app DataSources from master DB (may not exist yet): {}", e.getMessage());
+            return dataSources;
+        }
 
-            for (Map<String, Object> app : apps) {
-                String appId = (String) app.get("id");
+        // CR-122: try 를 루프 안으로 — 한 App 실패가 나머지 로드를 중단시키지 않게.
+        for (Map<String, Object> app : apps) {
+            String appId = (String) app.get("id");
+            try {
                 DataSource ds = createDataSource(app);
                 appDataSources.put(appId, (HikariDataSource) ds);
                 dataSources.put(appId, ds);
                 log.info("Loaded DataSource for app: {}", appId);
+            } catch (Exception e) {
+                log.error("Failed to load DataSource for app {} — skipping: {}", appId, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Could not load app DataSources from master DB (may not exist yet): {}", e.getMessage());
         }
         return dataSources;
     }
@@ -65,7 +76,8 @@ public class AppDataSourceManager {
         config.put("db_port", port);
         config.put("db_name", dbName);
         config.put("db_username", username);
-        config.put("db_password_encrypted", password);
+        // CR-122: 호출자가 넘긴 평문 비밀번호 — createDataSource 가 설정값보다 우선한다.
+        config.put("db_password", password);
 
         HikariDataSource ds = createDataSource(config);
         appDataSources.put(appId, ds);
@@ -114,7 +126,10 @@ public class AppDataSourceManager {
         int port = portObj instanceof Number n ? n.intValue() : Integer.parseInt(portObj.toString());
         String dbName = (String) config.get("db_name");
         String username = (String) config.get("db_username");
-        String password = (String) config.get("db_password_encrypted");
+        // CR-122: TenantDataSourceManager 와 동일 — 접속 비밀번호는 설정값이 단일 출처.
+        // apps.db_password_encrypted 에는 AppOnboardingService 가 BCrypt 해시를 저장하므로 접속에 쓸 수 없다.
+        String override = (String) config.get("db_password");
+        String password = (override != null && !override.isBlank()) ? override : defaultDbPassword;
 
         hikariConfig.setJdbcUrl(String.format("jdbc:postgresql://%s:%d/%s", host, port, dbName));
         hikariConfig.setUsername(username);

@@ -29,6 +29,17 @@ public class TenantDataSourceManager {
     private final JdbcTemplate masterJdbcTemplate;
     private final Map<String, HikariDataSource> tenantDataSources = new ConcurrentHashMap<>();
 
+    /**
+     * CR-122: 테넌트 DB 접속 비밀번호 단일 출처.
+     *
+     * <p>테넌트마다 DB 계정을 따로 만들지 않는다 — 전 테넌트가 {@code db_username=platform} 한 계정을
+     * 공유하며, 온보딩의 DB 생성/삭제/마이그레이션도 모두 이 값으로 접속한다
+     * ({@code TenantOnboardingService} 133·248번 줄). 따라서 접속 비밀번호의 출처는 이 설정값이며
+     * {@code tenants.db_password_encrypted} 컬럼이 아니다.</p>
+     */
+    @org.springframework.beans.factory.annotation.Value("${platform.default-db-password:platform}")
+    private String defaultDbPassword;
+
     public TenantDataSourceManager(@Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate) {
         this.masterJdbcTemplate = masterJdbcTemplate;
     }
@@ -39,21 +50,29 @@ public class TenantDataSourceManager {
      */
     public Map<Object, Object> loadAllTenantDataSources() {
         Map<Object, Object> dataSources = new HashMap<>();
+        List<Map<String, Object>> tenants;
         try {
-            List<Map<String, Object>> tenants = masterJdbcTemplate.queryForList(
-                "SELECT id, db_host, db_port, db_name, db_username, db_password_encrypted " +
+            tenants = masterJdbcTemplate.queryForList(
+                "SELECT id, db_host, db_port, db_name, db_username " +
                 "FROM tenants WHERE status = 'active'"
             );
+        } catch (Exception e) {
+            log.warn("Could not load tenant DataSources from master DB (may not exist yet): {}", e.getMessage());
+            return dataSources;
+        }
 
-            for (Map<String, Object> tenant : tenants) {
-                String tenantId = (String) tenant.get("id");
+        // CR-122: try 를 루프 안으로 — 한 테넌트 실패가 이후 테넌트 로드를 통째로 중단시키던 문제 수정.
+        // (운영 실측: 6번째 테넌트 접속 실패로 bp_wes/workmap 이 아예 로드되지 않아 원격 도구 동기화가 멈췄다.)
+        for (Map<String, Object> tenant : tenants) {
+            String tenantId = (String) tenant.get("id");
+            try {
                 DataSource ds = createDataSource(tenant);
                 tenantDataSources.put(tenantId, (HikariDataSource) ds);
                 dataSources.put(tenantId, ds);
                 log.info("Loaded DataSource for tenant: {}", tenantId);
+            } catch (Exception e) {
+                log.error("Failed to load DataSource for tenant {} — skipping: {}", tenantId, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Could not load tenant DataSources from master DB (may not exist yet): {}", e.getMessage());
         }
         return dataSources;
     }
@@ -68,7 +87,8 @@ public class TenantDataSourceManager {
         config.put("db_port", port);
         config.put("db_name", dbName);
         config.put("db_username", username);
-        config.put("db_password_encrypted", password);
+        // CR-122: 호출자가 넘긴 평문 비밀번호. createDataSource 가 이 키를 설정값보다 우선한다.
+        config.put("db_password", password);
 
         HikariDataSource ds = createDataSource(config);
         tenantDataSources.put(tenantId, ds);
@@ -106,7 +126,12 @@ public class TenantDataSourceManager {
         int port = portObj instanceof Number n ? n.intValue() : Integer.parseInt(portObj.toString());
         String dbName = (String) tenant.get("db_name");
         String username = (String) tenant.get("db_username");
-        String password = (String) tenant.get("db_password_encrypted");
+        // CR-122: 접속 비밀번호는 설정값(platform.default-db-password)이 단일 출처.
+        // 과거엔 tenants.db_password_encrypted 를 그대로 썼으나, 온보딩이 그 컬럼에 BCrypt 해시를
+        // 저장하므로(TenantOnboardingService 167번 줄) 복원 불가라 기동 시 접속이 항상 실패했다.
+        // addTenantDataSource 처럼 호출자가 평문을 넘긴 경우에만 그 값을 우선한다.
+        String override = (String) tenant.get("db_password");
+        String password = (override != null && !override.isBlank()) ? override : defaultDbPassword;
 
         config.setJdbcUrl(String.format("jdbc:postgresql://%s:%d/%s", host, port, dbName));
         config.setUsername(username);
