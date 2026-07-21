@@ -12,8 +12,8 @@
 
 ```
 [사용자 PC]
-   ├─ aimbase-agent (--runner-mode)        ← Claude Code CLI 를 자식 프로세스로 spawn
-   │     listen 127.0.0.1:8290 (예시)
+   ├─ aimbase-agent (SERVLET 모드, 기본)    ← Claude Code CLI 를 자식 프로세스로 spawn
+   │     listen 127.0.0.1:8290 (예시)       (CR-073 — --runner-mode 플래그 폐지, § 3 참조)
    ├─ Claude Code 본인 설정 (~/.claude/.mcp.json)
    └─ 작업 도구 (소비자앱 브라우저, Claude Code, ...)
                     │
@@ -117,8 +117,10 @@ curl http://localhost:8290/v1/health -H "X-Api-Key: <RUNNER_API_KEY>"
 ## 4. Claude Code 자체에서 Aimbase MCP 사용
 
 > **CR-072 (v8.7.0)** — 단일 `aimbase` 키 → **다중 mcpServers** (`aimbase-local` + `aimbase-server`) 로 확장.
-> SDK 14개 (사용자 PC) + 서버 도구 26개 (`web_search`, `http_request`, `send_message`, `schedule_cron`, `notebook_edit`, `lsp` 등) 를 모두 CLI 에 노출.
+> SDK 14개 (사용자 PC) + 서버 도구 (`web_search`, `http_request`, `send_message`, `schedule_cron`, `notebook_edit`, `lsp`, `bash`, `file_write`, `download_file` 등) 를 모두 CLI 에 노출.
 > 호환 모드: `aimbase-server` 미지정 시 기존 키 `aimbase` 단독 (SDK 만) — CLI 호출 prefix 깨짐 방지.
+>
+> **CR-104 / CR-110** — 서버 도구 노출 개수는 28→42 로 확장되었고(`file_write`/`bash`/`download_file` 등 추가), 이후 화이트리스트가 코드 하드코딩에서 `global_config.mcp.cli-exposed-tools`(CSV, 42개) **런타임 단일 소스**로 외부화됐다. CLI 경로(`/mcp`)와 API 어댑터 경로가 같은 목록을 참조하므로 **두 경로의 도구 집합이 동일**하다. 목록 변경은 § 4 하단 참조.
 
 본인 PC Claude Code 가 Aimbase SDK + 서버 도구를 모두 호출할 때:
 
@@ -131,7 +133,8 @@ curl http://localhost:8290/v1/health -H "X-Api-Key: <RUNNER_API_KEY>"
       "args": ["-jar", "/opt/aimbase-agent/aimbase-agent.jar", "--mcp-stdio"]
     },
     "aimbase-server": {
-      "url": "https://aimbase.your-org.com/mcp/sse",
+      "type": "http",
+      "url": "https://aimbase.your-org.com/mcp",
       "headers": {
         "X-API-Key": "<테넌트 키>",
         "X-Aimbase-Agent-Id": "a3bc1..."
@@ -141,29 +144,37 @@ curl http://localhost:8290/v1/health -H "X-Api-Key: <RUNNER_API_KEY>"
 }
 ```
 
+> **CR-124 (2026-07-22)**: transport 가 SSE → **Streamable HTTP** 로 바뀌었다.
+> `"type": "http"`, URL 은 `/mcp/sse` → **`/mcp`**(하위경로 없는 단일 엔드포인트).
+> 배경: Claude CLI 2.1.x 는 프로토콜 `2025-11-25` 를 요구하는데 **SSE transport 는
+> MCP Java SDK 2.0.0 에서도 `2024-11-05` 하나만 광고**해 협상이 실패하고 도구가
+> 0개로 고정된다. Streamable HTTP 만 `2025-11-25` 를 지원한다.
+
 CLI 가 두 서버 모두에 connect 후 도구 카탈로그를 prefix 분리해 합친다 — `mcp__aimbase-local__file_read` vs `mcp__aimbase-server__web_search`.
 
-`aimbase-server` 의 `/mcp/sse` 가 받는 인증/라우팅 헤더:
+`aimbase-server` 의 `/mcp` 가 받는 인증/라우팅 헤더:
 
 | 헤더 | 처리 필터 | 용도 |
 |---|---|---|
 | `X-API-Key` | `ApiKeyAuthenticationFilter` | tenant_id 자동 결정 (필수) |
 | `X-Aimbase-Agent-Id` | `AgentIdRequestFilter` | 세션 식별 + Hook 컨텍스트 (선택) |
 
-서버 측 거버넌스 (`/mcp/sse` 진입 도구 호출):
+서버 측 거버넌스 (`/mcp` 진입 도구 호출):
 - **PRE/POST_TOOL_USE Hook** ✓ 적용
 - **Rate Limit** ✓ 적용 (`mcp.rate-limit.requests-per-minute`, 기본 60/min, 테넌트 단위)
-- **화이트리스트** ✓ `McpExposureLevel.CLI` 만 노출 (26개)
+- **화이트리스트** ✓ `global_config.mcp.cli-exposed-tools` (CSV, 42개) 에 든 도구만 노출 (CR-110). `parse_document` 및 내부 전용 6개(`team_create`/`team_delete`/`enter_plan_mode`/`exit_plan_mode`/`verify_plan_execution`/`temp_cleanup`)는 의도적 제외
 - **PolicyEngine / max_iterations / 풀세트 Hook** ✗ CR-050 트레이드오프 계승
 
-도구 노출 on/off:
+도구 노출 on/off + 화이트리스트:
 ```yaml
 mcp:
   server-exposure:
-    enabled: true     # false 면 /mcp/sse 도구 0개 노출
+    enabled: true     # false 면 /mcp 도구 0개 노출
   rate-limit:
     requests-per-minute: 60
 ```
+
+- **화이트리스트 변경 (CR-110)**: 노출 도구 목록은 `global_config.mcp.cli-exposed-tools`(CSV) 단일 소스로 관리. **제거는 런타임 즉시 반영**(실행 게이트 차단), **추가는 재기동 시** `/mcp` 노출에 반영. `PlatformSettingsService` 5분 캐시. V66 master seed(42개)가 코드 상수 `McpExposurePolicy.DEFAULT_FALLBACK`과 정합 유지
 
 ---
 
@@ -209,6 +220,10 @@ Connection 의 `config.tool_mode` 값에 따라 CLI 가 사용할 수 있는 도
 | `400 No active ClaudeCliRunner for agent-id ...` | agent 가 비활성(heartbeat 5분 초과) 또는 `runner_capability=false`. agent 재등록 필요 |
 | `401 Invalid X-Api-Key` (Runner 응답) | aimbase-agent 의 `aimbase.runner.api-key` 와 connection 의 `runner_api_key` 불일치 |
 | Worker 큐 대기 (BIZ-100) | run 당 5개 상한. 동시 요청 많으면 `--max-workers` 증가 또는 분산 |
+| `No such tool: mcp__aimbase-server__<x>` (CR-104) | 해당 도구가 `global_config.mcp.cli-exposed-tools` 화이트리스트에 없음. CSV 에 추가 후 **재기동**(추가는 재기동 시 `/mcp` 반영). 제거 방향은 런타임 즉시 |
+| **MCP 상태가 `pending` 에서 안 바뀌고 도구 0개** (CR-124) | `.mcp.json` 이 옛 SSE 설정(`"type":"sse"`, `/mcp/sse`). **`"type":"http"` + `/mcp`** 로 교체. 서버 로그에 `Client requested unsupported protocol version: 2025-11-25 ... suggest the 2024-11-05` 가 찍히면 확정. SSE 는 MCP Java SDK 2.0.0 에서도 `2024-11-05` 만 광고해 협상 불가 |
+| 배포 직후 도구 개수가 모자람 (원격 도구 누락) | 소비앱 원격 도구는 agent 재등록 → `RemoteToolDiscovery` 30초 주기 동기화(CR-121)를 거쳐야 붙는다. **배포 후 ~90초** 뒤 재확인. `docker compose logs api \| grep 'tool exposed'` 로 반영 시각 확인 |
+| AGENT_CALL 이 "진행 중" 으로 멈춤 (turn timeout) | CLI worker hang 가능. agent 로그 `turn timeout after Ns` 확인 + agent `spring.mvc.async.request-timeout`(기본 600s, `AIMBASE_AGENT_ASYNC_TIMEOUT_MS`) vs BE `anthropic-cli.http-timeout-seconds` 정렬 확인(CR-111). 멈춘 run 은 `POST /workflows/runs/{runId}/cancel?force=true` 강제 중지 후 `/rerun`(CR-116). 좀비 `claude` 프로세스 누적 시 `pkill`(CR-109/114) |
 | 사용자 PC 꺼져 있음 | Runner 미응답 → 호출 실패 (정직). 폴백 정책은 별도 CR (자동화 미포함) |
 
 ---
@@ -217,5 +232,7 @@ Connection 의 `config.tool_mode` 값에 따라 CLI 가 사용할 수 있는 도
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.2.0 | 2026-06-18 | **현행화 — 도구 노출 26→42 + 화이트리스트 외부화 + timeout/좀비 트러블슈팅**. § 1 그림 `--runner-mode` → SERVLET 모드(CR-073 폐지 반영). § 4 서버 도구 노출 개수 26 고정 표기 제거 — CR-104(28→42, `file_write`/`bash`/`download_file` 추가) + CR-110(`global_config.mcp.cli-exposed-tools` CSV 단일 소스, 제거=즉시/추가=재기동) 반영, 화이트리스트 항목·on/off 블록 갱신. § 7 트러블슈팅에 `No such tool`(CR-104) + AGENT_CALL turn timeout/force-cancel/rerun/좀비(CR-111/116/109/114) 추가. 코드 실측(`McpExposurePolicy`/V66 SQL/`ClaudeCliCommandBuilder`). 신규 코드 없음 — 문서만 |
+| v1.1.0 | 2026-04-28 | CR-072 + CR-073 — 다중 mcpServers (`aimbase-local` + `aimbase-server`) 로 SDK 14개 + 서버 도구 26개 노출. `--runner-mode` 플래그 폐지 (후방 호환). `mcp.server-exposure.enabled` / `mcp.rate-limit.requests-per-minute` 키 추가 |
 | v1.0.0 | 2026-04-27 | CR-071 초판 — Claude Code MCP 연동 + aimbase-agent `--runner-mode` 셋업 |
 | v1.1.0 | 2026-04-28 | CR-072 + CR-073 — 다중 mcpServers (`aimbase-local` + `aimbase-server`) 로 SDK 14개 + 서버 도구 26개 노출. `--runner-mode` 플래그 폐지 (후방 호환). `mcp.server-exposure.enabled` / `mcp.rate-limit.requests-per-minute` 키 추가 |

@@ -12,12 +12,17 @@ AXOPM 프로젝트의 `.mcp.json`에 Aimbase Admin MCP 서버를 등록합니다
 {
   "mcpServers": {
     "aimbase-admin": {
-      "type": "sse",
-      "url": "http://localhost:8080/admin-mcp/sse?tenant_id=axopm_companyA"
+      "type": "http",
+      "url": "http://localhost:8080/admin-mcp?tenant_id=axopm_companyA"
     }
   }
 }
 ```
+
+> **CR-124 (2026-07-22)**: transport 가 SSE → **Streamable HTTP** 로 바뀌었다.
+> `"type"` 은 `"sse"` → `"http"`, URL 은 `/admin-mcp/sse` → **`/admin-mcp`**(하위경로 없는
+> 단일 엔드포인트). 옛 설정으로는 Claude CLI 가 요구하는 프로토콜 `2025-11-25` 협상이
+> 불가해 **도구가 0개**로 보인다.
 
 - **URL에 `tenant_id` 쿼리 파라미터 필수** — 테넌트 DB 라우팅에 사용
 - Aimbase BE가 `http://localhost:8080`에서 기동 중이어야 합니다
