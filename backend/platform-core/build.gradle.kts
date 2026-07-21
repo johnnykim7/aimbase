@@ -29,9 +29,8 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-starter-vector-store-pgvector")
 
     // ── MCP Java SDK ──
-    implementation(platform("io.modelcontextprotocol.sdk:mcp-bom:0.17.0"))
+    implementation(platform("io.modelcontextprotocol.sdk:mcp-bom:2.0.0"))
     implementation("io.modelcontextprotocol.sdk:mcp")
-    implementation("io.modelcontextprotocol.sdk:mcp-spring-webmvc")
     // 0.17.0: JSON 매퍼가 별도 모듈로 분리됨 (Jackson2 구현)
     implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
     // 0.17.0 스키마 검증기는 networknt 2.0.0 의 Dialects 클래스 필요.

@@ -150,7 +150,11 @@ public class ServerMcpToolDispatcher {
 
         String truncated = McpResultTruncator.truncate(name, result);
         if (mediaBlocks.isEmpty()) {
-            return new McpSchema.CallToolResult(truncated, false);
+            // CR-124 (SDK 2.0.0): (String, boolean) 축약 생성자 제거 → builder 사용.
+            return McpSchema.CallToolResult.builder()
+                    .addTextContent(truncated)
+                    .isError(false)
+                    .build();
         }
         // CR-101: 텍스트 + 멀티모달 블록 동시 운반. 텍스트만 truncate — base64 블록은 자르면 깨진다.
         McpSchema.CallToolResult.Builder builder = McpSchema.CallToolResult.builder()
@@ -267,7 +271,11 @@ public class ServerMcpToolDispatcher {
 
     private static McpSchema.CallToolResult errorResult(String message) {
         String safe = message == null ? "" : message.replace("\"", "\\\"");
-        return new McpSchema.CallToolResult("{\"error\":\"" + safe + "\"}", true);
+        // CR-124 (SDK 2.0.0): (String, boolean) 축약 생성자 제거 → builder 사용.
+        return McpSchema.CallToolResult.builder()
+                .addTextContent("{\"error\":\"" + safe + "\"}")
+                .isError(true)
+                .build();
     }
 
     private static Map<String, Object> failureContext(String error) {

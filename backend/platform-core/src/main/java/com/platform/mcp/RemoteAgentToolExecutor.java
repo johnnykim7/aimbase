@@ -38,8 +38,9 @@ public class RemoteAgentToolExecutor implements ToolExecutor {
     @Override
     public String execute(Map<String, Object> input) {
         // 1차: 직접 연결 시도
+        // CR-124: agent 는 SDK 2.0.0 전환으로 Streamable 단일 엔드포인트(/mcp)만 노출한다.
         try (MCPServerClient client = new MCPServerClient(
-                "remote-" + toolDef.name(), "http", Map.of("url", agentMcpUrl + "/mcp/sse"))) {
+                "remote-" + toolDef.name(), "streamable", Map.of("url", agentMcpUrl + "/mcp"))) {
             client.connect();
             String result = client.callTool(toolDef.name(), input);
             log.debug("Remote tool '{}' executed via agent at {}", toolDef.name(), agentMcpUrl);
@@ -51,8 +52,8 @@ public class RemoteAgentToolExecutor implements ToolExecutor {
             // 2차: TURN 릴레이 폴백
             if (turnMcpUrl != null && !turnMcpUrl.isBlank()) {
                 try (MCPServerClient turnClient = new MCPServerClient(
-                        "turn-" + toolDef.name(), "http",
-                        Map.of("url", turnMcpUrl + "/mcp/sse"))) {
+                        "turn-" + toolDef.name(), "streamable",
+                        Map.of("url", turnMcpUrl + "/mcp"))) {
                     turnClient.connect();
                     String result = turnClient.callTool(toolDef.name(), input);
                     log.info("Remote tool '{}' executed via TURN relay at {}", toolDef.name(), turnMcpUrl);

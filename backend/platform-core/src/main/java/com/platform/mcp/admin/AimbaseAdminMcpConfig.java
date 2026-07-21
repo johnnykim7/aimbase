@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.WebMvcSseServerTransportProvider;
+import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,23 +27,28 @@ public class AimbaseAdminMcpConfig {
 
     private static final Logger log = LoggerFactory.getLogger(AimbaseAdminMcpConfig.class);
 
+    /** CR-124 (SDK 2.0.0): SSE → Streamable HTTP 전환. 상세 사유는 ServerMcpConfig 참조. */
     @Bean
-    public WebMvcSseServerTransportProvider adminMcpTransport(ObjectMapper objectMapper) {
-        // SDK 0.17.0: 생성자 대신 builder + McpJsonMapper 사용.
-        return WebMvcSseServerTransportProvider.builder()
-                .jsonMapper(io.modelcontextprotocol.json.McpJsonMapper.createDefault())
-                .messageEndpoint("/admin-mcp/message")
-                .sseEndpoint("/admin-mcp/sse")
+    public HttpServletStreamableServerTransportProvider adminMcpTransport(ObjectMapper objectMapper) {
+        return HttpServletStreamableServerTransportProvider.builder()
+                .jsonMapper(io.modelcontextprotocol.json.McpJsonDefaults.getMapper())
+                .mcpEndpoint("/admin-mcp")
                 .build();
     }
 
+    /** CR-124: 2.0.0 provider 는 HttpServlet 상속체라 서블릿으로 등록한다. */
     @Bean
-    public RouterFunction<ServerResponse> adminMcpRouterFunction(WebMvcSseServerTransportProvider adminMcpTransport) {
-        return adminMcpTransport.getRouterFunction();
+    public org.springframework.boot.web.servlet.ServletRegistrationBean<HttpServletStreamableServerTransportProvider>
+            adminMcpServletRegistration(HttpServletStreamableServerTransportProvider adminMcpTransport) {
+        var reg = new org.springframework.boot.web.servlet.ServletRegistrationBean<>(adminMcpTransport, "/admin-mcp/*");
+        reg.setName("adminMcpStreamableServlet");
+        reg.setAsyncSupported(true);
+        reg.setLoadOnStartup(1);
+        return reg;
     }
 
     @Bean
-    public McpSyncServer adminMcpServer(WebMvcSseServerTransportProvider adminMcpTransport,
+    public McpSyncServer adminMcpServer(HttpServletStreamableServerTransportProvider adminMcpTransport,
                                          AdminToolService toolService) {
         String workflowRules = """
 
@@ -179,15 +184,16 @@ public class AimbaseAdminMcpConfig {
     // ── Helper: Tool/Schema 빌더 ────────────────────────────
 
     private McpServerFeatures.SyncToolSpecification tool(
-            String name, String description, McpSchema.JsonSchema inputSchema,
+            String name, String description, Map<String, Object> inputSchema,
             Function<Map<String, Object>, String> handler) {
-        // SDK 0.17.0: Tool 7-arg 생성자 대신 builder 사용.
+        // CR-124 (SDK 2.0.0): inputSchema 는 Map 오버로드 사용.
         var mcpTool = McpSchema.Tool.builder()
                 .name(name)
                 .description(description)
                 .inputSchema(inputSchema)
                 .build();
-        return new McpServerFeatures.SyncToolSpecification(mcpTool, (exchange, args) -> {
+        // CR-124 (SDK 2.0.0): 핸들러 2번째 인자가 Map → CallToolRequest 로 변경됨.
+        return new McpServerFeatures.SyncToolSpecification(mcpTool, (exchange, request) -> {
             // MCP 메시지는 비동기 스레드에서 실행 → TenantContext가 없을 수 있음
             // McpTenantSessionFilter가 SSE 연결 시 저장한 테넌트를 사용
             String savedTenant = McpTenantSessionFilter.getCurrentMcpTenant();
@@ -198,11 +204,17 @@ public class AimbaseAdminMcpConfig {
                 log.debug("MCP tool '{}': set tenant '{}'", name, savedTenant);
             }
             try {
-                String result = handler.apply(args);
-                return new McpSchema.CallToolResult(result, false);
+                String result = handler.apply(request.arguments());
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent(result)
+                        .isError(false)
+                        .build();
             } catch (Exception e) {
                 log.error("MCP tool '{}' failed: {}", name, e.getMessage(), e);
-                return new McpSchema.CallToolResult("{\"error\":\"" + e.getMessage() + "\"}", true);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("{\"error\":\"" + e.getMessage() + "\"}")
+                        .isError(true)
+                        .build();
             } finally {
                 if (tenantSet) {
                     com.platform.tenant.TenantContext.clear();
@@ -211,12 +223,13 @@ public class AimbaseAdminMcpConfig {
         });
     }
 
-    private McpSchema.JsonSchema schema(Map<String, Object> properties) {
-        return new McpSchema.JsonSchema("object", properties, List.of(), null, null, null);
+    // CR-124 (SDK 2.0.0): JsonSchema 레코드 대신 Map 으로 조립한다.
+    private Map<String, Object> schema(Map<String, Object> properties) {
+        return Map.of("type", "object", "properties", properties, "required", List.of());
     }
 
-    private McpSchema.JsonSchema schemaReq(Map<String, Object> properties, List<String> required) {
-        return new McpSchema.JsonSchema("object", properties, required, null, null, null);
+    private Map<String, Object> schemaReq(Map<String, Object> properties, List<String> required) {
+        return Map.of("type", "object", "properties", properties, "required", required);
     }
 
     private Map<String, Object> propStr(String description) {

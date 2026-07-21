@@ -127,12 +127,16 @@ public class ClaudeCliAdapterConfig {
 
         if (serverExposed) {
             java.util.Map<String, Object> server = new java.util.LinkedHashMap<>();
-            // CR-072 (2026-04-28): Claude CLI MCP config schema 가 SSE 트랜스포트에 "type" 필수 요구.
-            server.put("type", "sse");
+            // CR-072 (2026-04-28): Claude CLI MCP config schema 가 트랜스포트에 "type" 필수 요구.
+            // CR-124 (2026-07-22): "sse" → "http"(Streamable HTTP). SSE 는 서버측 SDK 2.0.0 에서도
+            // 프로토콜 2024-11-05 만 광고해 CLI 가 요구하는 2025-11-25 협상이 불가하다.
+            // CLI 스키마 유니온: ["stdio","sse","sse-ide","http","ws","sdk"] — "http" 가 Streamable.
+            server.put("type", "http");
             String base = serverMcpBaseUrl.endsWith("/")
                     ? serverMcpBaseUrl.substring(0, serverMcpBaseUrl.length() - 1)
                     : serverMcpBaseUrl;
-            server.put("url", base + "/mcp/sse");
+            // Streamable 은 하위경로 없는 단일 엔드포인트.
+            server.put("url", base + "/mcp");
             java.util.Map<String, String> headers = new java.util.LinkedHashMap<>();
             if (serverMcpApiKey != null && !serverMcpApiKey.isBlank()) {
                 headers.put("X-API-Key", serverMcpApiKey);

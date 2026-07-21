@@ -6,8 +6,8 @@ import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.McpSyncServer;
+import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
-import io.modelcontextprotocol.server.transport.WebMvcSseServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -125,7 +125,7 @@ public class AgentMcpServer {
         log.info("AgentMcpServer stdio 모드 시작: {} 도구 노출", tools.size());
         // SDK 0.17.0: StdioServerTransportProvider 는 McpJsonMapper 인자 필요.
         McpSyncServer server = buildMcpServer(
-                new StdioServerTransportProvider(io.modelcontextprotocol.json.McpJsonMapper.createDefault()));
+                new StdioServerTransportProvider(io.modelcontextprotocol.json.McpJsonDefaults.getMapper()));
         // stdio transport는 stdin이 닫힐 때까지 블로킹 처리한다.
         // JVM 종료 시그널(SIGTERM/SIGINT)에 graceful 종료 등록
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -142,19 +142,38 @@ public class AgentMcpServer {
     }
 
     /**
-     * 공통 도구 스펙 빌더 — SSE/stdio 모두 동일한 도구 목록을 노출한다.
+     * 공통 도구 스펙 목록 — Streamable HTTP/stdio 모두 동일한 도구 목록을 노출한다.
+     *
+     * <p>CR-124 (SDK 2.0.0): {@code McpStreamableServerTransportProvider} 와
+     * {@code McpServerTransportProvider} 가 서로 다른 인터페이스로 분리되어
+     * {@code McpServer.sync(...)} 오버로드가 갈렸다. 공통분모를 "도구 스펙 목록"으로 내리고
+     * 서버 조립은 각 transport 쪽에서 수행한다.</p>
      */
-    private McpSyncServer buildMcpServer(io.modelcontextprotocol.spec.McpServerTransportProvider transport) {
+    private List<McpServerFeatures.SyncToolSpecification> buildToolSpecs() {
         List<McpServerFeatures.SyncToolSpecification> toolSpecs = new ArrayList<>();
         for (ToolExecutor tool : tools) {
             UnifiedToolDef def = tool.getDefinition();
             var mcpTool = McpToolConversion.toMcpTool(tool);
+            // CR-124 (SDK 2.0.0): 핸들러 2번째 인자가 Map → CallToolRequest 로 변경됨.
             toolSpecs.add(new McpServerFeatures.SyncToolSpecification(mcpTool,
-                    (exchange, args) -> dispatch(tool, def.name(), args)));
+                    (exchange, request) -> dispatch(tool, def.name(), request.arguments())));
         }
+        return toolSpecs;
+    }
+
+    /** stdio transport 용 서버 조립. */
+    private McpSyncServer buildMcpServer(io.modelcontextprotocol.spec.McpServerTransportProvider transport) {
         return McpServer.sync(transport)
                 .serverInfo("aimbase-agent", "1.0.0")
-                .tools(toolSpecs)
+                .tools(buildToolSpecs())
+                .build();
+    }
+
+    /** Streamable HTTP transport 용 서버 조립 (CR-124). */
+    private McpSyncServer buildMcpServer(io.modelcontextprotocol.spec.McpStreamableServerTransportProvider transport) {
+        return McpServer.sync(transport)
+                .serverInfo("aimbase-agent", "1.0.0")
+                .tools(buildToolSpecs())
                 .build();
     }
 
@@ -189,22 +208,32 @@ public class AgentMcpServer {
         }
 
         @Bean
-        public WebMvcSseServerTransportProvider mcpTransport() {
-            // SDK 0.17.0: 생성자 대신 builder + McpJsonMapper 사용.
-            return WebMvcSseServerTransportProvider.builder()
-                    .jsonMapper(io.modelcontextprotocol.json.McpJsonMapper.createDefault())
-                    .messageEndpoint("/mcp/message")
-                    .sseEndpoint("/mcp/sse")
+        public HttpServletStreamableServerTransportProvider mcpTransport() {
+            // CR-124 (SDK 2.0.0): WebMvcSse 제거(mcp-spring-webmvc 아티팩트 자체가 2.0.0 에 없음).
+            // Streamable HTTP 단일 엔드포인트로 전환 — SSE 는 2.0.0 에서도 2024-11-05 만 광고해
+            // Claude CLI 가 요구하는 2025-11-25 협상이 불가하다.
+            return HttpServletStreamableServerTransportProvider.builder()
+                    .jsonMapper(io.modelcontextprotocol.json.McpJsonDefaults.getMapper())
+                    .mcpEndpoint("/mcp")
                     .build();
         }
 
+        /**
+         * CR-124: 2.0.0 provider 는 {@link jakarta.servlet.http.HttpServlet} 상속체라
+         * RouterFunction 이 아니라 서블릿으로 등록한다.
+         */
         @Bean
-        public RouterFunction<ServerResponse> mcpRouterFunction(WebMvcSseServerTransportProvider transport) {
-            return transport.getRouterFunction();
+        public org.springframework.boot.web.servlet.ServletRegistrationBean<HttpServletStreamableServerTransportProvider>
+                mcpServletRegistration(HttpServletStreamableServerTransportProvider transport) {
+            var reg = new org.springframework.boot.web.servlet.ServletRegistrationBean<>(transport, "/mcp/*");
+            reg.setName("agentMcpStreamableServlet");
+            reg.setAsyncSupported(true);
+            reg.setLoadOnStartup(1);
+            return reg;
         }
 
         @Bean
-        public McpSyncServer mcpServer(WebMvcSseServerTransportProvider transport) {
+        public McpSyncServer mcpServer(HttpServletStreamableServerTransportProvider transport) {
             // SSE 모드: 외부 AgentMcpServer 인스턴스의 공통 빌더 재사용
             // toolExecutors가 없으면(직접 Spring Boot 기동 시) 빈 서버로 대기
             if (toolExecutors == null || toolExecutors.isEmpty()) {

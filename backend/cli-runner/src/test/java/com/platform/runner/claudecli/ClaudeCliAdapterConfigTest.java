@@ -48,8 +48,9 @@ class ClaudeCliAdapterConfigTest {
         assertThat(servers.has("aimbase")).isFalse();
 
         JsonNode server = servers.get("aimbase-server");
-        assertThat(server.get("type").asText()).isEqualTo("sse");
-        assertThat(server.get("url").asText()).isEqualTo("https://aimbase.example.com/mcp/sse");
+        // CR-124: SSE → Streamable HTTP. SSE 는 2025-11-25 협상이 불가해 CLI 가 도구를 못 본다.
+        assertThat(server.get("type").asText()).isEqualTo("http");
+        assertThat(server.get("url").asText()).isEqualTo("https://aimbase.example.com/mcp");
         JsonNode headers = server.get("headers");
         assertThat(headers.get("X-API-Key").asText()).isEqualTo("k-secret");
         assertThat(headers.get("X-Aimbase-Agent-Id").asText()).isEqualTo("agent-uuid-1");
@@ -67,9 +68,9 @@ class ClaudeCliAdapterConfigTest {
         assertThat(servers.has("aimbase-server")).isTrue();
         assertThat(servers.has("aimbase-local")).isFalse();
         assertThat(servers.has("aimbase")).isFalse();
-        // 끝 슬래시 자동 정규화
+        // 끝 슬래시 자동 정규화 (CR-124: Streamable 단일 엔드포인트)
         assertThat(servers.get("aimbase-server").get("url").asText())
-                .isEqualTo("https://aimbase.example.com/mcp/sse");
+                .isEqualTo("https://aimbase.example.com/mcp");
     }
 
     @Test

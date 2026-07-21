@@ -7,7 +7,7 @@ import com.platform.tool.ToolRegistry;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.WebMvcSseServerTransportProvider;
+import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,19 +65,33 @@ public class ServerMcpConfig {
         this.applicationContext = applicationContext;
     }
 
+    /**
+     * CR-124 (SDK 2.0.0): SSE → Streamable HTTP 전환.
+     *
+     * <p>{@code mcp-spring-webmvc} 아티팩트가 2.0.0 에 존재하지 않으며, SSE transport 는
+     * 2.0.0 에서도 {@code 2024-11-05} 단일 버전만 광고해 Claude CLI 가 요구하는
+     * {@code 2025-11-25} 협상이 불가하다. Streamable HTTP 는 4종 전부 지원한다.</p>
+     */
     @Bean
-    public WebMvcSseServerTransportProvider serverMcpTransport(ObjectMapper objectMapper) {
-        // SDK 0.17.0: 생성자 대신 builder + McpJsonMapper 사용.
-        return WebMvcSseServerTransportProvider.builder()
-                .jsonMapper(io.modelcontextprotocol.json.McpJsonMapper.createDefault())
-                .messageEndpoint("/mcp/message")
-                .sseEndpoint("/mcp/sse")
+    public HttpServletStreamableServerTransportProvider serverMcpTransport(ObjectMapper objectMapper) {
+        return HttpServletStreamableServerTransportProvider.builder()
+                .jsonMapper(io.modelcontextprotocol.json.McpJsonDefaults.getMapper())
+                .mcpEndpoint("/mcp")
                 .build();
     }
 
+    /**
+     * CR-124: 2.0.0 provider 는 {@link jakarta.servlet.http.HttpServlet} 상속체라
+     * RouterFunction 이 아니라 서블릿으로 등록한다.
+     */
     @Bean
-    public RouterFunction<ServerResponse> serverMcpRouterFunction(WebMvcSseServerTransportProvider serverMcpTransport) {
-        return serverMcpTransport.getRouterFunction();
+    public org.springframework.boot.web.servlet.ServletRegistrationBean<HttpServletStreamableServerTransportProvider>
+            serverMcpServletRegistration(HttpServletStreamableServerTransportProvider serverMcpTransport) {
+        var reg = new org.springframework.boot.web.servlet.ServletRegistrationBean<>(serverMcpTransport, "/mcp/*");
+        reg.setName("serverMcpStreamableServlet");
+        reg.setAsyncSupported(true);
+        reg.setLoadOnStartup(1);
+        return reg;
     }
 
     /**
@@ -85,7 +99,7 @@ public class ServerMcpConfig {
      * {@code addTool()} 호출이 정상 작동하게 한다 (SDK 0.10.0 제약).
      */
     @Bean
-    public McpSyncServer serverMcpServer(WebMvcSseServerTransportProvider serverMcpTransport) {
+    public McpSyncServer serverMcpServer(HttpServletStreamableServerTransportProvider serverMcpTransport) {
         return McpServer.sync(serverMcpTransport)
                 .serverInfo("aimbase-server", "1.0.0")
                 .capabilities(io.modelcontextprotocol.spec.McpSchema.ServerCapabilities.builder()
@@ -163,8 +177,9 @@ public class ServerMcpConfig {
             ToolExecutor tool = entry.getValue();
             try {
                 McpSchema.Tool mcpTool = McpToolConversion.toMcpTool(tool);
+                // CR-124 (SDK 2.0.0): 핸들러 2번째 인자가 Map → CallToolRequest 로 변경됨.
                 mcpServer.addTool(new McpServerFeatures.SyncToolSpecification(mcpTool,
-                        (exchange, args) -> dispatcher.dispatch(tool, name, args)));
+                        (exchange, request) -> dispatcher.dispatch(tool, name, request.arguments())));
                 publishedTools.add(name);
                 changed = true;
                 log.info("Server MCP: tool exposed '{}'", name);

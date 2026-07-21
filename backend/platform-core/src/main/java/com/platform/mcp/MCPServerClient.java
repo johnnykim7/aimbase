@@ -27,6 +27,8 @@ public class MCPServerClient implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(MCPServerClient.class);
 
     private final String serverId;
+    /** CR-124: true 면 Streamable HTTP, false 면 기존 SSE. */
+    private final boolean streamable;
     // SSE 세션 무효화(사이드카 재기동 등) 시 reconnect 로 교체하므로 final 아님.
     private McpSyncClient client;
     private boolean initialized = false;
@@ -71,14 +73,21 @@ public class MCPServerClient implements AutoCloseable {
             throw new IllegalArgumentException("MCP server config must contain 'url' for transport: " + transport);
         }
 
+        // CR-124: "streamable"/"streamable-http" 는 Streamable HTTP 클라이언트로 붙는다.
+        // aimbase agent 는 SDK 2.0.0 전환으로 /mcp(Streamable) 만 노출하므로 이 경로가 필요하다.
+        // Python 사이드카(rag/safety/evaluation)는 여전히 SSE 라 기존 경로를 유지한다.
+        this.streamable = "streamable".equalsIgnoreCase(transport)
+                || "streamable-http".equalsIgnoreCase(transport);
+
         // SDK 0.10.0 의 HttpClientSseClientTransport 는 baseUri + sseEndpoint("/sse" 기본)
         // 형태로 호출. Java URI.resolve 는 절대경로(sseEndpoint) 가 base path 를 덮어쓰므로,
         // baseUri 에 context path(`/api/mcp`) 가 포함돼 있으면 호출이 root(`/sse`) 로 가서 404.
         // → DB url(`http://host:8183/api/mcp`) 을 scheme://authority 와 path 로 분리해
         //    baseUri = scheme://authority, sseEndpoint = path + "/sse" 로 설정한다.
-        UrlSplit split = splitBaseAndSsePath(url);
-        log.info("MCP server '{}' transport split: baseUri={}, sseEndpoint={}",
-                serverId, split.baseUri, split.sseEndpoint);
+        // CR-124: Streamable 은 "/sse" 를 붙이면 안 된다(단일 엔드포인트를 그대로 사용).
+        UrlSplit split = this.streamable ? splitBaseAndPath(url) : splitBaseAndSsePath(url);
+        log.info("MCP server '{}' transport split: baseUri={}, endpoint={}, streamable={}",
+                serverId, split.baseUri, split.sseEndpoint, this.streamable);
 
         this.urlSplit = split;
         this.requestTimeoutSeconds = requestTimeoutSeconds;
@@ -90,10 +99,17 @@ public class MCPServerClient implements AutoCloseable {
      * 보존된 urlSplit/requestTimeoutSeconds 로 동일 구성을 재현한다.
      */
     private McpSyncClient buildClient() {
-        var httpTransport = HttpClientSseClientTransport.builder(urlSplit.baseUri())
-                .sseEndpoint(urlSplit.sseEndpoint())
-                .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)))
-                .build();
+        // CR-124: Streamable 은 단일 엔드포인트(하위경로 없음)라 baseUri+endpoint 로 그대로 붙인다.
+        io.modelcontextprotocol.spec.McpClientTransport httpTransport = streamable
+                ? io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport
+                        .builder(urlSplit.baseUri())
+                        .endpoint(urlSplit.sseEndpoint())
+                        .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)))
+                        .build()
+                : HttpClientSseClientTransport.builder(urlSplit.baseUri())
+                        .sseEndpoint(urlSplit.sseEndpoint())
+                        .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)))
+                        .build();
         return McpClient.sync(httpTransport)
                 .clientInfo(new McpSchema.Implementation("aimbase", "1.0.0"))
                 .requestTimeout(Duration.ofSeconds(requestTimeoutSeconds))
@@ -163,6 +179,36 @@ public class MCPServerClient implements AutoCloseable {
             sseEndpoint = "/" + sseEndpoint;
         }
         return new UrlSplit(authority, sseEndpoint);
+    }
+
+    /**
+     * CR-124: Streamable HTTP 용 분리 — {@code "/sse"} 를 붙이지 않고 경로를 그대로 보존한다.
+     *
+     * <p>Streamable 은 하위경로 없는 단일 엔드포인트(예: {@code /mcp})로 동작하므로
+     * SSE 규칙(경로 끝에 {@code /sse} 보장)을 적용하면 존재하지 않는 경로로 붙게 된다.</p>
+     *
+     * package-private — 단위 테스트용.
+     */
+    static UrlSplit splitBaseAndPath(String url) {
+        URI uri;
+        try {
+            uri = new URI(url);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid MCP server url: " + url, e);
+        }
+        if (uri.getScheme() == null || uri.getHost() == null) {
+            throw new IllegalArgumentException("MCP server url must be absolute (scheme://host): " + url);
+        }
+        String authority = uri.getScheme() + "://" + uri.getRawAuthority();
+        String path = uri.getRawPath();
+        if (path == null || path.isEmpty() || "/".equals(path)) {
+            return new UrlSplit(authority, "/mcp");
+        }
+        String trimmed = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
+        if (!trimmed.startsWith("/")) {
+            trimmed = "/" + trimmed;
+        }
+        return new UrlSplit(authority, trimmed);
     }
 
     /** package-private — splitBaseAndSsePath 의 반환 타입. */
@@ -346,18 +392,21 @@ public class MCPServerClient implements AutoCloseable {
         return new UnifiedToolDef(tool.name(), tool.description(), schema);
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> buildSchema(McpSchema.JsonSchema jsonSchema) {
-        if (jsonSchema == null) {
+    /**
+     * CR-124 (SDK 2.0.0): {@code Tool.inputSchema()} 게터 반환 타입이
+     * {@code McpSchema.JsonSchema} → {@code Map<String,Object>} 로 바뀌었다.
+     * 원격 서버가 준 스키마 Map 을 그대로 신뢰하지 않고 필요한 키만 정규화해 옮긴다.
+     */
+    private Map<String, Object> buildSchema(Map<String, Object> jsonSchema) {
+        if (jsonSchema == null || jsonSchema.isEmpty()) {
             return Map.of("type", "object", "properties", Map.of());
         }
-        // JsonSchema의 properties, required, type 등을 Map으로 변환
         Map<String, Object> result = new java.util.LinkedHashMap<>();
-        if (jsonSchema.type() != null) result.put("type", jsonSchema.type());
-        if (jsonSchema.properties() != null) result.put("properties", jsonSchema.properties());
-        if (jsonSchema.required() != null) result.put("required", jsonSchema.required());
-        if (jsonSchema.additionalProperties() != null)
-            result.put("additionalProperties", jsonSchema.additionalProperties());
+        if (jsonSchema.get("type") != null) result.put("type", jsonSchema.get("type"));
+        if (jsonSchema.get("properties") != null) result.put("properties", jsonSchema.get("properties"));
+        if (jsonSchema.get("required") != null) result.put("required", jsonSchema.get("required"));
+        if (jsonSchema.get("additionalProperties") != null)
+            result.put("additionalProperties", jsonSchema.get("additionalProperties"));
         if (result.isEmpty()) {
             result.put("type", "object");
             result.put("properties", Map.of());

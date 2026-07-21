@@ -21,23 +21,33 @@ public final class McpToolConversion {
     private McpToolConversion() {
     }
 
-    /** UnifiedToolDef 의 inputSchema(JSONSchema Map) 를 MCP JsonSchema 로 변환. */
+    /**
+     * UnifiedToolDef 의 inputSchema(JSONSchema Map) 를 MCP inputSchema Map 으로 정규화.
+     *
+     * <p>CR-124 (SDK 2.0.0): {@code McpSchema.JsonSchema} 레코드 대신 {@code Map<String,Object>} 로
+     * 다룬다. 2.0.0 의 {@code Tool.inputSchema()} 게터 반환 타입이 Map 으로 바뀌었기 때문에
+     * 생성·소비 양쪽을 Map 기준으로 통일한다.</p>
+     */
     @SuppressWarnings("unchecked")
-    public static McpSchema.JsonSchema toJsonSchema(Map<String, Object> schema) {
+    public static Map<String, Object> toJsonSchema(Map<String, Object> schema) {
         if (schema == null) {
-            return new McpSchema.JsonSchema("object", Map.of(), List.of(), null, null, null);
+            return Map.of("type", "object", "properties", Map.of(), "required", List.of());
         }
-        String type = (String) schema.getOrDefault("type", "object");
-        Map<String, Object> properties = (Map<String, Object>) schema.getOrDefault("properties", Map.of());
-        List<String> required = (List<String>) schema.getOrDefault("required", List.of());
-        Boolean additionalProperties = (Boolean) schema.get("additionalProperties");
-        return new McpSchema.JsonSchema(type, properties, required, additionalProperties, null, null);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("type", schema.getOrDefault("type", "object"));
+        out.put("properties", schema.getOrDefault("properties", Map.of()));
+        out.put("required", schema.getOrDefault("required", List.of()));
+        Object additionalProperties = schema.get("additionalProperties");
+        if (additionalProperties != null) {
+            out.put("additionalProperties", additionalProperties);
+        }
+        return out;
     }
 
     /** ToolExecutor → MCP Tool 메타로 변환 (이름/설명/입력스키마). */
     public static McpSchema.Tool toMcpTool(ToolExecutor tool) {
         UnifiedToolDef def = tool.getDefinition();
-        // SDK 0.17.0: Tool 7-arg 생성자 대신 builder 사용.
+        // SDK 2.0.0: inputSchema 는 Map 오버로드 사용.
         return McpSchema.Tool.builder()
                 .name(def.name())
                 .description(def.description())
@@ -56,11 +66,17 @@ public final class McpToolConversion {
         try {
             String result = tool.execute(args);
             result = McpResultTruncator.truncate(name, result);
-            return new McpSchema.CallToolResult(result, false);
+            // CR-124 (SDK 2.0.0): (String, boolean) 축약 생성자 제거 → builder 사용.
+            return McpSchema.CallToolResult.builder()
+                    .addTextContent(result)
+                    .isError(false)
+                    .build();
         } catch (Exception e) {
             String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            return new McpSchema.CallToolResult(
-                    "{\"error\":\"" + msg.replace("\"", "\\\"") + "\"}", true);
+            return McpSchema.CallToolResult.builder()
+                    .addTextContent("{\"error\":\"" + msg.replace("\"", "\\\"") + "\"}")
+                    .isError(true)
+                    .build();
         }
     }
 }
