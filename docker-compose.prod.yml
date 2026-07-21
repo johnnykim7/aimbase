@@ -233,7 +233,10 @@ services:
       AIMBASE_RUNNER_MAX_WORKERS: "5"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
       AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
-      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:-plat-77111309dc1043758c474444b4a36605}"
+      # ★ MCP 인증키는 AGENT_TENANT_ID 와 같은 테넌트 것이어야 한다 (CR-123 실측).
+      # bidding 키를 공유하면 /mcp/sse 가 bidding_system 으로 인증돼 bp_wes 원격도구가 안 보이고
+      # MCP 핸드셰이크가 status=pending 에서 멈춘다.
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WES_SERVER_MCP_API_KEY:-plat-d66bccfc4b954dbc907b31e7ef7a7131}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes"
       SERVER_PORT: "8296"   # 8294 → 8296 (기존 agent 와 충돌 회피)
       AGENT_NAME: "cli-runner-bp-wes"   # 이름 분리

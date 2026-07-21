@@ -76,9 +76,41 @@ public class ConnectionAdapterFactory {
     /**
      * connectionId에 해당하는 LLMAdapter를 반환한다.
      * 처음 호출 시 DB에서 Connection을 읽어 어댑터를 생성하고 캐싱한다.
+     *
+     * <p><b>CR-123</b>: 캐시 키를 {@code tenantId::connectionId::updatedAt} 으로 구성한다.
+     * 어댑터는 생성 시점의 config(tool_mode/api_key/model…)를 필드로 굳히므로, 캐시가
+     * connectionId 만으로 잡히면 DB 의 config 변경이 영영 반영되지 않는다. 기존엔
+     * {@link #evict(String)} 가 {@code ConnectionController.update()} 에서만 불려서
+     * <b>DB 를 직접 UPDATE 하면 무효화 경로가 없었다</b>(운영 실측: tool_mode 를 NATIVE→AIMBASE 로
+     * 바꿨는데 캐시된 NATIVE 어댑터가 계속 사용됨 → CLI 가 MCP 미연결로 도구를 못 찾음).
+     *
+     * <p>{@code updatedAt} 을 키에 포함하면 DB 가 바뀌는 순간 키가 달라져 자동으로 새 어댑터가
+     * 만들어진다 — 호출자가 evict 를 기억할 필요가 없다. 테넌트 접두사는 Database-per-Tenant 에서
+     * 같은 connectionId 가 테넌트마다 존재할 수 있어 교차 오염을 막기 위함이다.</p>
      */
     public LLMAdapter getAdapter(String connectionId) {
-        return cache.computeIfAbsent(connectionId, this::createAdapter);
+        ConnectionEntity conn = findConnection(connectionId);
+        String key = adapterCacheKey(connectionId, conn.getUpdatedAt());
+        LLMAdapter adapter = cache.get(key);
+        if (adapter != null) {
+            return adapter;
+        }
+        // 같은 커넥션의 낡은 버전(다른 updatedAt) 엔트리는 제거 — 무한 증식 방지.
+        String prefix = adapterCacheKeyPrefix(connectionId);
+        cache.keySet().removeIf(k -> k.startsWith(prefix));
+        return cache.computeIfAbsent(key, k -> createAdapter(connectionId));
+    }
+
+    /** CR-123: 캐시 키 접두사 — {@code tenantId::connectionId::} (버전 무관 제거용). */
+    private static String adapterCacheKeyPrefix(String connectionId) {
+        String tenantId = com.platform.tenant.TenantContext.getTenantId();
+        return (tenantId == null ? "-" : tenantId) + "::" + connectionId + "::";
+    }
+
+    /** CR-123: 캐시 키 — 테넌트·커넥션·config 버전(updatedAt) 조합. */
+    private static String adapterCacheKey(String connectionId, java.time.OffsetDateTime updatedAt) {
+        return adapterCacheKeyPrefix(connectionId)
+                + (updatedAt == null ? "0" : String.valueOf(updatedAt.toInstant().toEpochMilli()));
     }
 
     /**
@@ -132,11 +164,15 @@ public class ConnectionAdapterFactory {
     }
 
     /**
-     * Connection의 API Key가 변경됐을 때 캐시를 무효화한다.
-     * ConnectionController.update() 에서 호출.
+     * Connection 변경 시 캐시를 즉시 무효화한다. {@code ConnectionController.update()} 에서 호출.
+     *
+     * <p>CR-123: 캐시 키가 {@code tenantId::connectionId::updatedAt} 이므로 접두사 매칭으로
+     * 해당 커넥션의 모든 버전을 제거한다. 다만 이 호출은 이제 <b>필수가 아니라 최적화</b>다 —
+     * {@link #getAdapter(String)} 이 updatedAt 을 키에 포함해 DB 직접 수정도 자동 반영한다.</p>
      */
     public void evict(String connectionId) {
-        cache.remove(connectionId);
+        String prefix = adapterCacheKeyPrefix(connectionId);
+        cache.keySet().removeIf(k -> k.startsWith(prefix));
     }
 
     /**

@@ -62,4 +62,6 @@ public class ConnectionEntity {
     public void setHealthConfig(Map<String, Object> healthConfig) { this.healthConfig = healthConfig; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
+    /** CR-123: 어댑터 캐시 키가 updatedAt 을 쓰므로 테스트에서 버전을 명시할 수 있게 노출. */
+    public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }
