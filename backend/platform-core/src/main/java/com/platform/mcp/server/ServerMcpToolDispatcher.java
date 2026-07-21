@@ -16,6 +16,7 @@ import com.platform.tool.PermissionLevel;
 import com.platform.tool.ToolContext;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.ToolMessageBlock;
+import com.platform.tool.ToolRegistry;
 import com.platform.tool.ToolResult;
 import com.platform.tool.ToolResultRenderer;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -54,19 +55,20 @@ public class ServerMcpToolDispatcher {
     private final HookDispatcher hookDispatcher;
     private final TokenBucketRateLimiter rateLimiter;
     private final PdfVisionResolver pdfVisionResolver;
-    private final McpExposurePolicy mcpExposurePolicy;
+    private final ToolRegistry toolRegistry;
     private final int rateLimitPerMinute;
 
+    // CR-121: ToolRegistry 가 McpExposurePolicy 를 주입받으므로 @Lazy 로 순환 참조를 끊는다.
     public ServerMcpToolDispatcher(HookDispatcher hookDispatcher,
                                     TokenBucketRateLimiter rateLimiter,
                                     PdfVisionResolver pdfVisionResolver,
-                                    McpExposurePolicy mcpExposurePolicy,
+                                    @org.springframework.context.annotation.Lazy ToolRegistry toolRegistry,
                                     @Value("${mcp.rate-limit.requests-per-minute:60}")
                                     int rateLimitPerMinute) {
         this.hookDispatcher = hookDispatcher;
         this.rateLimiter = rateLimiter;
         this.pdfVisionResolver = pdfVisionResolver;
-        this.mcpExposurePolicy = mcpExposurePolicy;
+        this.toolRegistry = toolRegistry;
         this.rateLimitPerMinute = rateLimitPerMinute;
     }
 
@@ -84,7 +86,10 @@ public class ServerMcpToolDispatcher {
      * </p>
      */
     public McpSchema.CallToolResult dispatch(ToolExecutor tool, String name, Map<String, Object> args) {
-        if (!mcpExposurePolicy.isCliExposed(tool)) {
+        // CR-121: 노출 판정을 ToolRegistry.isCliExposed 단일 소스로 위임 — builtin 은 화이트리스트,
+        // 외부 MCP·원격 에이전트 도구는 항상 통과(소비앱이 등록한 도구는 aimbase 화이트리스트로 통제하지 않음).
+        // 이전엔 McpExposurePolicy 만 봐서 원격 도구가 노출돼도 실행 단계에서 차단됐다.
+        if (!toolRegistry.isCliExposed(tool)) {
             log.warn("Server MCP: blocked non-CLI-exposed tool '{}'", name);
             return errorResult("Tool not exposed via MCP CLI channel");
         }

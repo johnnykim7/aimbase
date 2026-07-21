@@ -33,6 +33,17 @@ public class ToolRegistry {
     /** CR-110: builtin(서버 내장) 도구 이름 집합. 노출 정책은 builtin 에만 적용, 외부 MCP 도구는 항상 통과. */
     private final java.util.Set<String> builtinNames = ConcurrentHashMap.newKeySet();
 
+    /**
+     * CR-121: {@link #registerBuiltins()} 완료 여부.
+     *
+     * <p>builtinNames 가 비어 있는 동안에는 {@link #isCliExposed} 가 모든 도구를 "외부 도구" 로 오판해
+     * 화이트리스트 통제를 받아야 할 builtin 까지 통과시킨다. ApplicationReadyEvent 리스너 간 순서는
+     * 동순위(@Order 미지정 = LOWEST_PRECEDENCE)일 때 비결정적이라 {@code ServerMcpConfig} 가 먼저 도는
+     * 경우가 실제로 발생했다(운영 로그 실측: 노출 로그가 ToolRegistry 초기화 로그보다 6ms 앞섬).
+     * 소비자는 이 플래그로 초기화 완료를 확인한 뒤 노출 판정을 수행해야 한다.</p>
+     */
+    private volatile boolean builtinsRegistered = false;
+
     public ToolRegistry(@Lazy List<ToolExecutor> builtins, PlatformMetrics platformMetrics,
                         com.platform.mcp.server.McpExposurePolicy mcpExposurePolicy) {
         this.platformMetrics = platformMetrics;
@@ -46,14 +57,53 @@ public class ToolRegistry {
             builtinNames.add(t.getDefinition().name());
             register(t);
         });
+        builtinsRegistered = true;
         log.info("ToolRegistry initialized with {} built-in tool(s): {}",
                 builtins.size(),
                 builtins.stream().map(t -> t.getDefinition().name()).toList());
     }
 
+    /**
+     * CR-121: builtin 등록이 끝나 노출 판정이 신뢰 가능한 상태인지.
+     * false 인 동안 {@link #isCliExposed}/{@link #getCliExposedTools} 는 builtin 을 외부 도구로
+     * 오판하므로, MCP 노출 동기화는 true 가 될 때까지 기다려야 한다.
+     */
+    public boolean isBuiltinsRegistered() {
+        return builtinsRegistered;
+    }
+
     /** CR-110: 해당 도구 이름이 builtin(서버 내장) 인지. 외부 MCP 도구는 false → 노출 정책 미적용. */
     private boolean isBuiltinName(String name) {
         return builtinNames.contains(name);
+    }
+
+    /**
+     * CR-121: 해당 도구가 CLI 채널(/mcp/sse)에 노출되는지 — CLI/API 경로 공용 단일 판정.
+     *
+     * <p>builtin 도구는 {@code mcp.cli-exposed-tools} 화이트리스트 정책을 따르고, 외부 MCP·원격
+     * 에이전트 도구({@code RemoteToolDiscovery} 가 동적 register)는 항상 통과한다. 후자는 소비앱이
+     * 자기 도구를 등록하는 것이므로 aimbase 화이트리스트로 통제하지 않는다 — {@link #getToolDefs(ToolFilterContext)}
+     * (API 경로) 가 쓰던 규칙과 동일하며, CLI 경로가 이 메서드를 참조함으로써 CR-104/110 의
+     * "CLI 집합 = API 집합" 불변식이 원격 도구까지 실제로 성립한다.</p>
+     *
+     * <p>CR-121 이전엔 CLI 경로({@code ServerMcpConfig}/{@code ServerMcpToolDispatcher})가
+     * {@code isBuiltinName} 가드 없이 화이트리스트만 봐서, 원격 도구가 CLI 에 영영 노출되지 않았다.</p>
+     */
+    public boolean isCliExposed(ToolExecutor executor) {
+        if (executor == null) {
+            return false;
+        }
+        if (!isBuiltinName(executor.getDefinition().name())) {
+            return true;
+        }
+        return mcpExposurePolicy.resolve(executor) == com.platform.tool.McpExposureLevel.CLI;
+    }
+
+    /** CR-121: CLI 채널에 노출되는 도구 목록 (등록된 전체 중 {@link #isCliExposed} 통과분). */
+    public List<ToolExecutor> getCliExposedTools() {
+        return executors.values().stream()
+                .filter(this::isCliExposed)
+                .toList();
     }
 
     /** MCP 도구 등록 (MCPServerManager에서 호출) */
@@ -72,6 +122,11 @@ public class ToolRegistry {
     /** CR-034: 등록된 도구 이름 집합 반환 */
     public java.util.Set<String> getRegisteredToolNames() {
         return java.util.Collections.unmodifiableSet(executors.keySet());
+    }
+
+    /** CR-121: 이름으로 등록된 도구 조회 (없으면 null). MCP 실행 게이트가 노출 재검증에 사용. */
+    public ToolExecutor getExecutor(String toolName) {
+        return executors.get(toolName);
     }
 
     /** LLMRequest.tools에 전달할 모든 도구 정의 (무필터 — 디버그/요약용. 노출 정책 미적용) */
@@ -100,8 +155,8 @@ public class ToolRegistry {
                     // 단 외부 MCP 도구(MCPServerManager/RemoteToolDiscovery 가 동적 register)는 노출 정책 대상이 아니므로
                     // 항상 통과 — 정책은 aimbase builtin 의 CLI 노출 여부만 통제한다.
                     // CR-068 회귀 가드: "정책상 노출 안 되는 builtin" 만 제외하며 세션/권한 기반 추가 축소는 하지 않는다.
-                    if (isBuiltinName(name)
-                            && mcpExposurePolicy.resolve(executor) != com.platform.tool.McpExposureLevel.CLI) {
+                    // CR-121: 판정을 isCliExposed 단일 메서드로 모아 CLI 경로와 문자 그대로 같은 규칙을 쓰게 한다.
+                    if (!isCliExposed(executor)) {
                         return false;
                     }
 

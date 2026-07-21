@@ -12,6 +12,7 @@ import com.platform.tool.ToolContext;
 import com.platform.tool.ToolContractMeta;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.ToolMessageBlock;
+import com.platform.tool.ToolRegistry;
 import com.platform.tool.ToolResult;
 import com.platform.tool.ToolScope;
 import com.platform.tool.model.UnifiedToolDef;
@@ -37,7 +38,7 @@ class ServerMcpToolDispatcherTest {
     private HookDispatcher hookDispatcher;
     private TokenBucketRateLimiter rateLimiter;
     private PdfVisionResolver pdfVisionResolver;
-    private McpExposurePolicy mcpExposurePolicy;
+    private ToolRegistry toolRegistry;
     private ServerMcpToolDispatcher dispatcher;
 
     @BeforeEach
@@ -45,11 +46,12 @@ class ServerMcpToolDispatcherTest {
         hookDispatcher = mock(HookDispatcher.class);
         rateLimiter = mock(TokenBucketRateLimiter.class);
         pdfVisionResolver = mock(PdfVisionResolver.class);
-        mcpExposurePolicy = mock(McpExposurePolicy.class);
-        // CR-110: 노출 게이트 목 — team_create(내부전용)만 차단. 나머지(web_search/parse_document 등)는 통과.
-        // 이 테스트는 dispatcher 의 Hook/RateLimit/PDF 렌더링 동작 검증이 목적이며, 노출 정책 자체 검증은
-        // McpExposurePolicyTest 담당. 게이트 차단은 rejects_non_cli_exposed_tool(team_create) 케이스가 전담.
-        when(mcpExposurePolicy.isCliExposed(any(ToolExecutor.class))).thenAnswer(inv -> {
+        toolRegistry = mock(ToolRegistry.class);
+        // CR-121: 노출 게이트 소스가 McpExposurePolicy → ToolRegistry.isCliExposed 로 이동.
+        // 목 동작은 동일 — team_create(내부전용)만 차단, 나머지는 통과. 이 테스트는 dispatcher 의
+        // Hook/RateLimit/PDF 렌더링 동작 검증이 목적이며, 노출 정책 자체 검증은 McpExposurePolicyTest
+        // 와 ToolRegistryExposureFilterTest 담당.
+        when(toolRegistry.isCliExposed(any(ToolExecutor.class))).thenAnswer(inv -> {
             ToolExecutor t = inv.getArgument(0);
             return !"team_create".equals(t.getDefinition().name());
         });
@@ -60,7 +62,7 @@ class ServerMcpToolDispatcherTest {
         when(rateLimiter.tryAcquire(anyString(), anyInt()))
                 .thenReturn(TokenBucketRateLimiter.RateLimitResult.allowed(60, 59));
         dispatcher = new ServerMcpToolDispatcher(hookDispatcher, rateLimiter, pdfVisionResolver,
-                mcpExposurePolicy, 60);
+                toolRegistry, 60);
     }
 
     @Test

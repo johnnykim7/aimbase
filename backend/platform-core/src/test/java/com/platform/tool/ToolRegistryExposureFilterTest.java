@@ -66,6 +66,64 @@ class ToolRegistryExposureFilterTest {
         assertThat(names).containsExactly("web_search");
     }
 
+    /**
+     * CR-121 회귀 가드: 원격 에이전트 도구(RemoteToolDiscovery 가 동적 register)는 화이트리스트에
+     * 없어도 CLI 채널에 노출된다. 이전 구현은 CLI 경로가 화이트리스트만 봐서 소비앱 도구가
+     * /mcp/sse 에 영영 실리지 않았다.
+     */
+    @Test
+    void remote_tool_is_cli_exposed_without_whitelist() {
+        ToolRegistry r = builtinRegistry(List.of(builtinTool("web_search")));
+        ToolExecutor remote = externalTool("wes_pick_order");
+        r.register(remote);
+
+        assertThat(r.isCliExposed(remote)).isTrue();
+        assertThat(r.getCliExposedTools().stream().map(t -> t.getDefinition().name()).toList())
+                .contains("wes_pick_order", "web_search");
+    }
+
+    /** CR-121: builtin 은 여전히 화이트리스트 통제를 받는다 — 자동 노출이 builtin 까지 번지면 안 된다. */
+    @Test
+    void builtin_still_gated_by_whitelist_for_cli() {
+        ToolRegistry r = builtinRegistry(List.of(builtinTool("web_search"), builtinTool("parse_document")));
+
+        assertThat(r.getCliExposedTools().stream().map(t -> t.getDefinition().name()).toList())
+                .containsExactly("web_search");
+    }
+
+    /** CR-121: CLI 노출 집합과 API 도구 집합이 동일하다는 CR-104/110 불변식(원격 도구 포함). */
+    @Test
+    void cli_exposed_set_equals_api_tool_set() {
+        ToolRegistry r = builtinRegistry(List.of(builtinTool("web_search"), builtinTool("parse_document")));
+        r.register(externalTool("wes_pick_order"));
+
+        List<String> cli = r.getCliExposedTools().stream().map(t -> t.getDefinition().name()).sorted().toList();
+        List<String> api = r.getToolDefs(ToolFilterContext.none()).stream()
+                .map(UnifiedToolDef::name).sorted().toList();
+        assertThat(cli).isEqualTo(api);
+    }
+
+    /**
+     * CR-121 회귀 가드: registerBuiltins 전에는 builtinNames 가 비어 모든 도구가 "외부 도구"로
+     * 오판된다(화이트리스트 우회). 소비자가 이 상태를 구분할 수 있어야 MCP 노출을 미룰 수 있다.
+     *
+     * <p>운영 실측: ServerMcpConfig 가 ToolRegistry 보다 6ms 먼저 돌아 parse_document 등
+     * 비노출 대상이 /mcp/sse 에 실렸다.</p>
+     */
+    @Test
+    void builtins_not_registered_flag_signals_unreliable_exposure() {
+        ToolRegistry r = new ToolRegistry(List.of(builtinTool("parse_document")),
+                mock(PlatformMetrics.class), policy);
+
+        // 아직 registerBuiltins 전 — 플래그로 판정 불가 상태임을 알 수 있어야 한다.
+        assertThat(r.isBuiltinsRegistered()).isFalse();
+
+        r.registerBuiltins();
+        assertThat(r.isBuiltinsRegistered()).isTrue();
+        // 등록 후에는 화이트리스트 통제가 정상 작동 (parse_document 는 정책상 NONE).
+        assertThat(r.getCliExposedTools()).isEmpty();
+    }
+
     /** builtins 를 넣고 registerBuiltins 를 태워 builtinNames 를 채운 레지스트리. */
     private ToolRegistry builtinRegistry(List<ToolExecutor> builtins) {
         ToolRegistry r = new ToolRegistry(builtins, mock(PlatformMetrics.class), policy);
