@@ -45,6 +45,13 @@ public class RemoteAgentToolExecutor implements ToolExecutor {
             String result = client.callTool(toolDef.name(), input);
             log.debug("Remote tool '{}' executed via agent at {}", toolDef.name(), agentMcpUrl);
             return result;
+        } catch (MCPToolErrorException toolErr) {
+            // CR-127: 도구가 isError 로 실패한 것은 연결 문제가 아니다. TURN 폴백을 타봐야
+            // 같은 에러를 한 번 더 받을 뿐이므로 즉시 올려보내 디스패처가 errorResult 로 만든다.
+            // (삼키면 CLI 에 isError:false 로 나가 모델이 없는 데이터를 창작한다)
+            log.warn("Remote tool '{}' failed with tool error (no TURN fallback): {}",
+                    toolDef.name(), toolErr.getMessage());
+            throw toolErr;
         } catch (Exception directEx) {
             log.warn("Direct connection failed for tool '{}' (agent: {}): {}",
                     toolDef.name(), agentMcpUrl, directEx.getMessage());

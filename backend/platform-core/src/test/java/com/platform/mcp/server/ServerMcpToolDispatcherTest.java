@@ -15,6 +15,7 @@ import com.platform.tool.ToolMessageBlock;
 import com.platform.tool.ToolRegistry;
 import com.platform.tool.ToolResult;
 import com.platform.tool.ToolScope;
+import com.platform.mcp.MCPToolErrorException;
 import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.BeforeEach;
@@ -85,6 +86,34 @@ class ServerMcpToolDispatcherTest {
         assertThat(result.isError()).isFalse();
         verify(hookDispatcher, times(1)).dispatch(eq(HookEvent.PRE_TOOL_USE), any(), eq("web_search"));
         verify(hookDispatcher, times(1)).dispatch(eq(HookEvent.POST_TOOL_USE), any(), eq("web_search"));
+    }
+
+    @Test
+    void cr127_remote_tool_error_is_reported_as_isError_to_cli() {
+        // CR-127: 원격 도구가 isError 로 실패하면 MCPToolErrorException 으로 승격되어
+        // 디스패처가 errorResult 를 만든다. 이전에는 에러 텍스트가 정상 결과로 둔갑해
+        // CLI 에 isError:false 로 나갔고, 모델이 없는 데이터를 창작했다.
+        UnifiedToolDef def = new UnifiedToolDef("get_progress", "진척 조회", Map.of("type", "object"));
+        ToolExecutor failing = new ToolExecutor() {
+            @Override
+            public UnifiedToolDef getDefinition() { return def; }
+
+            @Override
+            public String execute(Map<String, Object> args) {
+                throw new MCPToolErrorException("get_progress", "date must not be null");
+            }
+        };
+
+        McpSchema.CallToolResult result = dispatcher.dispatch(failing, "get_progress", Map.of());
+
+        assertThat(result.isError()).isTrue();
+        assertThat(((McpSchema.TextContent) result.content().get(0)).text())
+                .contains("date must not be null");
+        // 실패는 POST_TOOL_USE 가 아니라 실패 훅으로 간다
+        verify(hookDispatcher, times(1))
+                .dispatch(eq(HookEvent.POST_TOOL_USE_FAILURE), any(), eq("get_progress"));
+        verify(hookDispatcher, times(0))
+                .dispatch(eq(HookEvent.POST_TOOL_USE), any(), eq("get_progress"));
     }
 
     @Test

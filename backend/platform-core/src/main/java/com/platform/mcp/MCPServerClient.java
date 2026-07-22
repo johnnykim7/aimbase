@@ -287,10 +287,22 @@ public class MCPServerClient implements AutoCloseable {
             result = callToolRead(toolName, input);
         }
 
+        String text = extractText(result);
+
+        // CR-127: isError 를 삼키지 않는다. 이전에는 로그만 남기고 텍스트를 정상 반환값처럼
+        // 돌려줘, 호출자(디스패처)가 실패를 알 수 없었다. 디스패처는 예외만 errorResult 로
+        // 변환하므로 CLI 에는 isError:false 로 나갔고, 모델은 실패를 모른 채 없는 데이터를
+        // 창작했다. 예외로 승격해 실패가 CLI 까지 실패로 전달되게 한다.
         if (Boolean.TRUE.equals(result.isError())) {
-            log.warn("MCP tool '{}' returned an error result", toolName);
+            log.warn("MCP tool '{}' returned an error result: {}", toolName, text);
+            throw new MCPToolErrorException(toolName, text);
         }
 
+        return text;
+    }
+
+    /** CallToolResult 의 TextContent 블록만 이어붙인다. */
+    private static String extractText(McpSchema.CallToolResult result) {
         return result.content().stream()
                 .filter(c -> c instanceof McpSchema.TextContent)
                 .map(c -> ((McpSchema.TextContent) c).text())

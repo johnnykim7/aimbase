@@ -87,6 +87,27 @@ class MCPToolExecutorLazyReconnectTest {
     }
 
     @Test
+    void cr127_도구_isError_는_재연결_재시도_대상이_아니다() {
+        // 도구 로직 에러(잘못된 인자 등)는 전송 장애가 아니므로 재연결해도 같은 결과다.
+        // 무의미한 재시도 없이 그대로 전파되어야 호출자가 실패로 처리할 수 있다.
+        MCPServerClient client = mock(MCPServerClient.class);
+        MCPServerManager manager = mock(MCPServerManager.class);
+
+        when(client.callTool(any(), any()))
+                .thenThrow(new MCPToolErrorException("get_opportunity", "date must not be null"));
+
+        MCPToolExecutor exec = new MCPToolExecutor(client, def, manager, "srv-1");
+
+        assertThatThrownBy(() -> exec.execute(Map.of()))
+                .isInstanceOf(MCPToolErrorException.class)
+                .hasMessageContaining("date must not be null");
+
+        // 재연결을 시도하지 않는다 (전송 장애가 아니므로)
+        verify(manager, never()).reconnect(any());
+        verify(client, times(1)).callTool(any(), any());
+    }
+
+    @Test
     void manager_null_레거시_생성자는_재시도_없음() {
         MCPServerClient stale = mock(MCPServerClient.class);
         when(stale.callTool(any(), any())).thenThrow(new RuntimeException("conn closed"));

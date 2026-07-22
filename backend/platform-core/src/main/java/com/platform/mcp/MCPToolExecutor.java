@@ -45,6 +45,10 @@ public class MCPToolExecutor implements ToolExecutor {
     public String execute(Map<String, Object> input) {
         try {
             return client.callTool(definition.name(), input);
+        } catch (MCPToolErrorException toolErr) {
+            // CR-127: 도구 로직 에러(잘못된 인자 등)는 전송 장애가 아니다.
+            // 재연결·재시도해도 같은 결과이므로 그대로 올려보내 호출자가 실패로 처리하게 한다.
+            throw toolErr;
         } catch (Exception e) {
             if (manager == null || serverId == null) {
                 throw e;
