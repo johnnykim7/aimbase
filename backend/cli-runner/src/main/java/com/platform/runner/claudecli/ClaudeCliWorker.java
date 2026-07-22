@@ -61,6 +61,12 @@ public class ClaudeCliWorker implements AutoCloseable {
     /** CR-069: 도구 노출 모드 (AIMBASE/NATIVE/HYBRID). null/미설정 시 빌더 default(AIMBASE). */
     private volatile ClaudeCliCommandBuilder.ToolMode toolMode;
     /**
+     * CR-126: AIMBASE 모드에서 봉인할 CLI built-in 도구 목록 override.
+     * null/빈 목록이면 {@link ClaudeCliCommandBuilder#DEFAULT_SEALED_NATIVE_TOOLS} 폴백.
+     * CLI 버전업으로 built-in 이 늘었을 때 재배포 없이 대응하기 위한 설정 경로.
+     */
+    private volatile List<String> sealedNativeTools;
+    /**
      * CR-104: 이 워커가 CLI 에 허용할 도구(원본 도구명) 목록. null/빈 목록이면 미적용
      * (서버 MCP endpoint 가 노출하는 전체를 그대로 사용). 설정 시 {@code mcp__aimbase-server__<tool>}
      * 형식으로 변환해 CLI {@code --allowedTools} 로 주입 → CLI 가 가져가는 도구 = API tools 목록.
@@ -98,6 +104,10 @@ public class ClaudeCliWorker implements AutoCloseable {
 
     private volatile String sessionId;       // CLI `system/init` 이벤트에서 추출
     private volatile boolean firstTurnSent;
+
+    // CR-121: 좀비 reaper 가 idle 워커를 판별하기 위한 활동 타임스탬프.
+    private final long createdAtMs = System.currentTimeMillis();
+    private volatile long lastActivityMs = System.currentTimeMillis();
 
     /** 기본 생성자 — 도구 비연결(빈 MCP 설정) 모드. 기존 호출부 호환. */
     public ClaudeCliWorker(String binaryPath, String model, String resumeSessionId,
@@ -145,6 +155,17 @@ public class ClaudeCliWorker implements AutoCloseable {
             throw new IllegalStateException("Worker already started; cannot set toolMode after start()");
         }
         this.toolMode = mode;
+    }
+
+    /**
+     * CR-126: start() 호출 전, AIMBASE 봉인 대상 built-in 목록 override.
+     * null/빈 목록이면 빌더 기본 상수 사용.
+     */
+    public void setSealedNativeTools(List<String> toolNames) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set sealedNativeTools after start()");
+        }
+        this.sealedNativeTools = (toolNames == null || toolNames.isEmpty()) ? null : List.copyOf(toolNames);
     }
 
     /**
@@ -257,6 +278,21 @@ public class ClaudeCliWorker implements AutoCloseable {
         return process != null && process.isAlive();
     }
 
+    /** CR-121: 마지막 turn 활동 시각(epoch ms) — reaper idle 판정용. */
+    public long lastActivityMs() {
+        return lastActivityMs;
+    }
+
+    /** CR-121: 워커 생성 시각(epoch ms). */
+    public long createdAtMs() {
+        return createdAtMs;
+    }
+
+    /** CR-121: 종료된 프로세스 pid(로그/진단용). */
+    public long pid() {
+        return process != null ? process.pid() : -1L;
+    }
+
     @Override
     public void close() {
         if (process == null) return;
@@ -291,6 +327,7 @@ public class ClaudeCliWorker implements AutoCloseable {
         }
         turnLock.lock();
         long start = System.currentTimeMillis();
+        lastActivityMs = start; // CR-121: reaper idle 판정 갱신
         try {
             if (first && firstTurnSent) {
                 throw new IllegalStateException("turnFirst already called on this worker");
@@ -817,6 +854,7 @@ public class ClaudeCliWorker implements AutoCloseable {
         List<String> disallowed = disallowSubagent ? List.of("Agent") : null;
         return ClaudeCliCommandBuilder.builder(binaryPath)
                 .toolMode(toolMode)               // null 이면 빌더 default(AIMBASE)
+                .sealedNativeTools(sealedNativeTools)  // CR-126: null 이면 빌더 기본 상수
                 .mcpConfigJson(injectWorkspaceHeader(mcpConfigJson, workingDirectory))
                 .allowedTools(mcpAllowed)         // CR-104: null 이면 빌더가 무시
                 .disallowedTools(disallowed)      // CR-117: null 이면 빌더가 무시

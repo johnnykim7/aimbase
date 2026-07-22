@@ -10,8 +10,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * CR-069: ClaudeCliCommandBuilder 단위 테스트.
  *
- * <p>잠금 정책 (--strict-mcp-config / --permission-mode bypassPermissions / --tools "" sealing) 이
+ * <p>잠금 정책 (--strict-mcp-config / --permission-mode bypassPermissions / 네이티브 봉인) 이
  * Worker / ClaudeCodeTool 양쪽 호출에서 자동 적용되는지 + tool_mode 별 분기 + 호출처 override 동작 검증.
+ *
+ * <p>CR-126: 네이티브 봉인은 {@code --tools ""} 가 아니라 {@code --disallowedTools <built-in...>} 이다.
+ * {@code --tools ""} 는 MCP 도구까지 함께 꺼서 AIMBASE 모드를 무력화한다.
  */
 class ClaudeCliCommandBuilderTest {
 
@@ -19,16 +22,62 @@ class ClaudeCliCommandBuilderTest {
             "{\"mcpServers\":{\"aimbase\":{\"command\":\"java\",\"args\":[\"-jar\",\"agent.jar\",\"--mcp-stdio\"]}}}";
 
     @Test
-    @DisplayName("default: AIMBASE 모드 + 잠금 정책(strict-mcp-config + bypassPermissions + --tools '' sealing)")
+    @DisplayName("default: AIMBASE 모드 + 잠금 정책(strict-mcp-config + bypassPermissions + 네이티브 봉인)")
     void default_aimbase_mode_applies_lockdown_policy() {
         List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
                 .mcpConfigJson(AIMBASE_MCP)
                 .build();
 
-        assertThat(cmd).containsSequence("--tools", "");                                  // 네이티브 봉인
+        assertThat(cmd).containsSequence("--disallowedTools", "Bash");                    // 네이티브 봉인 (CR-126)
         assertThat(cmd).containsSequence("--strict-mcp-config");                          // 글로벌 격리
         assertThat(cmd).containsSequence("--mcp-config", AIMBASE_MCP);                    // Aimbase MCP 연결
         assertThat(cmd).containsSequence("--permission-mode", "bypassPermissions");       // stdio 자동화
+    }
+
+    @Test
+    @DisplayName("CR-126: AIMBASE 봉인은 --tools '' 를 쓰지 않는다 (MCP 도구까지 꺼지는 회귀 방어)")
+    void cr126_aimbase_seal_never_emits_empty_tools_flag() {
+        List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
+                .toolMode(ClaudeCliCommandBuilder.ToolMode.AIMBASE)
+                .mcpConfigJson(AIMBASE_MCP)
+                .build();
+
+        // --tools "" 가 다시 들어오면 AIMBASE 모드에서 MCP 도구가 0개가 된다
+        assertThat(cmd).doesNotContain("--tools");
+        // built-in 은 개별 차단되어야 한다
+        assertThat(cmd).contains("--disallowedTools");
+        assertThat(cmd).containsSequence("--disallowedTools", "Write");
+        // MCP 연결은 살아있어야 한다
+        assertThat(cmd).containsSequence("--mcp-config", AIMBASE_MCP);
+    }
+
+    @Test
+    @DisplayName("CR-126: sealedNativeTools override 시 기본 상수 대신 지정 목록만 봉인")
+    void cr126_sealed_native_tools_override() {
+        List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
+                .toolMode(ClaudeCliCommandBuilder.ToolMode.AIMBASE)
+                .mcpConfigJson(AIMBASE_MCP)
+                .sealedNativeTools(List.of("Bash", "CustomNewTool"))
+                .build();
+
+        assertThat(cmd).containsSequence("--disallowedTools", "Bash");
+        assertThat(cmd).containsSequence("--disallowedTools", "CustomNewTool");
+        // 기본 상수에만 있고 override 목록엔 없는 도구는 봉인 대상이 아니다
+        assertThat(cmd).doesNotContain("WebSearch");
+    }
+
+    @Test
+    @DisplayName("CR-126: sealedNativeTools null/빈 목록이면 기본 상수로 폴백")
+    void cr126_sealed_native_tools_falls_back_to_default() {
+        List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
+                .toolMode(ClaudeCliCommandBuilder.ToolMode.AIMBASE)
+                .mcpConfigJson(AIMBASE_MCP)
+                .sealedNativeTools(List.of())
+                .build();
+
+        for (String t : ClaudeCliCommandBuilder.DEFAULT_SEALED_NATIVE_TOOLS) {
+            assertThat(cmd).containsSequence("--disallowedTools", t);
+        }
     }
 
     @Test
@@ -40,8 +89,8 @@ class ClaudeCliCommandBuilderTest {
                         "mcp__aimbase-server__builtin_grep"))
                 .build();
 
-        // --tools "" (네이티브 봉인) 는 그대로 — allowedTools 는 MCP 도구 화이트리스트로 별개 적용
-        assertThat(cmd).containsSequence("--tools", "");
+        // 네이티브 봉인(--disallowedTools)은 그대로 — allowedTools 는 MCP 도구 화이트리스트로 별개 적용
+        assertThat(cmd).containsSequence("--disallowedTools", "Bash");
         assertThat(cmd).containsSequence("--allowedTools", "mcp__aimbase-server__file_write");
         assertThat(cmd).containsSequence("--allowedTools", "mcp__aimbase-server__builtin_grep");
     }
@@ -73,7 +122,7 @@ class ClaudeCliCommandBuilderTest {
         assertThat(cmd).containsSequence("claude", "--resume", "session-A", "-p");
         assertThat(cmd).containsSequence("--input-format", "stream-json", "--output-format", "stream-json");
         assertThat(cmd).contains("--verbose");
-        assertThat(cmd).containsSequence("--tools", "");
+        assertThat(cmd).containsSequence("--disallowedTools", "Bash");   // CR-126 네이티브 봉인
         assertThat(cmd).containsSequence("--strict-mcp-config");
         assertThat(cmd).containsSequence("--permission-mode", "bypassPermissions");
         assertThat(cmd).containsSequence("--append-system-prompt", "Aimbase rules");
@@ -95,7 +144,7 @@ class ClaudeCliCommandBuilderTest {
         assertThat(cmd).startsWith("/usr/local/bin/claude", "-p", "List files in workspace");
         assertThat(cmd).containsSequence("--output-format", "json");
         assertThat(cmd).containsSequence("--max-turns", "5");
-        assertThat(cmd).containsSequence("--tools", "");                                  // AIMBASE 잠금
+        assertThat(cmd).containsSequence("--disallowedTools", "Bash");                    // AIMBASE 잠금 (CR-126)
         assertThat(cmd).containsSequence("--mcp-config", AIMBASE_MCP);
         assertThat(cmd).containsSequence("--permission-mode", "bypassPermissions");
     }
@@ -108,7 +157,8 @@ class ClaudeCliCommandBuilderTest {
                 .mcpConfigJson(AIMBASE_MCP)  // 명시해도 NATIVE 면 무시됨
                 .build();
 
-        assertThat(cmd).doesNotContain("");                                                // --tools "" 없음
+        assertThat(cmd).doesNotContain("--tools");                                        // --tools 미명시
+        assertThat(cmd).doesNotContain("--disallowedTools");                              // NATIVE 는 봉인 안 함
         assertThat(cmd).containsSequence("--strict-mcp-config");                          // 글로벌 격리는 유지
         assertThat(cmd).containsSequence("--mcp-config", "{\"mcpServers\":{}}");          // MCP 빈 설정으로 강제
     }

@@ -39,6 +39,20 @@ public class RunnerProperties {
     /** CR-072: 서버 측 MCP endpoint 라우팅용 agent-id. */
     private String serverMcpAgentId;
 
+    /**
+     * CR-126: AIMBASE 모드에서 봉인할 CLI built-in 도구 목록 (CSV).
+     *
+     * <p>비어있으면 {@code ClaudeCliCommandBuilder.DEFAULT_SEALED_NATIVE_TOOLS} 를 쓴다.
+     * CLI 버전업으로 새 built-in 이 추가되면 이 설정으로 재배포 없이 봉인 범위를 넓힐 수 있다.
+     * 예: {@code aimbase.runner.sealed-native-tools=Bash,Edit,Write,NewTool}
+     */
+    private String sealedNativeTools;
+
+    /** CR-121: 좀비 reaper sweep 주기(초). 0 이하면 reaper 비활성. 기본 300s(5분). */
+    private int reaperIntervalSeconds = 300;
+    /** CR-121: idle 임계(초) — 마지막 turn 활동 후 이 시간 넘게 놀고 있는 워커를 회수. 기본 900s(15분). */
+    private int reaperIdleThresholdSeconds = 900;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getApiKey() { return apiKey; }
@@ -62,4 +76,25 @@ public class RunnerProperties {
 
     public String getServerMcpAgentId() { return serverMcpAgentId; }
     public void setServerMcpAgentId(String serverMcpAgentId) { this.serverMcpAgentId = serverMcpAgentId; }
+
+    public String getSealedNativeTools() { return sealedNativeTools; }
+    public void setSealedNativeTools(String sealedNativeTools) { this.sealedNativeTools = sealedNativeTools; }
+
+    /**
+     * CR-126: CSV 설정을 목록으로 파싱. 미설정/공백이면 null → 빌더 기본 상수 폴백.
+     */
+    public java.util.List<String> resolveSealedNativeTools() {
+        if (sealedNativeTools == null || sealedNativeTools.isBlank()) return null;
+        java.util.List<String> parsed = java.util.Arrays.stream(sealedNativeTools.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        return parsed.isEmpty() ? null : parsed;
+    }
+
+    public int getReaperIntervalSeconds() { return reaperIntervalSeconds; }
+    public void setReaperIntervalSeconds(int reaperIntervalSeconds) { this.reaperIntervalSeconds = reaperIntervalSeconds; }
+
+    public int getReaperIdleThresholdSeconds() { return reaperIdleThresholdSeconds; }
+    public void setReaperIdleThresholdSeconds(int reaperIdleThresholdSeconds) { this.reaperIdleThresholdSeconds = reaperIdleThresholdSeconds; }
 }

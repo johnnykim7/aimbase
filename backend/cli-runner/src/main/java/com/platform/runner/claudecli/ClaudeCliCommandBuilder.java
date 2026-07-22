@@ -43,6 +43,34 @@ public final class ClaudeCliCommandBuilder {
         HYBRID
     }
 
+    /**
+     * CR-126: AIMBASE 모드에서 봉인할 CLI built-in 도구 기본 목록.
+     *
+     * <p>이전에는 {@code --tools ""} 하나로 봉인했으나, CLI 2.1.x 의 {@code --tools} 는
+     * built-in 뿐 아니라 <b>MCP 도구까지 함께</b> 제한한다 (CLI --help: <i>"Use \"\" to
+     * disable all tools"</i>). 그 결과 AIMBASE 모드에서 Aimbase MCP 도구가 항상 0개였고,
+     * 도구 없이도 요청이 200 으로 끝나 모델이 날조한 응답이 그대로 나갔다.
+     *
+     * <p>네이티브만 봉인하고 MCP 를 살리려면 {@code --disallowedTools} 로 built-in 을
+     * 개별 차단해야 한다. 실측 대조:
+     * <pre>
+     *   --tools ""                       → MCP 차단 / 네이티브 차단   (의도 불일치)
+     *   --allowedTools mcp__server__*    → MCP 허용 / 네이티브 허용   (봉인 실패)
+     *   --disallowedTools Bash,Edit,...  → MCP 허용 / 네이티브 차단   (의도 일치)
+     * </pre>
+     *
+     * <p>CLI 버전업으로 built-in 이 늘면 이 상수만으로는 새 도구가 열린 채 남는다.
+     * 운영에서는 {@code aimbase.runner.sealed-native-tools} 로 override 할 수 있고,
+     * 이 상수는 설정이 비었을 때의 폴백이다.
+     */
+    public static final List<String> DEFAULT_SEALED_NATIVE_TOOLS = List.of(
+            "Task", "Bash", "CronCreate", "CronDelete", "CronList", "DesignSync",
+            "Edit", "EnterWorktree", "ExitWorktree", "Monitor", "NotebookEdit",
+            "PushNotification", "Read", "RemoteTrigger", "ReportFindings",
+            "ScheduleWakeup", "SendMessage", "Skill", "TaskCreate", "TaskGet",
+            "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "ToolSearch",
+            "WebFetch", "WebSearch", "Workflow", "Write");
+
     private final String executable;
 
     // 모드/정책
@@ -50,7 +78,9 @@ public final class ClaudeCliCommandBuilder {
     private String mcpConfigJson;       // AIMBASE/HYBRID 시 사용. NATIVE 면 무시
     private boolean strictMcpConfig = true;        // 잠금 정책: 글로벌 ~/.claude 격리
     private String permissionMode = "bypassPermissions";  // 잠금: stdio 자동화 환경
-    private boolean sealNativeTools = true;        // AIMBASE 시 --tools "" 적용 여부
+    private boolean sealNativeTools = true;        // AIMBASE 시 네이티브 도구 봉인 여부
+    // CR-126: 봉인 대상 목록. 비면 DEFAULT_SEALED_NATIVE_TOOLS 폴백
+    private List<String> sealedNativeTools = null;
 
     // 호출 모드 (입출력 형태)
     private boolean streamJson = false;            // Worker 경로
@@ -107,6 +137,15 @@ public final class ClaudeCliCommandBuilder {
 
     public ClaudeCliCommandBuilder sealNativeTools(boolean v) {
         this.sealNativeTools = v;
+        return this;
+    }
+
+    /**
+     * CR-126: 봉인할 built-in 도구 목록 override.
+     * null/빈 목록이면 {@link #DEFAULT_SEALED_NATIVE_TOOLS} 를 쓴다.
+     */
+    public ClaudeCliCommandBuilder sealedNativeTools(List<String> tools) {
+        this.sealedNativeTools = tools;
         return this;
     }
 
@@ -176,8 +215,12 @@ public final class ClaudeCliCommandBuilder {
 
     /**
      * --tools flag (도구 셋 자체 제한). null 이면 미명시.
-     * 빈 문자열은 "네이티브 도구 전면 봉인" 의미로 해석 — sealNativeTools 와 동일 효과지만
-     * 호출처가 명시적으로 컨트롤하고 싶을 때 사용.
+     *
+     * <p><b>주의 (CR-126)</b>: 빈 문자열을 넘기면 CLI 가 <i>모든</i> 도구를 끈다 —
+     * built-in 뿐 아니라 <b>MCP 도구까지</b> 사라진다. "네이티브만 봉인" 이 목적이라면
+     * 이 메서드가 아니라 {@link #sealNativeTools(boolean)} 를 쓸 것.
+     * AIMBASE 모드에서 여기에 ""/"none" 을 넘기면 Aimbase MCP 도구가 0개가 되고,
+     * 그 상태로도 요청은 200 으로 끝나 모델이 날조한 응답이 나간다.
      */
     public ClaudeCliCommandBuilder toolsSpec(String spec) {
         this.toolsSpec = spec;
@@ -249,7 +292,7 @@ public final class ClaudeCliCommandBuilder {
 
     /**
      * 도구 모드별 flag 적용:
-     * - AIMBASE: --tools "" (네이티브 봉인) + --strict-mcp-config + --mcp-config <json>
+     * - AIMBASE: --disallowedTools <built-in...> (네이티브 봉인, CR-126) + --strict-mcp-config + --mcp-config <json>
      * - NATIVE: MCP 미연결 — --strict-mcp-config + --mcp-config {빈} (글로벌 격리만 적용)
      * - HYBRID: 네이티브 + MCP 양쪽 (--tools 봉인 안 함, MCP 는 연결)
      * 호출처가 toolsSpec/allowedTools/disallowedTools 를 명시하면 추가 적용.
@@ -261,8 +304,17 @@ public final class ClaudeCliCommandBuilder {
             cmd.add("--tools");
             cmd.add(toolsSpec == null ? "" : toolsSpec);
         } else if (toolMode == ToolMode.AIMBASE && sealNativeTools) {
-            cmd.add("--tools");
-            cmd.add("");
+            // CR-126: --tools "" 는 MCP 도구까지 함께 끄므로 쓰지 않는다.
+            // built-in 을 --disallowedTools 로 개별 차단해야 MCP 도구가 살아남는다.
+            List<String> seal = (sealedNativeTools == null || sealedNativeTools.isEmpty())
+                    ? DEFAULT_SEALED_NATIVE_TOOLS
+                    : sealedNativeTools;
+            for (String t : seal) {
+                if (t != null && !t.isBlank()) {
+                    cmd.add("--disallowedTools");
+                    cmd.add(t.trim());
+                }
+            }
         }
         // NATIVE/HYBRID 는 기본적으로 --tools 미명시 → CLI 본체 도구 모두 사용 가능
 

@@ -104,9 +104,12 @@ deploy_agents() {
   scp_send backend/aimbase-agent/Dockerfile "$SERVER:$REMOTE/backend/aimbase-agent/Dockerfile"
   scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
 
-  # 모든 러너가 같은 이미지를 쓰므로 build 는 1회, 재기동만 전체에 적용한다.
-  echo "━━━ 러너 전체 재기동: $AGENT_SERVICES ━━━"
-  ssh_run "cd $REMOTE && docker compose build aimbase-agent && docker compose up -d --force-recreate $AGENT_SERVICES"
+  # 러너마다 이미지가 별도로 명명된다 — compose 에 image: 미지정이라 서비스명 기반으로
+  # aimbase-aimbase-agent / -wes / -workmap / -axopm 4개가 각각 만들어진다.
+  # 따라서 build 를 서비스별로 전부 돌려야 한다. 1개만 빌드하면 나머지는 옛 이미지로
+  # 재기동되어 새 jar 가 반영되지 않는다(CR-124 transport 불일치가 이 경로로 발생).
+  echo "━━━ 러너 전체 재빌드/재기동: $AGENT_SERVICES ━━━"
+  ssh_run "cd $REMOTE && docker compose build $AGENT_SERVICES && docker compose up -d --force-recreate $AGENT_SERVICES"
   echo "✅ Agent 전체 완료 → $AGENT_SERVICES"
 }
 

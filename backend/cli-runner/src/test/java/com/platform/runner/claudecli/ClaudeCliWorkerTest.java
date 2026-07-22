@@ -237,7 +237,9 @@ class ClaudeCliWorkerTest {
         worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
 
         String args = Files.readString(argsDump);
-        assertThat(args).doesNotContain("--disallowedTools");
+        // CR-126 이후 AIMBASE 봉인이 --disallowedTools 로 built-in 을 차단하므로 플래그 자체는 존재한다.
+        // 이 테스트의 관심사는 "Agent(서브에이전트) 가 차단되지 않는가" 이므로 그것만 검증한다.
+        assertThat(args).doesNotContain("--disallowedTools Agent");
     }
 
     @Test
