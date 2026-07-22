@@ -62,13 +62,18 @@ public final class ClaudeCliCommandBuilder {
      * <p>CLI 버전업으로 built-in 이 늘면 이 상수만으로는 새 도구가 열린 채 남는다.
      * 운영에서는 {@code aimbase.runner.sealed-native-tools} 로 override 할 수 있고,
      * 이 상수는 설정이 비었을 때의 폴백이다.
+     *
+     * <p><b>{@code ToolSearch} 는 의도적으로 제외한다.</b> 이 환경의 MCP 도구는 전부
+     * deferred(지연 로딩) 라서 모델이 {@code ToolSearch} 로 스키마를 불러와야 호출할 수 있다.
+     * 봉인하면 MCP 도구 110개 전체에 접근할 길이 사라져 {@code --tools ""} 와 같은 증상이 된다.
+     * 실측: {@code --disallowedTools ToolSearch} 하나만으로 MCP 도구가 전부 사라짐.
      */
     public static final List<String> DEFAULT_SEALED_NATIVE_TOOLS = List.of(
             "Task", "Bash", "CronCreate", "CronDelete", "CronList", "DesignSync",
             "Edit", "EnterWorktree", "ExitWorktree", "Monitor", "NotebookEdit",
             "PushNotification", "Read", "RemoteTrigger", "ReportFindings",
             "ScheduleWakeup", "SendMessage", "Skill", "TaskCreate", "TaskGet",
-            "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "ToolSearch",
+            "TaskList", "TaskOutput", "TaskStop", "TaskUpdate",
             "WebFetch", "WebSearch", "Workflow", "Write");
 
     private final String executable;

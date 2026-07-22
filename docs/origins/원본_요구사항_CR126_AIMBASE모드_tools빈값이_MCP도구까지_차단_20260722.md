@@ -144,6 +144,33 @@ TaskList, TaskOutput, TaskStop, TaskUpdate, ToolSearch, WebFetch, WebSearch,
 Workflow, Write
 ```
 
+### 5-1. 배포 후 발견 — `ToolSearch` 는 봉인하면 안 된다
+
+`--disallowedTools` 로 바꿔 배포했더니 봉인은 정확히 걸렸지만(`tools=[Glob, Grep]`)
+MCP 도구는 여전히 0개였다. 봉인 개수를 줄여가며 이분 탐색한 결과:
+
+| 봉인 조합 | MCP 도구 |
+|-----------|---------|
+| 29개 전체 | ❌ 사라짐 |
+| 3개 (Bash/Edit/Write) | ✅ 정상 |
+| `Task` 만 | ✅ 정상 |
+| `Read` 만 | ✅ 정상 |
+| **`ToolSearch` 만** | ❌ **사라짐** |
+
+**이 환경의 MCP 도구는 전부 deferred(지연 로딩)** 라서 모델이 `ToolSearch` 로
+스키마를 불러와야 호출할 수 있다. `ToolSearch` 를 막으면 MCP 도구 110개 전체에
+접근할 길이 사라져 `--tools ""` 와 똑같은 증상이 된다.
+
+`ToolSearch` 를 제외한 28개 봉인으로 최종 확인:
+
+```
+| mcp__aimbase-server__bash | 성공 → 호스트명 4f73e458486c (api 컨테이너) |
+| 네이티브 Bash             | 차단 → 도구 미등록으로 실행 불가            |
+```
+
+→ `DEFAULT_SEALED_NATIVE_TOOLS` 에서 `ToolSearch` 제외.
+회귀 방어 테스트 `cr126_toolsearch_must_not_be_sealed` 추가.
+
 ### 결정 필요 사항
 
 1. **봉인 범위** — built-in 전체를 막을지, `Bash/Edit/Write` 등 위험군만 막을지

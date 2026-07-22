@@ -52,6 +52,21 @@ class ClaudeCliCommandBuilderTest {
     }
 
     @Test
+    @DisplayName("CR-126: ToolSearch 는 봉인하지 않는다 — deferred MCP 도구 로딩 통로")
+    void cr126_toolsearch_must_not_be_sealed() {
+        // MCP 도구가 전부 deferred 라서 ToolSearch 를 막으면 110개 전체에 접근 불가.
+        // --tools "" 와 동일한 증상이 되므로 기본 봉인 목록에 절대 들어가면 안 된다.
+        assertThat(ClaudeCliCommandBuilder.DEFAULT_SEALED_NATIVE_TOOLS)
+                .doesNotContain("ToolSearch");
+
+        List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
+                .toolMode(ClaudeCliCommandBuilder.ToolMode.AIMBASE)
+                .mcpConfigJson(AIMBASE_MCP)
+                .build();
+        assertThat(cmd).doesNotContainSequence("--disallowedTools", "ToolSearch");
+    }
+
+    @Test
     @DisplayName("CR-126: sealedNativeTools override 시 기본 상수 대신 지정 목록만 봉인")
     void cr126_sealed_native_tools_override() {
         List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
