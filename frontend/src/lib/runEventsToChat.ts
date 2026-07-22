@@ -17,6 +17,12 @@ export type ChatFlowBlock =
       connection?: string;
       /** "input": LLM_CALL 에 우리가 넣은 입력 프롬프트. undefined/"output": 모델 응답. */
       role?: "input" | "output";
+      /**
+       * CR-120: 청크 인덱스(LLM_REQUEST/RESPONSE payload.iteration). LARGE_INPUT 스텝은
+       * 한 step_id 안에서 청크마다 request/response 를 발행하므로, 이 값으로 청크 카드를 묶는다.
+       * undefined = 청크 단위가 아닌 일반 블록.
+       */
+      chunkIndex?: number;
     }
   | {
       kind: "tool_use";
@@ -27,7 +33,25 @@ export type ChatFlowBlock =
       /** AGENT_CALL 안에서 에이전트가 자율로 부른 도구 (subagent_run_id 채워짐) */
       isAgent: boolean;
       durationMs?: number;
+      /** CR-120: 청크 인덱스 (위 text 블록과 동일 용도) */
+      chunkIndex?: number;
     };
+
+/**
+ * CR-120: LARGE_INPUT 한 청크(페이지 N~M)의 처리 단위.
+ * BE 가 청크마다 LLM_REQUEST(프롬프트)+LLM_RESPONSE(결과/실패)를 같은 step_id·동일 iteration
+ * 으로 발행한다. FE 는 iteration(=chunkIndex)별로 묶어 "청크 N/M (페이지) ✓완료" 카드를 만든다.
+ */
+export interface ChatFlowChunk {
+  /** 0-based 청크 인덱스 */
+  index: number;
+  blocks: ChatFlowBlock[];
+  status: "running" | "ok" | "failed";
+  /** "1-20" 등 — BE 본문 "(페이지 X-Y" 에서 파싱 */
+  pageRange?: string;
+  /** 전체 청크 수 — BE 본문 "청크 N/M" 에서 파싱 (진행률 표시용) */
+  totalChunks?: number;
+}
 
 /**
  * FOREACH 컨테이너 step 의 한 iteration(반복 #N).
@@ -61,6 +85,11 @@ export interface ChatFlowIteration {
    * 텍스트가 없으므로, 이 구조 신호(도구 후 텍스트 0 + 부모 종료)로 빈응답을 추정해 경고 배지.
    */
   emptyResponseSuspected?: boolean;
+  /**
+   * CR-120: 이 반복(=LARGE_INPUT step)이 청크 단위로 처리됐으면, 청크 카드들.
+   * blocks 를 chunkIndex 별로 묶은 것. 있으면 FE 는 blocks 대신 chunks 를 청크 카드로 렌더한다.
+   */
+  chunks?: ChatFlowChunk[];
 }
 
 export interface ChatFlowStep {
@@ -76,6 +105,11 @@ export interface ChatFlowStep {
   connection?: string;
   /** FOREACH 자식(반복) 그룹 — `부모[index]` step_id 이벤트를 index 별로 묶은 것 */
   iterations?: ChatFlowIteration[];
+  /**
+   * CR-120: FOREACH 위임 없이 LARGE_INPUT step 단독으로 청크를 처리하는 경우의 청크 카드.
+   * (FOREACH 안이면 chunks 는 ChatFlowIteration 에 붙는다.)
+   */
+  chunks?: ChatFlowChunk[];
 }
 
 function str(v: unknown): string | undefined {
@@ -132,7 +166,10 @@ export function runEventsToChat(
         if (connection && !s.connection) s.connection = connection;
         const text = str(e.prompt_text);
         if (text) {
-          s.blocks.push({ kind: "text", text, model, connection, role: "input" });
+          s.blocks.push({
+            kind: "text", text, model, connection, role: "input",
+            chunkIndex: e.iteration ?? undefined,
+          });
         }
         break;
       }
@@ -145,7 +182,10 @@ export function runEventsToChat(
         if (connection && !s.connection) s.connection = connection;
         const text = str(e.response_text);
         if (text) {
-          s.blocks.push({ kind: "text", text, model, connection, role: "output" });
+          s.blocks.push({
+            kind: "text", text, model, connection, role: "output",
+            chunkIndex: e.iteration ?? undefined,
+          });
         }
         break;
       }
@@ -219,6 +259,79 @@ function parseChildStepId(stepId: string): { parentId: string; index: number } |
   // body id 가 명시되지 않은 기본 케이스: `.body` 접미사를 벗겨 컨테이너 id 로 환원.
   const parentId = m[1].replace(/\.body$/, "");
   return { parentId, index: Number(m[2]) };
+}
+
+/* ── CR-120: 청크 그룹핑 ─────────────────────────────────────────────────────
+ *
+ * LARGE_INPUT step 은 한 step_id 안에서 청크마다 LLM_REQUEST(프롬프트)+LLM_RESPONSE
+ * (결과/실패)를 발행하며, payload.iteration = 청크 인덱스(또는 Reduce 신호 9000/9001)다.
+ * 블록의 chunkIndex 로 묶어 "청크 N/M (페이지) ✓완료" 카드를 만든다.
+ *
+ * 본문 텍스트(BE LargeInputStepExecutor 가 박은 이모지 헤더)에서 전체 청크 수(M)와
+ * 페이지 범위를 파싱한다 — step_id 에는 그 메타가 없으므로 본문이 유일한 소스.
+ */
+
+/** "청크 3/13 (페이지 41-60" 형태에서 {n, total, pageRange} 파싱. 못 찾으면 빈 객체. */
+function parseChunkMeta(text: string): { n?: number; total?: number; pageRange?: string } {
+  const out: { n?: number; total?: number; pageRange?: string } = {};
+  const m = /청크\s+(\d+)\/(\d+)/.exec(text);
+  if (m) {
+    out.n = Number(m[1]);
+    out.total = Number(m[2]);
+  }
+  const pm = /페이지\s+([\d-]+)/.exec(text);
+  if (pm) out.pageRange = pm[1];
+  return out;
+}
+
+/** 한 청크 그룹의 상태 — output(role!=="input") 텍스트가 있으면 ok, 실패 본문이면 failed, 아니면 running. */
+function chunkStatusOf(blocks: ChatFlowBlock[]): "running" | "ok" | "failed" {
+  const outputs = blocks.filter((b) => b.kind === "text" && b.role === "output");
+  // 실패/마지막-실패 본문(❌)이 있으면 failed. 재시도(⚠️)는 아직 진행으로 본다.
+  const failed = outputs.some((b) => b.kind === "text" && b.text.startsWith("❌"));
+  if (failed) return "failed";
+  if (outputs.length > 0) return "ok";
+  return "running";
+}
+
+/**
+ * step 의 블록 중 chunkIndex 가 있는 것들을 청크 카드로 묶는다.
+ * chunkIndex 없는 블록은 그대로 남겨(plain) 반환한다(예: Reduce 본문은 iteration 9000+ 라
+ * 별개 청크로 잡히지 않게 normalChunk 임계값으로 거른다).
+ * @returns { plain: 청크 아닌 블록, chunks: 청크 카드(인덱스 오름차순) }
+ */
+function groupBlocksIntoChunks(blocks: ChatFlowBlock[]): {
+  plain: ChatFlowBlock[];
+  chunks: ChatFlowChunk[];
+} {
+  const plain: ChatFlowBlock[] = [];
+  const byChunk = new Map<number, ChatFlowBlock[]>();
+  for (const b of blocks) {
+    const ci = b.chunkIndex;
+    // Reduce 진행 신호(9000/9001)는 청크가 아니라 step 본문으로 둔다.
+    if (ci == null || ci >= 9000) {
+      plain.push(b);
+      continue;
+    }
+    (byChunk.get(ci) ?? byChunk.set(ci, []).get(ci)!).push(b);
+  }
+  if (byChunk.size === 0) return { plain: blocks, chunks: [] };
+
+  const chunks: ChatFlowChunk[] = [];
+  for (const [index, blks] of byChunk) {
+    // 본문에서 total/pageRange 파싱(요청/응답 본문 어디든 들어있음).
+    let total: number | undefined;
+    let pageRange: string | undefined;
+    for (const b of blks) {
+      if (b.kind !== "text") continue;
+      const meta = parseChunkMeta(b.text);
+      if (meta.total != null) total = meta.total;
+      if (meta.pageRange) pageRange = meta.pageRange;
+    }
+    chunks.push({ index, blocks: blks, status: chunkStatusOf(blks), pageRange, totalChunks: total });
+  }
+  chunks.sort((a, b) => a.index - b.index);
+  return { plain, chunks };
 }
 
 /**
@@ -299,11 +412,35 @@ function foldForeachIterations(steps: ChatFlowStep[]): ChatFlowStep[] {
     });
   }
 
+  // CR-120: FOREACH 위임 없이 LARGE_INPUT 단독 step 도 청크로 묶는다(컨테이너 본문 직접 보유).
+  for (const s of result) {
+    if (s.iterations) continue; // FOREACH 컨테이너는 아래 루프에서 iteration 별로 처리
+    const grouped = groupBlocksIntoChunks(s.blocks);
+    if (grouped.chunks.length > 0) {
+      s.blocks = grouped.plain;
+      s.chunks = grouped.chunks;
+    }
+  }
+
   for (const s of result) {
     if (!s.iterations) continue;
     s.iterations.sort((a, b) => a.index - b.index);
     // 자식엔 STEP_END 가 없으므로 부모 종료 상태/최종 응답 도착으로 status 보정.
     for (const it of s.iterations) {
+      // CR-120: 이 반복이 청크 단위(LARGE_INPUT)면 청크 카드로 묶고, 상태를 청크 기준으로 안정화.
+      //   기존 inferIterationStatus 는 "마지막 블록이 input 이면 running" 이라 청크가 병렬로
+      //   섞여 들어오면 ok→running 깜빡임을 유발했다 → 청크 완료/전체 기준으로 대체.
+      const grouped = groupBlocksIntoChunks(it.blocks);
+      if (grouped.chunks.length > 0) {
+        it.blocks = grouped.plain;
+        it.chunks = grouped.chunks;
+        const done = grouped.chunks.filter((c) => c.status !== "running").length;
+        const total = grouped.chunks[0]?.totalChunks ?? grouped.chunks.length;
+        // 부모(FOREACH/LARGE_INPUT)가 끝났으면 그 상태로 마감, 아니면 청크 완료 여부로 판정.
+        if (s.status !== "running") it.status = s.status;
+        else it.status = done >= total && total > 0 ? "ok" : "running";
+        continue; // 청크 모드는 아래 일반 보정/빈응답 추정을 건너뛴다.
+      }
       it.status = inferIterationStatus(it.status, s.status, it.blocks);
       const last = it.blocks[it.blocks.length - 1];
       // CR-117: running 자식의 대기 상태 — "모델 응답 대기 중" vs "도구 실행 중".

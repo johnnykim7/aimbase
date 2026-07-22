@@ -41,8 +41,19 @@ public class ClaudeCliWorkerPool {
     private final Duration acquireTimeout;
     /** CR-069: spawn 시 default toolMode (application.yml 의 platform.llm.anthropic-cli.tool-mode). */
     private final ClaudeCliCommandBuilder.ToolMode defaultToolMode;
+    /**
+     * CR-126: AIMBASE 봉인 대상 built-in 목록 override (aimbase.runner.sealed-native-tools).
+     * null/빈 목록이면 {@link ClaudeCliCommandBuilder#DEFAULT_SEALED_NATIVE_TOOLS} 폴백.
+     * 생성자 시그니처를 늘리지 않도록 setter 주입 — 미설정이면 현행 기본 동작.
+     */
+    private volatile List<String> sealedNativeTools;
 
     private final Map<String, RunWorkers> runs = new ConcurrentHashMap<>();
+
+    // CR-121: 좀비 reaper — idle 워커 자동 회수. sweep 주기/idle 임계는 생성자 인자(설정).
+    private final Duration reaperInterval;
+    private final Duration reaperIdleThreshold;
+    private volatile java.util.concurrent.ScheduledExecutorService reaper;
 
     public ClaudeCliWorkerPool(WorkerFactory workerFactory, int maxWorkersPerRun,
                                Duration acquireTimeout) {
@@ -52,10 +63,93 @@ public class ClaudeCliWorkerPool {
     public ClaudeCliWorkerPool(WorkerFactory workerFactory, int maxWorkersPerRun,
                                Duration acquireTimeout,
                                ClaudeCliCommandBuilder.ToolMode defaultToolMode) {
+        this(workerFactory, maxWorkersPerRun, acquireTimeout, defaultToolMode,
+                Duration.ofMinutes(5), Duration.ofMinutes(15));
+    }
+
+    /** CR-121: reaper 주기/idle 임계까지 명시하는 풀 생성자. */
+    public ClaudeCliWorkerPool(WorkerFactory workerFactory, int maxWorkersPerRun,
+                               Duration acquireTimeout,
+                               ClaudeCliCommandBuilder.ToolMode defaultToolMode,
+                               Duration reaperInterval, Duration reaperIdleThreshold) {
         this.workerFactory = workerFactory;
         this.maxWorkersPerRun = maxWorkersPerRun > 0 ? maxWorkersPerRun : 5;
         this.acquireTimeout = acquireTimeout != null ? acquireTimeout : Duration.ofSeconds(60);
         this.defaultToolMode = defaultToolMode;
+        this.reaperInterval = reaperInterval != null ? reaperInterval : Duration.ofMinutes(5);
+        this.reaperIdleThreshold = reaperIdleThreshold != null ? reaperIdleThreshold : Duration.ofMinutes(15);
+        startReaper();
+    }
+
+    /**
+     * CR-126: AIMBASE 봉인 대상 built-in 목록 설정 (설정 override).
+     * null/빈 목록이면 빌더 기본 상수를 쓴다.
+     */
+    public void setSealedNativeTools(List<String> toolNames) {
+        this.sealedNativeTools = (toolNames == null || toolNames.isEmpty()) ? null : List.copyOf(toolNames);
+    }
+
+    /** CR-121: idle 좀비 워커를 주기적으로 회수하는 데몬 스레드 시작. interval<=0 이면 비활성. */
+    private void startReaper() {
+        if (reaperInterval.toMillis() <= 0) {
+            log.info("CR-121: worker reaper disabled (interval<=0)");
+            return;
+        }
+        this.reaper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "cli-worker-reaper");
+            t.setDaemon(true);
+            return t;
+        });
+        long periodMs = reaperInterval.toMillis();
+        reaper.scheduleWithFixedDelay(this::reapIdleWorkers, periodMs, periodMs, TimeUnit.MILLISECONDS);
+        log.info("CR-121: worker reaper started (interval={}, idleThreshold={})",
+                reaperInterval, reaperIdleThreshold);
+    }
+
+    /**
+     * CR-121: idle 임계를 넘은 워커(또는 이미 죽은 프로세스)를 회수한다. 운영에서 취소/누락 경로의
+     * 워커가 어느 cleanup 으로도 안 닫혀 좀비로 누적되던 것을 주기적으로 정리한다(매번 수동 kill 근절).
+     */
+    void reapIdleWorkers() {
+        long now = System.currentTimeMillis();
+        long idleMs = reaperIdleThreshold.toMillis();
+        int reaped = 0;
+        for (Map.Entry<String, RunWorkers> e : runs.entrySet()) {
+            RunWorkers rw = e.getValue();
+            List<ClaudeCliWorker> snapshot;
+            synchronized (rw) {
+                snapshot = new ArrayList<>(rw.forks);
+            }
+            for (ClaudeCliWorker w : snapshot) {
+                boolean dead = !w.isAlive();
+                boolean idle = (now - w.lastActivityMs()) > idleMs;
+                if (dead || idle) {
+                    try {
+                        w.close();
+                    } catch (Exception ce) {
+                        log.warn("CR-121: reaper close 실패 run={} pid={}: {}", e.getKey(), w.pid(), ce.getMessage());
+                    }
+                    synchronized (rw) {
+                        rw.forks.remove(w);
+                        rw.branchWorkers.values().remove(w);
+                        if (rw.main == w) rw.main = null;
+                    }
+                    reaped++;
+                    log.info("CR-121: reaped {} worker run={} pid={} idleMs={}",
+                            dead ? "dead" : "idle", e.getKey(), w.pid(), now - w.lastActivityMs());
+                }
+            }
+            synchronized (rw) {
+                if (rw.forks.isEmpty()) runs.remove(e.getKey(), rw);
+            }
+        }
+        if (reaped > 0) log.info("CR-121: reaper sweep complete, reaped {} workers", reaped);
+    }
+
+    /** CR-121: 풀 종료 시 reaper 정지(테스트/셧다운 누수 방지). */
+    public void shutdownReaper() {
+        java.util.concurrent.ScheduledExecutorService r = this.reaper;
+        if (r != null) r.shutdownNow();
     }
 
     /**
@@ -133,6 +227,7 @@ public class ClaudeCliWorkerPool {
                 if (effectiveMode != null) {
                     worker.setToolMode(effectiveMode);
                 }
+                worker.setSealedNativeTools(sealedNativeTools); // CR-126: null 이면 빌더 기본 상수
                 if (allowedTools != null && !allowedTools.isEmpty()) {
                     worker.setAllowedTools(allowedTools);
                 }
@@ -218,6 +313,7 @@ public class ClaudeCliWorkerPool {
         acquireSlot(rw, runId);
         try {
             ClaudeCliWorker worker = workerFactory.create(model, parentSessionId, true, configDir);
+            worker.setSealedNativeTools(sealedNativeTools); // CR-126: main 과 동일 봉인 정책 적용
             worker.start();
             synchronized (rw) {
                 rw.forks.add(worker);
@@ -286,6 +382,26 @@ public class ClaudeCliWorkerPool {
             }
         }
         log.info("Run '{}': shutdown complete, closed {} workers", runId, all.size());
+    }
+
+    /**
+     * CR-121: {@code prefix} 로 시작하는 모든 run 키의 워커를 일괄 종료한다. LARGE_INPUT 은 청크/재시도마다
+     * 키가 {@code {parentRunId}-li-...} 로 달라 {@link #shutdownForRun}(정확 일치)로는 한 번에 못 닫는다.
+     * 부모 runId 접두사 하나로 그 run 의 모든 청크 워커를 회수한다.
+     *
+     * @return 종료한 run(워커 그룹) 수
+     */
+    public int shutdownForRunPrefix(String prefix) {
+        if (prefix == null || prefix.isBlank()) return 0;
+        int groups = 0;
+        for (String key : new ArrayList<>(runs.keySet())) {
+            if (key.startsWith(prefix)) {
+                shutdownForRun(key);
+                groups++;
+            }
+        }
+        if (groups > 0) log.info("Prefix '{}': shutdown complete, closed {} run groups", prefix, groups);
+        return groups;
     }
 
     public int activeWorkerCount(String runId) {

@@ -58,6 +58,9 @@ public class LargeInputStepExecutor implements StepExecutor {
     private final com.platform.largeinput.PopplerPdfRenderer popplerRenderer;
     private final WorkspaceProperties workspaceProperties;
     private final com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder;
+    // CR-121: 청크 worker 를 워크플로우 run 에 연결(강제 취소가 역추적해 kill) + 취소 표식 조회.
+    private final com.platform.agent.ActiveCliWorkerRegistry activeCliWorkerRegistry;
+    private final com.platform.workflow.WorkflowCancellationRegistry cancelRegistry;
 
     @Value("${largeinput.policy:auto}")
     private String systemPolicy;
@@ -86,7 +89,9 @@ public class LargeInputStepExecutor implements StepExecutor {
                                   MCPRagClient ragClient,
                                   com.platform.largeinput.PopplerPdfRenderer popplerRenderer,
                                   WorkspaceProperties workspaceProperties,
-                                  com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder) {
+                                  com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder,
+                                  com.platform.agent.ActiveCliWorkerRegistry activeCliWorkerRegistry,
+                                  com.platform.workflow.WorkflowCancellationRegistry cancelRegistry) {
         this.attachmentService = attachmentService;
         this.sourceLoaders = sourceLoaders;
         this.decomposer = decomposer;
@@ -100,6 +105,8 @@ public class LargeInputStepExecutor implements StepExecutor {
         this.popplerRenderer = popplerRenderer;
         this.workspaceProperties = workspaceProperties;
         this.eventRecorder = eventRecorder;
+        this.activeCliWorkerRegistry = activeCliWorkerRegistry;
+        this.cancelRegistry = cancelRegistry;
     }
 
     @Override
@@ -345,16 +352,34 @@ public class LargeInputStepExecutor implements StepExecutor {
         Semaphore gate = new Semaphore(Math.max(1, maxParallel));
         final String tenantId = TenantContext.getTenantId();
         final int totalChunks = chunks.size();
+        // CR-121: 이 run 의 부모 runId(문자열) — registry 등록/취소 조회 키.
+        final String runIdStr = progressRunId != null ? progressRunId.toString() : null;
+        final boolean cliConn = connectionId != null && !connectionId.isBlank();
         List<CompletableFuture<ChunkRun>> futures = new ArrayList<>(chunks.size());
         for (LargeInputChunk chunk : chunks) {
+            final String chunkSessionId = sessionBase + "-c" + chunk.chunkIndex();
             futures.add(CompletableFuture.supplyAsync(() -> {
                 if (tenantId != null) TenantContext.setTenantId(tenantId);
                 gate.acquireUninterruptibly();
                 try {
-                    return runChunk(chunk, action, mapInstr, adapter, resolvedModel,
-                            responseSchema, pdfBytes, sourceFilePath, itemRetryMax,
-                            sessionBase + "-c" + chunk.chunkIndex(), workspacePath,
-                            progressRunId, progressStepId, connectionId, totalChunks);
+                    // CR-121: 청크 시작 전 취소 감지 — 취소된 run 이면 남은 청크는 즉시 FAILED 로 건너뛴다
+                    // (진행 중 worker 는 force kill 이 별도로 처리).
+                    if (runIdStr != null && cancelRegistry.isCancelRequested(runIdStr)) {
+                        ChunkRun skipped = new ChunkRun(chunk);
+                        skipped.ok = false;
+                        skipped.failureReason = "run cancelled — chunk skipped";
+                        return skipped;
+                    }
+                    // CR-121: 청크 worker 를 run 에 등록(강제 취소가 역추적해 kill). 비-CLI 면 connectionId 없음 → no-op.
+                    if (cliConn) activeCliWorkerRegistry.register(runIdStr, chunkSessionId, connectionId);
+                    try {
+                        return runChunk(chunk, action, mapInstr, adapter, resolvedModel,
+                                responseSchema, pdfBytes, sourceFilePath, itemRetryMax,
+                                chunkSessionId, workspacePath,
+                                progressRunId, progressStepId, connectionId, totalChunks);
+                    } finally {
+                        if (cliConn) activeCliWorkerRegistry.unregister(runIdStr, chunkSessionId);
+                    }
                 } finally {
                     gate.release();
                     TenantContext.clear();

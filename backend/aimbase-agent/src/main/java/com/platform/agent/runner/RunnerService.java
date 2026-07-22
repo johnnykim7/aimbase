@@ -103,6 +103,25 @@ public class RunnerService {
         }
     }
 
+    /**
+     * CR-121: 접두사로 시작하는 모든 run 의 워커를 일괄 종료한다. LARGE_INPUT 은 청크/재시도마다
+     * runId(={parentRunId}-li-...)가 달라 pool 에 제각각 등록되므로, 부모 runId 접두사 하나로 모두 회수한다.
+     *
+     * @return 종료한 run(워커 그룹) 수
+     */
+    public int cancelByPrefix(String runIdPrefix) {
+        if (runIdPrefix == null || runIdPrefix.isBlank()) return 0;
+        try {
+            int closed = workerPool.shutdownForRunPrefix(runIdPrefix);
+            firstTurnDone.keySet().removeIf(k -> k != null && k.startsWith(runIdPrefix));
+            if (closed > 0) log.info("cancelByPrefix({}): {} run 워커 그룹 종료", runIdPrefix, closed);
+            return closed;
+        } catch (Exception e) {
+            log.warn("cancelByPrefix({}) 실패: {}", runIdPrefix, e.getMessage());
+            return 0;
+        }
+    }
+
     public int activeRunCount() {
         return workerPool.activeRunCount();
     }

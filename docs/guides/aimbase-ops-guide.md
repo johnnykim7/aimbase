@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v1.7.0** | 2026-04-10 | Aimbase v6.4.0 기준
+> **v3.7.0** | 2026-06-18 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -513,6 +513,8 @@ DAG 기반 워크플로우를 설계하고 실행합니다. Workflow Studio(비�
 | 실행 결과 | `GET /workflows/{id}/runs/{runId}` | 개별 실행 결과 |
 | 횡단 실행 내역 | `GET /workflows/runs` | 전체 워크플로우 횡단 run 목록 (CR-102) |
 | 이벤트 본문 | `GET /workflows/runs/{runId}/events/{eventId}` | 이벤트 단건 본문 전문 (CR-102) |
+| 실행 중지 | `POST /workflows/runs/{runId}/cancel` | 진행 중 run 협조적 중지 (CR-105). `?force=true` 면 CLI worker 즉시 kill (CR-116) |
+| 실행 재실행 | `POST /workflows/runs/{runId}/rerun` | 원 run 입력으로 새 run 실행 (원 run 보존, 새 runId 반환, CR-116) |
 
 **실행 내역 화면 (한눈에 보는 UI) [CR-102]**
 
@@ -556,6 +558,33 @@ DAG 기반 워크플로우를 설계하고 실행합니다. Workflow Studio(비�
 
 - **append 채널 비대 방어**: cyclic + `reduce:append` 조합은 회차마다 채널 List가 늘어난다. step budget(기본 50)이 1차 방어선이지만, `workflow_runs.step_results` JSONB가 커지면 조회/저장 지연 — 장기 루프 워크플로우는 채널 누적 대신 요약 스텝을 중간에 두도록 설계 검토
 - **스트리밍 타임아웃**: 노드 토큰 스트리밍은 내부적으로 300초 상한. 초과 시 부분 응답으로 진행하고 경고 로그(`토큰 스트리밍 타임아웃`) — 장시간 LLM_CALL은 step `timeoutMs`와 별개로 이 상한 인지
+
+**실행 중지·재실행 운영 [CR-105 / CR-116]**
+
+진행 중이거나 멈춘(hang) run을 운영자/소비앱이 직접 끊고 다시 돌릴 수 있다.
+
+| 동작 | 호출 | 효과 |
+|------|------|------|
+| 협조적 중지 | `POST /workflows/runs/{runId}/cancel` | `running`은 중지 표식만 세우고 **다음 스텝 경계에서** `cancelled` 전이(현재 스텝은 끝까지 수행 — 즉시성 없음). `pending_approval`은 즉시 `cancelled` + 대기 승인 정리. terminal은 멱등. 미존재 404 |
+| 강제 중지 | `POST /workflows/runs/{runId}/cancel?force=true` | 그 run이 띄운 **CLI worker를 즉시 kill**하고 즉시 `cancelled` 종료. AGENT_CALL의 CLI worker가 응답 전 hang하면 협조적 cancel은 스텝 안에 막혀 안 먹으므로 `force=true` 사용. worker 매핑(`ActiveCliWorkerRegistry`)을 못 찾으면 협조적 표식으로 폴백 |
+| 재실행 | `POST /workflows/runs/{runId}/rerun` | 원 run의 입력(`input_data`)+`workflowId`로 **새 run 실행**(원 run 보존, 새 runId 반환, 202). 워크플로우 정의 삭제 시 404 |
+
+- **소비앱 UI 권장**: cancel 응답의 `status`를 그대로 화면에 박지 말 것 — `running` 취소 시 응답이 아직 `running`이므로 "중지 요청 접수→`중지 중…` 표시→SSE `workflow.done` 또는 `GET /workflows/runs/{runId}` 폴링으로 terminal 확정" 흐름. 중지보다 완료가 빨라 `completed`로 끝날 수 있음
+- **멀티노드 주의**: 메모리 플래그라 `running` cancel은 인스턴스 로컬(다른 노드 실행 run 미인터셉트), `pending_approval`은 DB 기반이라 노드 무관
+
+**run별 격리 workspace [CR-107]**
+
+워크플로우 run마다 격리된 작업장 경로를 만들어 TOOL_CALL/AGENT_CALL 스텝의 cwd(`ToolContext.workspacePath` / CLI worker cwd)로 쓴다. run 간 파일 간섭을 막고, HYBRID 모드 CLI 내장 Read/Bash가 작업장 파일을 직접 읽게 한다.
+
+- **사전 조건**: agent 컨테이너에 BE/사이드카와 **동일 workspace 볼륨 마운트** 필수 — `docker-compose.prod.yml`에 `./workspace:/data/workspace` 3곳(be/rag/agent) 정렬됨. 누락 시 CLI 내장 Read가 작업장 파일을 못 찾아 헤매다 turn timeout
+- 세션에 명시 `workspaceRef`가 있으면(소비앱 채팅 연동 지정) 그걸 사용(기존 동작 보존), 없으면 run별 격리 경로 생성
+
+**CLI worker 좀비 누수 점검 [CR-109 / CR-114]**
+
+AGENT_CALL이 Claude CLI 경로(`adapter=anthropic-cli`)를 쓰면 run마다 CLI worker(별도 `claude` 프로세스)가 뜬다. timeout/정상완료 시 결정적으로 정리되도록 보강됨(CR-109=timeout 경로, CR-114=정상 success 경로).
+
+- **점검**: agent 호스트/컨테이너에서 `ps -ef | grep 'claude'` — run이 모두 끝났는데 `claude` 프로세스가 남아 누적되면 좀비. 누적 시 메모리/동시성 압박 → 새 run의 worker가 hang(`[CLI-INIT]` 못 찍고 600s 침묵)할 수 있음
+- **응급 조치**: 컨테이너에서 좀비 `claude` 프로세스 `pkill`(TERM→KILL) 후 단발 CLI 정상 동작 확인. 멈춘 run은 위 `?force=true`로 강제 중지 후 `rerun`
 
 **EVALUATOR_LOOP (평가-최적화 루프)** [CR-055]
 
@@ -785,6 +814,20 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 | `allowed_roots` | 파일 접근 허용 경로 | `["/data/workspace", "/tmp"]` |
 | `denied_paths` | 접근 차단 경로 | `["/etc", "/root", "**/.env"]` |
 | `secret_patterns` | 비밀 감지 패턴 (정규식) | `["sk-[a-zA-Z0-9]+", "password\\s*="]` |
+
+**CLI/API 도구 노출 목록 (런타임 외부화) [CR-110]**
+
+CLI(`/mcp/sse`) 경로와 API 어댑터가 모델에 싣는 도구 화이트리스트는 코드 하드코딩이 아니라 `global_config`의 **단일 소스**로 관리된다. `ServerMcpConfig`·`ServerMcpToolDispatcher`·`ToolRegistry.getToolDefs(filter)`가 모두 같은 정책을 참조하므로 **CLI 경로와 API 경로의 도구 집합이 동일**하다.
+
+| 항목 | 값 |
+|------|-----|
+| 설정 키 | `global_config.mcp.cli-exposed-tools` (CSV) |
+| seed | V66 master 마이그레이션 (42개, `McpExposurePolicy.DEFAULT_FALLBACK` 코드 상수와 동일해야 함) |
+| 캐시 | `PlatformSettingsService` 5분 캐시 |
+| 의도적 제외 | `parse_document`(비전/직접 호출 경로만) + 내부 전용 6개(`team_create`/`team_delete`/`enter_plan_mode`/`exit_plan_mode`/`verify_plan_execution`/`temp_cleanup`) |
+
+- **반영 시점**: 목록에서 **제거는 런타임 즉시 반영**(실행 게이트가 차단), **추가는 재기동 시** `/mcp/sse` 노출에 반영(SSE 등록 시점 결정)
+- 새 환경/테넌트에서 도구 집합이 갈리지 않도록 CSV는 코드 상수와 정합 유지 — 임의 환경별 수정 지양
 
 ### 3-14. Context Recipe 설정 [CR-029]
 
@@ -1126,6 +1169,18 @@ curl -X POST http://localhost:8280/api/v1/tools/rag_search/execute \
 **업그레이드:**
 - 새 설치 패키지를 덮어 설치. 사용자 설정(`~/.aimbase-agent/config/`)은 유지됨
 
+**장기 AGENT_CALL turn timeout 정렬 [CR-111 / CR-106]:**
+
+정확도 요구가 큰 AGENT_CALL(다수 PDF 적재·11항목 추출 등)은 거대 출력을 만드느라 turn이 수 분 걸린다. 이전엔 agent의 async timeout 미설정 + 300초 상한이 turn을 조기 절단했다. 다음 3겹을 함께 상향·정렬해야 한다(한 곳만 짧으면 거기서 끊김).
+
+| 위치 | 설정 | 기본값 | 환경변수 |
+|------|------|--------|----------|
+| agent (Runner) | `spring.mvc.async.request-timeout` (StreamingResponseBody) | 600000ms (600s) | `AIMBASE_AGENT_ASYNC_TIMEOUT_MS` |
+| BE (platform-core) | `platform.llm.anthropic-cli.http-timeout-seconds` (Runner HTTP 호출) | 300s | `ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS` |
+
+- **운영 점검**: AGENT_CALL이 "진행 중"으로 멈춰 보이면 ① agent 로그에 `turn timeout after Ns` 가 찍히는지(끊긴 위치) ② BE의 HTTP timeout이 agent async timeout보다 짧지 않은지 확인. compose ENV로 상향 시 코드 수정 0
+- **안전망(CR-106)**: retry가 멱등(`--resume` 이어하기)이라 중간 절단 시 처음부터 재spawn하지 않고 이어간다. 근본 단축은 출력량↓(워크플로우 스텝 분할 — 소비앱 영역)
+
 ### 시나리오 J: ClaudeCodeTool 다중계정 운영 [CR-043]
 
 **목적**: 여러 OAuth/API Key 계정을 풀로 등록해 (1) 테넌트별 격리, (2) 공용 라운드로빈, (3) 계정 실패 시 자동 페일오버를 제공.
@@ -1385,6 +1440,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.7.0 | 2026-06-18 | **현행화 — 헤더 동기화 + CR-105/107/109/110/111/114/116 운영분 누락 보강**. 헤더를 v1.7.0(2026-04-10, v6.4.0) → v3.7.0(2026-06-18, v8.18.0)로 정정(변경이력은 v3.6.0까지 갱신돼 있었으나 헤더가 stale). **§ 3-5 워크플로우 관리**: ① 실행 중지·재실행 운영(`POST /workflows/runs/{runId}/cancel` 협조적 + `?force=true` CLI worker 즉시 kill, `/rerun` 새 run 실행 — CR-105/116) + 소비앱 UI 권장 패턴 + 멀티노드 주의, API 표에 cancel/rerun 2행 추가. ② run별 격리 workspace(CR-107) — agent 컨테이너 동일 volume 마운트(`./workspace:/data/workspace`) 필수, 누락 시 turn timeout. ③ CLI worker 좀비 누수 점검(CR-109/114) — `ps -ef \| grep claude` 누적 확인 + 응급 pkill 후 force-cancel/rerun. **§ 3-13 Native Tool 관리**: CLI/API 도구 노출 목록 런타임 외부화(CR-110) — `global_config.mcp.cli-exposed-tools` CSV 단일 소스(V66 master seed 42개), 제거=런타임 즉시/추가=재기동, parse_document+내부 6개 제외. **시나리오 H**: 장기 AGENT_CALL turn timeout 정렬(CR-111/106) — agent `spring.mvc.async.request-timeout`(600s, `AIMBASE_AGENT_ASYNC_TIMEOUT_MS`) + BE `anthropic-cli.http-timeout-seconds`(`ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS`) 3겹 정렬, retry 멱등 안전망. 코드 실측 기반(`WorkflowController`/`WorkflowEngine`/`docker-compose.prod.yml`/`application.yml`/V66 SQL). 신규 코드 없음 — 문서만 |
 | v3.6.0 | 2026-06-12 | **CR-102 2차 — 내부 도구 루프 가시화** (§ 3-5 보강). 실행 내역 타임라인에 AGENT_CALL 서브에이전트 도구 루프 + CLI 어댑터 내부 관찰 이벤트 추가 표시. 이벤트량 증가 — 용량 모니터링 항목 갱신 |
 | v3.5.0 | 2026-06-12 | **CR-102 — 실행 내역 화면 + 본문 전문 적재** (§ 3-5). FE 사이드바 "실행 내역" 신설 — 전체 워크플로우 횡단 run 목록(필터+페이지네이션) → 실행 상세(이벤트 타임라인 + 행 클릭 본문 전문 펼침). `workflow_run_events` 본문 4컬럼(V66 tenant) 무조건 적재 — 용량 모니터링 항목 추가, TTL 후속 CR |
 | v3.4.0 | 2026-06-03 | **CR-092 — 전통적 OCR (Tesseract)** 운영 시나리오 O 추가. 사이드카 `tesseract-ocr-kor` 한국어 언어팩 설치 확인 / `global_config` 4 키 (`aimbase.ocr.*` V65 seed) / 페이지 상한 (BIZ-105 50p) / 언어 화이트리스트 (BIZ-106) / fallback 임계 (BIZ-107 50자) 운영 절차. `PdfTextExtractor` 자동 fallback 로그 모니터링 + `ocr_image` Built-in Tool 감사 로그. Vision 모델(CR-061)과 선택 기준 정리 |

@@ -79,7 +79,8 @@ class WorkflowEngineCancelTest {
                 null,
                 null,
                 provider(workerRegistry),       // CR-116
-                provider(adapterFactory));       // CR-116
+                provider(adapterFactory),        // CR-116
+                provider(new WorkflowCancellationRegistry())); // CR-121
     }
 
     private WorkflowRunEntity run(UUID id, String status) {

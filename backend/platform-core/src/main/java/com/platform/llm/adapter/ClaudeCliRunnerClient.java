@@ -180,7 +180,15 @@ public class ClaudeCliRunnerClient {
     private static final Duration CANCEL_TIMEOUT = Duration.ofSeconds(10);
 
     public void cancel(AgentEndpoint endpoint, String runId, String runnerApiKey) {
-        Map<String, Object> body = Map.of("run_id", runId);
+        cancel(endpoint, runId, runnerApiKey, false);
+    }
+
+    /**
+     * CR-121: {@code prefix=true} 면 Runner 가 {@code runId} 를 접두사로 보고, 그 접두사로 시작하는
+     * 모든 세션의 워커를 일괄 종료한다(LARGE_INPUT 청크/재시도 sessionId 가 제각각인 잔여 회수용).
+     */
+    public void cancel(AgentEndpoint endpoint, String runId, String runnerApiKey, boolean prefix) {
+        Map<String, Object> body = Map.of("run_id", runId, "prefix", prefix);
         HttpRequest httpReq = newJsonRequest(endpoint, "/v1/cancel", body, runnerApiKey, CANCEL_TIMEOUT);
         try {
             HttpResponse<String> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());

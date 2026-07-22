@@ -60,12 +60,22 @@ public class ParallelStepExecutor implements StepExecutor {
         // CR-071 Phase 1: ClaudeCliBranchScope/ClaudeCliWorkerPool 의존 제거 (cli-runner 모듈 분리).
         // Phase 4 에서 ClaudeCliAdapter 가 신설되면 브랜치 fork 라이프사이클은 어댑터/Runner 측에서 관리.
 
+        // VT 는 부모 ThreadLocal 을 상속하지 않으므로 TenantContext 를 캡처해 각 VT 안에서 재주입.
+        // 누락 시 sub-step(AGENT_CALL→SubagentRunner.save 등)이 잘못된 DataSource(=master)로 라우팅되어
+        // "relation \"subagent_runs\" does not exist" 로 실패 (DB-per-Tenant 격리, BIZ-003).
+        final String tenantId = com.platform.tenant.TenantContext.getTenantId();
+
         // 각 스텝을 Virtual Thread로 병렬 실행
         List<CompletableFuture<Map.Entry<String, Map<String, Object>>>> futures = stepIds.stream()
                 .map(stepId -> CompletableFuture.supplyAsync(
                         () -> {
-                            Map<String, Object> result = engine.executeStepById(stepId, context);
-                            return Map.entry(stepId, result);
+                            if (tenantId != null) com.platform.tenant.TenantContext.setTenantId(tenantId);
+                            try {
+                                Map<String, Object> result = engine.executeStepById(stepId, context);
+                                return Map.entry(stepId, result);
+                            } finally {
+                                com.platform.tenant.TenantContext.clear();
+                            }
                         },
                         Executors.newVirtualThreadPerTaskExecutor()
                 ))

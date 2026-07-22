@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.5.0** | 2026-06-04 | Aimbase v8.16.0 기준
+> **v3.13.1** | 2026-06-18 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -338,6 +338,8 @@ curl -X POST /api/v1/workflows \
 | `FOREACH` | `items`, `body`, `item_var`, `mode`, `max_concurrency`, `max_items`, `collect`, `on_item_error` | 동적 컬렉션 fan-out (CR-087). 런타임 컬렉션의 각 원소에 body step 적용 (map) |
 
 > **주의**: 스텝 타입은 `TOOL_CALL`입니다 (`TOOL_USE` 아님). config에서 도구 이름은 `tool` (`tool_name` 아님), 입력은 `input` (`arguments` 아님).
+
+> **`LLM_CALL`이 Claude CLI 커넥터(`adapter=anthropic-cli`)를 가리킬 때의 라우팅 (CR-103)** — 어느 PC/서버의 agent(Runner)로 보낼지는 다음 우선순위로 결정된다: ① 요청 헤더 `X-Aimbase-Agent-Id` → ② 위젯 토큰의 `user_ref` 클레임(CR-075) → ③ **커넥터 `config.agent_name`** → ④ 모두 없으면 400(`cli_routing_missing`). 워크플로우는 헤더/토큰 없이 실행되므로 보통 ③번 — 커넥터 `config.agent_name`에 라우팅 대상 agent 이름을 박아두면 소비앱이 agent-id를 몰라도 자동 라우팅된다. 대상 agent가 미등록/오프라인이면 `cli_agent_offline`로 스텝 실패한다.
 
 **ROUTER 스텝 (N-way 동적 라우팅, CR-084)** — `CONDITION`의 true/false 2갈래를 일반화. `routes` 배열을 정의 순서대로 평가해 `when` 표현식이 참인 첫 route의 `to`로 분기, 모두 실패 시 `default:true` route 사용:
 
@@ -1947,6 +1949,7 @@ URL 에서 파일을 받아 워크스페이스에 **원본 그대로(바이너�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.13.1 | 2026-06-18 | **현행화 — 헤더 버전 동기화 + CR-103 CLI 라우팅 보강** (문서만). 헤더 표기를 변경이력 최신(v3.13.0)에 맞춰 `v3.13.1 / Aimbase v8.18.0 기준`으로 정정(이전 헤더는 v3.5.0 으로 멈춰 있었음). § 4-1 스텝 타입 표 아래 **`LLM_CALL`이 `adapter=anthropic-cli` 커넥터를 가리킬 때의 라우팅 우선순위**(① 헤더 `X-Aimbase-Agent-Id` → ② 위젯 토큰 `user_ref` → ③ 커넥터 `config.agent_name`(CR-103) → ④ 400 `cli_routing_missing`) 노트 추가 — 워크플로우는 헤더/토큰 없이 실행되므로 커넥터 `config.agent_name`로 자동 라우팅. 코드 실측: `ClaudeCliAdapter.resolveAgent`. API 표면 무변화 |
 | v3.13.0 | 2026-06-18 | **CR-116 — 워크플로우 run 강제 취소 + 재실행** (§ 4-7). ① **강제 취소**: 기존 `POST /workflows/runs/{runId}/cancel` 에 `?force=true` 파라미터 추가(같은 엔드포인트, 미지정 시 기존 협조적 동작 = **하위호환**). 협조적 cancel 은 스텝 경계에서만 표식을 검사해, AGENT_CALL 의 CLI worker 가 응답 전 hang 하면 즉시 안 먹는다 → `force=true` 면 그 run 이 띄운 CLI worker 를 즉시 kill(`ActiveCliWorkerRegistry` 로 workflowRunId→childSessionId 역추적 후 CR-114 와 동일 Runner cancel 부품 재사용) 하고 즉시 `cancelled` 로 종료(후속 폴링 불요). worker 매핑 못 찾는 경우 협조적 표식 폴백. ② **재실행**: `POST /workflows/runs/{runId}/rerun` 신설 — 원 run 의 `input_data`+`workflowId` 로 새 run 실행(원 run 보존, 새 runId 반환, 202). DB 스키마/마이그레이션 무변경(인메모리 레지스트리, input_data 기존 컬럼). 단위 — ActiveCliWorkerRegistry 5 + WorkflowEngineCancel force 3 + 회귀 GREEN(71 PASS) |
 | v3.12.0 | 2026-06-18 | **run 단건 조회에 진행 단계 이름·진행 목록 추가** (§ 4-5). run **단건** 조회 2종(`GET /workflows/{id}/runs/{runId}`, `GET /workflows/runs/{runId}`) 응답에 `currentStepName`(현재 `currentStep` id 에 해당하는 WF 정의 step 의 사람이 읽는 `name`) + `steps[]`(정의 순서대로 `{id, name, status}`, status = completed/running/pending, run terminal 시 현재 스텝은 종료 상태) 신규 추가. 소비앱이 "지금 어느 단계인지"/진행바를 step id 매핑 캐싱 없이 바로 표시. status·steps 도출은 BE 인메모리 lookup(WF 정의 1회 조회) — DB 스키마/마이그레이션 무변경. WF 정의 미존재 시 `currentStepName=null`·`steps=[]` graceful. 기존 필드(`currentStep`/`stepResults`/`status` …) 그대로 유지 = **하위호환**. 목록 조회(`/runs`)는 미적용(전체 step 은 `GET /workflows/{id}` 캐싱 권장) |
 | v3.11.1 | 2026-06-15 | **CR-095 후속 — PDF 페이지 분할 가드** (§ 18-4). 13MB/29p PDF AGENT_CALL(`parse_document`) 300초 turn timeout 해소. 근본원인=openclaude `getPDFPageCount > PDF_AT_MENTION_INLINE_THRESHOLD(10)` 가드 포팅 누락(3MB 크기 게이트만 가져옴) → >3MB PDF 첫 20p 통째 이미지화로 거대 입력. 해결: 사이드카 `pdf_page_count` MCP 도구 신설(렌더 없이 페이지 수) + `pdf_to_images` `total_pages` 반환 + `PdfVisionResolver` 페이지 가드(`aimbase.pdf.inline-page-threshold:10` 초과 & `pages` 미지정 시 `too_many_pages` 반환 → 모델이 `pages`로 분할 호출) + `parse_document` 도구 `pages` 파라미터 추가. 위젯/채팅 첨부는 1회성이라 가드 미적용(첫 max-pages-per-read). 사이드카 pdf_images 20 + ocr 26 + PdfVisionResolver 14 + tool/mcp.server 회귀 GREEN. 기존 동작 무변경 |

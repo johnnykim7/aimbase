@@ -60,12 +60,12 @@ public class WorkflowEngine {
     private final com.platform.llm.ConnectionAdapterFactory connectionAdapterFactory;
 
     /**
-     * CR-105: 협조적 중지 요청 집합 — {@link #requestCancel(UUID)} 가 runId 를 넣고,
-     * DAG/cyclic 실행 루프가 스텝 경계에서 {@link #isCancelRequested(String)} 로 검사한다.
+     * CR-105/CR-121: 협조적 중지 요청 레지스트리 — {@link #requestCancel(UUID)} 가 runId 를 넣고,
+     * DAG/cyclic 실행 루프가 스텝 경계에서, LARGE_INPUT 실행기가 청크 경계에서 검사한다.
+     * CR-121 에서 별도 빈({@link WorkflowCancellationRegistry})으로 분리해 스텝 실행기와 표식을 공유한다.
      * 같은 JVM 인스턴스에서 도는 run 만 인터셉트 가능(VT fire-and-forget 모델, 멀티노드 시 인스턴스 로컬).
      */
-    private final java.util.Set<String> cancelRequests =
-            java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final WorkflowCancellationRegistry cancelRegistry;
 
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
@@ -78,7 +78,8 @@ public class WorkflowEngine {
                           org.springframework.beans.factory.ObjectProvider<com.platform.session.SessionStore> sessionStoreProvider,
                           org.springframework.beans.factory.ObjectProvider<com.platform.config.WorkspaceProperties> workspacePropertiesProvider,
                           org.springframework.beans.factory.ObjectProvider<com.platform.agent.ActiveCliWorkerRegistry> activeCliWorkerRegistryProvider,
-                          org.springframework.beans.factory.ObjectProvider<com.platform.llm.ConnectionAdapterFactory> connectionAdapterFactoryProvider) {
+                          org.springframework.beans.factory.ObjectProvider<com.platform.llm.ConnectionAdapterFactory> connectionAdapterFactoryProvider,
+                          org.springframework.beans.factory.ObjectProvider<WorkflowCancellationRegistry> cancelRegistryProvider) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -94,15 +95,26 @@ public class WorkflowEngine {
         // CR-116: 옵셔널 — 미주입 환경(일부 단위 테스트)에서는 force 가 협조적 표식만 남긴다.
         this.activeCliWorkerRegistry = activeCliWorkerRegistryProvider != null ? activeCliWorkerRegistryProvider.getIfAvailable() : null;
         this.connectionAdapterFactory = connectionAdapterFactoryProvider != null ? connectionAdapterFactoryProvider.getIfAvailable() : null;
+        // CR-121: 미주입 환경(일부 단위 테스트)이면 자체 인스턴스로 폴백 — 스텝 실행기와 공유 안 되지만 엔진 자체 동작은 유지.
+        WorkflowCancellationRegistry cr = cancelRegistryProvider != null ? cancelRegistryProvider.getIfAvailable() : null;
+        this.cancelRegistry = cr != null ? cr : new WorkflowCancellationRegistry();
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
     /**
-     * CR-071 Phase 1: ClaudeCliWorkerPool 의존 제거. Phase 4 에서 ClaudeCliAdapter 가
-     * Runner 측 정리 책임을 가지므로 워크플로우 엔진은 더 이상 워커 라이프사이클을 관리하지 않는다.
+     * run 종료(정상/예외/취소) 시 CLI 워커 잔여 정리.
+     *
+     * <p>CR-071 에서 한 번 no-op 로 비웠으나(어댑터가 success/timeout 경로에서 sessionId 단위 정리),
+     * CR-121 에서 LARGE_INPUT 청크 sessionId 가 제각각이라 sessionId 단위 정리만으로는 누락 잔여가
+     * 좀비로 남는 것이 확인됨(취소된 run 의 청크 워커가 어느 경로로도 안 닫힘). 그래서 run 종료의
+     * 최종 안전망으로 부모 runId 접두사 일괄 정리를 건다. best-effort.
      */
     private void shutdownCliWorkers(String runId) {
-        // no-op (CR-071)
+        try {
+            cleanupWorkersByPrefix(UUID.fromString(runId), null);
+        } catch (Exception e) {
+            log.warn("CR-121: run 종료 prefix cleanup 실패 (run={}): {}", runId, e.getMessage());
+        }
     }
 
     // ─── 협조적 중지 (CR-105) ─────────────────────────────────────────────
@@ -117,7 +129,7 @@ public class WorkflowEngine {
      * @return 표식 등록 여부(이미 등록돼 있었으면 false)
      */
     public boolean requestCancel(UUID runId) {
-        boolean added = cancelRequests.add(runId.toString());
+        boolean added = cancelRegistry.request(runId.toString());
         log.info("Cancel requested for run '{}' (newlyMarked={})", runId, added);
         return added;
     }
@@ -210,12 +222,11 @@ public class WorkflowEngine {
             return;
         }
         var workers = activeCliWorkerRegistry.workersOf(runId.toString());
-        if (workers.isEmpty()) {
-            log.info("CR-116: run '{}' 에 활성 CLI worker 없음 (이미 종료됐거나 비-CLI 경로)", runId);
-            return;
-        }
+        // CR-116: registry 에 등록된 worker(AGENT_CALL + CR-121 LARGE_INPUT 청크)를 개별 kill.
+        java.util.Set<String> connIds = new java.util.LinkedHashSet<>();
         for (var w : workers) {
             if (w.connectionId() == null || w.connectionId().isBlank()) continue;
+            connIds.add(w.connectionId());
             try {
                 connectionAdapterFactory.getAdapter(w.connectionId()).cleanupSession(w.childSessionId());
                 log.info("CR-116: killed CLI worker run={} childSession={}", runId, w.childSessionId());
@@ -223,16 +234,43 @@ public class WorkflowEngine {
                 log.warn("CR-116: worker kill 실패 run={} childSession={}: {}", runId, w.childSessionId(), e.getMessage());
             }
         }
+        // CR-121: registry 에 안 잡힌 잔여(청크 등록/해제 타이밍 누락 등)까지 부모 runId 접두사로 일괄 회수.
+        cleanupWorkersByPrefix(runId, connIds);
+    }
+
+    /**
+     * CR-121: run 의 모든 CLI 워커를 부모 runId 접두사로 일괄 정리한다. LARGE_INPUT 은 청크/재시도마다
+     * sessionId 가 {@code {runId}-li-...} 로 달라 pool 에 제각각 등록되므로, run 종료(취소/정상/실패) 시
+     * 이 한 번의 prefix cancel 로 남은 워커를 모두 회수해 좀비 누수를 막는다. best-effort.
+     *
+     * @param knownConnIds 이미 알고 있는 connection(없으면 registry 에서 보강 시도)
+     */
+    private void cleanupWorkersByPrefix(UUID runId, java.util.Set<String> knownConnIds) {
+        if (connectionAdapterFactory == null) return;
+        java.util.Set<String> connIds = new java.util.LinkedHashSet<>(
+                knownConnIds != null ? knownConnIds : java.util.Set.of());
+        if (connIds.isEmpty() && activeCliWorkerRegistry != null) {
+            for (var w : activeCliWorkerRegistry.workersOf(runId.toString())) {
+                if (w.connectionId() != null && !w.connectionId().isBlank()) connIds.add(w.connectionId());
+            }
+        }
+        for (String connId : connIds) {
+            try {
+                connectionAdapterFactory.getAdapter(connId).cleanupSessionsByPrefix(runId.toString());
+            } catch (Exception e) {
+                log.warn("CR-121: prefix cleanup 실패 run={} conn={}: {}", runId, connId, e.getMessage());
+            }
+        }
     }
 
     /** 실행 루프 체크포인트 — 이 run 에 중지 요청이 걸려 있는지. */
     private boolean isCancelRequested(String runId) {
-        return cancelRequests.contains(runId);
+        return cancelRegistry.isCancelRequested(runId);
     }
 
     /** run 종료 시 표식 정리(메모리 누수 방지). */
     private void clearCancel(String runId) {
-        cancelRequests.remove(runId);
+        cancelRegistry.clear(runId);
     }
 
     /**
@@ -241,6 +279,8 @@ public class WorkflowEngine {
      */
     private void finishCancelled(WorkflowRunEntity run, StepContext context) {
         log.info("Run '{}': cancellation honored at step boundary", run.getId());
+        // CR-121: 협조적 취소가 스텝 경계에서 honored 될 때, 그 사이 떠 있던 CLI 워커 잔여를 prefix 로 회수.
+        cleanupWorkersByPrefix(run.getId(), null);
         run.setStatus("cancelled");
         run.setCompletedAt(OffsetDateTime.now());
         if (context != null) {

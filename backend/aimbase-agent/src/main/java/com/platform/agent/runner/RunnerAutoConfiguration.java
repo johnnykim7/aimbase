@@ -52,7 +52,14 @@ public class RunnerAutoConfiguration {
                         configDir,
                         Duration.ofSeconds(props.getTurnTimeoutSeconds()),  // CR-106: 설정화 (기본 300s)
                         mcpConfig);
-        return new ClaudeCliWorkerPool(factory, props.getMaxWorkers(), Duration.ofSeconds(60));
+        // CR-121: reaper 설정 주입 — idle 좀비 워커 자동 회수.
+        ClaudeCliWorkerPool pool = new ClaudeCliWorkerPool(factory, props.getMaxWorkers(), Duration.ofSeconds(60),
+                (com.platform.runner.claudecli.ClaudeCliCommandBuilder.ToolMode) null,
+                Duration.ofSeconds(props.getReaperIntervalSeconds()),
+                Duration.ofSeconds(props.getReaperIdleThresholdSeconds()));
+        // CR-126: AIMBASE 봉인 대상 override (미설정이면 null → 빌더 기본 상수)
+        pool.setSealedNativeTools(props.resolveSealedNativeTools());
+        return pool;
     }
 
     @Bean

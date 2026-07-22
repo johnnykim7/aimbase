@@ -195,11 +195,55 @@ class ClaudeCliWorkerPoolTest {
         pool.shutdownForRun("run-C");
     }
 
+    // ─── CR-121 ───────────────────────────────────────────────────────────
+
+    @Test
+    void shutdownForRunPrefix_closes_all_runs_with_matching_prefix() {
+        ClaudeCliWorkerPool pool = newPool(5);
+        // LARGE_INPUT 청크처럼 부모 runId 접두사를 공유하는 서로 다른 키들.
+        pool.getOrCreateMain("parent-1-li-extract.body[0]-c0", null, null);
+        pool.getOrCreateMain("parent-1-li-extract.body[1]-c0", null, null);
+        pool.getOrCreateMain("parent-1-li-verify.body[0]-c0", null, null);
+        // 다른 부모 — 접두사 불일치라 살아남아야 한다.
+        pool.getOrCreateMain("parent-2-li-extract.body[0]-c0", null, null);
+        assertThat(pool.activeRunCount()).isEqualTo(4);
+
+        int closed = pool.shutdownForRunPrefix("parent-1");
+        assertThat(closed).isEqualTo(3);
+        assertThat(pool.activeRunCount()).isEqualTo(1);
+        assertThat(pool.activeWorkerCount("parent-2-li-extract.body[0]-c0")).isEqualTo(1);
+
+        pool.shutdownForRun("parent-2-li-extract.body[0]-c0");
+    }
+
+    @Test
+    void reaper_closes_idle_workers() throws InterruptedException {
+        // sweep 0.2s, idle 임계 0.3s — 짧게 잡아 idle 워커가 회수되는지 확인.
+        ClaudeCliWorkerPool pool = new ClaudeCliWorkerPool(
+                (model, sid, fork, cfg) -> new ClaudeCliWorker(
+                        binary.toString(), model, sid, fork, cfg, Duration.ofSeconds(5)),
+                5, Duration.ofSeconds(2), null,
+                Duration.ofMillis(200), Duration.ofMillis(300));
+        ClaudeCliWorker w = pool.getOrCreateMain("idle-run", null, null);
+        assertThat(w.isAlive()).isTrue();
+        assertThat(pool.activeRunCount()).isEqualTo(1);
+
+        // idle 임계 + sweep 주기 이상 대기 → reaper 가 회수.
+        long deadline = System.currentTimeMillis() + 3000;
+        while (pool.activeRunCount() > 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(100);
+        }
+        assertThat(pool.activeRunCount()).isEqualTo(0);
+        pool.shutdownReaper();
+    }
+
     private ClaudeCliWorkerPool newPool(int max) {
+        // reaper 비활성(interval=0) — 일반 테스트가 reaper 간섭 없이 결정적으로 돌도록.
         return new ClaudeCliWorkerPool(
                 (model, sid, fork, cfg) -> new ClaudeCliWorker(
                         binary.toString(), model, sid, fork, cfg, Duration.ofSeconds(5)),
-                max, Duration.ofSeconds(2));
+                max, Duration.ofSeconds(2), null,
+                Duration.ZERO, Duration.ofMinutes(15));
     }
 
     private static void awaitDead(ClaudeCliWorker w) {

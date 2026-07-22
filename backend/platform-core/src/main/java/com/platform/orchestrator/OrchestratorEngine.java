@@ -847,6 +847,9 @@ public class OrchestratorEngine {
     private String resolveWorkspace(ChatRequest request, String sessionId) {
         String existing = sessionId != null ? sessionStore.getWorkspaceRef(sessionId) : null;
         String requested = request.workingDirectory();
+        // CR-107 디버그: cwd 전파 추적 — 어느 칸에서 null 이 되는지 운영 로그로 확정.
+        log.info("[CR107-DEBUG] resolveWorkspace: sessionId={}, existing={}, requested(workingDirectory)={}",
+                sessionId, existing, requested);
 
         if (existing != null && !existing.isBlank()) {
             if (requested != null && !requested.isBlank() && !requested.equals(existing)) {

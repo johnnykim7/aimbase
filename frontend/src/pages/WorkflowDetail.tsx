@@ -7,6 +7,7 @@ import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { Page } from "../components/layout/Page";
 import { useSetHeaderOverride } from "../components/layout/AppShell";
 import { useWorkflows, useRunWorkflow } from "../hooks/useWorkflows";
+import { useConnections } from "../hooks/useConnections";
 import { workflowsApi } from "../api/workflows";
 import type { Workflow, WorkflowStep, WorkflowRun } from "../types/workflow";
 
@@ -476,7 +477,15 @@ function StepDetailPanel({ step }: { step: WorkflowStep }) {
   const responseSchema = config.response_schema as Record<string, unknown> | undefined;
   const systemPrompt = config.system as string | undefined;
   const prompt = config.prompt as string | undefined;
-  const connectionId = config.connection_id as string | undefined;
+  // FOREACH 등은 connection_id 가 자식 body 내부에 중첩됨 → 둘 다 탐색
+  const nestedBody = config.body as Record<string, unknown> | undefined;
+  const connectionId =
+    (config.connection_id as string | undefined) ??
+    (nestedBody?.connection_id as string | undefined);
+  const { data: connections } = useConnections();
+  const connectionName = connectionId
+    ? connections?.find((c) => c.id === connectionId)?.name
+    : undefined;
   const toolName = config.tool as string | undefined;
   const toolInput = config.input as Record<string, unknown> | undefined;
 
@@ -487,8 +496,13 @@ function StepDetailPanel({ step }: { step: WorkflowStep }) {
     <div className="px-3 py-1 pb-2">
       {connectionId && (
         <div>
-          <div className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-1 mt-2.5">Connection ID</div>
-          <div className="text-[11px] font-mono text-muted-foreground/40">{connectionId}</div>
+          <div className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-1 mt-2.5">Connection</div>
+          {connectionName ? (
+            <div className="text-[12px] font-medium text-foreground">{connectionName}</div>
+          ) : (
+            <div className="text-[11px] text-warning">연결을 찾을 수 없음 (삭제되었거나 다른 테넌트)</div>
+          )}
+          <div className="text-[10px] font-mono text-muted-foreground/40 mt-0.5" title="참고용 connection_id">{connectionId}</div>
         </div>
       )}
       {toolName && (

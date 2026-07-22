@@ -61,8 +61,10 @@ import java.util.stream.Collectors;
  * <h3>출력 계약</h3>
  * {@code { output: ..., results: [...], item_count: N, failed_count: M }} —
  * <ul>
- *   <li>{@code collect=append}(기본): {@code output}/{@code results} 모두 각 원소 body 결과 List</li>
- *   <li>{@code collect=none}: {@code output}/{@code results} 모두 빈 List</li>
+ *   <li>{@code collect=append}(기본): {@code output}/{@code results}/{@code structured_data} 모두 각 원소
+ *       body 결과 List (후속 스텝이 {@code {{foreach.structured_data}}} 로 자식의 structured_data 를
+ *       묻히지 않고 받을 수 있도록 동일 List 를 structured_data 로도 노출)</li>
+ *   <li>{@code collect=none}: {@code output}/{@code results}/{@code structured_data} 모두 빈 List</li>
  *   <li>{@code collect=merge}: {@code output} 은 각 섹션 {@code structured_data.content[]} 를 평탄
  *       병합한 TipTap 문서 1건({@code {type:"doc", content:[...]}}, Map), {@code results} 는 원본 List 보존</li>
  * </ul>
@@ -212,6 +214,13 @@ public class ForeachStepExecutor implements StepExecutor {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("output", collected);
         output.put("results", collected);
+        // 후속 스텝이 {{foreach.structured_data}} 로 받을 수 있게 동일 List 를 structured_data 로도 노출한다.
+        // 자식 body(예: LARGE_INPUT)는 context 폭발 방지로 fact 본체를 output 이 아니라 structured_data 키에만
+        // 담는다(LargeInputStepExecutor 참조). 그런데 FOREACH 는 output/results 만 내보내 자식의 structured_data
+        // 가 묻혀, verify 같은 후속 스텝의 {{extract_facts.structured_data}} 가 빈 값으로 치환되던 버그를 차단.
+        // 값은 각 자식 결과 원소(그 안에 자식의 structured_data 포함)의 List — 후속 프롬프트는 "각 원소의
+        // structured_data.facts" 를 훑으므로 results 와 동일 구조로 정합.
+        output.put("structured_data", collected);
         output.put("item_count", items.size());
         output.put("failed_count", (int) failed);
         return output;

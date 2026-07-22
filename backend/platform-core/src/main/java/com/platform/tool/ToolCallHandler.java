@@ -935,9 +935,14 @@ public class ToolCallHandler {
 
         // CLI 는 도구를 자기 MCP 채널로 받지만, allowed_tools 산출을 위해 도구 목록은 그대로 전달.
         List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
+        // CR-107 후속(핵심): CLI 스트리밍 경로의 LLMRequest 에 workspacePath 를 실어야
+        // ClaudeCliRunnerClient → agent → Worker.pb.directory 로 CLI cwd 가 run workspace 로 잡힌다.
+        // 이 한 줄이 빠져 CLI 서브에이전트가 /app cwd 로 떨어져 첨부(attachments/...)를 못 읽었다.
+        String cwd = ctx != null ? ctx.workspacePath() : null;
         LLMRequest request = new LLMRequest(
                 resolvedModel, messages, filteredTools.isEmpty() ? null : filteredTools,
-                config, true, sessionId, null, responseSchema);
+                config, true, sessionId, null, responseSchema)
+                .withWorkingDirectory(cwd);
 
         final java.util.UUID runId = (ctx != null && ctx.workflowRunId() != null)
                 ? parseUuidSafe(ctx.workflowRunId()) : null;

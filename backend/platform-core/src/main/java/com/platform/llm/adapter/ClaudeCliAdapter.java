@@ -175,6 +175,22 @@ public class ClaudeCliAdapter implements LLMAdapter {
     }
 
     /**
+     * CR-121: 부모 runId 접두사로 시작하는 모든 워커 세션을 Runner 에 일괄 종료 요청한다.
+     * LARGE_INPUT 청크/재시도 sessionId 가 제각각이라 단일 cleanupSession 으로 못 잡는 잔여 좀비 회수용.
+     */
+    @Override
+    public void cleanupSessionsByPrefix(String runIdPrefix) {
+        if (runIdPrefix == null || runIdPrefix.isBlank()) return;
+        try {
+            AgentEndpoint endpoint = resolveEndpoint();
+            log.info("CR-121: run 종료 — Runner prefix cancel 신호 전송 (prefix={})", runIdPrefix);
+            runnerClient.cancel(endpoint, runIdPrefix, runnerApiKey, true);
+        } catch (RuntimeException e) {
+            log.warn("CR-121: prefix cancel 실패 (prefix={}): {}", runIdPrefix, e.getMessage());
+        }
+    }
+
+    /**
      * CR-082: runner 호출 실패의 원인을 진단 로그/에러 메시지에 식별 가능한 사유 코드로 분류.
      * 정확한 사유보다 "어디서 끊겼는지" 단서 하나가 운영 진단을 빠르게 한다.
      */

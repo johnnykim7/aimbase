@@ -43,4 +43,15 @@ public interface LLMAdapter {
      * 정상 완료(success) 경로에서도 호출되어 좀비 워커 누수를 막는다. best-effort — 정리 실패가 호출처 흐름을 막지 않는다.
      */
     default void cleanupSession(String sessionId) { }
+
+    /**
+     * CR-121: 주어진 접두사(=워크플로우 run 의 부모 runId)로 시작하는 모든 세션의 워커를 일괄 정리한다.
+     *
+     * <p>LARGE_INPUT 은 청크/재시도마다 sessionId 가 달라({@code {runId}-li-{step}.body[N]-cM}) pool 에
+     * 제각각 등록되므로, 단일 {@link #cleanupSession(String)} 로는 한 번에 회수할 수 없다. run 이 종료
+     * (취소/정상/실패)되면 이 메서드로 그 run 의 모든 잔여 워커를 부모 runId 하나로 정리해 좀비 누수를 막는다.
+     *
+     * <p>기본은 no-op. worker pool 을 두는 어댑터(예: {@code ClaudeCliAdapter})만 오버라이드한다. best-effort.
+     */
+    default void cleanupSessionsByPrefix(String runIdPrefix) { }
 }

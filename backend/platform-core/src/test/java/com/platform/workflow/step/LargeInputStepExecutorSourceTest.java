@@ -61,7 +61,9 @@ class LargeInputStepExecutorSourceTest {
                 ragClient,
                 mock(com.platform.largeinput.PopplerPdfRenderer.class),
                 workspaceProperties,
-                mock(com.platform.workflow.event.WorkflowRunEventRecorder.class));
+                mock(com.platform.workflow.event.WorkflowRunEventRecorder.class),
+                new com.platform.agent.ActiveCliWorkerRegistry(),          // CR-121
+                new com.platform.workflow.WorkflowCancellationRegistry()); // CR-121
     }
 
     private LargeInputSource invokeLoadSource(Map<String, Object> config) throws Exception {

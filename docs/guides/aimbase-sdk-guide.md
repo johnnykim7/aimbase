@@ -1,6 +1,6 @@
 # Aimbase Tool SDK 사용 가이드
 
-> **v1.2.0** | 2026-04-26 | CR-041, CR-042, CR-067
+> **v1.3.1** | 2026-06-18 | CR-041, CR-042, CR-067, CR-071, CR-073
 
 소비앱이 Aimbase 도구를 로컬에서 사용하거나, 원격 Agent로 Aimbase 오케스트레이션에 참여하는 방법을 안내합니다.
 
@@ -450,6 +450,7 @@ java -jar aimbase-agent.jar \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.3.1 | 2026-06-18 | **현행화 — 헤더 동기화 + CR-073 명시**. 헤더 표기를 변경이력 최신에 맞춰 v1.3.1(2026-06-18)로 정정(이전 헤더 v1.2.0 으로 멈춰 있었음). **CR-073 (BREAKING)** — `aimbase-agent --runner-mode` 플래그 **폐지**. v1.3.0 카드의 `--runner-mode`(CR-071 도입)는 그 시점 기록이며, 이후 `--mcp-stdio` 외 모든 진입은 **SERVLET 단일 컨텍스트**로 통합되어 `--runner-mode` 플래그는 박혀 있어도 무시된다. § 6 본문(설치/config 편집)은 플래그를 안내하지 않으므로 무수정. 신규 코드 없음 — 문서만 |
 | v1.3.0 | 2026-04-27 | CR-071 — aimbase-agent 에 `--runner-mode` 추가 (`ClaudeCliRunner` HTTP 서비스). 기존 `--mcp-stdio` 와 별개 모드 — Aimbase 서버의 `ClaudeCliAdapter` 가 `/v1/chat`, `/v1/chat/stream`, `/v1/cancel` 호출. agent 등록 시 metadata 에 `runnerEndpoint` / `runnerApiKeyHash` 포함하면 `runner_capability=true` 자동 설정. 신규 모듈 `cli-runner` (Worker/Pool/CommandBuilder, CR-050/CR-069 자산 이동). 기존 `ClaudeCliLlmAdapter` / `ClaudeCodeTool` 즉시 삭제 |
 | v1.2.0 | 2026-04-26 | CR-067 — `ToolResultRenderer` 신설 + `EnhancedToolExecutor` default bridge 본문 노출 정정 + 직렬화 규칙 섹션 추가 |
 | v1.1.0 | 2026-04-10 | CR-042 독립 실행형 Agent (aimbase-agent) 섹션 추가 |

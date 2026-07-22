@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowDownToLine, Bot, CheckCircle2, ChevronRight, Loader
 import { cn } from "@/lib/utils";
 import { ToolUseBlock } from "../chat/blocks/ToolUseBlock";
 import { TextBlock } from "../chat/blocks/TextBlock";
-import type { ChatFlowBlock, ChatFlowIteration, ChatFlowStep } from "../../lib/runEventsToChat";
+import type { ChatFlowBlock, ChatFlowChunk, ChatFlowIteration, ChatFlowStep } from "../../lib/runEventsToChat";
 
 interface RunChatFlowProps {
   steps: ChatFlowStep[];
@@ -94,6 +94,96 @@ const InputPromptBlock = ({ text }: { text: string }) => {
   );
 };
 
+/**
+ * CR-120: 응답 결과 접이식 블록 — 청크 카드 안에서 모델 응답을 기본 접힘으로 표시.
+ * (step 본문의 최종 응답은 기존대로 펼쳐 보이고, 청크 단위 응답만 접는다 — 청크가 13개면
+ *  전부 펼쳐두면 화면이 끝없이 길어지므로.)
+ */
+const OutputBlock = ({ text, defaultOpen = false }: { text: string; defaultOpen?: boolean }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-md border border-border/60 bg-background">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-muted/40"
+      >
+        <ChevronRight
+          className={cn("size-3.5 shrink-0 transition-transform text-muted-foreground", open && "rotate-90")}
+        />
+        <span className="text-[11px] font-medium text-foreground">응답 결과</span>
+        <span className="ml-auto font-mono text-[10px] text-muted-foreground/60">
+          {text.length.toLocaleString()}자
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-border/60 p-2.5">
+          <TextBlock text={text} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * CR-120: 청크 1개 카드 — "청크 N/M (페이지) ✓완료" 헤더 + 펼치면 프롬프트(접힘)+응답(접힘).
+ * 상태 아이콘으로 진행/완료/실패를 구분한다. running 청크는 회전 스피너.
+ */
+const ChunkGroup = ({ c }: { c: ChatFlowChunk }) => {
+  const [open, setOpen] = useState(false);
+  const Icon = c.status === "ok" ? CheckCircle2 : c.status === "failed" ? XCircle : Loader2;
+  const iconClass =
+    c.status === "ok"
+      ? "text-green-600"
+      : c.status === "failed"
+        ? "text-destructive"
+        : "text-blue-500 animate-spin";
+  const total = c.totalChunks;
+  const label = total ? `청크 ${c.index + 1}/${total}` : `청크 ${c.index + 1}`;
+  return (
+    <div className="rounded-md border border-border/60 bg-muted/10">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-muted/30"
+      >
+        <ChevronRight
+          className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")}
+        />
+        <Icon className={cn("size-3.5 shrink-0", iconClass)} />
+        <span className="font-mono text-[11px] font-medium text-foreground">{label}</span>
+        {c.pageRange && (
+          <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+            p.{c.pageRange}
+          </span>
+        )}
+        {c.status === "running" && (
+          <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400">처리 중…</span>
+        )}
+        {c.status === "failed" && (
+          <span className="text-[11px] font-medium text-destructive">실패</span>
+        )}
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2 border-t border-border/60 p-2.5">
+          {c.blocks.length === 0 && (
+            <div className="text-xs text-muted-foreground/50">(본문 없음)</div>
+          )}
+          {c.blocks.map((b, i) =>
+            b.kind === "text" && b.role === "input" ? (
+              <InputPromptBlock key={i} text={b.text} />
+            ) : b.kind === "text" && b.role === "output" ? (
+              <OutputBlock key={i} text={b.text} />
+            ) : (
+              <FlowBlock key={i} b={b} idx={i} />
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** 블록 1개 렌더 — text / tool_use(에이전트 호출 구분). step 본문·iteration 본문 공용. */
 const FlowBlock = ({ b, idx }: { b: ChatFlowBlock; idx: number }) => {
   if (b.kind === "text") {
@@ -158,6 +248,22 @@ function isEmptyResponseFailure(it: ChatFlowIteration): boolean {
   );
 }
 
+/**
+ * CR-120: 청크 진행률 라벨 — "진행중 (12/13)" / "완료 (13/13)" / "실패 N".
+ * 전체(M)는 청크 본문의 "청크 N/M" 에서 파싱한 totalChunks(없으면 도착한 청크 수).
+ * 사용자 요구: 한 청크 완료 후 다른 청크 진행 중일 때 ok→running 깜빡임 없이 "진행중 (N/M)" 안정 표시.
+ */
+function chunkProgressLabel(chunks: ChatFlowChunk[]): string {
+  const total = chunks[0]?.totalChunks ?? chunks.length;
+  const done = chunks.filter((c) => c.status === "ok").length;
+  const failed = chunks.filter((c) => c.status === "failed").length;
+  const finished = done + failed;
+  const head = finished >= total && total > 0 ? "완료" : "진행중";
+  let label = `${head} (${done}/${total})`;
+  if (failed > 0) label += ` · 실패 ${failed}`;
+  return label;
+}
+
 /** FOREACH 한 반복(반복 #N) — 기본 접힘, 헤더에 상태·요약. 클릭 시 자식 블록 펼침. */
 const IterationGroup = ({ it }: { it: ChatFlowIteration }) => {
   const [open, setOpen] = useState(false);
@@ -172,6 +278,8 @@ const IterationGroup = ({ it }: { it: ChatFlowIteration }) => {
   const dur = durationLabel(it.durationMs);
   const wait = waitLabel(it);
   const emptyResp = isEmptyResponseFailure(it);
+  const chunks = it.chunks;
+  const hasChunks = !!chunks?.length;
 
   return (
     <div className="rounded-md border border-border/70 bg-muted/20">
@@ -196,8 +304,17 @@ const IterationGroup = ({ it }: { it: ChatFlowIteration }) => {
             <AlertTriangle className="size-3" />빈 응답
           </span>
         )}
-        {/* CR-117: running 대기 상태 문구 — 도구만 끝나고 전체 끝난 것으로 오인 방지 */}
-        {wait ? (
+        {/* CR-120: 청크 단위면 진행률(12/13)을 우선 표시. 아니면 기존 대기문구/요약. */}
+        {hasChunks ? (
+          <span
+            className={cn(
+              "truncate text-[11px] font-medium",
+              it.status === "running" ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground",
+            )}
+          >
+            {chunkProgressLabel(chunks!)}
+          </span>
+        ) : wait ? (
           <span className="truncate text-[11px] font-medium text-blue-600 dark:text-blue-400">
             {wait}
           </span>
@@ -214,12 +331,17 @@ const IterationGroup = ({ it }: { it: ChatFlowIteration }) => {
       </button>
       {open && (
         <div className="flex flex-col gap-2 border-t border-border/70 p-2.5">
-          {it.blocks.length === 0 && (
-            <div className="text-xs text-muted-foreground/50">(본문 없음)</div>
-          )}
+          {/* CR-120: 청크 단위면 청크 카드들을 중첩 렌더(3단). 아니면 기존 블록 흐름. */}
+          {hasChunks &&
+            chunks!.map((c) => <ChunkGroup key={c.index} c={c} />)}
           {it.blocks.map((b, i) => (
             <FlowBlock key={i} b={b} idx={i} />
           ))}
+          {!hasChunks && it.blocks.length === 0 && (
+            <div className="text-xs text-muted-foreground/50">
+              {it.status === "running" ? "처리 대기 중…" : "(본문 없음)"}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -283,9 +405,21 @@ export const RunChatFlow = ({ steps, live }: RunChatFlowProps) => {
             <div className="flex flex-col gap-2 p-3">
               {step.blocks.length === 0 &&
                 !step.iterations?.length &&
+                !step.chunks?.length &&
                 !isLastRunning && (
                   <div className="text-xs text-muted-foreground/50">(본문 없음)</div>
                 )}
+              {/* CR-120: FOREACH 위임 없이 LARGE_INPUT 단독이면 step 레벨에 청크 진행률+카드 */}
+              {step.chunks?.length ? (
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[11px] font-medium text-muted-foreground">
+                    {chunkProgressLabel(step.chunks)}
+                  </div>
+                  {step.chunks.map((c) => (
+                    <ChunkGroup key={c.index} c={c} />
+                  ))}
+                </div>
+              ) : null}
               {step.blocks.map((b, i) => (
                 <FlowBlock key={b.kind === "tool_use" ? b.id : i} b={b} idx={i} />
               ))}

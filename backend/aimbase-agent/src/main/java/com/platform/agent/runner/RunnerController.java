@@ -147,10 +147,14 @@ public class RunnerController {
         if (req == null || req.getRunId() == null || req.getRunId().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "run_id required");
         }
-        boolean ok = service.cancel(req.getRunId());
+        // CR-121: prefix=true 면 접두사로 시작하는 모든 워커를 일괄 종료(LARGE_INPUT 청크 잔여 회수).
+        int n = req.isPrefix()
+                ? service.cancelByPrefix(req.getRunId())
+                : (service.cancel(req.getRunId()) ? 1 : 0);
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("cancelled", ok);
-        if (!ok) result.put("reason", "not_found_or_failed");
+        result.put("cancelled", n > 0);
+        result.put("closed", n);
+        if (n == 0) result.put("reason", "not_found_or_failed");
         return result;
     }
 

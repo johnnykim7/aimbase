@@ -29,13 +29,22 @@ export const useWorkflowRun = (runId: string | undefined) =>
     retry: false,
   });
 
-/** CR-102: run 이벤트 타임라인 (메타만 — 본문은 행 펼침 시 단건 조회). */
-export const useWorkflowRunEvents = (runId: string | undefined) =>
+/**
+ * CR-102: run 이벤트 타임라인 (메타만 — 본문은 행 펼침 시 단건 조회).
+ * CR-108: includeBody=true 시 본문 전문을 일괄 조회 — 채팅 흐름 뷰가 모든 블록 본문을 한 번에 필요로 함.
+ * @param refetchInterval 진행중 run 폴링용 (ms). 0/undefined 면 폴링 안 함.
+ */
+export const useWorkflowRunEvents = (
+  runId: string | undefined,
+  opts?: { includeBody?: boolean; refetchInterval?: number },
+) =>
   useQuery({
-    queryKey: ["workflow-run-events", runId],
-    queryFn: () => workflowsApi.runEvents(runId!).then((r) => r.data.data ?? []),
+    queryKey: ["workflow-run-events", runId, opts?.includeBody ?? false],
+    queryFn: () =>
+      workflowsApi.runEvents(runId!, opts?.includeBody ?? false).then((r) => r.data.data ?? []),
     enabled: !!runId,
     retry: false,
+    refetchInterval: opts?.refetchInterval && opts.refetchInterval > 0 ? opts.refetchInterval : false,
   });
 
 /** CR-102: 이벤트 단건 본문 전문 — 행 펼침 시에만 fetch (enabled). */
