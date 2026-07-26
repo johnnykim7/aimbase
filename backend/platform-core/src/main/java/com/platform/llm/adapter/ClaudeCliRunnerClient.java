@@ -104,11 +104,20 @@ public class ClaudeCliRunnerClient {
     public LLMResponse chat(AgentEndpoint endpoint, LLMRequest request, String toolMode,
                              String configDir, String systemPromptOverride, String runnerApiKey,
                              boolean subagentEnabled) {
-        Map<String, Object> body = buildBody(request, toolMode, configDir, systemPromptOverride, subagentEnabled);
+        return chat(endpoint, request, toolMode, configDir, systemPromptOverride, runnerApiKey,
+                subagentEnabled, null);
+    }
+
+    /** CR-129(갭A): 커넥션 exposed_tools 전달 오버로드. */
+    public LLMResponse chat(AgentEndpoint endpoint, LLMRequest request, String toolMode,
+                             String configDir, String systemPromptOverride, String runnerApiKey,
+                             boolean subagentEnabled, List<String> exposedTools) {
+        Map<String, Object> body = buildBody(request, toolMode, configDir, systemPromptOverride,
+                subagentEnabled, exposedTools);
         HttpRequest httpReq = newJsonRequest(endpoint, "/v1/chat", body, runnerApiKey);
 
         try {
-            HttpResponse<String> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = clientFor(endpoint).send(httpReq, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
                 throw new ResponseStatusException(HttpStatus.valueOf(resp.statusCode()),
                         "Runner /v1/chat 실패: " + resp.body());
@@ -132,11 +141,21 @@ public class ClaudeCliRunnerClient {
     public void chatStream(AgentEndpoint endpoint, LLMRequest request, String toolMode,
                             String configDir, String systemPromptOverride, String runnerApiKey,
                             Consumer<LLMStreamChunk> chunkConsumer, boolean subagentEnabled) {
-        Map<String, Object> body = buildBody(request, toolMode, configDir, systemPromptOverride, subagentEnabled);
+        chatStream(endpoint, request, toolMode, configDir, systemPromptOverride, runnerApiKey,
+                chunkConsumer, subagentEnabled, null);
+    }
+
+    /** CR-129(갭A): 커넥션 exposed_tools 전달 오버로드. */
+    public void chatStream(AgentEndpoint endpoint, LLMRequest request, String toolMode,
+                            String configDir, String systemPromptOverride, String runnerApiKey,
+                            Consumer<LLMStreamChunk> chunkConsumer, boolean subagentEnabled,
+                            List<String> exposedTools) {
+        Map<String, Object> body = buildBody(request, toolMode, configDir, systemPromptOverride,
+                subagentEnabled, exposedTools);
         HttpRequest httpReq = newJsonRequest(endpoint, "/v1/chat/stream", body, runnerApiKey);
 
         try {
-            HttpResponse<InputStream> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<InputStream> resp = clientFor(endpoint).send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
             if (resp.statusCode() / 100 != 2) {
                 throw new ResponseStatusException(HttpStatus.valueOf(resp.statusCode()),
                         "Runner /v1/chat/stream 실패");
@@ -191,7 +210,7 @@ public class ClaudeCliRunnerClient {
         Map<String, Object> body = Map.of("run_id", runId, "prefix", prefix);
         HttpRequest httpReq = newJsonRequest(endpoint, "/v1/cancel", body, runnerApiKey, CANCEL_TIMEOUT);
         try {
-            HttpResponse<String> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = clientFor(endpoint).send(httpReq, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
                 log.warn("Runner /v1/cancel 응답 {}: {}", resp.statusCode(), resp.body());
             }
@@ -206,6 +225,44 @@ public class ClaudeCliRunnerClient {
     private HttpRequest newJsonRequest(AgentEndpoint endpoint, String path,
                                         Map<String, Object> body, String runnerApiKey) {
         return newJsonRequest(endpoint, path, body, runnerApiKey, httpRequestTimeout);
+    }
+
+    /**
+     * 이 endpoint 호출에 쓸 HttpClient 를 고른다.
+     *
+     * <p>TURN-TCP 릴레이(RFC 6062)는 연결마다 agent 가 ConnectionBind 로 새 통로를 세워야 하는
+     * 1회성 채널이다. 공용 {@link #httpClient} 는 커넥션 풀을 재사용하므로, 이전 요청이 쓰고 닫은
+     * 소켓을 다시 집어 "header parser received no bytes"(TURN_BROKEN_PIPE) 로 깨진다.
+     * curl 은 매번 새 연결이라 성공하는데 BE 만 실패하던 원인이 이것.
+     *
+     * <p>릴레이 대상일 때만 요청 전용 클라이언트를 만들어 풀 재사용을 피한다.
+     * docker 내부 직통(예: http://aimbase-agent-wes:8296)은 기존 풀을 그대로 쓴다.
+     */
+    private HttpClient clientFor(AgentEndpoint endpoint) {
+        if (!isTurnRelayEndpoint(endpoint)) {
+            return httpClient;
+        }
+        return HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .version(HttpClient.Version.HTTP_1_1)   // 릴레이는 h2 업그레이드 협상 불필요
+                .build();
+    }
+
+    /**
+     * TURN 릴레이 endpoint 판별.
+     *
+     * <p>agent 가 TURN-TCP 로 등록하면 runnerEndpoint 가 TURN 서버의 공인 IP + 릴레이 포트
+     * (예: {@code http://59.8.160.12:57267}) 가 된다. 반면 docker 내부 직통은 서비스명 호스트
+     * (예: {@code http://aimbase-agent-wes:8296}) 다. 호스트가 IP 리터럴이면 릴레이로 본다.
+     */
+    private static boolean isTurnRelayEndpoint(AgentEndpoint endpoint) {
+        if (endpoint == null || endpoint.runnerEndpoint() == null) return false;
+        try {
+            String host = URI.create(endpoint.runnerEndpoint()).getHost();
+            return host != null && host.matches("\\d{1,3}(\\.\\d{1,3}){3}");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** CR-109: 요청별 타임아웃 오버라이드 오버로드 (cancel 은 짧은 타임아웃 사용). */
@@ -229,7 +286,8 @@ public class ClaudeCliRunnerClient {
 
     private static Map<String, Object> buildBody(LLMRequest request, String toolMode,
                                                    String configDir, String systemPromptOverride,
-                                                   boolean subagentEnabled) {
+                                                   boolean subagentEnabled,
+                                                   List<String> exposedTools) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("run_id", request.sessionId() != null ? request.sessionId() : UUID.randomUUID().toString());
         body.put("model", request.model());
@@ -255,6 +313,10 @@ public class ClaudeCliRunnerClient {
         // CR-104: 이 호출의 도구 목록(= getToolDefs(toolFilter), API 경로가 모델에 싣는 것과 동일)을
         // 원본 도구명으로 실어 보낸다. Runner 가 mcp__aimbase-server__<tool> 로 변환해 --allowedTools 주입.
         // 비어있으면 미전송 → Runner 가 서버 MCP endpoint 노출 전체(CLI_EXPOSED)를 그대로 사용.
+        // CR-129(갭A): 요청 도구 목록이 없으면 커넥션 exposed_tools 화이트리스트로 폴백한다.
+        // 우선순위: 요청 tools(tool_filter 반영) > 커넥션 exposed_tools > 미전송(전체 노출, 기존 동작).
+        // 소비앱과 무관한 builtin(입찰/RAG/문서 등 ~110개)이 CLI 에 통째로 실리던 문제를 커넥션 단위로 좁힌다.
+        List<String> allowedTools = null;
         if (request.tools() != null && !request.tools().isEmpty()) {
             List<String> toolNames = request.tools().stream()
                     .map(com.platform.tool.model.UnifiedToolDef::name)
@@ -262,8 +324,14 @@ public class ClaudeCliRunnerClient {
                     .distinct()
                     .toList();
             if (!toolNames.isEmpty()) {
-                body.put("allowed_tools", toolNames);
+                allowedTools = toolNames;
             }
+        }
+        if (allowedTools == null && exposedTools != null && !exposedTools.isEmpty()) {
+            allowedTools = exposedTools;
+        }
+        if (allowedTools != null) {
+            body.put("allowed_tools", allowedTools);
         }
         List<Map<String, Object>> rawMessages = toRawMessages(request.messages());
         // CR-113: CLI 는 Anthropic API 의 tool_choice/json_schema 같은 구조화 강제 장치가 없어
