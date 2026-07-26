@@ -36,6 +36,8 @@ public class RunnerAutoConfiguration {
         cfg.setServerMcpBaseUrl(props.getServerMcpBaseUrl());
         cfg.setServerMcpApiKey(props.getServerMcpApiKey());
         cfg.setServerMcpAgentId(props.getServerMcpAgentId());
+        // 외부 MCP 서버(playwright 등) 추가 주입 — Runner 가 도는 PC 에서만 의미 있는 도구용.
+        cfg.setExtraMcpServersJson(props.getExtraMcpServersJson());
         return cfg;
     }
 

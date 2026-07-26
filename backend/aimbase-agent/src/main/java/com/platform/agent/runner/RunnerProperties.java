@@ -40,6 +40,16 @@ public class RunnerProperties {
     private String serverMcpAgentId;
 
     /**
+     * 외부 MCP 서버 추가 주입 (예: playwright). mcpServers 내부 객체 JSON.
+     *
+     * <p>예: {@code aimbase.runner.extra-mcp-servers-json={"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest"]}}}
+     *
+     * <p>브라우저 조작처럼 Runner 가 도는 PC 에서만 의미 있는 도구를 붙일 때 쓴다.
+     * aimbase 항목과 병합되며 키가 겹치면 이 값이 이긴다.
+     */
+    private String extraMcpServersJson;
+
+    /**
      * CR-126: AIMBASE 모드에서 봉인할 CLI built-in 도구 목록 (CSV).
      *
      * <p>비어있으면 {@code ClaudeCliCommandBuilder.DEFAULT_SEALED_NATIVE_TOOLS} 를 쓴다.
@@ -76,6 +86,9 @@ public class RunnerProperties {
 
     public String getServerMcpAgentId() { return serverMcpAgentId; }
     public void setServerMcpAgentId(String serverMcpAgentId) { this.serverMcpAgentId = serverMcpAgentId; }
+
+    public String getExtraMcpServersJson() { return extraMcpServersJson; }
+    public void setExtraMcpServersJson(String extraMcpServersJson) { this.extraMcpServersJson = extraMcpServersJson; }
 
     public String getSealedNativeTools() { return sealedNativeTools; }
     public void setSealedNativeTools(String sealedNativeTools) { this.sealedNativeTools = sealedNativeTools; }

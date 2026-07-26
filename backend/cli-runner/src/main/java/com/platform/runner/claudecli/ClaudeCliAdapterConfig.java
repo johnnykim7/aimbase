@@ -39,6 +39,15 @@ public class ClaudeCliAdapterConfig {
     private String serverMcpApiKey = "";
     /** CR-072: aimbase-server MCP endpoint 호출용 X-Aimbase-Agent-Id 헤더 값. */
     private String serverMcpAgentId = "";
+    /**
+     * 외부 MCP 서버 추가 주입 (예: playwright). mcpServers 내부 객체 JSON.
+     *
+     * <p>예시: {@code {"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest"]}}}
+     *
+     * <p>{@link #resolveMcpConfigJson()} 이 합성한 aimbase 항목 위에 병합된다. 키가 겹치면 이 값이 이긴다.
+     * {@code mcpConfigJson} 을 통째로 지정한 경우에는 그쪽이 우선이라 병합하지 않는다.
+     */
+    private String extraMcpServersJson = "";
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -86,6 +95,9 @@ public class ClaudeCliAdapterConfig {
 
     public String getServerMcpAgentId() { return serverMcpAgentId; }
     public void setServerMcpAgentId(String v) { this.serverMcpAgentId = (v == null) ? "" : v; }
+
+    public String getExtraMcpServersJson() { return extraMcpServersJson; }
+    public void setExtraMcpServersJson(String v) { this.extraMcpServersJson = (v == null) ? "" : v; }
 
     public Duration turnTimeout() { return Duration.ofSeconds(timeoutSeconds); }
 
@@ -148,6 +160,18 @@ public class ClaudeCliAdapterConfig {
                 server.put("headers", headers);
             }
             servers.put("aimbase-server", server);
+        }
+
+        // extraMcpServersJson 병합 (예: playwright). 키 충돌 시 외부 지정이 이긴다.
+        // 파싱 실패는 무시 — 잘못된 설정 하나로 aimbase 도구 전체가 죽는 편이 더 나쁘다.
+        if (extraMcpServersJson != null && !extraMcpServersJson.isBlank()) {
+            try {
+                java.util.Map<?, ?> extra = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(extraMcpServersJson, java.util.Map.class);
+                extra.forEach((k, v) -> servers.put(String.valueOf(k), v));
+            } catch (Exception e) {
+                // 무시하고 aimbase 항목만으로 진행
+            }
         }
 
         java.util.Map<String, Object> root = java.util.Map.of("mcpServers", servers);
