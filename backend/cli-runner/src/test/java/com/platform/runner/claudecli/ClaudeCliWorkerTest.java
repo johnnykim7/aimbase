@@ -1,5 +1,6 @@
 package com.platform.runner.claudecli;
 
+import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.UnifiedMessage;
 import org.junit.jupiter.api.AfterEach;
@@ -97,6 +98,88 @@ class ClaudeCliWorkerTest {
                 UnifiedMessage.ofText(UnifiedMessage.Role.USER, "turn-2"));
 
         assertThat(second.textContent()).isEqualTo("hello");
+    }
+
+    /**
+     * 스트리밍 경로에서 2턴째 이후 <b>이전 턴 사용자 질문이 재전송되지 않는지</b> 검증.
+     *
+     * <p>회귀 대상: 워커가 {@code first} 플래그를 상태 검증에만 쓰고 받은 messages 를 전부 stdin 에
+     * 쓰던 시절, 위젯(스트리밍) 대화에서 과거 질문이 매 턴 누적 전송됐다. CLI 는 이미 답한 질문을
+     * 다시 받아 앞선 지시부터 재수행하고 정작 이번 질문은 묻혔다(운영 세션 sess-1785039270248-pyhw08hb:
+     * "/tmp 가 어디냐" 에 엑셀·PPT 재생성으로 응답).
+     */
+    @Test
+    void stream_turn_does_not_resend_previous_user_messages() throws IOException {
+        Path stdinDump = tempDir.resolve("stdin-" + System.nanoTime() + ".txt");
+        Path dumpStub = writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-dump"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo "$line" >> '%s'
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-dump","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(stdinDump.toString()));
+
+        worker = new ClaudeCliWorker(dumpStub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.start();
+
+        // 1턴째 — 전체 주입 (CLI 맥락 초기화)
+        worker.turnStream(List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "turn-1")), true, d -> {});
+
+        // 2턴째 — 호출자가 누적 이력 전체를 넘겨도 이번 턴 질문만 나가야 한다
+        worker.turnStream(List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "turn-1"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "turn-2")), false, d -> {});
+
+        List<String> lines = Files.readAllLines(stdinDump);
+        assertThat(lines).hasSize(2);
+        assertThat(lines.get(0)).contains("turn-1");
+        // 핵심: 2턴째 라인에 이전 턴 질문이 섞이면 안 된다
+        assertThat(lines.get(1)).contains("turn-2");
+        assertThat(lines.get(1)).doesNotContain("turn-1");
+    }
+
+    /**
+     * 도구 루프 중 재주입되는 TOOL_RESULT 는 이번 턴 입력이므로 절단되면 안 된다.
+     *
+     * <p>stdin 덤프 대신 절단 함수를 직접 검증한다 — 스텁이 첫 줄을 읽자마자 {@code result} 를 내보내
+     * turn 이 반환되므로, 두 번째 줄의 기록 시점은 스텁 프로세스와 경쟁 상태가 된다(무엇을 <b>보냈는지</b>가
+     * 검증 대상이지 스텁이 언제 받아쓰는지가 아니다).
+     */
+    @Test
+    void trim_keeps_current_turn_user_and_tool_results_only() {
+        List<UnifiedMessage> input = List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "old-question"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, "old-answer"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "current-question"),
+                UnifiedMessage.ofToolResults(List.of(
+                        new ContentBlock.ToolResult("tu-1", "tool-output-kept"))));
+
+        List<UnifiedMessage> trimmed = ClaudeCliWorker.trimToCurrentTurn(input);
+
+        assertThat(trimmed).hasSize(2);
+        assertThat(trimmed.get(0).role()).isEqualTo(UnifiedMessage.Role.USER);
+        assertThat(flatten(trimmed.get(0))).isEqualTo("current-question");
+        assertThat(trimmed.get(1).role()).isEqualTo(UnifiedMessage.Role.TOOL_RESULT);
+    }
+
+    /** USER 없이 TOOL_RESULT 만 재주입되는 도구 루프 중간 턴은 전량 보존한다. */
+    @Test
+    void trim_preserves_all_when_no_user_message() {
+        List<UnifiedMessage> input = List.of(
+                UnifiedMessage.ofToolResults(List.of(
+                        new ContentBlock.ToolResult("tu-1", "only-tool-result"))));
+
+        assertThat(ClaudeCliWorker.trimToCurrentTurn(input)).isEqualTo(input);
+    }
+
+    private static String flatten(UnifiedMessage msg) {
+        return msg.content().stream()
+                .filter(b -> b instanceof ContentBlock.Text)
+                .map(b -> ((ContentBlock.Text) b).text())
+                .reduce("", String::concat);
     }
 
     @Test

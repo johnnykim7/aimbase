@@ -2,6 +2,7 @@ package com.platform.orchestrator;
 
 import com.platform.action.ActionExecutor;
 import com.platform.action.model.*;
+import com.platform.config.WorkspaceProperties;
 import com.platform.hook.HookDecision;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookEvent;
@@ -99,6 +100,10 @@ public class OrchestratorEngine {
     private final HookDispatcher hookDispatcher;
     private final MemoryAutoExtractService memoryAutoExtractService;
     private final CancellationRegistry cancellationRegistry;
+    /** CR-130: 채팅 경로용 run 기록자 — 채팅도 "실행 내역"에서 도구 궤적까지 보이게 한다. */
+    private final ChatRunRecorder chatRunRecorder;
+    /** CR-132 후속: 채팅 세션 workspace 자동 할당(산출물 out/ 의 부모)의 base 경로 산정용. */
+    private final WorkspaceProperties workspaceProperties;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -129,8 +134,12 @@ public class OrchestratorEngine {
             RuntimeRegistry runtimeRegistry,
             HookDispatcher hookDispatcher,
             MemoryAutoExtractService memoryAutoExtractService,
-            CancellationRegistry cancellationRegistry
+            CancellationRegistry cancellationRegistry,
+            ChatRunRecorder chatRunRecorder,
+            WorkspaceProperties workspaceProperties
     ) {
+        this.chatRunRecorder = chatRunRecorder;
+        this.workspaceProperties = workspaceProperties;
         this.modelRouter = modelRouter;
         this.fallbackChainExecutor = fallbackChainExecutor;
         this.connectionAdapterFactory = connectionAdapterFactory;
@@ -225,10 +234,20 @@ public class OrchestratorEngine {
         // CR-045: workspacePath — 세션 메타(workspaceRef) > 요청값 > null 우선순위.
         // 첫 요청이면 세션 메타에 저장. 기존 메타와 다른 값 요청 시 IllegalStateException(BIZ-091) → Controller 409.
         String workspacePath = resolveWorkspace(request, sessionId);
+        // CR-130: 워크플로우가 아닌 채팅 경로도 "실행 내역"에서 보이도록 workflow_id=NULL 인 run 을 만든다.
+        // 이 runId 가 ToolContext 로 흘러야 ToolCallHandler 의 canRecord(runId != null)가 켜지고,
+        // CLI 내부 도구 관찰(observed_tool_events)이 기존 워크플로우 이벤트 적재 로직 그대로 남는다.
+        // CLI 커넥션(도구 루프를 실제로 도는 경로)일 때만 생성 — 일반 LLM 채팅은 남길 궤적이 없다.
+        String effectiveRunId = request.workflowRunId();
+        UUID chatRunId = null;
+        if (effectiveRunId == null && connectionAdapterFactory.isCliConnection(request.connectionId())) {
+            chatRunId = chatRunRecorder.start(sessionId, request.connectionId(), request.model());
+            if (chatRunId != null) effectiveRunId = chatRunId.toString();
+        }
         // CR-102: workflowRunId/stepId/subagentRunId/connectionId 전파 — 도구 루프 이벤트의 run 타임라인 연결 + 커넥터 표시
         ToolContext toolContext = new ToolContext(
                 tenantId, null, null, sessionId,
-                request.workflowRunId(), request.workflowStepId(), request.subagentRunId(),
+                effectiveRunId, request.workflowStepId(), request.subagentRunId(),
                 request.connectionId(),
                 request.userId(), PermissionLevel.FULL,
                 ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
@@ -332,7 +351,9 @@ public class OrchestratorEngine {
                             adapter, resolvedModel, trimmedMessages,
                             modelConfig, sessionId, toolRegistry,
                             request.toolFilter(), request.toolChoice(), toolContext,
-                            resolvedSchema);
+                            resolvedSchema,
+                            // CR-128(갭B): 요청 단위 CLI override 를 도구루프 경로에도 전달
+                            request.toolModeOverride(), request.systemPromptOverride());
                 } finally {
                     actionsExecuted = com.platform.tool.ToolCallHandler.drainActionTracking();
                 }
@@ -342,7 +363,9 @@ public class OrchestratorEngine {
                 // 상대경로(attachments/...)로도 작업장을 읽게 한다. 비-CLI 어댑터는 무시.
                 LLMRequest llmRequest = new LLMRequest(
                         resolvedModel, trimmedMessages, null,
-                        modelConfig, false, sessionId, null, resolvedSchema, workspacePath);
+                        modelConfig, false, sessionId, null, resolvedSchema, workspacePath)
+                        // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (CLI 어댑터만 사용, 그 외 무시)
+                        .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride());
                 try {
                     if (useConnectionGroup) {
                         // CR-015: 커넥션 그룹 기반 호출 — 그룹 전략 + 커넥션 레벨 폴백
@@ -372,6 +395,18 @@ public class OrchestratorEngine {
             }
             llmSuccess = true;
         } finally {
+            // CR-130: 채팅 run 종료 — 성공/실패 무관하게 반드시 닫아 RUNNING 좀비 run 을 남기지 않는다.
+            // (chatRunId 가 null = 워크플로우 경로이거나 비-CLI 채팅 → no-op)
+            if (chatRunId != null) {
+                // 도구 없는 단발 경로(actionsEnabled=false)는 executeLoop 을 안 타므로
+                // CLI 가 응답에 실어보낸 도구 관찰을 여기서 직접 적재해야 한다(그렇지 않으면 events 0건).
+                chatRunRecorder.recordObservedTools(chatRunId, llmResponse);
+                if (llmSuccess) {
+                    chatRunRecorder.complete(chatRunId);
+                } else {
+                    chatRunRecorder.fail(chatRunId, "LLM call failed");
+                }
+            }
             long latencyMs = System.currentTimeMillis() - llmStart;
             String provider = resolvedModel.contains("/") ? resolvedModel.split("/")[0] : "unknown";
             long inputTokens = (llmResponse != null && llmResponse.usage() != null) ? llmResponse.usage().inputTokens() : 0;
@@ -556,10 +591,18 @@ public class OrchestratorEngine {
         // CR-045: workspacePath 결정 (비스트리밍 경로와 동일)
         String tenantId = TenantContext.getTenantId();
         String workspacePath = resolveWorkspace(request, sessionId);
+        // CR-130: 스트리밍 채팅도 비스트리밍과 동일하게 run 을 만들어 "실행 내역"에 남긴다.
+        // 위젯·FE 채팅이 이 경로를 타므로 여기가 빠지면 실사용 대부분이 기록되지 않는다.
+        String effectiveRunId = request.workflowRunId();
+        UUID chatRunId = null;
+        if (effectiveRunId == null && connectionAdapterFactory.isCliConnection(request.connectionId())) {
+            chatRunId = chatRunRecorder.start(sessionId, request.connectionId(), request.model());
+            if (chatRunId != null) effectiveRunId = chatRunId.toString();
+        }
         // CR-102: workflowRunId/stepId/subagentRunId/connectionId 전파 (스트리밍 경로 동일)
         ToolContext toolContext = new ToolContext(
                 tenantId, null, null, sessionId,
-                request.workflowRunId(), request.workflowStepId(), request.subagentRunId(),
+                effectiveRunId, request.workflowStepId(), request.subagentRunId(),
                 request.connectionId(),
                 request.userId(), PermissionLevel.FULL,
                 ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
@@ -603,10 +646,16 @@ public class OrchestratorEngine {
                 // CR-107 후속: workspacePath 를 CLI cwd 전파용으로 실어 보낸다(비스트리밍 경로와 동일).
                 LLMRequest llmRequest = new LLMRequest(
                         resolvedModel, trimmedMessages, null,
-                        streamModelConfig, true, sessionId, null, null, workspacePath);
+                        streamModelConfig, true, sessionId, null, null, workspacePath)
+                        // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (스트리밍 경로)
+                        .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride());
                 StringBuilder textBuf = new StringBuilder();
                 final TokenUsage[] usageHolder = new TokenUsage[]{null};
                 final String[] idHolder = new String[]{""};
+                // CR-130: 도구 없는 스트리밍 경로도 CLI 내부 도구 관찰(observedTool chunk)을 모아
+                // run 종료 시 적재한다. 이 분기는 executeLoopStream 을 타지 않아 아무도 소비하지 않았다.
+                final java.util.List<com.platform.llm.model.ObservedToolEvent> observedBuf =
+                        java.util.Collections.synchronizedList(new java.util.ArrayList<>());
                 // CR-045: adapter.chatStream은 fire-and-forget(가상 스레드)이므로 CountDownLatch로 완료 대기.
                 java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
                 adapter.chatStream(llmRequest, chunk -> {
@@ -619,6 +668,15 @@ public class OrchestratorEngine {
                     if (chunk.done()) {
                         usageHolder[0] = chunk.usage();
                         latch.countDown();
+                        return;
+                    }
+                    // CR-130: CLI 내부 도구 관찰 청크 수집 (tool_result 도착분만 적재해 중복 방지)
+                    if (chunk.observedTool() != null) {
+                        var ot = chunk.observedTool();
+                        if (ot.output() != null) {
+                            observedBuf.add(new com.platform.llm.model.ObservedToolEvent(
+                                    ot.toolName(), ot.input(), ot.output(), ot.durationMs()));
+                        }
                         return;
                     }
                     if (chunk.delta() == null) return;
@@ -642,6 +700,13 @@ public class OrchestratorEngine {
                         List.of(new ContentBlock.Text(finalText)),
                         List.of(), usageHolder[0] != null ? usageHolder[0] : new TokenUsage(0, 0),
                         LLMResponse.FinishReason.END, 0, 0);
+                // CR-130: 수집한 CLI 도구 관찰을 채팅 run 에 적재 (observedBuf 는 이 분기 스코프)
+                if (chatRunId != null && !observedBuf.isEmpty()) {
+                    chatRunRecorder.recordObservedTools(chatRunId,
+                            new LLMResponse(idHolder[0], resolvedModel, List.of(), List.of(),
+                                    new TokenUsage(0, 0), LLMResponse.FinishReason.END, 0, 0,
+                                    java.util.List.copyOf(observedBuf)));
+                }
                 streamSinkWithCitations.accept(new com.platform.orchestrator.stream.StreamEvent.Done(usageHolder[0]));
             }
 
@@ -659,6 +724,15 @@ public class OrchestratorEngine {
                 saveUsageLog(request.userId(), sessionId, resolvedModel, finalResponse);
             }
         } finally {
+            // CR-130: 스트리밍 채팅 run 종료 — 예외·중단 포함 모든 경로에서 닫는다.
+            // 중단(cancel)은 정상 완료와 구분되도록 FAILED 로 남긴다.
+            if (chatRunId != null) {
+                if (cancelled.get()) {
+                    chatRunRecorder.fail(chatRunId, "사용자 중단");
+                } else {
+                    chatRunRecorder.complete(chatRunId);
+                }
+            }
             cancellationRegistry.clear(sessionId);
         }
     }
@@ -862,7 +936,52 @@ public class OrchestratorEngine {
             sessionStore.setWorkspaceRefIfAbsent(sessionId, requested);
             return requested;
         }
-        return requested;
+        return autoAssignChatWorkspace(request, sessionId);
+    }
+
+    /**
+     * CR-132 후속: 요청이 {@code working_directory} 를 주지 않는 채팅(위젯) 세션에 workspace 를 자동 할당한다.
+     *
+     * <p>배경 — CR-132 의 산출물 다운로드({@code GET /chat/artifacts})는 세션 {@code workspaceRef} 하위
+     * {@code out/} 를 스캔한다. 그런데 위젯은 {@code working_directory} 를 보내지 않아 workspaceRef 가 끝까지
+     * 비어 있었고, {@code ArtifactService.resolveOutDir} 가 null 을 반환해 <b>다운로드 경로가 한 번도 동작하지
+     * 않았다</b>. CLI 는 갈 곳을 못 찾아 {@code /tmp} 에 파일을 만들었고(운영 세션
+     * sess-1785039270248-pyhw08hb), 사용자에겐 접근 불가능한 컨테이너 내부 경로만 안내됐다.
+     *
+     * <p>여기서 세션 전용 폴더를 잡아주면 소비앱·위젯 코드 변경 없이 모든 채팅 세션이 산출물 전달 통로를 갖는다.
+     * 경로는 {@code {base}/chat/{sessionId}} — base 는 BE·러너가 동일 볼륨으로 공유하는 마운트
+     * (운영: {@code /data/workspace})라 러너가 쓴 파일을 BE 가 그대로 읽는다.
+     *
+     * <p>CLI 커넥션에만 적용한다. 일반 LLM 채팅은 파일을 만들 수단이 없어 빈 폴더만 양산되기 때문이다.
+     * 폴더 생성은 실제 사용 시점(러너가 cwd 로 진입)에 맡기지 않고 여기서 미리 만든다 — CLI 프로세스의
+     * cwd 지정은 폴더가 없으면 spawn 자체가 실패한다.
+     *
+     * @return 할당된 절대경로. 대상이 아니거나 생성 실패 시 null(기존 동작 유지 — 폴백 resolver 로).
+     */
+    private String autoAssignChatWorkspace(ChatRequest request, String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return null;
+        if (!connectionAdapterFactory.isCliConnection(request.connectionId())) return null;
+
+        String base = workspaceProperties.getBase();
+        if (base == null || base.isBlank()) return null;
+
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of(base, "chat", sessionId).toAbsolutePath().normalize();
+            // whitelist 밖이면 포기 — 임의 경로에 폴더를 만들지 않는다.
+            if (!workspaceProperties.isInsideWhitelist(dir)) {
+                log.warn("[CR132] 채팅 workspace 자동할당 취소 — whitelist 밖: {}", dir);
+                return null;
+            }
+            java.nio.file.Files.createDirectories(dir);
+            String assigned = dir.toString();
+            sessionStore.setWorkspaceRefIfAbsent(sessionId, assigned);
+            log.info("[CR132] 채팅 workspace 자동할당: session={}, path={}", sessionId, assigned);
+            return assigned;
+        } catch (Exception e) {
+            // 산출물 전달은 부가기능 — 실패해도 대화 자체는 계속되어야 한다.
+            log.warn("[CR132] 채팅 workspace 자동할당 실패 session={}: {}", sessionId, e.getMessage());
+            return null;
+        }
     }
 
 }

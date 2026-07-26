@@ -337,7 +337,7 @@ public class ClaudeCliWorker implements AutoCloseable {
             }
 
             eventQueue.clear();
-            writeUserMessages(messages);
+            writeUserMessages(first ? messages : trimToCurrentTurn(messages));
             if (first) firstTurnSent = true;
 
             return awaitResult(start, deltaConsumer, observeConsumer);
@@ -346,6 +346,52 @@ public class ClaudeCliWorker implements AutoCloseable {
         } finally {
             turnLock.unlock();
         }
+    }
+
+    /**
+     * 2턴째 이후 입력을 "이번 턴 몫"으로 자른다.
+     *
+     * <p>워커는 {@code --resume} 으로 자기 세션 이력을 이미 들고 있으므로, 호출자가 넘긴 전체 대화
+     * 이력을 그대로 stdin 에 쓰면 <b>과거 사용자 질문이 매 턴 재전송</b>된다. CLI 입장에서는 이미 답한
+     * 질문을 다시 받은 것이라 앞선 지시부터 재수행하고, 정작 이번 질문은 묻힌다(운영 사례:
+     * "/tmp 가 어디냐" 질문에 엑셀·PPT 를 다시 만들어 답한 세션 sess-1785039270248-pyhw08hb).
+     * 턴이 쌓일수록 재전송 줄 수가 늘어 응답 시간도 함께 악화된다.
+     *
+     * <p>비스트리밍 경로({@code RunnerService.runTurn})는 호출 전에 {@code lastUserMessage} 로 이미
+     * 1개만 뽑아 넘겨 우연히 정상이었고, 스트리밍 경로만 전체를 넘겨 증상이 났다. 절단을 워커 안으로
+     * 옮겨 두 경로가 같은 규칙을 따르게 한다.
+     *
+     * <p>TOOL_RESULT 는 도구 루프가 진행 중인 이번 턴의 입력이므로 보존한다. 마지막 USER 메시지보다
+     * 뒤에 오는 TOOL_RESULT 만 남기고, 그 앞의 과거 이력은 버린다.
+     */
+    // visible for testing
+    static List<UnifiedMessage> trimToCurrentTurn(List<UnifiedMessage> messages) {
+        if (messages == null || messages.isEmpty()) return messages;
+        int lastUserIdx = -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            UnifiedMessage m = messages.get(i);
+            if (m != null && m.role() == UnifiedMessage.Role.USER) {
+                lastUserIdx = i;
+                break;
+            }
+        }
+        // USER 가 없으면 도구 루프 중(TOOL_RESULT 만 재주입) — 전량 보존.
+        if (lastUserIdx < 0) return messages;
+
+        List<UnifiedMessage> trimmed = new ArrayList<>();
+        for (int i = lastUserIdx; i < messages.size(); i++) {
+            UnifiedMessage m = messages.get(i);
+            if (m == null) continue;
+            if (m.role() == UnifiedMessage.Role.USER || m.role() == UnifiedMessage.Role.TOOL_RESULT) {
+                trimmed.add(m);
+            }
+        }
+        int dropped = messages.size() - trimmed.size();
+        if (dropped > 0) {
+            log.debug("[CLI-STDIN] 이전 턴 이력 {}건 절단 (CLI 세션이 자체 보유) — 이번 턴 {}건만 전송",
+                    dropped, trimmed.size());
+        }
+        return trimmed;
     }
 
     private void writeUserMessages(List<UnifiedMessage> messages) throws IOException {
