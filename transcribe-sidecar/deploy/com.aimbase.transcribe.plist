@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  맥 상주 설정. 설치:
+    cp deploy/com.aimbase.transcribe.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.aimbase.transcribe.plist
+
+  로그인 세션에 묶이므로 맥이 잠자기로 들어가면 멈춘다.
+  배치가 야간에 돌아야 하면 시스템설정에서 잠자기를 해제할 것.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aimbase.transcribe</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/sykim/Documents/GitHub/bp-platform/aimbase/transcribe-sidecar/run.sh</string>
+    </array>
+
+    <!-- 모델 캐시(./mlx_models)가 CWD 기준이라 반드시 고정한다. -->
+    <key>WorkingDirectory</key>
+    <string>/Users/sykim/Documents/GitHub/bp-platform/aimbase/transcribe-sidecar</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/sykim/Documents/GitHub/bp-platform/aimbase/transcribe-sidecar/sidecar-mlx.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sykim/Documents/GitHub/bp-platform/aimbase/transcribe-sidecar/sidecar-mlx.log</string>
+</dict>
+</plist>
