@@ -23,15 +23,18 @@ import java.util.Map;
 /**
  * CR-133: 로컬 Whisper 사이드카(맥 MLX) 호출 클라이언트.
  *
- * <p>{@link SpeechService} 를 <b>구현하지 않는다</b>. 그 인터페이스는 위젯 STT(CR-060)용이며
- * 구현체가 둘이 되면 {@code SpeechController}/{@code ChatSttController} 주입이 모호해진다.
- * 회의녹음 배치는 세그먼트·소요시간까지 필요해 반환 타입도 다르다.
+ * <p>같은 Whisper 지만 OpenAI API({@link WhisperSpeechService})와 달리 <b>비용이 0</b>이고
+ * 오디오가 외부로 나가지 않는다. 그래서 {@link SpeechService} 도 구현해 짧은 발화(위젯 STT)
+ * 경로에서도 선택할 수 있게 한다. 실제 선택은 {@link SpeechServiceRouter} 가 한다.
+ *
+ * <p>주입 모호성 주의: 이 빈과 {@code WhisperSpeechService} 가 둘 다 {@code SpeechService}
+ * 구현체이므로, 컨트롤러가 직접 주입받지 않도록 라우터에 {@code @Primary} 를 둔다.
  *
  * <p>사이드카는 공유기 포트포워딩으로 인터넷에 노출되므로 {@code X-Api-Key} 를 반드시 보낸다.
  * 엔드포인트·키는 {@code stt_local} 타입 커넥션의 config 에서 읽는다.
  */
 @Service
-public class LocalWhisperSpeechService {
+public class LocalWhisperSpeechService implements SpeechService {
 
     private static final Logger log = LoggerFactory.getLogger(LocalWhisperSpeechService.class);
 
@@ -52,6 +55,16 @@ public class LocalWhisperSpeechService {
                 .version(HttpClient.Version.HTTP_1_1)
                 .build();
         this.objectMapper = new ObjectMapper();
+    }
+
+    /**
+     * CR-134: 짧은 발화(위젯 STT) 경로. {@link SpeechService} 계약을 사이드카로 이행한다.
+     * 커넥션은 활성 {@code stt_local} 중 첫 번째를 자동 선택한다.
+     */
+    @Override
+    public TranscribeResult transcribe(byte[] audio, String mimeType, String filename, String language) {
+        BatchTranscribeResult r = transcribe(audio, mimeType, filename, language, null);
+        return new TranscribeResult(r.text(), r.language(), r.durationSec());
     }
 
     /** 전사 결과. 위젯용 {@code TranscribeResult} 와 달리 세그먼트·소요시간을 포함한다. */
