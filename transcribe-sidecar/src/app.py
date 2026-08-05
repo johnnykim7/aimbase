@@ -26,7 +26,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, WebSocket
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 logging.basicConfig(
@@ -161,6 +162,37 @@ def health():
         "device": DEVICE,
         "loaded": _model is not None,
     }
+
+
+@app.get("/stream-test")
+def stream_test():
+    """실시간 STT 확인용 테스트 페이지. 브라우저에서 마이크로 바로 검증한다."""
+    return FileResponse(Path(__file__).parent / "static" / "stream.html")
+
+
+@app.websocket("/stream")
+async def stream(websocket: WebSocket):
+    """
+    CR-135: 실시간 스트리밍 STT.
+
+    브라우저가 MediaRecorder 청크(WebM)를 바이너리로 계속 보내면
+    확정/미확정 텍스트를 JSON 으로 돌려준다.
+
+    인증: WS 는 커스텀 헤더를 못 붙이는 클라이언트가 많아 쿼리 파라미터로 받는다.
+          ws://host:8291/stream?api_key=...
+    """
+    from streaming import handle_stream
+
+    provided = websocket.query_params.get("api_key")
+    if not provided or not hmac.compare_digest(provided, API_KEY):
+        # accept 전에 닫으면 클라이언트가 이유를 모르므로 정책 위반 코드로 명시한다.
+        await websocket.close(code=1008, reason="invalid or missing api_key")
+        return
+
+    await websocket.accept()
+    session_id = websocket.query_params.get("session_id", "anonymous")
+    log.info("[CR-135] 스트리밍 연결: session=%s", session_id)
+    await handle_stream(websocket, session_id)
 
 
 @app.post("/transcribe", response_model=TranscribeResponse)

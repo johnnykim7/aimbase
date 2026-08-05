@@ -2,3 +2,15 @@ faster-whisper>=1.1.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.12
+
+# CR-133 배치 전사(맥 MLX). Apple Silicon 전용 — 리눅스에서는 설치하지 않는다.
+lightning-whisper-mlx>=0.0.10
+
+# CR-135 실시간 스트리밍 STT
+mlx-whisper>=0.4.0
+librosa>=0.10.0
+soundfile>=0.12.0
+ffmpeg-python>=0.2.0
+websockets>=13.0
+torch>=2.0.0
+torchaudio>=2.0.0

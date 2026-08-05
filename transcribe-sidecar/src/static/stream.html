@@ -1,0 +1,108 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>실시간 STT 테스트 (CR-135)</title>
+<style>
+  body { font-family: -apple-system, "Apple SD Gothic Neo", sans-serif; max-width: 780px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 18px; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  input { padding: 6px 8px; font-size: 13px; }
+  input[type=text] { flex: 1; min-width: 240px; }
+  button { padding: 8px 18px; font-size: 14px; cursor: pointer; }
+  #out { border: 1px solid #ccc; border-radius: 6px; min-height: 220px; padding: 14px;
+         font-size: 17px; line-height: 1.7; white-space: pre-wrap; }
+  /* 확정은 검정, 미확정은 회색 — 뒷말이 나오면 회색 부분이 바뀐다. */
+  .pending { color: #999; }
+  #status { font-size: 13px; color: #666; margin-top: 10px; }
+</style>
+
+<h1>실시간 STT 테스트</h1>
+
+<div class="row">
+  <input type="text" id="url" value="ws://127.0.0.1:8291/stream">
+  <input type="text" id="key" placeholder="api_key" style="max-width:220px">
+</div>
+<div class="row">
+  <button id="btn">🎤 시작</button>
+  <label>청크 <select id="slice">
+    <option value="500">0.5초</option>
+    <option value="1000" selected>1초</option>
+    <option value="2000">2초</option>
+  </select></label>
+</div>
+
+<div id="out"></div>
+<div id="status">대기 중</div>
+
+<script>
+const btn = document.getElementById('btn');
+const out = document.getElementById('out');
+const statusEl = document.getElementById('status');
+let ws, recorder, stream, running = false;
+
+function render(text, pending) {
+  out.innerHTML = '';
+  out.appendChild(document.createTextNode(text || ''));
+  if (pending) {
+    const span = document.createElement('span');
+    span.className = 'pending';
+    span.textContent = (text ? ' ' : '') + pending;
+    out.appendChild(span);
+  }
+}
+
+async function start() {
+  const key = document.getElementById('key').value.trim();
+  if (!key) { statusEl.textContent = 'api_key 를 입력하세요'; return; }
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    statusEl.textContent = '마이크 권한 거부: ' + e.message;
+    return;
+  }
+
+  const url = document.getElementById('url').value.trim()
+    + '?api_key=' + encodeURIComponent(key)
+    + '&session_id=web-' + Date.now();
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    statusEl.textContent = '연결됨 — 말하세요';
+    recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+    };
+    recorder.start(parseInt(document.getElementById('slice').value, 10));
+    running = true;
+    btn.textContent = '⏹ 중지';
+  };
+
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'transcript') {
+      render(m.text, m.buffer);
+      statusEl.textContent = '전사 중…';
+    } else if (m.type === 'final') {
+      render(m.text, '');
+      statusEl.textContent = '완료';
+    }
+  };
+
+  ws.onclose = (e) => {
+    statusEl.textContent = e.reason ? ('종료: ' + e.reason) : '연결 종료';
+    stop(true);
+  };
+  ws.onerror = () => { statusEl.textContent = '연결 오류'; };
+}
+
+function stop(fromClose) {
+  running = false;
+  btn.textContent = '🎤 시작';
+  try { recorder && recorder.state !== 'inactive' && recorder.stop(); } catch (e) {}
+  try { stream && stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  if (!fromClose) { try { ws && ws.close(); } catch (e) {} }
+}
+
+btn.onclick = () => running ? stop() : start();
+</script>
