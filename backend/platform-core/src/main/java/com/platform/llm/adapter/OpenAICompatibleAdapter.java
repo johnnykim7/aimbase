@@ -171,7 +171,7 @@ public class OpenAICompatibleAdapter implements LLMAdapter {
         return defaultModel;
     }
 
-    private List<ChatCompletionMessageParam> buildMessages(List<UnifiedMessage> messages) {
+    List<ChatCompletionMessageParam> buildMessages(List<UnifiedMessage> messages) {
         List<ChatCompletionMessageParam> result = new ArrayList<>();
         for (UnifiedMessage msg : messages) {
             if (msg.role() == UnifiedMessage.Role.TOOL_RESULT) {
@@ -191,24 +191,72 @@ public class OpenAICompatibleAdapter implements LLMAdapter {
         return result;
     }
 
-    private ChatCompletionMessageParam toMessage(UnifiedMessage msg) {
-        String text = msg.content().stream()
+    ChatCompletionMessageParam toMessage(UnifiedMessage msg) {
+        return switch (msg.role()) {
+            case SYSTEM -> ChatCompletionMessageParam.ofSystem(
+                    ChatCompletionSystemMessageParam.builder().content(extractText(msg)).build());
+            case ASSISTANT -> ChatCompletionMessageParam.ofAssistant(
+                    ChatCompletionAssistantMessageParam.builder()
+                            .content(ChatCompletionAssistantMessageParam.Content.ofText(extractText(msg)))
+                            .build());
+            // CR-136: USER 메시지에 Image 블록이 있으면 content part 배열(멀티파트)로 보낸다.
+            // 없으면 기존 단일 문자열 경로를 그대로 탄다(회귀 방지).
+            default -> {
+                boolean hasImage = msg.content().stream()
+                        .anyMatch(b -> b instanceof ContentBlock.Image);
+                if (!hasImage) {
+                    yield ChatCompletionMessageParam.ofUser(
+                            ChatCompletionUserMessageParam.builder()
+                                    .content(ChatCompletionUserMessageParam.Content.ofText(extractText(msg)))
+                                    .build());
+                }
+                yield ChatCompletionMessageParam.ofUser(
+                        ChatCompletionUserMessageParam.builder()
+                                .contentOfArrayOfContentParts(toContentParts(msg))
+                                .build());
+            }
+        };
+    }
+
+    /**
+     * CR-136: UnifiedMessage 의 블록들을 OpenAI content part 배열로 변환한다.
+     *
+     * <p>Image 는 {@code image_url} 파트로, base64 는 {@code data:<mime>;base64,<data>} 데이터 URI 로
+     * 싣는다. 그 외 블록(ToolUse/Thinking 등)은 이 경로에서 표현할 방법이 없으므로 조용히 버린다 —
+     * 빈 텍스트 파트를 만들면 일부 서버(vLLM/LM Studio)가 400 을 낸다.
+     */
+    private List<ChatCompletionContentPart> toContentParts(UnifiedMessage msg) {
+        List<ChatCompletionContentPart> parts = new ArrayList<>();
+        for (ContentBlock block : msg.content()) {
+            if (block instanceof ContentBlock.Image img) {
+                String imageUrl = img.isBase64()
+                        ? "data:" + img.mediaType() + ";base64," + img.data()
+                        : img.url();
+                if (imageUrl == null || imageUrl.isBlank()) {
+                    log.warn("이미지 블록에 data/url 이 모두 비어 있어 건너뜁니다: provider={}", provider);
+                    continue;
+                }
+                parts.add(ChatCompletionContentPart.ofImageUrl(
+                        ChatCompletionContentPartImage.builder()
+                                .imageUrl(ChatCompletionContentPartImage.ImageUrl.builder()
+                                        .url(imageUrl)
+                                        .build())
+                                .build()));
+            } else if (block instanceof ContentBlock.Text text && !text.text().isEmpty()) {
+                parts.add(ChatCompletionContentPart.ofText(
+                        ChatCompletionContentPartText.builder()
+                                .text(text.text())
+                                .build()));
+            }
+        }
+        return parts;
+    }
+
+    private String extractText(UnifiedMessage msg) {
+        return msg.content().stream()
                 .filter(b -> b instanceof ContentBlock.Text)
                 .map(b -> ((ContentBlock.Text) b).text())
                 .reduce("", (a, s) -> a + s);
-
-        return switch (msg.role()) {
-            case SYSTEM -> ChatCompletionMessageParam.ofSystem(
-                    ChatCompletionSystemMessageParam.builder().content(text).build());
-            case ASSISTANT -> ChatCompletionMessageParam.ofAssistant(
-                    ChatCompletionAssistantMessageParam.builder()
-                            .content(ChatCompletionAssistantMessageParam.Content.ofText(text))
-                            .build());
-            default -> ChatCompletionMessageParam.ofUser(
-                    ChatCompletionUserMessageParam.builder()
-                            .content(ChatCompletionUserMessageParam.Content.ofText(text))
-                            .build());
-        };
     }
 
     private LLMResponse toResponse(ChatCompletion completion, String modelId, long latencyMs,

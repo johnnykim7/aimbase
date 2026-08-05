@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.13.1** | 2026-06-18 | Aimbase v8.18.0 기준
+> **v3.15.0** | 2026-08-05 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1739,7 +1739,9 @@ BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:upload` 
 ```
 
 **처리 규칙** — 서버가 요청 모델의 어댑터 capability 를 확인한 뒤:
-- `image` 블록: 이미지 지원 어댑터(Anthropic/OpenAI/Bedrock/Ollama/Vertex)는 모두 네이티브 `ImageBlockParam` 으로 전달
+- `image` 블록: 이미지 지원 어댑터(Anthropic/OpenAI/Bedrock/Ollama/Vertex/**OpenAI 호환**)는 모두 네이티브 `ImageBlockParam` 으로 전달
+  - **OpenAI 호환 어댑터**(CR-136) — `openai_compatible` 계열(vLLM/Ollama/LM Studio/DeepSeek/LocalAI, 그리고 이 어댑터에 위임하는 Bedrock/Vertex)은 OpenAI 멀티파트 `content` 배열로 전달한다: base64 첨부는 `image_url` = `data:{mediaType};base64,{data}`, URL 첨부는 URL 그대로. 이미지 블록이 없는 메시지는 기존 단일 문자열 `content` 를 그대로 사용(동작 무변경)
+  - ⚠️ CR-136 이전에는 이 경로가 **이미지 블록을 조용히 버렸다**(에러 없이 텍스트만 전달 → 모델이 사진 없이 답을 지어냄). `openai_compatible` 커넥션으로 Vision 을 쓰려면 CR-136 이 배포된 빌드여야 한다
 - `document` 블록 (PDF): **CR-095 비전 게이트** — PDF 를 사이드카 텍스트 추출(`parse_document`/OCR)이 아니라 **LLM 모델 비전**으로 파싱한다 (openclaude 1:1). 크기/모델지원에 따라 3분기:
   - **≤ 3MB & PDF 지원 어댑터**(Anthropic/Bedrock Claude) → base64 `DocumentBlockParam` 통째 — 모델이 PDF 를 직접 비전으로 봄
   - **> 3MB or PDF 미지원 어댑터** → Python 사이드카 `pdf_to_images`(poppler) 로 페이지를 JPEG(100 DPI) 렌더 → `ImageBlockParam` 배열로 전달 (모델이 페이지 이미지를 비전으로 봄). 페이지 상한 기본 20
@@ -2012,6 +2014,7 @@ multipart/form-data. 즉시 **202** 와 `job_id` 를 반환하고 전사는 백�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.15.0 | 2026-08-05 | **CR-136 — OpenAI 호환 어댑터 멀티모달(이미지 블록) 전달** (§ 18-4). `OpenAICompatibleAdapter.toMessage()` 가 `ContentBlock.Text` 만 필터링해 **이미지 블록을 조용히 버리던** 갭 해소(에러가 안 나서 모델이 사진 없이 답을 지어내는, 더 위험한 실패였음). 이미지가 포함된 USER 메시지는 OpenAI 멀티파트 `content` 배열(`image_url` = base64 → `data:{mediaType};base64,{data}`, URL → 그대로)로 전달하고, 이미지 없는 메시지는 기존 단일 문자열 경로를 그대로 타 **하위호환**. 빈 data/url 이미지 블록과 빈 텍스트 블록은 파트에서 제외(일부 서버가 빈 파트에 400 반환). 영향 범위 = `openai_compatible` 계열 전부(vLLM/Ollama/LM Studio/DeepSeek/LocalAI) + 이 어댑터에 위임하는 `BedrockAdapter`/`VertexAIAdapter`. 텍스트 경로·API 표면 무변화. 단위 `OpenAICompatibleAdapterTest` 9 PASS + platform-core 회귀 946 PASS. e2e(로컬 LM Studio Qwen2.5-VL): 7B = SKU 라벨 정독·개수 오답(구조적 한계 재현), 32B = 라벨 9개·개수 9개·이상 박스 전부 정확. **주의: 수량은 VLM 에 직접 묻지 말고 나열시켜 코드로 셀 것**(7B/32B 모두 카운팅 실패 — 모델 크기로 해결 안 됨) |
 | v3.14.0 | 2026-08-05 | **CR-133/134/135 음성 인식(STT) 확장** — ① § 22 신설: 회의녹음 배치 전사 `POST/GET /api/v1/transcribe-jobs`(job 등록→폴링, 최대 1GB, 길이 제한 없음). 1시간 녹음이 동기 응답 불가라 위젯 STT(§ 19, 60초 제한)와 경로를 분리. ② § 19 갱신: STT 백엔드가 OpenAI 고정이 아님 — 플랫폼 설정 `stt.provider` 로 로컬(맥 MLX 사이드카, 비용 0)/OpenAI 선택, 로컬 실패 시 OpenAI 폴백(CR-134). 호출 방식은 동일하므로 소비앱 변경 불필요. ③ **[STT 연동 가이드](aimbase-stt-guide.md) 신설** — 3경로(짧은 발화/긴 녹음/실시간 WS 스트리밍) 선택 기준과 브라우저 클라이언트 예제. 실시간 스트리밍(CR-135)은 사이드카 단독 동작이며 aimbase 연동 전이라 가이드에서만 다룬다 |
 | v3.13.2 | 2026-07-26 | **CR-131 위젯 리치 렌더링 — § 17 공개 서빙 리소스 표기 갱신** (문서만). 위젯이 코드스플릿되어 산출물이 진입 로더(`aimbase-chat.umd.global.js` ~1KB) + core(`aimbase-chat.esm.js` ~49KB) + lazy 청크(mermaid·코드 하이라이트·엑셀 변환 `*.js` 다수) 구조로 변경됨을 반영. self-host 시 디렉토리 전체 복사 필요(단일 파일 복사는 리치 렌더링을 깨뜨림). 소비앱 통합 상세는 embed-chat-widget.md v1.1.0 참조. API 엔드포인트 표면 무변화 |
 | v3.13.1 | 2026-06-18 | **현행화 — 헤더 버전 동기화 + CR-103 CLI 라우팅 보강** (문서만). 헤더 표기를 변경이력 최신(v3.13.0)에 맞춰 `v3.13.1 / Aimbase v8.18.0 기준`으로 정정(이전 헤더는 v3.5.0 으로 멈춰 있었음). § 4-1 스텝 타입 표 아래 **`LLM_CALL`이 `adapter=anthropic-cli` 커넥터를 가리킬 때의 라우팅 우선순위**(① 헤더 `X-Aimbase-Agent-Id` → ② 위젯 토큰 `user_ref` → ③ 커넥터 `config.agent_name`(CR-103) → ④ 400 `cli_routing_missing`) 노트 추가 — 워크플로우는 헤더/토큰 없이 실행되므로 커넥터 `config.agent_name`로 자동 라우팅. 코드 실측: `ClaudeCliAdapter.resolveAgent`. API 표면 무변화 |
