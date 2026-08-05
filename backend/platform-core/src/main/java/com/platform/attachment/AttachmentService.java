@@ -80,6 +80,16 @@ public class AttachmentService {
         String mediaType = mimeValidator.detect(head);
         mimeValidator.assertMatchesContentType(mediaType, file.getContentType());
 
+        // CR-137: MimeValidator 가 영상 4종(MP4/MOV/WEBM/AVI)도 인식하게 확장됐지만,
+        // 채팅 첨부 경로는 이미지·PDF 전용을 유지한다. 영상은 프레임 추출·job 이 필요하므로
+        // POST /api/v1/vision-jobs 로 보내야 한다. 여기서 막지 않으면 영상이
+        // 이미지 상한(10MB)에 걸리거나 Vision 블록 조립에서 조용히 깨진다.
+        if (MimeValidator.isVideo(mediaType)) {
+            throw new AttachmentException(HttpStatus.BAD_REQUEST,
+                    AttachmentException.CODE_MIME_UNSUPPORTED,
+                    "video is not supported on chat attachments — use POST /api/v1/vision-jobs");
+        }
+
         // 3) 크기 제한 BIZ-099
         long maxBytes = MimeValidator.isPdf(mediaType)
                 ? getLong("widget.attachment.max-pdf-bytes", DEFAULT_MAX_PDF_BYTES)

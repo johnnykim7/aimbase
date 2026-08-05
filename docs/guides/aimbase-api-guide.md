@@ -1975,7 +1975,7 @@ multipart/form-data. 즉시 **202** 와 `job_id` 를 반환하고 전사는 백�
 
 | 파라미터 | 필수 | 설명 |
 |---|---|---|
-| `file` | ✅ | 오디오 바이너리 (최대 1GB) |
+| `file` | ✅ | 오디오 바이너리 (최대 100MB — 앞단 nginx `client_max_body_size` 와 맞춘 값. 1시간 회의 m4a/opus 가 50~120MB) |
 | `language` | ❌ | `ko`/`en`/… 또는 `auto`(기본) |
 | `connection_id` | ❌ | 특정 STT 커넥션 지정. 생략 시 활성 `stt_local` 중 첫 번째 |
 
@@ -2008,12 +2008,93 @@ multipart/form-data. 즉시 **202** 와 `job_id` 를 반환하고 전사는 백�
 |---|---|
 | 400 | `file` 누락 또는 빈 파일 / `job_id` 형식 오류 |
 | 404 | job 없음 (테넌트가 다르면 조회되지 않는다) |
-| 413 | 파일 1GB 초과 |
+| 413 | 파일 100MB 초과 |
 | 502/503/504 | STT 백엔드 오류·불가·타임아웃 |
+
+---
+
+## 23. 영상 판독 (`vision-jobs`) [CR-137]
+
+현장에서 찍은 **영상**을 올리면 서버가 프레임을 뽑아 VLM 에 태우고 판독 결과를 돌려준다.
+재고조사·입고조사처럼 "찍어서 판별"이 필요한 업무용이다.
+
+**촬영 UI 는 소비앱이 만든다.** aimbase 는 업로드 수신·프레임 추출·판독만 담당한다 —
+촬영 화면은 앱마다 톤이 달라 앱에 녹아야 하고, `<input type="file" accept="video/*" capture="environment">`
+수준이라 공통화할 알맹이가 없다.
+
+> **사진 1장은 이 API 가 아니다.** 기존 § 18-4 첨부 경로(`POST /api/v1/chat/attachments` →
+> `messages[].content[]` 에 `image` 블록)를 쓰면 된다. 프레임 추출이 필요 없어 job 이 불필요하다.
+> 채팅 첨부에 영상을 올리면 400 으로 거부되고 이 API 로 안내된다.
+
+### 23-1. `POST /api/v1/vision-jobs`
+
+multipart/form-data. 즉시 **202** 와 `job_id` 를 반환하고 추출·판독은 백그라운드에서 진행된다.
+
+| 파라미터 | 필수 | 설명 |
+|---|---|---|
+| `file` | ✅ | 영상 바이너리 (최대 100MB). MP4 / MOV / WebM / AVI |
+| `connection_id` | ❌ | 판독에 쓸 LLM 커넥션. 생략 시 기본 해석 |
+| `frames` | ❌ | 추출 프레임 수. 기본 **6**, 범위 1~20 (BIZ-112) |
+| `prompt` | ❌ | 판독 지시. 생략 시 기본 프롬프트(무엇이 보이는지·라벨 나열) |
+
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "PENDING",
+            "filename": "rack.mp4", "mime_type": "video/mp4",
+            "size_bytes": 8096651, "frames": 6 } }
+```
+
+MIME 은 **매직넘버로 판정**한다(확장자·Content-Type 은 위조 가능). iOS 가 `.mov` 를 `video/mp4` 로
+보내는 등 헤더 표기는 기기마다 달라 계열만 일치하면 통과시킨다.
+
+### 23-2. `GET /api/v1/vision-jobs/{jobId}`
+
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "COMPLETED",
+            "duration_sec": 12.4, "frame_count": 6,
+            "result": "선반 3단에 박스가 적재되어 있습니다. 라벨은 SKU-A101, SKU-A102 …",
+            "elapsed_sec": 34.2 } }
+```
+
+`status`: `PENDING` → `RUNNING` → `COMPLETED`, 실패 시 `FAILED`(+`error_message`).
+
+소요는 대략 **업로드 + 추출(2~5초) + 판독(프레임당 5~10초)**. 6프레임이면 30초~1분이다.
+폴링은 3~5초 간격이면 충분하다.
+
+### 23-3. ⚠️ 수량은 VLM 에 직접 묻지 말 것 (BIZ-115)
+
+VLM 은 **라벨을 정확히 나열해놓고도 총계를 틀린다.** 실측에서 박스 9개의 SKU 라벨을 전부 정확히
+읽어놓고 "총 7개"라고 답했고, 7B·32B 모두 동일했다 — **모델을 키워도 해결되지 않는 구조적 한계**다.
+
+수량이 필요하면 **나열시키고 코드로 센다**:
+
+```jsonc
+// prompt 에 "보이는 SKU 라벨을 모두 나열하라"고 지시하고
+// 배열 length 로 개수를 구한다. "몇 개냐"고 묻지 않는다.
+```
+
+능력별로는 이렇게 갈린다 — **읽기**(라벨·문자) ✅ / **이상감지**(이진 판정) ✅ /
+**세기** ❌ / **대조**(판독값 vs 기간계 데이터) ⭕ 는 워크플로우로 조합.
+
+### 23-4. 산출물 보존
+
+원본 영상은 재판독·감사를 위해 보존하되 **24시간 후 GC** 된다(BIZ-114, `vision.artifact-ttl-seconds`).
+추출 프레임은 판독 직후 삭제된다. job 레코드(결과 텍스트)는 이력으로 남는다.
+
+### 23-5. 에러
+
+| 코드 | 원인 |
+|---|---|
+| 400 | `file` 누락/빈 파일 / 영상이 아님(이미지·PDF 는 § 18-4 경로) / `job_id` 형식 오류 |
+| 404 | job 없음 (테넌트가 다르면 조회되지 않는다) |
+| 413 | 파일 100MB 초과 |
+| 422 | 매직넘버와 Content-Type 계열 불일치 |
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.16.0 | 2026-08-06 | **CR-137 — 영상 판독 API 신설 + 업로드 상한 정합** (§ 23). ① **`POST/GET /api/v1/vision-jobs`**: 영상을 올리면 서버가 ffmpeg 로 프레임 N장(기본 6, 1~20)을 균등 간격 추출해 VLM 에 태우고 판독 결과를 반환(job 등록→폴링). 지원 MIME 4종 MP4/MOV/WebM/AVI 를 **매직넘버로 판정**하되, iOS 가 `.mov` 를 `video/mp4` 로 보내는 등 헤더 표기가 기기마다 달라 영상은 `video/*` 계열만 일치하면 통과(이미지는 기존대로 엄격). 프레임 추출은 **서버**에서 한다 — 소비앱이 늘어나도 canvas·코덱 분기를 앱마다 재구현하지 않고, 원본이 서버에 남아 재판독·감사가 가능하다. 촬영 UI 는 소비앱 몫. 사진 1장은 이 API 가 아니라 기존 § 18-4 첨부 경로를 쓰며, 채팅 첨부에 영상을 올리면 400 으로 거부하고 이 API 로 안내한다. 원본은 24h 후 GC(BIZ-114), 프레임은 판독 직후 삭제. ② **⚠️ BIZ-115 — 수량은 VLM 에 직접 묻지 말 것**(§ 23-3): 박스 9개의 라벨을 전부 정확히 읽어놓고 "총 7개"라 답하며 7B·32B 동일 — 모델 크기로 해결 안 되는 구조적 한계다. 나열시켜 코드로 셀 것. ③ **업로드 상한 3계층 정합**(회귀 수정): nginx 100m 보다 Spring multipart 가 50MB 로 작아 **50~100MB 파일이 nginx 를 통과하고 Spring 에서 터지던** 실제 버그를 해소(50MB→100MB). § 22 전사 job 상한 표기도 1GB→100MB 로 정정 — 기존 1GB 는 앞단 두 계층에 먼저 막혀 **도달 불가능한 값**이었다. 단위 `MimeValidatorTest` +11 / `FrameExtractorTest` 10 / `VisionJobServiceTest` 8 PASS + platform-core 회귀 GREEN |
 | v3.15.0 | 2026-08-05 | **CR-136 — OpenAI 호환 어댑터 멀티모달(이미지 블록) 전달** (§ 18-4). `OpenAICompatibleAdapter.toMessage()` 가 `ContentBlock.Text` 만 필터링해 **이미지 블록을 조용히 버리던** 갭 해소(에러가 안 나서 모델이 사진 없이 답을 지어내는, 더 위험한 실패였음). 이미지가 포함된 USER 메시지는 OpenAI 멀티파트 `content` 배열(`image_url` = base64 → `data:{mediaType};base64,{data}`, URL → 그대로)로 전달하고, 이미지 없는 메시지는 기존 단일 문자열 경로를 그대로 타 **하위호환**. 빈 data/url 이미지 블록과 빈 텍스트 블록은 파트에서 제외(일부 서버가 빈 파트에 400 반환). 영향 범위 = `openai_compatible` 계열 전부(vLLM/Ollama/LM Studio/DeepSeek/LocalAI) + 이 어댑터에 위임하는 `BedrockAdapter`/`VertexAIAdapter`. 텍스트 경로·API 표면 무변화. 단위 `OpenAICompatibleAdapterTest` 9 PASS + platform-core 회귀 946 PASS. e2e(로컬 LM Studio Qwen2.5-VL): 7B = SKU 라벨 정독·개수 오답(구조적 한계 재현), 32B = 라벨 9개·개수 9개·이상 박스 전부 정확. **주의: 수량은 VLM 에 직접 묻지 말고 나열시켜 코드로 셀 것**(7B/32B 모두 카운팅 실패 — 모델 크기로 해결 안 됨) |
 | v3.14.0 | 2026-08-05 | **CR-133/134/135 음성 인식(STT) 확장** — ① § 22 신설: 회의녹음 배치 전사 `POST/GET /api/v1/transcribe-jobs`(job 등록→폴링, 최대 1GB, 길이 제한 없음). 1시간 녹음이 동기 응답 불가라 위젯 STT(§ 19, 60초 제한)와 경로를 분리. ② § 19 갱신: STT 백엔드가 OpenAI 고정이 아님 — 플랫폼 설정 `stt.provider` 로 로컬(맥 MLX 사이드카, 비용 0)/OpenAI 선택, 로컬 실패 시 OpenAI 폴백(CR-134). 호출 방식은 동일하므로 소비앱 변경 불필요. ③ **[STT 연동 가이드](aimbase-stt-guide.md) 신설** — 3경로(짧은 발화/긴 녹음/실시간 WS 스트리밍) 선택 기준과 브라우저 클라이언트 예제. 실시간 스트리밍(CR-135)은 사이드카 단독 동작이며 aimbase 연동 전이라 가이드에서만 다룬다 |
 | v3.13.2 | 2026-07-26 | **CR-131 위젯 리치 렌더링 — § 17 공개 서빙 리소스 표기 갱신** (문서만). 위젯이 코드스플릿되어 산출물이 진입 로더(`aimbase-chat.umd.global.js` ~1KB) + core(`aimbase-chat.esm.js` ~49KB) + lazy 청크(mermaid·코드 하이라이트·엑셀 변환 `*.js` 다수) 구조로 변경됨을 반영. self-host 시 디렉토리 전체 복사 필요(단일 파일 복사는 리치 렌더링을 깨뜨림). 소비앱 통합 상세는 embed-chat-widget.md v1.1.0 참조. API 엔드포인트 표면 무변화 |

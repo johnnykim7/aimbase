@@ -26,6 +26,12 @@ services:
     volumes:
       - ./workspace:/data/workspace
       - ./claude-accounts:/home/appuser/.claude-accounts
+      # CR-137 Phase 0: 업로드 스토리지 영속화.
+      # LocalStorageService 가 /data/aimbase 아래에 첨부 파일을 쓰는데(application.yml
+      # storage.local.base-path) 마운트가 없어 컨테이너 레이어에 기록됐다 → 재배포 시 소실.
+      # 24h TTL 이라 지금까진 드러나지 않았을 뿐이고, 영상(수백MB)이 들어오면
+      # 컨테이너 디스크가 부풀어 오른다.
+      - ./aimbase-storage:/data/aimbase
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:

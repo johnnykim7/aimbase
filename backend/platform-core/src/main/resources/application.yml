@@ -7,8 +7,18 @@ spring:
 
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 50MB
+      # CR-137 Phase 0: 50MB → 100MB (운영 nginx client_max_body_size 100m 과 일치).
+      #
+      # 기존 50MB 는 앞단 nginx(100m) 보다 작아서, 50~100MB 파일이 nginx 는 통과하고
+      # Spring 에서 MaxUploadSizeExceededException 으로 터졌다. 그 구간이 실제 버그다.
+      # (CR-133 TranscribeJobController 의 1GB 상한은 애초에 도달 불가였다.)
+      #
+      # 100MB 근거: 1시간 회의녹음(m4a/opus) 50~120MB, 현장 영상 30초~2분 20~100MB.
+      # 무손실 WAV 를 가정하지 않는 한 이 값이면 충분하다.
+      # 개별 용도별 상한은 각 컨트롤러/서비스가 따로 건다(이미지 10MB, PDF 32MB).
+      # 여기는 그 최대치를 덮는 바깥 울타리 역할만 한다.
+      max-file-size: 100MB
+      max-request-size: 100MB
 
   # ─── Master DataSource (테넌트 레지스트리, 구독 관리) ─────────────
   datasource:
@@ -176,12 +186,33 @@ storage:
   local:
     base-path: ${STORAGE_BASE_PATH:/data/aimbase}
 
+# ─── CR-137: 영상 프레임 추출 + VLM 판독 ──────────────────────────
+vision:
+  # 원본 영상·추출 프레임 작업 디렉토리. storage.local.base-path 아래에 두어
+  # 볼륨 마운트(docker-compose ./aimbase-storage:/data/aimbase) 하나로 영속화된다.
+  work-dir: ${VISION_WORK_DIR:/data/aimbase/vision-jobs}
+  # 원본 보존 시간(초). 재판독·감사용으로 남기되 100MB 급이라 무한 누적은 막는다(BIZ-114).
+  artifact-ttl-seconds: ${VISION_ARTIFACT_TTL_SECONDS:86400}
+  ffmpeg:
+    ffmpeg-bin: ${VISION_FFMPEG_BIN:ffmpeg}
+    ffprobe-bin: ${VISION_FFPROBE_BIN:ffprobe}
+    # 입력 seek(-ss 를 -i 앞에) 이라 프레임 1장은 보통 1초 내에 끝난다.
+    frame-timeout-seconds: ${VISION_FRAME_TIMEOUT:60}
+    probe-timeout-seconds: ${VISION_PROBE_TIMEOUT:30}
+    # JPEG 품질 2(고품질)~31(저품질). 판독 정확도와 base64 크기의 균형점.
+    jpeg-quality: ${VISION_JPEG_QUALITY:2}
+    # ffmpeg 는 CPU 바운드 — 과도한 병렬은 이득 없이 메모리만 먹는다.
+    max-concurrent: ${VISION_MAX_CONCURRENT:2}
+
 # ─── CR-045: 워크스페이스 접근 제어 (L0/L1/L2 단일 진실 원천) ────────────
 aimbase:
   workspace:
     base: ${AIMBASE_WORKSPACE_BASE:/data/workspaces}
     whitelist-roots:
       - ${AIMBASE_WORKSPACE_WHITELIST:${user.home}/Documents/GitHub/bp-fulfillment-infra}
+  # CR-132: CLI 산출물(out/) 다운로드 유예 시간. TTL 초과 mtime 파일은 GC 가 삭제.
+  artifact:
+    ttl-hours: ${AIMBASE_ARTIFACT_TTL_HOURS:24}
   # CR-092 OCR (Tesseract) — BIZ-105/106/107
   ocr:
     enabled: ${AIMBASE_OCR_ENABLED:true}

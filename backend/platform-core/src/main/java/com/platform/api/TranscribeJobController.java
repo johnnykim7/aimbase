@@ -34,8 +34,16 @@ public class TranscribeJobController {
 
     private static final Logger log = LoggerFactory.getLogger(TranscribeJobController.class);
 
-    /** 회의녹음 상한. 4시간 = 대략 1GB 이내 (BIZ-111 후보). */
-    private static final long MAX_SIZE_BYTES = 1024L * 1024L * 1024L;
+    /**
+     * 회의녹음 상한 100MB.
+     *
+     * CR-137 Phase 0 정정: 기존 1GB("4시간 분량" 근거)는 앞단에서 이미 막혀 도달 불가였다.
+     * nginx client_max_body_size 100m → Spring multipart(구 50MB) 순으로 먼저 걸리므로
+     * 이 검사가 실행될 일이 없었다. 상한 3계층을 100MB 로 맞춘다.
+     * 실제 소요: 1시간 회의(m4a/opus) 50~120MB. 무손실 WAV 가 아니면 충분하다.
+     * 더 큰 파일이 필요해지면 nginx → application.yml → 여기 순서로 함께 올릴 것.
+     */
+    private static final long MAX_SIZE_BYTES = 100L * 1024L * 1024L;
 
     private final TranscribeJobService jobService;
 
