@@ -4,6 +4,10 @@
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
+> ⭐ **연동을 새로 기획한다면 먼저** [aimbase-integration-pattern-guide.md](aimbase-integration-pattern-guide.md) 를 읽으세요.
+> 워크플로우 vs 자율 대화, 도구 모드(NATIVE/AIMBASE/HYBRID) 선택, 읽기 CS → 쓰기 CS 확장 기준을 다룹니다.
+> 이 문서(API 가이드)는 **방식을 정한 뒤** 구체적 호출법을 볼 때 사용합니다.
+
 ---
 
 ## 1. 시작하기
@@ -1340,8 +1344,9 @@ GET /api/v1/prompt-templates/preview?tenantId=...&projectId=...
 > 📖 **소비앱 개발자는 먼저 [통합 가이드](embed-chat-widget.md) (또는 공개 URL `https://aimbase.../widget/v1/`)를 읽으세요.** 이 절은 API 엔드포인트 레퍼런스입니다.
 >
 > **공개 서빙 리소스** (인증 없이 접근 가능):
-> - `/widget/v1/aimbase-chat.umd.global.js` — UMD 번들 (&lt;script&gt; 로드용, ~17KB)
-> - `/widget/v1/aimbase-chat.esm.js` — ESM (번들러용, ~25KB)
+> - `/widget/v1/aimbase-chat.umd.global.js` — &lt;script&gt; 진입 로더 (~1KB). core·청크를 lazy 로드
+> - `/widget/v1/aimbase-chat.esm.js` — core 번들 (~49KB, 번들러 import 겸용)
+> - `/widget/v1/*.js` (다수) — CR-131 lazy 청크 (mermaid·코드 하이라이트·엑셀 변환). 해당 기능 사용 시에만 fetch. **self-host 시 디렉토리 전체 복사 필요** (단일 파일 복사는 리치 렌더링을 깨뜨림)
 > - `/widget/v1/aimbase-chat.d.ts` — TypeScript 타입
 > - `/widget/v1/index.html` (또는 `/widget/v1/`) — HTML 렌더링된 통합 가이드
 > - `/widget/v1/sample-bff/server.js` — Node 샘플 BFF (외부 의존 0)
@@ -1762,7 +1767,12 @@ BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:upload` 
 
 ## 19. 위젯 음성 입력 STT (Whisper) [CR-060]
 
-위젯이 마이크로 녹음한 오디오를 OpenAI Whisper API 로 텍스트 변환해 입력창에 자동 삽입한다. **녹음 후 일괄 전송** 방식 (Whisper 는 실시간 스트리밍 미지원). Platform 경로(`/api/v1/speech/stt`) 는 그대로 유지되며 본 CR 에서는 위젯 전용 엔드포인트가 신설됐다.
+위젯이 마이크로 녹음한 오디오를 Whisper 로 텍스트 변환해 입력창에 자동 삽입한다. **녹음 후 일괄 전송** 방식. Platform 경로(`/api/v1/speech/stt`) 는 그대로 유지되며 본 CR 에서는 위젯 전용 엔드포인트가 신설됐다.
+
+> 📘 **STT 경로가 3개로 늘었다** — 짧은 발화(본 절), 긴 녹음(§ 22), 실시간 스트리밍.
+> 어느 것을 쓸지 고르는 기준과 클라이언트 예제는 **[STT 연동 가이드](aimbase-stt-guide.md)** 를 먼저 볼 것.
+>
+> **백엔드**: CR-134 이후 OpenAI 고정이 아니다. 플랫폼 설정 `stt.provider` 로 로컬(맥 MLX 사이드카, 비용 0) / OpenAI 를 고르며, 로컬 실패 시 OpenAI 로 폴백한다. 호출 방식은 동일하므로 소비앱은 신경 쓰지 않아도 된다.
 
 ### 19-1. 전제 — 위젯 토큰 Scope
 BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:stt` 를 포함해야 한다. `widget.allowed-scopes` 기본값은 `[chat:stream, chat:upload, chat:stt, workflow:subscribe, rag:read]` 로 확장되어 있다.
@@ -1946,9 +1956,64 @@ URL 에서 파일을 받아 워크스페이스에 **원본 그대로(바이너�
 
 ---
 
+
+---
+
+## 22. 회의녹음 배치 전사 (`transcribe-jobs`) [CR-133]
+
+긴 오디오(회의녹음·통화 등)를 텍스트로 변환한다. 1시간 녹음은 전사에만 수 분이 걸려 동기 응답이 불가능하므로 **job 등록 → 폴링** 구조를 쓴다.
+
+§ 19 위젯 STT 와 경로가 다르다. 위젯 STT 는 60초 제한이 걸린 짧은 발화 전용이며, 그 제한은 위젯을 보호하려고 건 값이라 긴 녹음 때문에 풀지 않는다.
+
+> 📘 어느 경로를 쓸지 고르는 기준·클라이언트 예제는 **[STT 연동 가이드](aimbase-stt-guide.md)** 참조.
+
+### 22-1. `POST /api/v1/transcribe-jobs`
+
+multipart/form-data. 즉시 **202** 와 `job_id` 를 반환하고 전사는 백그라운드에서 진행된다.
+
+| 파라미터 | 필수 | 설명 |
+|---|---|---|
+| `file` | ✅ | 오디오 바이너리 (최대 1GB) |
+| `language` | ❌ | `ko`/`en`/… 또는 `auto`(기본) |
+| `connection_id` | ❌ | 특정 STT 커넥션 지정. 생략 시 활성 `stt_local` 중 첫 번째 |
+
+```json
+{ "success": true,
+  "data": { "job_id": "524b89de-...", "status": "PENDING",
+            "filename": "meeting.m4a", "size_bytes": 1128824 } }
+```
+
+### 22-2. `GET /api/v1/transcribe-jobs/{jobId}`
+
+| 파라미터 | 설명 |
+|---|---|
+| `include_segments` | `true` 면 `segments[{start,end,text}]` 포함. 1시간 회의면 수백 건이라 기본 제외 |
+
+```json
+{ "success": true,
+  "data": { "job_id": "524b89de-...", "status": "COMPLETED",
+            "text": "자 그러면 회의를 시작하겠습니다 …",
+            "language": "ko", "duration_sec": 3600.0, "elapsed_sec": 243.1 } }
+```
+
+`status`: `PENDING` → `RUNNING` → `COMPLETED`, 실패 시 `FAILED`(+`error`).
+
+전사 소요는 대략 **오디오 길이 ÷ 14**(1시간 → 약 4분). 폴링은 5~10초 간격이면 충분하다.
+
+### 22-3. 에러
+
+| 코드 | 원인 |
+|---|---|
+| 400 | `file` 누락 또는 빈 파일 / `job_id` 형식 오류 |
+| 404 | job 없음 (테넌트가 다르면 조회되지 않는다) |
+| 413 | 파일 1GB 초과 |
+| 502/503/504 | STT 백엔드 오류·불가·타임아웃 |
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.14.0 | 2026-08-05 | **CR-133/134/135 음성 인식(STT) 확장** — ① § 22 신설: 회의녹음 배치 전사 `POST/GET /api/v1/transcribe-jobs`(job 등록→폴링, 최대 1GB, 길이 제한 없음). 1시간 녹음이 동기 응답 불가라 위젯 STT(§ 19, 60초 제한)와 경로를 분리. ② § 19 갱신: STT 백엔드가 OpenAI 고정이 아님 — 플랫폼 설정 `stt.provider` 로 로컬(맥 MLX 사이드카, 비용 0)/OpenAI 선택, 로컬 실패 시 OpenAI 폴백(CR-134). 호출 방식은 동일하므로 소비앱 변경 불필요. ③ **[STT 연동 가이드](aimbase-stt-guide.md) 신설** — 3경로(짧은 발화/긴 녹음/실시간 WS 스트리밍) 선택 기준과 브라우저 클라이언트 예제. 실시간 스트리밍(CR-135)은 사이드카 단독 동작이며 aimbase 연동 전이라 가이드에서만 다룬다 |
+| v3.13.2 | 2026-07-26 | **CR-131 위젯 리치 렌더링 — § 17 공개 서빙 리소스 표기 갱신** (문서만). 위젯이 코드스플릿되어 산출물이 진입 로더(`aimbase-chat.umd.global.js` ~1KB) + core(`aimbase-chat.esm.js` ~49KB) + lazy 청크(mermaid·코드 하이라이트·엑셀 변환 `*.js` 다수) 구조로 변경됨을 반영. self-host 시 디렉토리 전체 복사 필요(단일 파일 복사는 리치 렌더링을 깨뜨림). 소비앱 통합 상세는 embed-chat-widget.md v1.1.0 참조. API 엔드포인트 표면 무변화 |
 | v3.13.1 | 2026-06-18 | **현행화 — 헤더 버전 동기화 + CR-103 CLI 라우팅 보강** (문서만). 헤더 표기를 변경이력 최신(v3.13.0)에 맞춰 `v3.13.1 / Aimbase v8.18.0 기준`으로 정정(이전 헤더는 v3.5.0 으로 멈춰 있었음). § 4-1 스텝 타입 표 아래 **`LLM_CALL`이 `adapter=anthropic-cli` 커넥터를 가리킬 때의 라우팅 우선순위**(① 헤더 `X-Aimbase-Agent-Id` → ② 위젯 토큰 `user_ref` → ③ 커넥터 `config.agent_name`(CR-103) → ④ 400 `cli_routing_missing`) 노트 추가 — 워크플로우는 헤더/토큰 없이 실행되므로 커넥터 `config.agent_name`로 자동 라우팅. 코드 실측: `ClaudeCliAdapter.resolveAgent`. API 표면 무변화 |
 | v3.13.0 | 2026-06-18 | **CR-116 — 워크플로우 run 강제 취소 + 재실행** (§ 4-7). ① **강제 취소**: 기존 `POST /workflows/runs/{runId}/cancel` 에 `?force=true` 파라미터 추가(같은 엔드포인트, 미지정 시 기존 협조적 동작 = **하위호환**). 협조적 cancel 은 스텝 경계에서만 표식을 검사해, AGENT_CALL 의 CLI worker 가 응답 전 hang 하면 즉시 안 먹는다 → `force=true` 면 그 run 이 띄운 CLI worker 를 즉시 kill(`ActiveCliWorkerRegistry` 로 workflowRunId→childSessionId 역추적 후 CR-114 와 동일 Runner cancel 부품 재사용) 하고 즉시 `cancelled` 로 종료(후속 폴링 불요). worker 매핑 못 찾는 경우 협조적 표식 폴백. ② **재실행**: `POST /workflows/runs/{runId}/rerun` 신설 — 원 run 의 `input_data`+`workflowId` 로 새 run 실행(원 run 보존, 새 runId 반환, 202). DB 스키마/마이그레이션 무변경(인메모리 레지스트리, input_data 기존 컬럼). 단위 — ActiveCliWorkerRegistry 5 + WorkflowEngineCancel force 3 + 회귀 GREEN(71 PASS) |
 | v3.12.0 | 2026-06-18 | **run 단건 조회에 진행 단계 이름·진행 목록 추가** (§ 4-5). run **단건** 조회 2종(`GET /workflows/{id}/runs/{runId}`, `GET /workflows/runs/{runId}`) 응답에 `currentStepName`(현재 `currentStep` id 에 해당하는 WF 정의 step 의 사람이 읽는 `name`) + `steps[]`(정의 순서대로 `{id, name, status}`, status = completed/running/pending, run terminal 시 현재 스텝은 종료 상태) 신규 추가. 소비앱이 "지금 어느 단계인지"/진행바를 step id 매핑 캐싱 없이 바로 표시. status·steps 도출은 BE 인메모리 lookup(WF 정의 1회 조회) — DB 스키마/마이그레이션 무변경. WF 정의 미존재 시 `currentStepName=null`·`steps=[]` graceful. 기존 필드(`currentStep`/`stepResults`/`status` …) 그대로 유지 = **하위호환**. 목록 조회(`/runs`)는 미적용(전체 step 은 `GET /workflows/{id}` 캐싱 권장) |
