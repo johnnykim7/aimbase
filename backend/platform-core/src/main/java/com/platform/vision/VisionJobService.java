@@ -96,11 +96,25 @@ public class VisionJobService {
     /**
      * job 을 등록하고 즉시 job_id 를 반환한다. 추출·판독은 백그라운드에서 진행된다.
      *
-     * @param video    업로드된 영상이 저장된 경로 (컨트롤러가 미리 저장)
-     * @param frames   추출할 프레임 수 (null 이면 기본 6)
+     * <p>CR-141 하위호환: connectionGroupId 없이 부르던 기존 호출부용.
      */
     public VisionJobEntity submit(Path video, String mimeType, String filename, long sizeBytes,
                                   Integer frames, String prompt, String connectionId, String createdBy) {
+        return submit(video, mimeType, filename, sizeBytes, frames, prompt, connectionId, null, createdBy);
+    }
+
+    /**
+     * job 을 등록하고 즉시 job_id 를 반환한다. 추출·판독은 백그라운드에서 진행된다.
+     *
+     * @param video             업로드된 영상이 저장된 경로 (컨트롤러가 미리 저장)
+     * @param frames            추출할 프레임 수 (null 이면 기본 6)
+     * @param connectionId      판독에 쓸 커넥션. group 과 함께 오면 group 이 이긴다(오케스트레이터 우선순위)
+     * @param connectionGroupId CR-141: 커넥션 그룹. 그룹 전략으로 커넥션을 고르고 실패 시 폴백한다.
+     *                          맥이 꺼져 판독이 통째로 FAILED 되던 것을 다른 커넥션으로 넘긴다.
+     */
+    public VisionJobEntity submit(Path video, String mimeType, String filename, long sizeBytes,
+                                  Integer frames, String prompt, String connectionId,
+                                  String connectionGroupId, String createdBy) {
         int frameCount = clampFrames(frames);
 
         VisionJobEntity job = new VisionJobEntity();
@@ -118,7 +132,7 @@ public class VisionJobService {
 
         String tenantId = TenantContext.getTenantId();
         UUID jobId = saved.getJobId();
-        executor.submit(() -> runJob(jobId, tenantId, video, frameCount, prompt, connectionId));
+        executor.submit(() -> runJob(jobId, tenantId, video, frameCount, prompt, connectionId, connectionGroupId));
 
         log.info("[CR-137] 영상 판독 job 등록: job_id={} file={} ({} bytes) frames={} tenant={}",
                 jobId, filename, sizeBytes, frameCount, tenantId);
@@ -127,7 +141,7 @@ public class VisionJobService {
 
     /** 워커 본체. 예외를 밖으로 던지지 않고 job 상태에 남긴다. */
     private void runJob(UUID jobId, String tenantId, Path video,
-                        int frameCount, String prompt, String connectionId) {
+                        int frameCount, String prompt, String connectionId, String connectionGroupId) {
         // ThreadLocal 은 상속되지 않으므로 워커에서 직접 복원해야 한다(BIZ-003).
         if (tenantId != null) {
             TenantContext.setTenantId(tenantId);
@@ -166,7 +180,11 @@ public class VisionJobService {
                     null,                                   // userId
                     null,                                   // ragSourceId
                     connectionId,
-                    null, null, null, null, null);          // toolFilter/toolChoice/format/group/workdir
+                    null,                                   // toolFilter
+                    null,                                   // toolChoice
+                    null,                                   // responseFormat
+                    connectionGroupId,                      // CR-141: 그룹 지정 시 전략 선택 + 폴백
+                    null);                                  // workingDirectory
 
             ChatResponse response = orchestrator.chat(req);
             String text = extractText(response);

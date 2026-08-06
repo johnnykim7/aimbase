@@ -79,6 +79,7 @@ public class VisionJobController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> submit(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "connection_id", required = false) String connectionId,
+            @RequestParam(value = "connection_group_id", required = false) String connectionGroupId,
             @RequestParam(value = "frames", required = false) Integer frames,
             @RequestParam(value = "prompt", required = false) String prompt,
             @RequestParam(value = "prompt_key", required = false) String promptKey,
@@ -144,7 +145,7 @@ public class VisionJobController {
 
         VisionJobEntity job = jobService.submit(
                 videoPath, mediaType, file.getOriginalFilename(), file.getSize(),
-                frames, resolvedPrompt, connectionId, currentUser());
+                frames, resolvedPrompt, connectionId, connectionGroupId, currentUser());
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("job_id", job.getJobId());

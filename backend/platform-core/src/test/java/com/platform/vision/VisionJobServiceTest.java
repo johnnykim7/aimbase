@@ -150,6 +150,42 @@ class VisionJobServiceTest {
         assertThat(req.getValue().actionsEnabled()).isFalse();
     }
 
+    /**
+     * CR-141: connection_group_id 가 오케스트레이터까지 전달되어야 한다.
+     * 여기서 끊기면 그룹 전략·폴백이 통째로 안 걸린다(맥이 꺼지면 그냥 FAILED).
+     */
+    @Test
+    void runJob_passesConnectionGroupToOrchestrator(@TempDir Path tmp) throws Exception {
+        Path video = tmp.resolve("v.mp4");
+        Files.writeString(video, "fake");
+        stubSuccessfulRun(tmp, "ok", 2);
+
+        service.submit(video, "video/mp4", "v.mp4", 10L, 2, "지시", null, "vision-pool", "tester");
+
+        awaitUntil(() -> !mockingDetails(orchestrator).getInvocations().isEmpty());
+
+        ArgumentCaptor<ChatRequest> req = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(orchestrator).chat(req.capture());
+        assertThat(req.getValue().connectionGroupId()).isEqualTo("vision-pool");
+    }
+
+    /** 그룹을 안 주던 기존 호출부는 그대로 동작해야 한다(8-arg 오버로드). */
+    @Test
+    void submit_withoutGroup_keepsNullGroup(@TempDir Path tmp) throws Exception {
+        Path video = tmp.resolve("v.mp4");
+        Files.writeString(video, "fake");
+        stubSuccessfulRun(tmp, "ok", 2);
+
+        service.submit(video, "video/mp4", "v.mp4", 10L, 2, "지시", "conn-1", "tester");
+
+        awaitUntil(() -> !mockingDetails(orchestrator).getInvocations().isEmpty());
+
+        ArgumentCaptor<ChatRequest> req = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(orchestrator).chat(req.capture());
+        assertThat(req.getValue().connectionGroupId()).isNull();
+        assertThat(req.getValue().connectionId()).isEqualTo("conn-1");
+    }
+
     /** 프레임을 한 장도 못 뽑으면 FAILED 로 끝나야 한다(예외가 새어나가면 안 됨). */
     @Test
     void runJob_failsWhenNoFramesExtracted(@TempDir Path tmp) throws Exception {
