@@ -31,6 +31,7 @@ class FrameExtractorTest {
         ReflectionTestUtils.setField(fx, "probeTimeoutSeconds", 30);
         ReflectionTestUtils.setField(fx, "jpegQuality", 2);
         ReflectionTestUtils.setField(fx, "maxConcurrent", 2);
+        ReflectionTestUtils.setField(fx, "frameMaxEdge", 768);
         return fx;
     }
 
@@ -65,6 +66,24 @@ class FrameExtractorTest {
         assertThat(FrameExtractor.formatTs(-3.0)).isEqualTo("0.000");
     }
 
+    /**
+     * 긴 변 상한 필터. min() 이라 원본이 더 작으면 확대하지 않는다.
+     * 실측 근거: 1080x1920 6장 = 16,227 토큰(32B context 8192 초과 → 400),
+     * 768px 로 줄이면 2,511 토큰으로 정상 판독.
+     */
+    @Test
+    void scaleFilter_capsLongEdgeWithoutUpscaling() {
+        assertThat(FrameExtractor.scaleFilter(768))
+                .isEqualTo("scale='min(768,iw)':'min(768,ih)':force_original_aspect_ratio=decrease");
+    }
+
+    /** 0 이하면 리사이즈 비활성 — 원본 해상도 그대로 뽑고 싶을 때의 탈출구. */
+    @Test
+    void scaleFilter_disabledForNonPositive() {
+        assertThat(FrameExtractor.scaleFilter(0)).isNull();
+        assertThat(FrameExtractor.scaleFilter(-1)).isNull();
+    }
+
     // ── 실제 ffmpeg 실행 ─────────────────────────────────────
 
     @Test
@@ -83,6 +102,40 @@ class FrameExtractorTest {
         Path junk = tmp.resolve("not-a-video.mp4");
         Files.writeString(junk, "this is not a video");
         assertThat(newExtractor().probeDuration(junk)).isEqualTo(-1);
+    }
+
+    /**
+     * 추출된 프레임이 실제로 긴 변 상한을 지키는지 — 필터 문자열이 아니라 픽셀로 확인한다.
+     * sample1.mp4 는 1080x1920 세로 영상이므로 768 로 줄면 432x768 가 된다.
+     */
+    @Test
+    void extract_downscalesToFrameMaxEdge(@TempDir Path tmp) throws Exception {
+        assumeTrue(ffmpegAvailable(), "ffmpeg not installed");
+        assumeTrue(Files.exists(SAMPLE), "cvilite sample1.mp4 not present");
+
+        List<Path> frames = newExtractor().extract(SAMPLE, 2, tmp.resolve("frames"));
+
+        assertThat(frames).isNotEmpty();
+        for (Path f : frames) {
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(f.toFile());
+            assertThat(img).isNotNull();
+            assertThat(Math.max(img.getWidth(), img.getHeight())).isLessThanOrEqualTo(768);
+        }
+    }
+
+    /** frameMaxEdge=0 이면 리사이즈하지 않는다 — 원본 해상도가 그대로 나와야 한다. */
+    @Test
+    void extract_keepsOriginalSizeWhenResizeDisabled(@TempDir Path tmp) throws Exception {
+        assumeTrue(ffmpegAvailable(), "ffmpeg not installed");
+        assumeTrue(Files.exists(SAMPLE), "cvilite sample1.mp4 not present");
+
+        FrameExtractor fx = newExtractor();
+        ReflectionTestUtils.setField(fx, "frameMaxEdge", 0);
+        List<Path> frames = fx.extract(SAMPLE, 1, tmp.resolve("frames"));
+
+        assertThat(frames).isNotEmpty();
+        java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(frames.get(0).toFile());
+        assertThat(Math.max(img.getWidth(), img.getHeight())).isGreaterThan(768);
     }
 
     /** 기본 6프레임 — cvilite preview/f0~f5.jpg 와 같은 개수. */

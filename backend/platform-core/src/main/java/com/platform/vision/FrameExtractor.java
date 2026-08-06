@@ -55,6 +55,20 @@ public class FrameExtractor {
     private int jpegQuality;
 
     /**
+     * 프레임 긴 변 상한(px). 원본 해상도를 그대로 넣으면 토큰만 폭증한다.
+     *
+     * <p>실측(2026-08-06): 1080x1920 폰 영상 6장 = 16,227 토큰 → LM Studio 32B(context 8192)
+     * 가 400 으로 거부. 768px 로 줄이면 같은 6장이 2,511 토큰(1/6.5)이 되고 판독은 정상.
+     * 선행 하네스 cvilite 도 같은 이유로 {@code FRAME_MAX_EDGE=768} 을 쓴다
+     * ("검수 판정엔 768px이면 충분, 원본 풀해상도는 토큰만 폭증").
+     *
+     * <p>축소만 하고 확대는 하지 않는다({@code force_original_aspect_ratio=decrease} +
+     * {@code min(..,iw/ih)}). 0 이하면 리사이즈를 끄고 원본 그대로 추출한다.
+     */
+    @Value("${vision.ffmpeg.frame-max-edge:768}")
+    private int frameMaxEdge;
+
+    /**
      * 동시 추출 상한. ffmpeg 는 CPU 바운드라 과도한 병렬은 이득 없이 메모리만 먹는다.
      * PopplerPdfRenderer 와 같은 이유의 게이트.
      */
@@ -128,15 +142,20 @@ public class FrameExtractor {
                 double ts = duration > 0 ? duration * (i + 0.5) / n : 0;
 
                 Path out = outDir.resolve("f" + i + ".jpg");
-                List<String> cmd = List.of(
+                List<String> cmd = new ArrayList<>(List.of(
                         ffmpegBin,
                         "-nostdin",                       // 파이프에서 stdin 을 물지 않게(hang 방지)
                         "-ss", formatTs(ts),              // ★ -i 앞: 입력 seek (뒤에 두면 전체 디코드)
                         "-i", video.toString(),
                         "-frames:v", "1",
-                        "-q:v", String.valueOf(jpegQuality),
-                        "-y",                             // 덮어쓰기(재시도 대비)
-                        out.toString());
+                        "-q:v", String.valueOf(jpegQuality)));
+                String vf = scaleFilter(frameMaxEdge);
+                if (vf != null) {
+                    cmd.add("-vf");
+                    cmd.add(vf);
+                }
+                cmd.add("-y");                            // 덮어쓰기(재시도 대비)
+                cmd.add(out.toString());
 
                 ProcResult r = exec(cmd, frameTimeoutSeconds);
                 if (r.exitCode != 0 || !Files.exists(out) || Files.size(out) == 0) {
@@ -168,6 +187,20 @@ public class FrameExtractor {
     /** ffmpeg -ss 는 초 단위 소수를 받는다. 로케일 무관하게 점(.) 소수점으로 찍는다. */
     static String formatTs(double seconds) {
         return String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, seconds));
+    }
+
+    /**
+     * 긴 변을 {@code maxEdge} 로 제한하는 {@code -vf} 필터를 만든다. 원본이 이미 작으면
+     * {@code min()} 이 원본 크기를 골라 확대하지 않는다(업스케일은 토큰만 늘고 정보는 안 는다).
+     *
+     * @param maxEdge 긴 변 상한(px). 0 이하면 리사이즈 비활성 → {@code null} 반환.
+     * @return ffmpeg scale 필터 문자열, 또는 비활성 시 {@code null}
+     */
+    static String scaleFilter(int maxEdge) {
+        if (maxEdge <= 0) return null;
+        return String.format(java.util.Locale.ROOT,
+                "scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease",
+                maxEdge, maxEdge);
     }
 
     private static String truncate(String s) {
