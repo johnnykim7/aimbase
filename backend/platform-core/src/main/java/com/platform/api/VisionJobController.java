@@ -1,8 +1,11 @@
 package com.platform.api;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.attachment.AttachmentException;
 import com.platform.attachment.MimeValidator;
 import com.platform.domain.VisionJobEntity;
+import com.platform.service.PromptTemplateService;
 import com.platform.tenant.TenantContext;
 import com.platform.vision.VisionJobService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,23 +55,34 @@ public class VisionJobController {
 
     private final VisionJobService jobService;
     private final MimeValidator mimeValidator;
+    private final PromptTemplateService promptTemplateService;
+    private final ObjectMapper objectMapper;
 
     @Value("${vision.work-dir:/data/aimbase/vision-jobs}")
     private String workDirRoot;
 
-    public VisionJobController(VisionJobService jobService, MimeValidator mimeValidator) {
+    public VisionJobController(VisionJobService jobService,
+                               MimeValidator mimeValidator,
+                               PromptTemplateService promptTemplateService,
+                               ObjectMapper objectMapper) {
         this.jobService = jobService;
         this.mimeValidator = mimeValidator;
+        this.promptTemplateService = promptTemplateService;
+        this.objectMapper = objectMapper;
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "영상 업로드 → 프레임 추출 + VLM 판독 job 등록 (비동기)")
+    @Operation(summary = "영상 업로드 → 프레임 추출 + VLM 판독 job 등록 (비동기)",
+            description = "프롬프트는 prompt 원문 또는 prompt_key(aimbase 템플릿) 로 준다. "
+                    + "둘 다 오면 원문이 이긴다. prompt_vars 는 템플릿 변수 JSON.")
     public ResponseEntity<ApiResponse<Map<String, Object>>> submit(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "connection_id", required = false) String connectionId,
             @RequestParam(value = "frames", required = false) Integer frames,
-            @RequestParam(value = "prompt", required = false) String prompt) {
+            @RequestParam(value = "prompt", required = false) String prompt,
+            @RequestParam(value = "prompt_key", required = false) String promptKey,
+            @RequestParam(value = "prompt_vars", required = false) String promptVars) {
 
         if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(ApiResponse.error("file is required"));
@@ -102,6 +116,14 @@ public class VisionJobController {
                             + "use POST /api/v1/chat/attachments for images and PDFs"));
         }
 
+        // CR-140: 프롬프트 확정. 디스크 쓰기 전에 해야 키 오타로 실패할 때 고아 파일이 안 남는다.
+        String resolvedPrompt;
+        try {
+            resolvedPrompt = resolvePrompt(prompt, promptKey, promptVars);
+        } catch (PromptResolutionException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.error(e.getMessage()));
+        }
+
         // 원본을 디스크에 저장한다. 메모리에 들고 있으면 100MB × 동시요청이 그대로 힙을 먹는다.
         // 재판독·감사를 위해 판독 후에도 보존한다(BIZ-114, TTL GC 대상).
         UUID stagingId = UUID.randomUUID();
@@ -122,7 +144,7 @@ public class VisionJobController {
 
         VisionJobEntity job = jobService.submit(
                 videoPath, mediaType, file.getOriginalFilename(), file.getSize(),
-                frames, prompt, connectionId, currentUser());
+                frames, resolvedPrompt, connectionId, currentUser());
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("job_id", job.getJobId());
@@ -168,6 +190,55 @@ public class VisionJobController {
         m.put("started_at", j.getStartedAt());
         m.put("finished_at", j.getFinishedAt());
         return m;
+    }
+
+    /**
+     * CR-140: 판독 프롬프트를 확정한다.
+     *
+     * <p>판독 지시문은 검수 기준이 바뀔 때마다 손대는 물건이라, 소비앱 코드에 상수로 박아두면
+     * 문구 한 줄 고치는 데 배포가 필요해진다. {@code prompt_key} 로 aimbase 프롬프트 템플릿
+     * (테넌트별 관리, FE 에서 수정 가능)을 가리키게 해 그 결합을 끊는다.
+     *
+     * <p><b>원문이 이긴다</b>: {@code prompt} 가 있으면 {@code prompt_key} 는 무시한다.
+     * 일회성 판독·실험을 템플릿 등록 없이 할 수 있어야 하기 때문이다.
+     *
+     * @return 확정된 프롬프트. 둘 다 없으면 {@code null}(서비스 기본 프롬프트로 판독)
+     * @throws PromptResolutionException prompt_vars 가 JSON 이 아니거나 템플릿을 못 찾은 경우
+     */
+    private String resolvePrompt(String prompt, String promptKey, String promptVars) {
+        if (prompt != null && !prompt.isBlank()) {
+            if (promptKey != null && !promptKey.isBlank()) {
+                log.info("[CR-140] prompt 원문과 prompt_key 가 함께 왔다 — 원문 우선, key 무시: {}", promptKey);
+            }
+            return prompt;
+        }
+        if (promptKey == null || promptKey.isBlank()) {
+            return prompt; // 둘 다 없음 → 서비스 기본값
+        }
+
+        Map<String, Object> vars;
+        try {
+            vars = (promptVars == null || promptVars.isBlank())
+                    ? Map.of()
+                    : objectMapper.readValue(promptVars, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            throw new PromptResolutionException("prompt_vars is not a valid JSON object: " + e.getMessage());
+        }
+
+        String rendered = promptTemplateService.render(promptKey, vars);
+        if (rendered == null || rendered.isBlank()) {
+            // 조용히 빈 프롬프트로 판독하면 엉뚱한 결과가 나온다 — 키 오타를 여기서 잡는다.
+            throw new PromptResolutionException("prompt template not found or empty: " + promptKey);
+        }
+        log.info("[CR-140] prompt_key 적용: {} ({}자)", promptKey, rendered.length());
+        return rendered;
+    }
+
+    /** CR-140: 프롬프트 확정 실패 — 호출자가 400 으로 변환한다. */
+    private static class PromptResolutionException extends RuntimeException {
+        PromptResolutionException(String message) {
+            super(message);
+        }
     }
 
     private static String extensionOf(String mediaType) {
