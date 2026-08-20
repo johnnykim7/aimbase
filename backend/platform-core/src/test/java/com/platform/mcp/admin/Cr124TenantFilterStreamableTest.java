@@ -22,8 +22,15 @@ class Cr124TenantFilterStreamableTest {
     private final TenantDataSourceManager dsm = mock(TenantDataSourceManager.class);
     private final McpTenantSessionFilter filter = new McpTenantSessionFilter(dsm);
 
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        McpTenantSessionFilter.clearAllSessions();
+        TenantContext.clear();
+    }
+
     @AfterEach
     void tearDown() {
+        McpTenantSessionFilter.clearAllSessions();
         TenantContext.clear();
     }
 
@@ -43,6 +50,7 @@ class Cr124TenantFilterStreamableTest {
     @Test
     void streamableBarePath_withTenantParam_propagatesTenant() throws Exception {
         var req = new MockHttpServletRequest("POST", "/admin-mcp");
+        req.addHeader("Mcp-Session-Id", "sess-a");
         req.setParameter("tenant_id", "axopm_companyA");
 
         assertThat(runAndCapture(req)).isEqualTo("axopm_companyA");
@@ -50,14 +58,20 @@ class Cr124TenantFilterStreamableTest {
         verify(dsm).getTenantDataSource("axopm_companyA");
     }
 
+    /**
+     * CR-124 의도(파라미터 없는 후속 요청도 테넌트 유지)는 그대로 두되,
+     * CR-125 이후 근거가 "마지막 전역값"이 아니라 "이 요청의 세션"으로 바뀌었다.
+     */
     @Test
-    void streamableBarePath_withoutParam_reusesLastTenant() throws Exception {
+    void streamableBarePath_withoutParam_reusesOwnSessionTenant() throws Exception {
         var first = new MockHttpServletRequest("POST", "/admin-mcp");
+        first.addHeader("Mcp-Session-Id", "sess-x");
         first.setParameter("tenant_id", "tenant_x");
         runAndCapture(first);
 
         // 후속 호출은 tenant_id 없이 온다 (Streamable 은 초기화 후 같은 EP 로 계속 POST)
         var next = new MockHttpServletRequest("POST", "/admin-mcp");
+        next.addHeader("Mcp-Session-Id", "sess-x");
         assertThat(runAndCapture(next)).isEqualTo("tenant_x");
     }
 

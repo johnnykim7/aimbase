@@ -194,14 +194,27 @@ public class AimbaseAdminMcpConfig {
                 .build();
         // CR-124 (SDK 2.0.0): 핸들러 2번째 인자가 Map → CallToolRequest 로 변경됨.
         return new McpServerFeatures.SyncToolSpecification(mcpTool, (exchange, request) -> {
-            // MCP 메시지는 비동기 스레드에서 실행 → TenantContext가 없을 수 있음
-            // McpTenantSessionFilter가 SSE 연결 시 저장한 테넌트를 사용
-            String savedTenant = McpTenantSessionFilter.getCurrentMcpTenant();
+            // MCP 메시지는 비동기 스레드에서 실행 → TenantContext가 없을 수 있음.
+            // CR-125: 예전에는 "마지막으로 연결한 테넌트"를 전역에서 읽어 다른 테넌트의 DB로
+            // 라우팅될 수 있었다. 이제 이 호출이 속한 MCP 세션의 테넌트만 조회한다.
+            String sessionId = exchange == null ? null : exchange.sessionId();
+            String sessionTenant = McpTenantSessionFilter.getTenantForSession(sessionId);
             boolean tenantSet = false;
-            if (savedTenant != null && com.platform.tenant.TenantContext.getTenantId() == null) {
-                com.platform.tenant.TenantContext.setTenantId(savedTenant);
+
+            if (sessionTenant == null && com.platform.tenant.TenantContext.getTenantId() == null) {
+                // 테넌트를 특정할 수 없으면 실행하지 않는다. 임의의 테넌트로 흘러드는 것보다
+                // 명시적으로 거부하는 편이 안전하다(BIZ-003).
+                log.warn("MCP tool '{}' rejected: no tenant bound to session {}", name, sessionId);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("{\"error\":\"tenant not resolved for this MCP session; reconnect with tenant_id\"}")
+                        .isError(true)
+                        .build();
+            }
+
+            if (sessionTenant != null && com.platform.tenant.TenantContext.getTenantId() == null) {
+                com.platform.tenant.TenantContext.setTenantId(sessionTenant);
                 tenantSet = true;
-                log.debug("MCP tool '{}': set tenant '{}'", name, savedTenant);
+                log.debug("MCP tool '{}': set tenant '{}' (session={})", name, sessionTenant, sessionId);
             }
             try {
                 String result = handler.apply(request.arguments());
