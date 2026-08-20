@@ -38,6 +38,7 @@ class MCPClientIntegrationTest {
     @Mock private MCPServerClient safetyMcpClient;
     @Mock private MCPServerClient evalMcpClient;
     @Mock private com.platform.tool.ToolRegistry toolRegistry;
+    @Mock private com.platform.tenant.TenantDataSourceManager tenantDataSourceManager;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -50,7 +51,7 @@ class MCPClientIntegrationTest {
 
         @BeforeEach
         void setUp() throws Exception {
-            ragClient = new MCPRagClient(objectMapper, toolRegistry);
+            ragClient = new MCPRagClient(objectMapper, toolRegistry, tenantDataSourceManager);
             injectMcpClient(ragClient, MCPRagClient.class, ragMcpClient);
         }
 

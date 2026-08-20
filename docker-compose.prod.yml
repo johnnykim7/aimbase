@@ -73,12 +73,16 @@ services:
     volumes:
       # api 와 동일 경로로 workspace 공유 → BE 가 패스한 file_path 를 사이드카가 직접 읽음
       - ./workspace:/data/workspace
+      # api 의 업로드 스토리지(LocalStorageService, storage.local.base-path=/data/aimbase)를
+      # 동일 경로로 공유 → 지식소스 업로드 파일도 사이드카가 file_path 로 직접 읽는다.
+      - ./aimbase-storage:/data/aimbase
     environment:
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8000"
       PARSE_DOWNLOAD_TIMEOUT_SEC: "150"
       # parse_document file_path 화이트리스트 (미설정 시 로컬 path 파싱 비활성)
-      PARSE_ALLOWED_ROOTS: /data/workspace
+      # 구분자는 콤마 — parser.py _validate_local_path 가 roots_env.split(",") 로 파싱한다.
+      PARSE_ALLOWED_ROOTS: /data/workspace,/data/aimbase
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/sse')"]
       interval: 15s

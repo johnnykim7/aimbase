@@ -27,13 +27,14 @@ class MCPRagClientCR011Test {
 
     @Mock private MCPServerClient mcpServerClient;
     @Mock private com.platform.tool.ToolRegistry toolRegistry;
+    @Mock private com.platform.tenant.TenantDataSourceManager tenantDataSourceManager;
 
     private MCPRagClient client;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() throws Exception {
-        client = new MCPRagClient(objectMapper, toolRegistry);
+        client = new MCPRagClient(objectMapper, toolRegistry, tenantDataSourceManager);
 
         Field mcpClientField = MCPRagClient.class.getDeclaredField("mcpClient");
         mcpClientField.setAccessible(true);

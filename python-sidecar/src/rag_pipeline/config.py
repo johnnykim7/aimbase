@@ -31,9 +31,13 @@ class Settings:
     # CR-036: Aimbase BE API (프롬프트 템플릿 벌크 로드)
     AIMBASE_API_URL: str = os.getenv("AIMBASE_API_URL", "http://localhost:8181")
 
+    def db_url_for(self, db_name: str) -> str:
+        """Build a connection URL for an arbitrary database (CR-142: tenant routing)."""
+        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{db_name}"
+
     @property
     def db_url(self) -> str:
-        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        return self.db_url_for(self.DB_NAME)
 
 
 settings = Settings()

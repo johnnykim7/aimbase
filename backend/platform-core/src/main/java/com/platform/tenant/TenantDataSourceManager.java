@@ -115,6 +115,35 @@ public class TenantDataSourceManager {
         return Map.copyOf(tenantDataSources);
     }
 
+    /**
+     * CR-142: 테넌트의 물리 DB 이름 조회 (RAG 사이드카 라우팅용).
+     *
+     * <p>사이드카는 테넌트 개념이 없어 단일 {@code DB_NAME} 으로 고정되어 있다. 호출 시 이 값을
+     * 인자로 넘겨 테넌트별 DB 로 라우팅한다. 이름을 {@code "aimbase_" + tenantId} 로 <b>조립하지
+     * 않는다</b> — 2026-08-20 에 그 조립 규칙의 대소문자 불일치로 사이드카 DB 연결이 전면 실패한
+     * 이력이 있고, {@code shopai-store-a} 처럼 하이픈이 든 테넌트 ID 도 있다. 정본은 master 의
+     * {@code tenants.db_name} 이며, 여기서는 이미 그 값으로 만들어진 풀의 JDBC URL 에서 되읽는다.</p>
+     *
+     * @return DB 이름. 해당 테넌트의 DataSource 가 없으면 {@code null}
+     */
+    public String getDbName(String tenantId) {
+        HikariDataSource ds = tenantDataSources.get(tenantId);
+        if (ds == null) {
+            return null;
+        }
+        String jdbcUrl = ds.getJdbcUrl();
+        if (jdbcUrl == null) {
+            return null;
+        }
+        int slash = jdbcUrl.lastIndexOf('/');
+        if (slash < 0 || slash == jdbcUrl.length() - 1) {
+            return null;
+        }
+        String name = jdbcUrl.substring(slash + 1);
+        int q = name.indexOf('?');
+        return q >= 0 ? name.substring(0, q) : name;
+    }
+
     /** TENANT_DB_HOST 환경변수가 설정되어 있으면 DB에 저장된 db_host를 오버라이드 */
     private static final String DB_HOST_OVERRIDE = System.getenv("TENANT_DB_HOST");
 

@@ -16,6 +16,7 @@ import logging
 from fastmcp import FastMCP
 
 from rag_pipeline.config import settings
+from rag_pipeline.db import tenant_db as _tenant_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def chunk_document(
 def embed_texts(
     texts: list[str],
     model: str = "",
+    tenant_db: str = "",
 ) -> str:
     """Generate embedding vectors for text array.
 
@@ -59,10 +61,11 @@ def embed_texts(
         texts: List of text strings to embed
         model: Model name (default: KoSimCSE-roberta-multitask)
     """
-    from rag_pipeline.tools.embedder import embed_texts as do_embed
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.embedder import embed_texts as do_embed
 
-    result = do_embed(texts, model)
-    return json.dumps(result, ensure_ascii=False)
+        result = do_embed(texts, model)
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -73,6 +76,7 @@ def search_hybrid(
     vector_weight: float = 0.7,
     keyword_weight: float = 0.3,
     embedding_model: str = "",
+    tenant_db: str = "",
 ) -> str:
     """Hybrid search combining BM25 keyword and vector semantic search.
 
@@ -86,10 +90,11 @@ def search_hybrid(
         keyword_weight: Weight for BM25 keyword search (0.0-1.0)
         embedding_model: 쿼리 임베딩에 사용할 모델 (빈 문자열이면 기본 모델)
     """
-    from rag_pipeline.tools.searcher import search_hybrid as do_search
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.searcher import search_hybrid as do_search
 
-    results = do_search(query, source_id, top_k, vector_weight, keyword_weight, embedding_model)
-    return json.dumps({"query": query, "results": results}, ensure_ascii=False)
+        results = do_search(query, source_id, top_k, vector_weight, keyword_weight, embedding_model)
+        return json.dumps({"query": query, "results": results}, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -124,6 +129,7 @@ def ingest_document(
     chunking_strategy: str = "semantic",
     chunking_config: str = "{}",
     embedding_model: str = "",
+    tenant_db: str = "",
 ) -> str:
     """Full ingestion pipeline: parse → chunk → embed → store in pgvector.
 
@@ -138,13 +144,14 @@ def ingest_document(
         chunking_config: JSON string with chunking parameters
         embedding_model: Embedding model name (default: KoSimCSE)
     """
-    from rag_pipeline.tools.ingestor import ingest_document as do_ingest
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.ingestor import ingest_document as do_ingest
 
-    cfg = json.loads(chunking_config) if isinstance(chunking_config, str) else chunking_config
-    result = do_ingest(
-        source_id, content, document_id, chunking_strategy, cfg, embedding_model
-    )
-    return json.dumps(result, ensure_ascii=False)
+        cfg = json.loads(chunking_config) if isinstance(chunking_config, str) else chunking_config
+        result = do_ingest(
+            source_id, content, document_id, chunking_strategy, cfg, embedding_model
+        )
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -156,6 +163,7 @@ def ingest_file(
     chunking_strategy: str = "semantic",
     chunking_config: str = "{}",
     embedding_model: str = "",
+    tenant_db: str = "",
 ) -> str:
     """File-based ingestion: read file → parse → chunk → embed → store.
 
@@ -171,14 +179,15 @@ def ingest_file(
         chunking_config: JSON string with chunking parameters
         embedding_model: Embedding model name (default: KoSimCSE)
     """
-    from rag_pipeline.tools.ingestor import ingest_file as do_ingest_file
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.ingestor import ingest_file as do_ingest_file
 
-    cfg = json.loads(chunking_config) if isinstance(chunking_config, str) else chunking_config
-    result = do_ingest_file(
-        source_id, file_path, storage_base_path,
-        document_id, chunking_strategy, cfg, embedding_model,
-    )
-    return json.dumps(result, ensure_ascii=False)
+        cfg = json.loads(chunking_config) if isinstance(chunking_config, str) else chunking_config
+        result = do_ingest_file(
+            source_id, file_path, storage_base_path,
+            document_id, chunking_strategy, cfg, embedding_model,
+        )
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -384,6 +393,7 @@ def evaluate_rag(
     test_set: str = "[]",
     config: str = "{}",
     mode: str = "fast",
+    tenant_db: str = "",
 ) -> str:
     """Evaluate RAG quality using RAGAS metrics (PY-026, CR-016).
 
@@ -400,12 +410,13 @@ def evaluate_rag(
         config: JSON string with {top_k, metrics}
         mode: Evaluation mode - "fast" (embedding similarity) or "accurate" (LLM Judge)
     """
-    from rag_pipeline.tools.evaluator import evaluate_rag as do_evaluate
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.evaluator import evaluate_rag as do_evaluate
 
-    ts = json.loads(test_set) if isinstance(test_set, str) else test_set
-    cfg = json.loads(config) if isinstance(config, str) else config
-    result = do_evaluate(source_id, ts, cfg, mode=mode)
-    return json.dumps(result, ensure_ascii=False)
+        ts = json.loads(test_set) if isinstance(test_set, str) else test_set
+        cfg = json.loads(config) if isinstance(config, str) else config
+        result = do_evaluate(source_id, ts, cfg, mode=mode)
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -436,6 +447,7 @@ def cache_lookup(
     query: str,
     source_id: str,
     threshold: float = 0.95,
+    tenant_db: str = "",
 ) -> str:
     """Semantic cache lookup — find cached response for similar query (PY-028).
 
@@ -446,10 +458,11 @@ def cache_lookup(
         source_id: Knowledge source ID
         threshold: Cosine similarity threshold for cache hit (default 0.95)
     """
-    from rag_pipeline.tools.semantic_cache import cache_lookup as do_lookup
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.semantic_cache import cache_lookup as do_lookup
 
-    result = do_lookup(query, source_id, threshold)
-    return json.dumps(result, ensure_ascii=False)
+        result = do_lookup(query, source_id, threshold)
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -459,6 +472,7 @@ def cache_store(
     response_text: str,
     metadata: str = "{}",
     ttl_hours: int = 24,
+    tenant_db: str = "",
 ) -> str:
     """Store query-response pair in semantic cache (PY-028).
 
@@ -469,11 +483,12 @@ def cache_store(
         metadata: JSON string with additional metadata
         ttl_hours: Cache TTL in hours (default 24, 0 = no expiry)
     """
-    from rag_pipeline.tools.semantic_cache import cache_store as do_store
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.semantic_cache import cache_store as do_store
 
-    meta = json.loads(metadata) if isinstance(metadata, str) else metadata
-    result = do_store(query, source_id, response_text, meta, ttl_hours)
-    return json.dumps(result, ensure_ascii=False)
+        meta = json.loads(metadata) if isinstance(metadata, str) else metadata
+        result = do_store(query, source_id, response_text, meta, ttl_hours)
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -504,6 +519,7 @@ def parent_child_search(
     query: str,
     source_id: str,
     top_k: int = 5,
+    tenant_db: str = "",
 ) -> str:
     """Parent-Child hierarchical search (PY-024).
 
@@ -515,10 +531,11 @@ def parent_child_search(
         source_id: Knowledge source ID to search in
         top_k: Number of parent results to return
     """
-    from rag_pipeline.tools.parent_child_search import parent_child_search as do_pc_search
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.parent_child_search import parent_child_search as do_pc_search
 
-    result = do_pc_search(query, source_id, top_k)
-    return json.dumps(result, ensure_ascii=False)
+        result = do_pc_search(query, source_id, top_k)
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -569,6 +586,7 @@ def save_document_template(
     description: str = "",
     tags: str = "[]",
     created_by: str = "",
+    tenant_db: str = "",
 ) -> str:
     """Save a document template for reuse (CR-018).
 
@@ -585,20 +603,22 @@ def save_document_template(
         tags: JSON array of tags
         created_by: Creator identifier
     """
-    from rag_pipeline.tools.template_manager import save_template
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.template_manager import save_template
 
-    result = save_template(
-        name=name, format=format, template_type=template_type,
-        code_template=code_template, variables=variables,
-        description=description, tags=tags, created_by=created_by,
-    )
-    return json.dumps(result, ensure_ascii=False)
+        result = save_template(
+            name=name, format=format, template_type=template_type,
+            code_template=code_template, variables=variables,
+            description=description, tags=tags, created_by=created_by,
+        )
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
 def list_document_templates(
     format: str = "",
     template_type: str = "",
+    tenant_db: str = "",
 ) -> str:
     """List saved document templates (CR-018).
 
@@ -606,36 +626,39 @@ def list_document_templates(
         format: Filter by format (empty for all)
         template_type: Filter by type 'code' or 'file' (empty for all)
     """
-    from rag_pipeline.tools.template_manager import list_templates
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.template_manager import list_templates
 
-    result = list_templates(format=format, template_type=template_type)
-    return json.dumps(result, ensure_ascii=False)
+        result = list_templates(format=format, template_type=template_type)
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
-def get_document_template(template_id: str) -> str:
+def get_document_template(template_id: str, tenant_db: str = "") -> str:
     """Get document template details including code (CR-018).
 
     Args:
         template_id: Template UUID
     """
-    from rag_pipeline.tools.template_manager import get_template
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.template_manager import get_template
 
-    result = get_template(template_id)
-    return json.dumps(result, ensure_ascii=False)
+        result = get_template(template_id)
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
-def delete_document_template(template_id: str) -> str:
+def delete_document_template(template_id: str, tenant_db: str = "") -> str:
     """Delete a document template (CR-018).
 
     Args:
         template_id: Template UUID
     """
-    from rag_pipeline.tools.template_manager import delete_template
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.template_manager import delete_template
 
-    result = delete_template(template_id)
-    return json.dumps(result, ensure_ascii=False)
+        result = delete_template(template_id)
+        return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -643,6 +666,7 @@ def render_document_template(
     template_id: str,
     variables: str = "{}",
     output_format: str = "",
+    tenant_db: str = "",
 ) -> str:
     """Generate a document from a saved template (CR-018).
 
@@ -655,23 +679,24 @@ def render_document_template(
         variables: JSON object with variable values {"title": "Report", "items": [...]}
         output_format: Output file format (pdf, docx, pptx). Empty = same as template format.
     """
-    # 먼저 템플릿 타입을 확인하여 적절한 렌더러로 분기
-    from rag_pipeline.tools.template_manager import get_template
+    with _tenant_db(tenant_db):
+        # 먼저 템플릿 타입을 확인하여 적절한 렌더러로 분기
+        from rag_pipeline.tools.template_manager import get_template
 
-    tpl_result = get_template(template_id)
-    if not tpl_result.get("success"):
-        return json.dumps(tpl_result, ensure_ascii=False)
+        tpl_result = get_template(template_id)
+        if not tpl_result.get("success"):
+            return json.dumps(tpl_result, ensure_ascii=False)
 
-    tpl_type = tpl_result["template"]["template_type"]
+        tpl_type = tpl_result["template"]["template_type"]
 
-    if tpl_type == "file":
-        from rag_pipeline.tools.file_template import render_file_template
-        result = render_file_template(template_id=template_id, variables=variables, output_format=output_format)
-    else:
-        from rag_pipeline.tools.template_manager import render_template
-        result = render_template(template_id=template_id, variables=variables)
+        if tpl_type == "file":
+            from rag_pipeline.tools.file_template import render_file_template
+            result = render_file_template(template_id=template_id, variables=variables, output_format=output_format)
+        else:
+            from rag_pipeline.tools.template_manager import render_template
+            result = render_template(template_id=template_id, variables=variables)
 
-    return json.dumps(result, ensure_ascii=False, default=str)
+        return json.dumps(result, ensure_ascii=False, default=str)
 
 
 @mcp.tool()
@@ -682,6 +707,7 @@ def upload_file_template(
     original_filename: str = "",
     description: str = "",
     tags: str = "[]",
+    tenant_db: str = "",
 ) -> str:
     """Upload a PPTX/DOCX file as a template (CR-018).
 
@@ -696,16 +722,17 @@ def upload_file_template(
         description: Template description
         tags: JSON array of tags
     """
-    from rag_pipeline.tools.file_template import upload_file_template as do_upload
+    with _tenant_db(tenant_db):
+        from rag_pipeline.tools.file_template import upload_file_template as do_upload
 
-    result = do_upload(
-        name=name, format=format, file_base64=file_base64,
-        original_filename=original_filename, description=description, tags=tags,
-    )
-    return json.dumps(result, ensure_ascii=False)
+        result = do_upload(
+            name=name, format=format, file_base64=file_base64,
+            original_filename=original_filename, description=description, tags=tags,
+        )
+        return json.dumps(result, ensure_ascii=False)
 
 
-# ── CR-013: Document Intelligence (스키마 기반 문서 생성) ─────
+    # ── CR-013: Document Intelligence (스키마 기반 문서 생성) ─────
 
 
 @mcp.tool()

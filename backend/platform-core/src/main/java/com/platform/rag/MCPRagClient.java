@@ -36,6 +36,8 @@ public class MCPRagClient {
 
     private final ObjectMapper objectMapper;
     private final ToolRegistry toolRegistry;
+    // CR-142: 테넌트 → 물리 DB 이름 해석(사이드카 라우팅 인자용)
+    private final com.platform.tenant.TenantDataSourceManager tenantDataSourceManager;
 
     @Value("${rag.mcp.url:http://localhost:8002}")
     private String mcpServerUrl;
@@ -51,9 +53,11 @@ public class MCPRagClient {
     private MCPServerClient mcpClient;
     private boolean connected = false;
 
-    public MCPRagClient(ObjectMapper objectMapper, @Lazy ToolRegistry toolRegistry) {
+    public MCPRagClient(ObjectMapper objectMapper, @Lazy ToolRegistry toolRegistry,
+                        @Lazy com.platform.tenant.TenantDataSourceManager tenantDataSourceManager) {
         this.objectMapper = objectMapper;
         this.toolRegistry = toolRegistry;
+        this.tenantDataSourceManager = tenantDataSourceManager;
     }
 
     @PostConstruct
@@ -100,6 +104,44 @@ public class MCPRagClient {
     }
 
     /**
+     * CR-142: 사이드카 도구 호출 단일 창구 — 현재 테넌트의 DB 이름을 인자로 주입한다.
+     *
+     * <p>사이드카는 테넌트 개념이 없어 단일 {@code DB_NAME} env 로 고정되어 있었다. 그 결과 어느
+     * 테넌트의 요청이든 같은 DB 로 임베딩이 적재되어 BIZ-003(Database-per-Tenant) 을 위반한다.
+     * 여기서 {@code tenant_db} 를 실어 보내면 사이드카가 요청 단위로 해당 DB 에 바인딩한다.</p>
+     *
+     * <p>호출 지점이 25곳이라 각 지점에서 인자를 채우면 누락이 생기므로, 모든 호출을 이 메서드로
+     * 모아 한 곳에서 주입한다. 테넌트를 못 구하면 인자를 넣지 않으며, 이때 사이드카는 기존
+     * {@code DB_NAME} 으로 폴백한다(무회귀).</p>
+     */
+    private String callTool(String toolName, Map<String, Object> input) {
+        Map<String, Object> args = new java.util.HashMap<>(input);
+        String tenantDb = resolveTenantDb();
+        if (tenantDb != null) {
+            args.put("tenant_db", tenantDb);
+        }
+        return mcpClient.callTool(toolName, args);
+    }
+
+    /** 현재 요청의 테넌트 DB 이름. 테넌트 컨텍스트가 없으면 null(사이드카 기본 DB 로 폴백). */
+    private String resolveTenantDb() {
+        try {
+            String tenantId = com.platform.tenant.TenantContext.getTenantId();
+            if (tenantId == null || tenantId.isBlank()) {
+                return null;
+            }
+            String dbName = tenantDataSourceManager.getDbName(tenantId);
+            if (dbName == null) {
+                log.warn("CR-142: no DataSource for tenant '{}' — sidecar falls back to default DB", tenantId);
+            }
+            return dbName;
+        } catch (Exception e) {
+            log.warn("CR-142: failed to resolve tenant db, falling back to sidecar default: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 사이드카 SSE 세션 워밍업 핑.
      *
      * SDK 0.10.0 의 SSE 세션은 사이드카 재기동/유휴 시 무효화되는데, MCPServerClient 가
@@ -141,7 +183,7 @@ public class MCPRagClient {
                 "embedding_model", embeddingModel != null ? embeddingModel : ""
         );
 
-        String result = mcpClient.callTool("ingest_document", input);
+        String result = callTool("ingest_document", input);
         log.info("MCP ingest_document result: {}", result);
         return parseJson(result);
     }
@@ -177,7 +219,7 @@ public class MCPRagClient {
         input.put("chunking_config", toJsonString(chunkingConfig != null ? chunkingConfig : Map.of()));
         input.put("embedding_model", embeddingModel != null ? embeddingModel : "");
 
-        String result = mcpClient.callTool("ingest_file", input);
+        String result = callTool("ingest_file", input);
         log.info("MCP ingest_file result: {}", result);
         return parseJson(result);
     }
@@ -211,7 +253,7 @@ public class MCPRagClient {
             input.put("embedding_model", embeddingModel);
         }
 
-        String result = mcpClient.callTool("search_hybrid", input);
+        String result = callTool("search_hybrid", input);
         return parseJson(result);
     }
 
@@ -228,7 +270,7 @@ public class MCPRagClient {
                 "top_k", topK
         );
 
-        String result = mcpClient.callTool("rerank_results", input);
+        String result = callTool("rerank_results", input);
         return parseJson(result);
     }
 
@@ -243,7 +285,7 @@ public class MCPRagClient {
                 "config", toJsonString(config != null ? config : Map.of())
         );
 
-        String result = mcpClient.callTool("chunk_document", input);
+        String result = callTool("chunk_document", input);
         return parseJson(result);
     }
 
@@ -261,7 +303,7 @@ public class MCPRagClient {
                 "llm_config", "{}"
         );
 
-        String result = mcpClient.callTool("transform_query", input);
+        String result = callTool("transform_query", input);
         return parseJson(result);
     }
 
@@ -280,7 +322,7 @@ public class MCPRagClient {
                 "batch_size", batchSize
         );
 
-        String result = mcpClient.callTool("finetune_embeddings", input);
+        String result = callTool("finetune_embeddings", input);
         return parseJson(result);
     }
 
@@ -293,7 +335,7 @@ public class MCPRagClient {
                 "model", model != null ? model : ""
         );
 
-        String result = mcpClient.callTool("embed_texts", input);
+        String result = callTool("embed_texts", input);
         return parseJson(result);
     }
 
@@ -308,7 +350,7 @@ public class MCPRagClient {
                 "file_type", fileType != null ? fileType : ""
         );
 
-        String result = mcpClient.callTool("parse_document", input);
+        String result = callTool("parse_document", input);
         return parseJson(result);
     }
 
@@ -325,7 +367,7 @@ public class MCPRagClient {
                 "file_type", fileType != null ? fileType : ""
         );
 
-        String result = mcpClient.callTool("parse_document", input);
+        String result = callTool("parse_document", input);
         return parseJson(result);
     }
 
@@ -349,7 +391,7 @@ public class MCPRagClient {
                 "ocr_max_pages", ocrMaxPages
         );
 
-        String result = mcpClient.callTool("read_pdf", input);
+        String result = callTool("read_pdf", input);
         return parseJson(result);
     }
 
@@ -366,7 +408,7 @@ public class MCPRagClient {
                 "languages", languages != null ? languages : "kor+eng"
         );
 
-        String result = mcpClient.callTool("ocr_image", input);
+        String result = callTool("ocr_image", input);
         return parseJson(result);
     }
 
@@ -381,7 +423,7 @@ public class MCPRagClient {
      */
     public Map<String, Object> pdfPageCount(String fileBase64) {
         Map<String, Object> input = Map.of("file_base64", fileBase64);
-        String result = mcpClient.callTool("pdf_page_count", input);
+        String result = callTool("pdf_page_count", input);
         return parseJson(result);
     }
 
@@ -394,7 +436,7 @@ public class MCPRagClient {
      */
     public Map<String, Object> pdfPageCountByPath(String filePath) {
         Map<String, Object> input = Map.of("file_path", filePath);
-        String result = mcpClient.callTool("pdf_page_count", input);
+        String result = callTool("pdf_page_count", input);
         return parseJson(result);
     }
 
@@ -419,7 +461,7 @@ public class MCPRagClient {
                 "max_pages", maxPages
         );
 
-        String result = mcpClient.callTool("pdf_to_images", input);
+        String result = callTool("pdf_to_images", input);
         return parseJson(result);
     }
 
@@ -443,7 +485,7 @@ public class MCPRagClient {
                 "dpi", dpi,
                 "max_pages", maxPages
         );
-        String result = mcpClient.callTool("pdf_to_images", input);
+        String result = callTool("pdf_to_images", input);
         return parseJson(result);
     }
 
@@ -462,7 +504,7 @@ public class MCPRagClient {
                 "max_iterations", maxIterations
         );
 
-        String result = mcpClient.callTool("self_rag_search", input);
+        String result = callTool("self_rag_search", input);
         return parseJson(result);
     }
 
@@ -480,7 +522,7 @@ public class MCPRagClient {
                 "similarity_threshold", similarityThreshold
         );
 
-        String result = mcpClient.callTool("compress_context", input);
+        String result = callTool("compress_context", input);
         return parseJson(result);
     }
 
@@ -496,7 +538,7 @@ public class MCPRagClient {
                 "model", model != null ? model : ""
         );
 
-        String result = mcpClient.callTool("embed_multimodal", input);
+        String result = callTool("embed_multimodal", input);
         return parseJson(result);
     }
 
@@ -514,7 +556,7 @@ public class MCPRagClient {
                 "timeout_ms", timeoutMs
         );
 
-        String result = mcpClient.callTool("scrape_url", input);
+        String result = callTool("scrape_url", input);
         return parseJson(result);
     }
 
@@ -532,7 +574,7 @@ public class MCPRagClient {
                 "chunking_config", toJsonString(chunkingConfig != null ? chunkingConfig : Map.of())
         );
 
-        String result = mcpClient.callTool("contextual_chunk", input);
+        String result = callTool("contextual_chunk", input);
         return parseJson(result);
     }
 
@@ -549,7 +591,7 @@ public class MCPRagClient {
                 "top_k", topK
         );
 
-        String result = mcpClient.callTool("parent_child_search", input);
+        String result = callTool("parent_child_search", input);
         return parseJson(result);
     }
 
@@ -572,7 +614,7 @@ public class MCPRagClient {
         input.put("config", toJsonString(config != null ? config : Map.of()));
         input.put("mode", mode != null ? mode : "fast");
 
-        String result = mcpClient.callTool("evaluate_rag", input);
+        String result = callTool("evaluate_rag", input);
         return parseJson(result);
     }
 
@@ -580,7 +622,7 @@ public class MCPRagClient {
      * 범용 MCP 도구 호출. 새 도구 추가 시 개별 메서드 없이도 호출 가능.
      */
     public Map<String, Object> callToolRaw(String toolName, Map<String, Object> input) {
-        String result = mcpClient.callTool(toolName, input);
+        String result = callTool(toolName, input);
         return parseJson(result);
     }
 
