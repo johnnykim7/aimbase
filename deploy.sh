@@ -89,7 +89,7 @@ deploy_agent() {
 }
 
 # 운영 러너 전체 — docker-compose.prod.yml 의 aimbase-agent* 서비스 목록과 일치해야 한다.
-AGENT_SERVICES="aimbase-agent aimbase-agent-axopm aimbase-agent-workmap aimbase-agent-wes"
+AGENT_SERVICES="aimbase-agent aimbase-agent-axopm aimbase-agent-workmap aimbase-agent-wes aimbase-agent-wes-cs"
 
 deploy_agents() {
   echo "━━━ Agent(Runner) 빌드 ━━━"

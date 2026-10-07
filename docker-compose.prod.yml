@@ -256,8 +256,65 @@ services:
       AGENT_MCP_PORT: "8297"   # 8295 → 8297 (충돌 회피)
       AGENT_TURN_ENABLED: "false"
       AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-wes:8296"   # 자기 서비스명:포트
+      # 운영질의 위젯 psql 접속값. 커넥션 안내에 비밀번호를 적지 않아 실행 로그에 남지 않게 한다(CR-WES-332 4-2).
+      # PGPASSWORD 는 .env.runner-wes 에 둔다. .env 는 api 가 통째로 읽으므로 거기 두지 않는다.
+      PGHOST: "59.8.160.12"
+      PGPORT: "5432"
+      PGDATABASE: "bp_fulfillment"
+      PGUSER: "claude_ro"
+    env_file:
+      - path: .env.runner-wes
+        required: false
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8296/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # bp-wes 슬랙 CS 조회 전용 러너(CR-WES-332 4-1). 커넥션 cli-runner-bp-wes-cs-001 이 이리로 보낸다.
+  # 개인정보 칸을 뺀 wes_cs_ai 계정만 쥔다. claude-accounts·workspace 를 -wes 와 나누는 이유는
+  # 그 폴더의 지난 대화 기록과 산출물에 claude_ro 접속값과 위젯 조회 결과가 남아 있어서다.
+  # claude-accounts-wes-cs/local-agent-cs 에는 local-agent-1 의 로그인 파일 두 개만 복사해 둔다(사용률은 같은 계정에 합산).
+  # local-agent-1 토큰을 새로 받으면 이 폴더에도 다시 복사해야 한다.
+  aimbase-agent-wes-cs:
+    build:
+      context: ./backend
+      dockerfile: aimbase-agent/Dockerfile
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - api
+    volumes:
+      - ./claude-accounts-wes-cs:/home/appuser/.claude-accounts
+      - ./workspace-wes-cs:/data/workspace
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "2"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WES_SERVER_MCP_API_KEY:-plat-d66bccfc4b954dbc907b31e7ef7a7131}"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes-cs"
+      SERVER_PORT: "8298"
+      AGENT_NAME: "cli-runner-bp-wes-cs"
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"
+      AGENT_TENANT_ID: "bp_wes"
+      AGENT_MCP_PORT: "8299"
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-wes-cs:8298"
+      PGHOST: "59.8.160.12"
+      PGPORT: "5432"
+      PGDATABASE: "bp_fulfillment"
+      PGUSER: "wes_cs_ai"
+    env_file:
+      - path: .env.runner-wes-cs   # PGPASSWORD
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8298/v1/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
