@@ -578,4 +578,98 @@ class LlmCallStepExecutorTest {
     void supports_returnsLlmCall() {
         assertThat(executor.supports()).isEqualTo(WorkflowStep.StepType.LLM_CALL);
     }
+
+    // CR-143: BIZ-034 워크플로우 LLM_CALL 구조화 출력 검증과 재요청
+
+    @Nested
+    @DisplayName("CR-143: 구조화 출력 검증과 재요청")
+    class StructuredOutputEnforcementTests {
+
+        private Map<String, Object> requiredSchemaConfig() {
+            Map<String, Object> config = baseConfig();
+            config.put("response_schema", Map.of(
+                    "type", "object",
+                    "properties", Map.of(
+                            "html", Map.of("type", "string"),
+                            "error", Map.of("type", "string")),
+                    "required", List.of("html", "error")));
+            return config;
+        }
+
+        private LLMResponse textResponse(String text) {
+            return new LLMResponse("msg-1", MODEL_ID, List.of(new ContentBlock.Text(text)),
+                    List.of(), new TokenUsage(100, 50), LLMResponse.FinishReason.END, 200L, 0.01);
+        }
+
+        private static final String BROKEN_JSON = "{\"html\": \"<p>피고는 \"곧 지급하겠다\"고 답했다</p>\", \"error\": \"\"}";
+
+        @Test
+        @DisplayName("TC-SO-010: 스키마를 만족하면 재요청 없이 structured_data 반환")
+        void validStructured_noRetry() {
+            mockAdapterReturn(makeStructuredResponse(LLMResponse.FinishReason.END,
+                    Map.of("html", "<p>초안</p>", "error", ""), 300));
+
+            Map<String, Object> result = executor.execute(stepWithConfig(requiredSchemaConfig()), defaultContext());
+
+            assertThat(result.get("structured_data")).isEqualTo(Map.of("html", "<p>초안</p>", "error", ""));
+            verify(adapter, times(1)).chat(any(LLMRequest.class));
+        }
+
+        @Test
+        @DisplayName("TC-SO-011: JSON 파싱 실패 후 교정 재요청으로 성공")
+        void brokenJson_retryWithCorrection() {
+            mockAdapterReturn(textResponse(BROKEN_JSON),
+                    makeStructuredResponse(LLMResponse.FinishReason.END, Map.of("html", "<p>초안</p>", "error", ""), 300));
+
+            Map<String, Object> result = executor.execute(stepWithConfig(requiredSchemaConfig()), defaultContext());
+
+            assertThat(result.get("structured_data")).isEqualTo(Map.of("html", "<p>초안</p>", "error", ""));
+            ArgumentCaptor<LLMRequest> captor = ArgumentCaptor.forClass(LLMRequest.class);
+            verify(adapter, times(2)).chat(captor.capture());
+            List<UnifiedMessage> retryMessages = captor.getAllValues().get(1).messages();
+            UnifiedMessage echo = retryMessages.get(retryMessages.size() - 2);
+            UnifiedMessage correction = retryMessages.get(retryMessages.size() - 1);
+            assertThat(echo.role()).isEqualTo(UnifiedMessage.Role.ASSISTANT);
+            assertThat(((ContentBlock.Text) echo.content().get(0)).text()).isEqualTo(BROKEN_JSON);
+            assertThat(correction.role()).isEqualTo(UnifiedMessage.Role.USER);
+            assertThat(((ContentBlock.Text) correction.content().get(0)).text())
+                    .contains("could not be parsed as a JSON object").contains("line 1");
+            assertThat(captor.getAllValues().get(1).responseSchema()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("TC-SO-012: 스키마 검증 실패(필수 필드 누락) 후 재요청으로 성공")
+        void schemaViolation_retry() {
+            mockAdapterReturn(
+                    makeStructuredResponse(LLMResponse.FinishReason.END, Map.of("html", "<p>초안</p>"), 300),
+                    makeStructuredResponse(LLMResponse.FinishReason.END, Map.of("html", "<p>초안</p>", "error", ""), 300));
+
+            Map<String, Object> result = executor.execute(stepWithConfig(requiredSchemaConfig()), defaultContext());
+
+            assertThat(result.get("structured_data")).isEqualTo(Map.of("html", "<p>초안</p>", "error", ""));
+            verify(adapter, times(2)).chat(any(LLMRequest.class));
+        }
+
+        @Test
+        @DisplayName("TC-SO-013: 재요청 2회 후에도 실패하면 스텝 실패")
+        void allAttemptsFail_throws() {
+            mockAdapterReturn(textResponse(BROKEN_JSON), textResponse(BROKEN_JSON), textResponse(BROKEN_JSON));
+
+            assertThatThrownBy(() -> executor.execute(stepWithConfig(requiredSchemaConfig()), defaultContext()))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("BIZ-034");
+            verify(adapter, times(3)).chat(any(LLMRequest.class));
+        }
+
+        @Test
+        @DisplayName("response_schema 가 없으면 텍스트 응답을 그대로 반환 (기존 동작)")
+        void noSchema_textPassThrough() {
+            mockAdapterReturn(textResponse("자유 텍스트"));
+
+            Map<String, Object> result = executor.execute(stepWithConfig(baseConfig()), defaultContext());
+
+            assertThat(result.get("output")).isEqualTo("자유 텍스트");
+            verify(adapter, times(1)).chat(any(LLMRequest.class));
+        }
+    }
 }

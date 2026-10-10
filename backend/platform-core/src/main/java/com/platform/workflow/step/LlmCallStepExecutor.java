@@ -1,11 +1,14 @@
 package com.platform.workflow.step;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.adapter.LLMAdapter;
+import com.platform.llm.adapter.StructuredOutputNormalizer;
 import com.platform.llm.model.*;
 import com.platform.llm.router.ModelRouter;
+import com.platform.schema.SchemaValidator;
 import com.platform.workflow.StepContext;
 import com.platform.workflow.event.WorkflowEventPublisher;
 import com.platform.workflow.event.WorkflowRunEventRecorder;
@@ -44,6 +47,8 @@ public class LlmCallStepExecutor implements StepExecutor {
     private static final int ESCALATION_MAX_TOKENS = 8192;
     private static final int SPLIT_PART_MAX_TOKENS = 4096;
     private static final int SPLIT_MAX_PARTS = 10;
+    /** CR-143: BIZ-034 구조화 출력 재요청 횟수 (채팅 경로 OrchestratorEngine 과 같은 값). */
+    private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
     private final ModelRouter modelRouter;
     private final ConnectionAdapterFactory connectionAdapterFactory;
@@ -52,18 +57,21 @@ public class LlmCallStepExecutor implements StepExecutor {
     private final WorkflowEventPublisher eventPublisher;
     /** CR-090: workflow_run_events 비동기 기록. null 허용(테스트 편의). */
     private final WorkflowRunEventRecorder eventRecorder;
+    private final SchemaValidator schemaValidator;
 
     @org.springframework.beans.factory.annotation.Autowired
     public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
                                 com.platform.service.PromptTemplateService promptTemplateService,
                                 org.springframework.beans.factory.ObjectProvider<WorkflowEventPublisher> eventPublisherProvider,
-                                org.springframework.beans.factory.ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider) {
+                                org.springframework.beans.factory.ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider,
+                                SchemaValidator schemaValidator) {
         this.modelRouter = modelRouter;
         this.promptTemplateService = promptTemplateService;
         this.connectionAdapterFactory = connectionAdapterFactory;
         // ObjectProvider 로 순환참조 회피 (WorkflowEventPublisher 는 워크플로우 패키지 컴포넌트)
         this.eventPublisher = eventPublisherProvider != null ? eventPublisherProvider.getIfAvailable() : null;
         this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
+        this.schemaValidator = schemaValidator;
     }
 
     /** 하위 호환: eventPublisher/eventRecorder 없는 3-arg 생성자 (기존 테스트/비스트리밍 사용처). */
@@ -74,6 +82,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.eventPublisher = null;
         this.eventRecorder = null;
+        this.schemaValidator = new SchemaValidator(MAPPER);
     }
 
     @Override
@@ -146,6 +155,8 @@ public class LlmCallStepExecutor implements StepExecutor {
         recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase1Start, system, prompt, connectionId);
 
         if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
+            response = ensureStructuredOutput(step.id(), adapter, resolvedModel, system, prompt, responseSchema,
+                    phase1Tokens, context, extThinking, thinkingBudget, connectionId, response);
             return buildResult(response, resolvedModel);
         }
 
@@ -162,6 +173,8 @@ public class LlmCallStepExecutor implements StepExecutor {
 
             if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
                 log.info("LLM_CALL step '{}': 에스컬레이션 성공 (max_tokens={})", step.id(), phase2Tokens);
+                response = ensureStructuredOutput(step.id(), adapter, resolvedModel, system, prompt, responseSchema,
+                        phase2Tokens, context, null, null, connectionId, response);
                 return buildResult(response, resolvedModel);
             }
 
@@ -583,12 +596,24 @@ public class LlmCallStepExecutor implements StepExecutor {
                                  Map<String, Object> responseSchema,
                                  int maxTokens, StepContext context,
                                  Boolean extendedThinking, Integer thinkingBudgetTokens) {
+        return callLlm(adapter, resolvedModel, baseMessages(system, prompt), responseSchema,
+                maxTokens, context, extendedThinking, thinkingBudgetTokens);
+    }
+
+    private static List<UnifiedMessage> baseMessages(String system, String prompt) {
         List<UnifiedMessage> messages = new ArrayList<>();
         if (system != null && !system.isBlank()) {
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, system));
         }
         messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt));
+        return messages;
+    }
 
+    private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,
+                                 List<UnifiedMessage> messages,
+                                 Map<String, Object> responseSchema,
+                                 int maxTokens, StepContext context,
+                                 Boolean extendedThinking, Integer thinkingBudgetTokens) {
         ModelConfig modelConfig = new ModelConfig(null, maxTokens, null, null,
                 extendedThinking, thinkingBudgetTokens);
         LLMRequest request = new LLMRequest(resolvedModel, messages, null,
@@ -598,6 +623,88 @@ public class LlmCallStepExecutor implements StepExecutor {
             return adapter.chat(request).get();
         } catch (Exception e) {
             throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * CR-143: BIZ-034 를 워크플로우 LLM_CALL 에도 적용한다. response_schema 를 선언했으면 스키마를 만족하는
+     * 결과만 넘기고, 못 하면 같은 대화에 직전 응답과 교정 지시를 붙여 최대 2회 다시 요청한 뒤 스텝을 실패시킨다.
+     *
+     * <p>어댑터 출구 정규화(CR-113)는 JSON 이 깨져도 원문을 그대로 돌려준다. 여기서 거르지 않으면 run 이
+     * 결과 없이 completed 로 끝나 소비앱이 빈 결과를 성공으로 받는다. CLI 경로는 워커가 마지막 USER 만 보내지만
+     * 같은 run 의 CLI 세션이 앞 대화를 가지고 있어 교정 지시만으로 맥락이 이어진다.
+     */
+    private LLMResponse ensureStructuredOutput(String stepId, LLMAdapter adapter, String resolvedModel,
+                                               String system, String prompt, Map<String, Object> responseSchema,
+                                               int maxTokens, StepContext context,
+                                               Boolean extendedThinking, Integer thinkingBudgetTokens,
+                                               String connectionId, LLMResponse response) {
+        if (responseSchema == null || responseSchema.isEmpty()) {
+            return response;
+        }
+        List<UnifiedMessage> messages = baseMessages(system, prompt);
+        LLMResponse current = response;
+        String problem = structuredOutputProblem(current, responseSchema);
+        for (int retry = 1; problem != null && retry <= STRUCTURED_OUTPUT_MAX_RETRIES; retry++) {
+            log.warn("LLM_CALL step '{}': 구조화 출력 불충족 ({}). 재요청 {}/{}",
+                    stepId, problem, retry, STRUCTURED_OUTPUT_MAX_RETRIES);
+            String correction = "Your previous response did not satisfy the required output format: " + problem
+                    + "\nReturn the same content again as one valid JSON object that matches the requested schema."
+                    + " Inside string values, escape double quotes as \\\" and line breaks as \\n. Output only the JSON.";
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, echoOf(current)));
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, correction));
+            long start = System.currentTimeMillis();
+            current = callLlm(adapter, resolvedModel, List.copyOf(messages), responseSchema, maxTokens, context,
+                    extendedThinking, thinkingBudgetTokens);
+            recordLlmResponse(context, stepId, current, resolvedModel, System.currentTimeMillis() - start,
+                    system, correction, connectionId);
+            problem = structuredOutputProblem(current, responseSchema);
+        }
+        if (problem != null) {
+            throw new RuntimeException("LLM_CALL step '" + stepId + "': response_schema 를 만족하는 결과를 받지 못함 "
+                    + "(BIZ-034, 재요청 " + STRUCTURED_OUTPUT_MAX_RETRIES + "회 후): " + problem);
+        }
+        return current;
+    }
+
+    /** 스키마를 만족하면 null, 아니면 모델에게 그대로 돌려줄 수 있는 실패 사유. */
+    private String structuredOutputProblem(LLMResponse response, Map<String, Object> responseSchema) {
+        Map<String, Object> data = extractStructuredData(response);
+        if (data == null) {
+            return "the response could not be parsed as a JSON object (" + jsonParseError(response.textContent()) + ")";
+        }
+        SchemaValidator.ValidationResult result = schemaValidator.validate(responseSchema, data);
+        return result.valid() ? null : "schema validation failed " + result.errors();
+    }
+
+    private static String jsonParseError(String text) {
+        if (text == null || text.isBlank()) {
+            return "empty response";
+        }
+        try {
+            MAPPER.readValue(StructuredOutputNormalizer.stripFence(text), new TypeReference<Map<String, Object>>() {});
+            return "not a JSON object";
+        } catch (JsonProcessingException e) {
+            var loc = e.getLocation();
+            return e.getOriginalMessage()
+                    + (loc != null ? " at line " + loc.getLineNr() + ", column " + loc.getColumnNr() : "");
+        }
+    }
+
+    /** 재요청 이력에 넣을 직전 응답. 텍스트가 없으면(Anthropic 경로의 Structured 단독) 데이터를 JSON 으로 적는다. */
+    private static String echoOf(LLMResponse response) {
+        String text = response.textContent();
+        if (text != null && !text.isBlank()) {
+            return text;
+        }
+        Map<String, Object> data = response.content().stream()
+                .filter(b -> b instanceof ContentBlock.Structured)
+                .map(b -> ((ContentBlock.Structured) b).data())
+                .findFirst().orElse(null);
+        try {
+            return data != null ? MAPPER.writeValueAsString(data) : "";
+        } catch (JsonProcessingException e) {
+            return String.valueOf(data);
         }
     }
 

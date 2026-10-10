@@ -90,7 +90,7 @@ public final class StructuredOutputNormalizer {
      * ```json 펜스 제거 + 앞뒤 설명문이 섞인 경우 첫 '{'~마지막 '}' 구간만 추출.
      * (배열 최상위는 현재 structured_data Map 계약상 미지원 — object 만 추출.)
      */
-    static String stripFence(String text) {
+    public static String stripFence(String text) {
         String t = text.trim();
         Matcher m = FENCE.matcher(t);
         if (m.find()) {
