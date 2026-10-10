@@ -523,7 +523,7 @@
 | POST | `/workflows` | 워크플로우 생성 (**v2.5: output_schema 지원**) | 🔒 |
 | GET | `/workflows/{id}` | 워크플로우 상세 조회 | 🔒 |
 | PUT | `/workflows/{id}` | 워크플로우 수정 | 🔒 |
-| DELETE | `/workflows/{id}` | 워크플로우 삭제 | 🔒 |
+| DELETE | `/workflows/{id}` | 워크플로우 삭제. 비활성화하며 실행 기록은 보존한다 (BIZ-116, CR-144) | 🔒 |
 | POST | `/workflows/{id}/run` | 워크플로우 실행 (비동기) | 🔒 |
 | POST | `/workflows/runs/{runId}/approve` | 워크플로우 승인 처리 | 🔒 |
 | GET | `/workflows/{id}/runs` | 실행 이력 조회 | 🔒 |
