@@ -178,7 +178,7 @@ class AdminToolServiceTest {
     @Test
     void getWorkflow_found_shouldReturnJson() {
         WorkflowEntity entity = buildWorkflow("wf-1", "Test WF");
-        when(workflowRepository.findById("wf-1")).thenReturn(Optional.of(entity));
+        when(workflowRepository.findByIdAndIsActiveTrue("wf-1")).thenReturn(Optional.of(entity));
 
         String result = service.getWorkflow(Map.of("workflow_id", "wf-1"));
 
@@ -188,7 +188,7 @@ class AdminToolServiceTest {
 
     @Test
     void getWorkflow_notFound_shouldReturnError() {
-        when(workflowRepository.findById("missing")).thenReturn(Optional.empty());
+        when(workflowRepository.findByIdAndIsActiveTrue("missing")).thenReturn(Optional.empty());
 
         String result = service.getWorkflow(Map.of("workflow_id", "missing"));
 
@@ -252,7 +252,7 @@ class AdminToolServiceTest {
     @Test
     void updateWorkflow_found_shouldPartialUpdate() {
         WorkflowEntity entity = buildWorkflow("wf-1", "Original");
-        when(workflowRepository.findById("wf-1")).thenReturn(Optional.of(entity));
+        when(workflowRepository.findByIdAndIsActiveTrue("wf-1")).thenReturn(Optional.of(entity));
         when(workflowRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Map<String, Object> input = new HashMap<>();
@@ -267,7 +267,7 @@ class AdminToolServiceTest {
 
     @Test
     void updateWorkflow_notFound_shouldReturnError() {
-        when(workflowRepository.findById("missing")).thenReturn(Optional.empty());
+        when(workflowRepository.findByIdAndIsActiveTrue("missing")).thenReturn(Optional.empty());
 
         String result = service.updateWorkflow(Map.of("workflow_id", "missing"));
 
@@ -275,28 +275,32 @@ class AdminToolServiceTest {
     }
 
     @Test
-    void deleteWorkflow_found_shouldDeleteAndReturnSuccess() {
-        when(workflowRepository.existsById("wf-1")).thenReturn(true);
+    void deleteWorkflow_found_shouldDeactivateAndReturnSuccess() {
+        WorkflowEntity entity = buildWorkflow("wf-1", "Test WF");
+        entity.setActive(true);
+        when(workflowRepository.findByIdAndIsActiveTrue("wf-1")).thenReturn(Optional.of(entity));
 
         String result = service.deleteWorkflow(Map.of("workflow_id", "wf-1"));
 
         assertThat(result).contains("\"success\":true");
-        verify(workflowRepository).deleteById("wf-1");
-    }
-
-    @Test
-    void deleteWorkflow_notFound_shouldReturnError() {
-        when(workflowRepository.existsById("missing")).thenReturn(false);
-
-        String result = service.deleteWorkflow(Map.of("workflow_id", "missing"));
-
-        assertThat(result).contains("error");
+        assertThat(entity.isActive()).isFalse();
+        verify(workflowRepository).save(entity);
         verify(workflowRepository, never()).deleteById(any());
     }
 
     @Test
+    void deleteWorkflow_notFound_shouldReturnError() {
+        when(workflowRepository.findByIdAndIsActiveTrue("missing")).thenReturn(Optional.empty());
+
+        String result = service.deleteWorkflow(Map.of("workflow_id", "missing"));
+
+        assertThat(result).contains("error");
+        verify(workflowRepository, never()).save(any());
+    }
+
+    @Test
     void runWorkflow_shouldExecuteAndReturnRun() {
-        when(workflowRepository.existsById("wf-1")).thenReturn(true);
+        when(workflowRepository.existsByIdAndIsActiveTrue("wf-1")).thenReturn(true);
         WorkflowRunEntity runEntity = new WorkflowRunEntity();
         when(workflowEngine.execute(eq("wf-1"), any(), any())).thenReturn(runEntity);
 
@@ -308,7 +312,7 @@ class AdminToolServiceTest {
 
     @Test
     void runWorkflow_notFound_shouldReturnError() {
-        when(workflowRepository.existsById("missing")).thenReturn(false);
+        when(workflowRepository.existsByIdAndIsActiveTrue("missing")).thenReturn(false);
 
         String result = service.runWorkflow(Map.of("workflow_id", "missing"));
 

@@ -151,7 +151,7 @@ public class AdminToolService {
 
     public String getWorkflow(Map<String, Object> input) {
         String id = requireString(input, "workflow_id");
-        return workflowRepository.findById(id)
+        return workflowRepository.findByIdAndIsActiveTrue(id)
                 .map(this::toJson)
                 .orElse("{\"error\":\"Workflow not found: " + id + "\"}");
     }
@@ -175,7 +175,7 @@ public class AdminToolService {
     @SuppressWarnings("unchecked")
     public String updateWorkflow(Map<String, Object> input) {
         String id = requireString(input, "workflow_id");
-        return workflowRepository.findById(id)
+        return workflowRepository.findByIdAndIsActiveTrue(id)
                 .map(entity -> {
                     if (input.containsKey("name")) entity.setName((String) input.get("name"));
                     if (input.containsKey("trigger_config")) entity.setTriggerConfig((Map<String, Object>) input.get("trigger_config"));
@@ -190,17 +190,20 @@ public class AdminToolService {
 
     public String deleteWorkflow(Map<String, Object> input) {
         String id = requireString(input, "workflow_id");
-        if (!workflowRepository.existsById(id)) {
+        // BIZ-116: 실행 기록을 남기기 위해 행을 지우지 않고 비활성화한다
+        var entity = workflowRepository.findByIdAndIsActiveTrue(id).orElse(null);
+        if (entity == null) {
             return "{\"error\":\"Workflow not found: " + id + "\"}";
         }
-        workflowRepository.deleteById(id);
+        entity.setActive(false);
+        workflowRepository.save(entity);
         return "{\"success\":true,\"message\":\"Workflow deleted: " + id + "\"}";
     }
 
     @SuppressWarnings("unchecked")
     public String runWorkflow(Map<String, Object> input) {
         String id = requireString(input, "workflow_id");
-        if (!workflowRepository.existsById(id)) {
+        if (!workflowRepository.existsByIdAndIsActiveTrue(id)) {
             return "{\"error\":\"Workflow not found: " + id + "\"}";
         }
         Map<String, Object> runInput = (Map<String, Object>) input.get("input");

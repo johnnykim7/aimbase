@@ -65,7 +65,7 @@ public class WorkflowController {
         if (domain != null) {
             return ApiResponse.ok(workflowRepository.findByDomainAndIsActiveTrue(domain));
         }
-        return ApiResponse.page(workflowRepository.findAll(pageable));
+        return ApiResponse.page(workflowRepository.findByIsActiveTrue(pageable));
     }
 
     @PostMapping
@@ -89,7 +89,7 @@ public class WorkflowController {
     @GetMapping("/{id}")
     @Operation(summary = "워크플로우 상세 조회")
     public ApiResponse<WorkflowEntity> get(@PathVariable String id) {
-        return workflowRepository.findById(id)
+        return workflowRepository.findByIdAndIsActiveTrue(id)
                 .map(ApiResponse::ok)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Workflow not found: " + id));
@@ -100,7 +100,7 @@ public class WorkflowController {
     public ApiResponse<WorkflowEntity> update(@PathVariable String id,
                                                @Valid @RequestBody WorkflowRequest request) {
         workflowValidator.validate(request.steps());
-        WorkflowEntity entity = workflowRepository.findById(id)
+        WorkflowEntity entity = workflowRepository.findByIdAndIsActiveTrue(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Workflow not found: " + id));
         entity.setName(request.name());
@@ -116,7 +116,12 @@ public class WorkflowController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "워크플로우 삭제")
     public void delete(@PathVariable String id) {
-        workflowRepository.deleteById(id);
+        // BIZ-116: workflow_runs 가 외래키로 참조하고 실행 기록은 남겨야 하므로 행을 지우지 않는다
+        WorkflowEntity entity = workflowRepository.findByIdAndIsActiveTrue(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Workflow not found: " + id));
+        entity.setActive(false);
+        workflowRepository.save(entity);
     }
 
     @PostMapping("/{id}/run")
@@ -125,7 +130,7 @@ public class WorkflowController {
     public ApiResponse<WorkflowRunEntity> run(@PathVariable String id,
                                                @RequestBody(required = false) Map<String, Object> input) {
         // 존재 여부 확인 (404 반환)
-        if (!workflowRepository.existsById(id)) {
+        if (!workflowRepository.existsByIdAndIsActiveTrue(id)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Workflow not found: " + id);
         }
         WorkflowRunEntity run = workflowEngine.execute(id, input, null);
@@ -172,7 +177,7 @@ public class WorkflowController {
     public ApiResponse<WorkflowRunEntity> rerun(@PathVariable UUID runId) {
         WorkflowRunEntity source = workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Workflow run not found: " + runId));
-        if (!workflowRepository.existsById(source.getWorkflowId())) {
+        if (!workflowRepository.existsByIdAndIsActiveTrue(source.getWorkflowId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "Workflow not found for rerun: " + source.getWorkflowId());
         }

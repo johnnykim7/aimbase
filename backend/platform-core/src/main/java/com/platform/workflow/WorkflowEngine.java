@@ -299,7 +299,8 @@ public class WorkflowEngine {
      * 워크플로우 비동기 실행 시작. WorkflowRunEntity를 즉시 반환하고 백그라운드에서 DAG 실행.
      */
     public WorkflowRunEntity execute(String workflowId, Map<String, Object> input, String sessionId) {
-        WorkflowEntity workflowEntity = workflowRepository.findById(workflowId)
+        // BIZ-116: 크론, 원격 트리거처럼 컨트롤러를 거치지 않는 진입점도 여기서 삭제된 워크플로우를 막는다
+        WorkflowEntity workflowEntity = workflowRepository.findByIdAndIsActiveTrue(workflowId)
                 .orElseThrow(() -> new IllegalArgumentException("Workflow not found: " + workflowId));
 
         WorkflowRunEntity run = new WorkflowRunEntity();
