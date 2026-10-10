@@ -319,3 +319,42 @@ services:
       timeout: 5s
       retries: 10
       start_period: 40s
+
+  # LexFlow 서면 초안 워크플로우 전용 러너. 커넥션 cli-runner-lexflow-001 이 이리로 보낸다.
+  # 러너 등록은 테넌트 DB 단위라 다른 테넌트 러너를 빌려 쓸 수 없어 따로 둔다.
+  # OAuth 계정·러너 키는 bidding 과 공유하고 이름·테넌트·포트(8300/8301)만 나눈다.
+  aimbase-agent-lexflow:
+    build:
+      context: ./backend
+      dockerfile: aimbase-agent/Dockerfile
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - api
+    volumes:
+      - ./claude-accounts:/home/appuser/.claude-accounts
+      - ./workspace:/data/workspace
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "3"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "plat-a7e4247b82e246fa8b6bd3e50f10409c"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-lexflow"
+      SERVER_PORT: "8300"
+      AGENT_NAME: "cli-runner-lexflow"
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"
+      AGENT_TENANT_ID: "lexflow"
+      AGENT_MCP_PORT: "8301"
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-lexflow:8300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8300/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
