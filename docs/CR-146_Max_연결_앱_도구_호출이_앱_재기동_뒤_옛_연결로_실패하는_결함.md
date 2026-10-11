@@ -85,6 +85,11 @@ DB 스키마 변경은 없다.
 - 작업 트리의 BE 미커밋 파일 129개 중 그 뒤에 바뀐 것이 없고, 작업 트리를 따로 복사해 만든 jar 가 AWS jar 와 1430개 항목이 같다. 다른 2개(SDK 내부 jar)는 빌드 시각만 다르고 속 파일 59개가 같다
 - 그 복사본에 이 수정만 얹은 jar 는 AWS jar 와 ServerMcpConfig, ServerMcpToolDispatcher, MCPToolExecutor, MCPServerManager 클래스 4개만 다르다
 
-### 6.4 운영
+### 6.4 운영 (2026-10-12, AWS 54.116.150.247)
 
-(반영 뒤 채운다)
+- 08:22 api 반영. 지금 이미지 위에 jar 만 바꾼 aimbase-api:cr146-20261012 를 latest 로 두고 api 만 다시 띄웠다. 롤백용 aimbase-api:pre-cr146-20261012
+- 롤백: `sudo docker tag aimbase-api:pre-cr146-20261012 aimbase-api:latest && cd /opt/wjbid/aimbase && sudo docker compose up -d --force-recreate api`
+- 기동 50초 뒤 healthy. 입찰대행 MCP 등록 자동 연결, 도구 19개, /mcp 에 get_opportunity 노출. 기동 ERROR 7건은 AWS 에 DB 가 없는 테넌트 7개의 DataSource 적재 실패로, 이번에 바뀐 클래스와 무관하다
+- 08:23:54 앱(bidding-agency) 재기동, 이어서 REST 재연결 성공(도구 19개)
+- 08:25 cli-runner-bidding-tools-001 채팅으로 get_opportunity 호출 성공, 공고 제목을 받았다. 앱 로그에 재연결 뒤 새 MCP 세션으로 tools/call 이 들어왔다
+- 첫 시도는 러너가 "turn() called before turnFirst()" 로 거절했다. 이 세션의 워커가 1시간 47분 전 쉬는 워커 정리(CR-121)로 닫혔는데 러너의 첫 턴 표시(RunnerService.firstTurnDone)는 남아, 새 워커에 이어지는 턴으로 보냈다. 실패 처리에서 표시가 지워져 두 번째 시도는 정상이었다. 러너 결함이라 이번 범위 밖이다
