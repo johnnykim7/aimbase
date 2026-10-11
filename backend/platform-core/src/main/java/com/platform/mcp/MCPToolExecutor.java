@@ -1,5 +1,6 @@
 package com.platform.mcp;
 
+import com.platform.tenant.TenantContext;
 import com.platform.tool.model.UnifiedToolDef;
 import com.platform.tool.ToolExecutor;
 import org.slf4j.Logger;
@@ -23,17 +24,25 @@ public class MCPToolExecutor implements ToolExecutor {
     private final UnifiedToolDef definition;
     private final MCPServerManager manager;
     private final String serverId;
+    /** CR-146: 이 실행기를 등록한 테넌트. MCP 서버 등록은 그 테넌트 DB 에 있다. */
+    private final String tenantId;
 
     public MCPToolExecutor(MCPServerClient client, UnifiedToolDef definition) {
-        this(client, definition, null, null);
+        this(client, definition, null, null, null);
     }
 
     public MCPToolExecutor(MCPServerClient client, UnifiedToolDef definition,
                             MCPServerManager manager, String serverId) {
+        this(client, definition, manager, serverId, null);
+    }
+
+    public MCPToolExecutor(MCPServerClient client, UnifiedToolDef definition,
+                            MCPServerManager manager, String serverId, String tenantId) {
         this.client = client;
         this.definition = definition;
         this.manager = manager;
         this.serverId = serverId;
+        this.tenantId = tenantId;
     }
 
     @Override
@@ -56,7 +65,7 @@ public class MCPToolExecutor implements ToolExecutor {
             log.warn("MCP tool '{}' call failed on server '{}': {} — attempting lazy reconnect",
                     definition.name(), serverId, e.getMessage());
             try {
-                manager.reconnect(serverId);
+                reconnectInOwnerTenant();
             } catch (Exception reconnectErr) {
                 log.warn("Lazy reconnect for server '{}' failed: {}", serverId, reconnectErr.getMessage());
                 throw e;
@@ -66,6 +75,29 @@ public class MCPToolExecutor implements ToolExecutor {
                 throw e;
             }
             return fresh.callTool(definition.name(), input);
+        }
+    }
+
+    /**
+     * CR-146: 재연결은 등록을 다시 읽으므로 등록 테넌트로 돌아야 한다. /mcp 도구 핸들러는 SDK 가
+     * 요청 스레드 밖에서 돌려 부른 쪽 테넌트가 비어 있고, 그대로 두면 조회가 master DB 로 가서
+     * 연결만 닫힌 채 실패한다. 끝나면 부른 쪽 테넌트 상태로 되돌린다.
+     */
+    private void reconnectInOwnerTenant() {
+        if (tenantId == null) {
+            manager.reconnect(serverId);
+            return;
+        }
+        String callerTenant = TenantContext.getTenantId();
+        TenantContext.setTenantId(tenantId);
+        try {
+            manager.reconnect(serverId);
+        } finally {
+            if (callerTenant == null) {
+                TenantContext.clear();
+            } else {
+                TenantContext.setTenantId(callerTenant);
+            }
         }
     }
 }

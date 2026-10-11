@@ -85,6 +85,16 @@ public class ServerMcpToolDispatcher {
      * </ol>
      * </p>
      */
+    public McpSchema.CallToolResult dispatch(String name, Map<String, Object> args) {
+        // CR-146: 재연결은 같은 이름의 실행기를 새 연결로 바꿔 끼운다. 호출 때 지금 등록된 것을 쓴다.
+        ToolExecutor tool = toolRegistry.getExecutor(name);
+        if (tool == null) {
+            log.warn("Server MCP: tool '{}' is no longer registered", name);
+            return errorResult("Tool not available: " + name);
+        }
+        return dispatch(tool, name, args);
+    }
+
     public McpSchema.CallToolResult dispatch(ToolExecutor tool, String name, Map<String, Object> args) {
         // CR-121: 노출 판정을 ToolRegistry.isCliExposed 단일 소스로 위임 — builtin 은 화이트리스트,
         // 외부 MCP·원격 에이전트 도구는 항상 통과(소비앱이 등록한 도구는 aimbase 화이트리스트로 통제하지 않음).

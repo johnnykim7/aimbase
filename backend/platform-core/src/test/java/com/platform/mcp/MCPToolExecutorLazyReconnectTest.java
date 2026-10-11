@@ -1,9 +1,12 @@
 package com.platform.mcp;
 
+import com.platform.tenant.TenantContext;
 import com.platform.tool.model.UnifiedToolDef;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -105,6 +108,50 @@ class MCPToolExecutorLazyReconnectTest {
         // 재연결을 시도하지 않는다 (전송 장애가 아니므로)
         verify(manager, never()).reconnect(any());
         verify(client, times(1)).callTool(any(), any());
+    }
+
+    @Test
+    void 테넌트_없는_스레드의_재연결은_등록_테넌트로_돈다() {
+        // CR-146: /mcp 도구 핸들러는 SDK 스레드에서 돌아 TenantContext 가 비어 있다.
+        MCPServerClient stale = mock(MCPServerClient.class);
+        MCPServerClient fresh = mock(MCPServerClient.class);
+        MCPServerManager manager = mock(MCPServerManager.class);
+        AtomicReference<String> tenantDuringReconnect = new AtomicReference<>();
+
+        when(stale.callTool(any(), any())).thenThrow(new RuntimeException("Client failed to initialize"));
+        when(manager.reconnect("srv-1")).thenAnswer(inv -> {
+            tenantDuringReconnect.set(TenantContext.getTenantId());
+            return List.of();
+        });
+        when(manager.getClient("srv-1")).thenReturn(fresh);
+        when(fresh.callTool(eq("get_opportunity"), any())).thenReturn("ok");
+
+        TenantContext.clear();
+        MCPToolExecutor exec = new MCPToolExecutor(stale, def, manager, "srv-1", "bidding_system");
+
+        assertThat(exec.execute(Map.of("id", "x"))).isEqualTo("ok");
+        assertThat(tenantDuringReconnect.get()).isEqualTo("bidding_system");
+        assertThat(TenantContext.getTenantId()).isNull();
+    }
+
+    @Test
+    void 재연결이_실패해도_부른_쪽_테넌트로_되돌린다() {
+        MCPServerClient stale = mock(MCPServerClient.class);
+        MCPServerManager manager = mock(MCPServerManager.class);
+
+        when(stale.callTool(any(), any())).thenThrow(new RuntimeException("conn closed"));
+        when(manager.reconnect("srv-1")).thenThrow(new RuntimeException("reconnect failed"));
+
+        TenantContext.setTenantId("caller_tenant");
+        try {
+            MCPToolExecutor exec = new MCPToolExecutor(stale, def, manager, "srv-1", "bidding_system");
+
+            assertThatThrownBy(() -> exec.execute(Map.of("id", "x")))
+                    .hasMessageContaining("conn closed");
+            assertThat(TenantContext.getTenantId()).isEqualTo("caller_tenant");
+        } finally {
+            TenantContext.clear();
+        }
     }
 
     @Test

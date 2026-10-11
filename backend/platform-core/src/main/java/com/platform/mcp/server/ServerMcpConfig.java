@@ -178,8 +178,10 @@ public class ServerMcpConfig {
             try {
                 McpSchema.Tool mcpTool = McpToolConversion.toMcpTool(tool);
                 // CR-124 (SDK 2.0.0): 핸들러 2번째 인자가 Map → CallToolRequest 로 변경됨.
+                // CR-146: 실행기를 여기서 잡아 두면 바깥 MCP 재연결 뒤에도 닫힌 옛 연결을 부른다.
+                // 이름이 같으면 다시 싣지 않으므로 핸들러는 호출 때 이름으로 지금 실행기를 찾는다.
                 mcpServer.addTool(new McpServerFeatures.SyncToolSpecification(mcpTool,
-                        (exchange, request) -> dispatcher.dispatch(tool, name, request.arguments())));
+                        (exchange, request) -> dispatcher.dispatch(name, request.arguments())));
                 publishedTools.add(name);
                 changed = true;
                 log.info("Server MCP: tool exposed '{}'", name);

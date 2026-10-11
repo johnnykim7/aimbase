@@ -118,8 +118,10 @@ public class MCPServerManager {
 
         // ToolRegistry에 MCP 도구 등록 (기존 동일 이름 도구 덮어쓰기)
         // manager + serverId 를 넘겨 lazy reconnect 가 가능하게 함.
+        // CR-146: 등록 테넌트도 넘긴다. 테넌트 없는 스레드에서 불려도 재연결이 이 등록을 찾게 한다.
+        String tenantId = TenantContext.getTenantId();
         for (UnifiedToolDef tool : tools) {
-            toolRegistry.register(new MCPToolExecutor(client, tool, this, serverId));
+            toolRegistry.register(new MCPToolExecutor(client, tool, this, serverId, tenantId));
         }
         log.info("Registered {} tool(s) from MCP server '{}'", tools.size(), serverId);
 

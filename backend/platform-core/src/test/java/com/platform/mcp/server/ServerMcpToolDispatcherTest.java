@@ -78,6 +78,30 @@ class ServerMcpToolDispatcherTest {
     }
 
     @Test
+    void dispatch_by_name_uses_currently_registered_executor() {
+        // CR-146: 재연결이 같은 이름의 실행기를 바꿔 끼우면 다음 호출은 새 실행기를 탄다.
+        when(toolRegistry.getExecutor("get_opportunity"))
+                .thenReturn(stubTool("get_opportunity", "old-connection"))
+                .thenReturn(stubTool("get_opportunity", "new-connection"));
+
+        dispatcher.dispatch("get_opportunity", Map.of());
+        McpSchema.CallToolResult result = dispatcher.dispatch("get_opportunity", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(((McpSchema.TextContent) result.content().get(0)).text()).isEqualTo("new-connection");
+    }
+
+    @Test
+    void dispatch_by_name_returns_error_when_tool_is_gone() {
+        when(toolRegistry.getExecutor("get_opportunity")).thenReturn(null);
+
+        McpSchema.CallToolResult result = dispatcher.dispatch("get_opportunity", Map.of());
+
+        assertThat(result.isError()).isTrue();
+        verify(hookDispatcher, times(0)).dispatch(eq(HookEvent.PRE_TOOL_USE), any(), any(String.class));
+    }
+
+    @Test
     void cli_exposed_tool_executes_with_pre_post_hooks() {
         ToolExecutor tool = stubTool("web_search", "{\"results\":[]}");
 
