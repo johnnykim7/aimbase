@@ -297,9 +297,9 @@
 
 | 메서드 | 경로 | 설명 | 인증 |
 |--------|------|------|------|
-| GET | `/mcp-servers` | MCP 서버 목록 조회 | 🔒 |
+| GET | `/mcp-servers` | MCP 서버 목록 조회. config.headers 값은 `****` (BIZ-117, CR-145) | 🔒 |
 | POST | `/mcp-servers` | MCP 서버 등록 | 🔒 |
-| GET | `/mcp-servers/{id}` | MCP 서버 상세 조회 | 🔒 |
+| GET | `/mcp-servers/{id}` | MCP 서버 상세 조회. config.headers 값은 `****` (BIZ-117, CR-145) | 🔒 |
 | PUT | `/mcp-servers/{id}` | MCP 서버 수정 | 🔒 |
 | DELETE | `/mcp-servers/{id}` | MCP 서버 삭제 | 🔒 |
 | POST | `/mcp-servers/{id}/discover` | 도구 탐색 | 🔒 |
@@ -314,7 +314,7 @@
 | id | String | ✅ | MCP 서버 ID |
 | name | String | ✅ | 서버 이름 |
 | transport | String | ✅ | 전송 유형 (stdio, sse, http) |
-| config | Map | ✅ | 전송별 설정 (JSONB) |
+| config | Map | ✅ | 전송별 설정 (JSONB). `url` 필수, `headers` 선택 |
 | autoStart | Boolean | 선택 | 서버 기동 시 자동 연결 여부 |
 
 ```json
@@ -326,6 +326,16 @@
   "autoStart": true
 }
 ```
+
+`config.headers` (선택, CR-145): 그 서버로 가는 모든 요청(SSE 연결과 메시지 보내기, Streamable 전 요청)에 싣는 머리글. 이름과 값은 문자열이다.
+
+```json
+"config": { "url": "http://host:8183/api/mcp", "headers": { "X-API-Key": "<값>" } }
+```
+
+- 객체가 아니거나, 값이 비었거나 문자열이 아니거나, HTTP 클라이언트가 받지 않는 이름(Host, Content-Length 등)이면 400
+- 응답(목록, 상세, 등록, 수정)에서 값은 `****` 로 나간다 (BIZ-117)
+- 수정 요청의 값이 `****` 이면 저장된 값을 유지한다. 저장된 값이 없는 이름에 `****` 를 보내면 400. 요청에 없는 이름은 지워진다
 
 ---
 

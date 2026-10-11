@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.7.0** | 2026-06-18 | Aimbase v8.18.0 기준
+> **v3.8.0** | 2026-10-11 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -660,6 +660,18 @@ Model Context Protocol 서버를 등록하여 도구를 확장합니다.
 | 삭제 | `DELETE /mcp-servers/{id}` | 서버 제거 |
 | 도구 탐색 | `POST /mcp-servers/{id}/discover` | 서버에서 도구 자동 등록 |
 | 연결 해제 | `POST /mcp-servers/{id}/disconnect` | 서버 연결 해제 |
+
+**열쇠 머리글 싣기 (CR-145)**: 상대 MCP 서버가 열쇠 머리글을 요구하면 등록 config 에 `headers` 를 넣습니다.
+그 서버로 가는 모든 요청(SSE 연결과 메시지 보내기, Streamable 전 요청)에 실립니다.
+
+```json
+{ "url": "http://host:8183/api/mcp", "headers": { "X-API-Key": "<값>" } }
+```
+
+- 목록·상세 응답에서 값은 `****` 로 보입니다. 이름만 확인할 수 있습니다
+- 수정할 때 값을 바꾸지 않을 머리글은 `****` 그대로 보내면 저장된 값이 유지됩니다. 요청에 빠진 머리글은 지워집니다
+- 수정 뒤 `POST /mcp-servers/{id}/reconnect` 로 다시 붙여야 새 머리글이 실립니다
+- 관리 화면 등록 창에는 머리글 칸이 없습니다. API 로 등록합니다
 
 ### 3-8. LLM 라우팅 설정
 
@@ -1440,6 +1452,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.8.0 | 2026-10-11 | **CR-145 — MCP 서버 등록 머리글** (§ 3-7). 등록 config `headers` 를 모든 MCP 요청에 싣고, 조회 응답에서 값을 `****` 로 가림. 수정 시 `****` 는 저장값 유지 |
 | v3.7.0 | 2026-06-18 | **현행화 — 헤더 동기화 + CR-105/107/109/110/111/114/116 운영분 누락 보강**. 헤더를 v1.7.0(2026-04-10, v6.4.0) → v3.7.0(2026-06-18, v8.18.0)로 정정(변경이력은 v3.6.0까지 갱신돼 있었으나 헤더가 stale). **§ 3-5 워크플로우 관리**: ① 실행 중지·재실행 운영(`POST /workflows/runs/{runId}/cancel` 협조적 + `?force=true` CLI worker 즉시 kill, `/rerun` 새 run 실행 — CR-105/116) + 소비앱 UI 권장 패턴 + 멀티노드 주의, API 표에 cancel/rerun 2행 추가. ② run별 격리 workspace(CR-107) — agent 컨테이너 동일 volume 마운트(`./workspace:/data/workspace`) 필수, 누락 시 turn timeout. ③ CLI worker 좀비 누수 점검(CR-109/114) — `ps -ef \| grep claude` 누적 확인 + 응급 pkill 후 force-cancel/rerun. **§ 3-13 Native Tool 관리**: CLI/API 도구 노출 목록 런타임 외부화(CR-110) — `global_config.mcp.cli-exposed-tools` CSV 단일 소스(V66 master seed 42개), 제거=런타임 즉시/추가=재기동, parse_document+내부 6개 제외. **시나리오 H**: 장기 AGENT_CALL turn timeout 정렬(CR-111/106) — agent `spring.mvc.async.request-timeout`(600s, `AIMBASE_AGENT_ASYNC_TIMEOUT_MS`) + BE `anthropic-cli.http-timeout-seconds`(`ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS`) 3겹 정렬, retry 멱등 안전망. 코드 실측 기반(`WorkflowController`/`WorkflowEngine`/`docker-compose.prod.yml`/`application.yml`/V66 SQL). 신규 코드 없음 — 문서만 |
 | v3.6.0 | 2026-06-12 | **CR-102 2차 — 내부 도구 루프 가시화** (§ 3-5 보강). 실행 내역 타임라인에 AGENT_CALL 서브에이전트 도구 루프 + CLI 어댑터 내부 관찰 이벤트 추가 표시. 이벤트량 증가 — 용량 모니터링 항목 갱신 |
 | v3.5.0 | 2026-06-12 | **CR-102 — 실행 내역 화면 + 본문 전문 적재** (§ 3-5). FE 사이드바 "실행 내역" 신설 — 전체 워크플로우 횡단 run 목록(필터+페이지네이션) → 실행 상세(이벤트 타임라인 + 행 클릭 본문 전문 펼침). `workflow_run_events` 본문 4컬럼(V66 tenant) 무조건 적재 — 용량 모니터링 항목 추가, TTL 후속 CR |
