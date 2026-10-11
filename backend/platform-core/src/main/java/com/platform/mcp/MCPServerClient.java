@@ -4,12 +4,16 @@ import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.common.McpTransportContext;
+import io.modelcontextprotocol.spec.McpClientTransport;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +56,8 @@ public class MCPServerClient implements AutoCloseable {
     // reconnect 시 동일 파라미터로 client 를 재생성하기 위해 보존.
     private final UrlSplit urlSplit;
     private final int requestTimeoutSeconds;
+    /** CR-145: 등록 config.headers. 값은 비밀이라 로그에는 이름만 남긴다. */
+    private final Map<String, String> headers;
 
     /** 기본 requestTimeout 30초. 문서 파싱처럼 오래 걸리는 호출은 아래 오버로드로 상향한다. */
     private static final int DEFAULT_REQUEST_TIMEOUT_SECONDS = 30;
@@ -86,8 +92,9 @@ public class MCPServerClient implements AutoCloseable {
         //    baseUri = scheme://authority, sseEndpoint = path + "/sse" 로 설정한다.
         // CR-124: Streamable 은 "/sse" 를 붙이면 안 된다(단일 엔드포인트를 그대로 사용).
         UrlSplit split = this.streamable ? splitBaseAndPath(url) : splitBaseAndSsePath(url);
-        log.info("MCP server '{}' transport split: baseUri={}, endpoint={}, streamable={}",
-                serverId, split.baseUri, split.sseEndpoint, this.streamable);
+        this.headers = MCPServerHeaders.from(config);
+        log.info("MCP server '{}' transport split: baseUri={}, endpoint={}, streamable={}, headers={}",
+                serverId, split.baseUri, split.sseEndpoint, this.streamable, this.headers.keySet());
 
         this.urlSplit = split;
         this.requestTimeoutSeconds = requestTimeoutSeconds;
@@ -100,21 +107,34 @@ public class MCPServerClient implements AutoCloseable {
      */
     private McpSyncClient buildClient() {
         // CR-124: Streamable 은 단일 엔드포인트(하위경로 없음)라 baseUri+endpoint 로 그대로 붙인다.
-        io.modelcontextprotocol.spec.McpClientTransport httpTransport = streamable
-                ? io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport
-                        .builder(urlSplit.baseUri())
-                        .endpoint(urlSplit.sseEndpoint())
-                        .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)))
-                        .build()
-                : HttpClientSseClientTransport.builder(urlSplit.baseUri())
-                        .sseEndpoint(urlSplit.sseEndpoint())
-                        .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)))
-                        .build();
+        // CR-145: 머리글이 있을 때만 요청 꾸밈을 건다. 없는 등록은 SDK 기본 경로를 그대로 탄다.
+        McpClientTransport httpTransport;
+        if (streamable) {
+            HttpClientStreamableHttpTransport.Builder builder = HttpClientStreamableHttpTransport
+                    .builder(urlSplit.baseUri())
+                    .endpoint(urlSplit.sseEndpoint())
+                    .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)));
+            if (!headers.isEmpty()) builder.httpRequestCustomizer(this::applyHeaders);
+            httpTransport = builder.build();
+        } else {
+            HttpClientSseClientTransport.Builder builder = HttpClientSseClientTransport
+                    .builder(urlSplit.baseUri())
+                    .sseEndpoint(urlSplit.sseEndpoint())
+                    .customizeClient(b -> b.connectTimeout(Duration.ofSeconds(30)));
+            if (!headers.isEmpty()) builder.httpRequestCustomizer(this::applyHeaders);
+            httpTransport = builder.build();
+        }
         return McpClient.sync(httpTransport)
                 .clientInfo(new McpSchema.Implementation("aimbase", "1.0.0"))
                 .requestTimeout(Duration.ofSeconds(requestTimeoutSeconds))
                 .initializationTimeout(Duration.ofSeconds(30))
                 .build();
+    }
+
+    /** SDK 가 SSE 연결, 메시지 보내기, Streamable 요청마다 부른다. 같은 이름은 등록 값으로 덮는다. */
+    private void applyHeaders(HttpRequest.Builder request, String method, URI endpoint, String body,
+                              McpTransportContext context) {
+        headers.forEach(request::setHeader);
     }
 
     /**

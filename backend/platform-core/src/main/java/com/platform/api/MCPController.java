@@ -2,6 +2,7 @@ package com.platform.api;
 
 import com.platform.domain.MCPServerEntity;
 import com.platform.tool.model.UnifiedToolDef;
+import com.platform.mcp.MCPServerHeaders;
 import com.platform.mcp.MCPServerManager;
 import com.platform.repository.MCPServerRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -14,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -37,43 +39,54 @@ public class MCPController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
-        return ApiResponse.page(mcpServerRepository.findAll(PageRequest.of(page, size)));
+        return ApiResponse.page(mcpServerRepository.findAll(PageRequest.of(page, size)).map(MCPServerResponse::of));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "MCP 서버 등록")
-    public ApiResponse<MCPServerEntity> create(@Valid @RequestBody MCPServerRequest request) {
+    public ApiResponse<MCPServerResponse> create(@Valid @RequestBody MCPServerRequest request) {
         MCPServerEntity entity = new MCPServerEntity();
         entity.setId(request.id() != null && !request.id().isBlank() ? request.id() : java.util.UUID.randomUUID().toString());
         entity.setName(request.name());
         entity.setTransport(request.transport());
-        entity.setConfig(request.config());
+        entity.setConfig(validatedConfig(null, request.config()));
         entity.setAutoStart(request.autoStart() != null ? request.autoStart() : true);
         entity.setStatus("disconnected");
-        return ApiResponse.ok(mcpServerRepository.save(entity));
+        return ApiResponse.ok(MCPServerResponse.of(mcpServerRepository.save(entity)));
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "MCP 서버 상세 조회")
-    public ApiResponse<MCPServerEntity> get(@PathVariable String id) {
+    public ApiResponse<MCPServerResponse> get(@PathVariable String id) {
         return mcpServerRepository.findById(id)
-                .map(ApiResponse::ok)
+                .map(entity -> ApiResponse.ok(MCPServerResponse.of(entity)))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "MCP server not found: " + id));
     }
 
     @PutMapping("/{id}")
     @Operation(summary = "MCP 서버 수정")
-    public ApiResponse<MCPServerEntity> update(@PathVariable String id,
+    public ApiResponse<MCPServerResponse> update(@PathVariable String id,
                                                 @Valid @RequestBody MCPServerRequest request) {
         MCPServerEntity entity = mcpServerRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "MCP server not found: " + id));
         entity.setName(request.name());
-        entity.setConfig(request.config());
+        entity.setConfig(validatedConfig(entity.getConfig(), request.config()));
         if (request.autoStart() != null) entity.setAutoStart(request.autoStart());
-        return ApiResponse.ok(mcpServerRepository.save(entity));
+        return ApiResponse.ok(MCPServerResponse.of(mcpServerRepository.save(entity)));
+    }
+
+    /** CR-145: 가린 머리글 값은 저장된 값으로 되돌리고, 머리글 모양을 검증한다. */
+    private static Map<String, Object> validatedConfig(Map<String, Object> stored, Map<String, Object> incoming) {
+        try {
+            Map<String, Object> config = MCPServerHeaders.restoreMasked(stored, incoming);
+            MCPServerHeaders.from(config);
+            return config;
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
     }
 
     @DeleteMapping("/{id}")
@@ -130,6 +143,25 @@ public class MCPController {
                         "MCP server not found: " + id));
         mcpServerManager.disconnect(id);
         return ApiResponse.ok(Map.of("serverId", id, "status", "disconnected"));
+    }
+
+    /** 등록 응답. 엔티티와 같은 모양이고 config.headers 값만 가린다 (BIZ-117). */
+    public record MCPServerResponse(
+            String id,
+            String name,
+            String transport,
+            Map<String, Object> config,
+            boolean autoStart,
+            String status,
+            Object toolsCache,
+            OffsetDateTime createdAt,
+            OffsetDateTime updatedAt
+    ) {
+        static MCPServerResponse of(MCPServerEntity entity) {
+            return new MCPServerResponse(entity.getId(), entity.getName(), entity.getTransport(),
+                    MCPServerHeaders.masked(entity.getConfig()), entity.isAutoStart(), entity.getStatus(),
+                    entity.getToolsCache(), entity.getCreatedAt(), entity.getUpdatedAt());
+        }
     }
 
     public record MCPServerRequest(
