@@ -103,6 +103,7 @@
 | CR-144 | 워크플로우 삭제 시 실행 기록 보존 (실행한 워크플로우 삭제 불가 결함). **발견 경위**: LexFlow 점검용 워크플로우를 운영에서 삭제하려다 500. **원인**: 삭제가 행을 지우는데 workflow_runs 외래키가 참조 중이라 DB 가 거부. **조치**: 삭제를 is_active=false 비활성화로 바꾸고 목록·상세·수정·새 실행에서 제외, 진행 중 run 과 실행 기록 조회는 유지 (BIZ-116). 설계 `docs/CR-144_워크플로우_삭제_실행기록_보존_설계.md`. 2026-10-10 운영 BE 배포, lexflow-cr143-check 삭제 204 와 이전 run 조회 200 확인 | 변경 | Medium | v3.x | 완료 |
 | CR-145 | [MCP 서버 등록에 머리글 싣기](CR-145_MCP_서버_등록에_머리글_싣기.md). **요청**: 입찰대행 플랫폼 CR-144 가 자기 MCP 통로에 X-API-Key 확인을 넣는데 Aimbase 는 등록 주소만 쓰고 머리글을 싣지 못함. **조치**: 등록 config 에 headers(이름과 값)를 받아 SSE 연결, 메시지 보내기, Streamable 모든 요청에 싣고, 등록 조회 응답과 로그에서 값을 가림. 수정 시 가린 값(****)은 저장값 유지 (BIZ-117). 2026-10-11 운영 BE 배포, 기존 MCP 자동 연결 유지 확인 | 변경 | Small | v3.x | 완료 |
 | CR-146 | [Max 연결 앱 도구 호출이 앱 재기동 뒤 옛 연결로 실패하는 결함](CR-146_Max_연결_앱_도구_호출이_앱_재기동_뒤_옛_연결로_실패하는_결함.md) | — | — | — | — |
+| CR-147 | [스킬 묶음 범용화](T3-17_CR-147_스킬묶음_범용화_설계서.md). **요청**: 입찰대행 플랫폼이 Claude Code 스킬 묶음(.skill)을 지시문으로 풀지 않고 그대로 올려 Claude 와 다른 LLM, API 연결과 CLI 연결 모두에서 쓰려 함. **조치**: 묶음 zip 올리기와 판(플랫폼 공용, 테넌트 전용), 모델 도구 skill_open, skill_read, skill_run, 스크립트 전용 실행 컨테이너, 워크플로우 단계 지정, CLI 세 모드 같은 도구 (BIZ-118~123) | 신규 | High | v3.x | 설계 |
 
 ---
 
@@ -2400,6 +2401,21 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   - 미지원 어댑터(supportsPdf=false) PDF: **페이지 이미지화 강제** (supportsImage 도 false 면 PdfTextExtractor 텍스트 폴백)
   - 로컬 Ollama 비전 모델 선택(한국어 문서 품질) — 별도 결정 (보류)
 - **후속 (2026-06-05, 페이지 분할 가드)**: 1차 배포 후 13MB/29p PDF AGENT_CALL(extract_facts) **300초 turn timeout** 발견. 근본원인=openclaude `getPDFPageCount > PDF_AT_MENTION_INLINE_THRESHOLD(10)` 가드 포팅 누락 — 3MB 크기 게이트만 가져오고 옆의 10p 분할 가드가 빠져, >3MB PDF 첫 20p 를 한 턴에 통째 이미지화→거대 입력 timeout. 해결(openclaude 1:1): ①사이드카 `pdf_page_count` MCP 도구 신설(pdfplumber, 렌더 없이 페이지 수) + `pdf_to_images` `total_pages` 반환 ②`MCPRagClient.pdfPageCount` ③`PdfVisionResolver.resolve(..., pages, allowSplitGuard)` — pages 지정 시 가드 우회+범위 렌더, 미지정+가드 시 페이지 수 확인→임계(`aimbase.pdf.inline-page-threshold:10`) 초과면 **NEEDS_SPLIT**(이미지화 안 하고 "pages 로 나눠 호출하라" 안내, 모델 자율 분할) ④`ParseDocumentTool` `pages` 파라미터 스키마 + NEEDS_SPLIT→`too_many_pages` 반환. 첨부 경로(ChatController)는 1회성이라 `allowSplitGuard=false`(가드 미적용, 첫 20p+truncated note). 테스트: 사이드카 pdf_images 20 + ocr 26 회귀 + PdfVisionResolver 14(가드 5 추가) + ParseDocumentTool/mcp.server 회귀 GREEN
+
+---
+
+### CR-147 | 스킬 묶음 범용화
+- **대상 기능 ID**: PRD-341, PRD-342, PRD-343, PRD-344, PRD-345, PRD-346, FE-038, FE-039, FE-040 (신규)
+- **변경 타입**: 신규
+- **원본 요구사항**: [docs/origins/원본_요구사항_스킬묶음_범용화_20261012.md](origins/원본_요구사항_스킬묶음_범용화_20261012.md)
+- **변경 내용**: Claude Code 스킬 묶음을 zip 그대로 올리고, 어느 모델과 연결이든 목록, 안내서, 파일, 스크립트 순으로 같은 도구로 쓴다. 상세 [T3-17](T3-17_CR-147_스킬묶음_범용화_설계서.md)
+- **결정 (2026-10-12 22:30 사용자)**: 대규모 진행, 플랫폼 공용과 테넌트 전용(겹치면 테넌트 전용), 올릴 때마다 새 판과 단계 판 고정, 스크립트 전용 격리 컨테이너, CLI 세 모드 같은 도구(NATIVE 는 스킬 도구만), 지시문형 스킬 병존
+- **영향 모듈**: domain, repository(master, tenant), api, tool/builtin, workflow/step, agent(SubagentRunner), mcp/server, llm/adapter(ClaudeCliRunnerClient), cli-runner, aimbase-agent(RunnerService), frontend(Skills, platform, workflow ConfigPanel), docker-compose, 새 컨테이너 skill-sandbox
+- **영향도**: High
+- **영향 범위**: BIZ-024(플랫폼 API), BIZ-020(감사 로그), CR-035(지시문형 스킬, 변경 없음), CR-104/CR-110(노출 정책), CR-117(작업장 머리글), CR-107(run 작업장)
+- **영향 설계서**: T1-1(PRD-341~346, FE-038~040), T1-3(BIZ-118~123), T1-7(CR-147 작업 단위), T2-1(skill-sandbox), T3-1(스킬 묶음 테이블 6개), T3-2(스킬 묶음 API, 단계 config, 도구, /mcp-skills), T3-3(스킬 화면), T3-4(올리기, 상세, 단계 지정), T3-5(TC-SKB-001~026), T3-17(신규)
+- **영향 없음 확인**: T1-5 FSM(묶음은 활성 여부만 있고 상태 전이가 없다), T1-6 이벤트 계약(워크플로우 run 이벤트는 T1-6 범위 밖, STEP_START payload 에 칸만 는다), T2-2(구현 규약 변경 없음)
+- **상태**: 설계
 
 ---
 
