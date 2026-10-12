@@ -50,6 +50,9 @@ dependencies {
     implementation("org.apache.pdfbox:pdfbox:3.0.4")
     implementation("org.apache.poi:poi-ooxml:5.4.0")
 
+    // ── Skill Bundle zip (CR-147): 심볼릭 링크 항목을 가려내려면 zip 의 유닉스 모드가 필요하다 ──
+    implementation("org.apache.commons:commons-compress:1.27.1")
+
     // ── JWT ──
     implementation("io.jsonwebtoken:jjwt-api:0.12.6")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")

@@ -1,6 +1,7 @@
 package com.platform.api;
 
 import com.platform.session.BlockingLimitException;
+import com.platform.skill.SkillNotFoundException;
 import com.platform.tenant.quota.QuotaExceededException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("IllegalArgumentException: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /** CR-147: 스킬 묶음 이름, 판, 파일을 찾지 못함 (BIZ-120). */
+    @ExceptionHandler(SkillNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSkillNotFound(SkillNotFoundException ex) {
+        log.warn("Skill not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
