@@ -7,6 +7,11 @@ import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.TokenUsage;
 import com.platform.llm.model.ToolCall;
 import com.platform.llm.model.UnifiedMessage;
+import com.platform.skill.SkillSetHeader;
+import com.platform.tool.SkillRef;
+import com.platform.tool.builtin.SkillOpenTool;
+import com.platform.tool.builtin.SkillReadTool;
+import com.platform.tool.builtin.SkillRunTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,6 +20,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -88,6 +94,17 @@ public class ClaudeCliWorker implements AutoCloseable {
     private volatile String workingDirectory;
     /** CR-104: --allowedTools 에 붙일 MCP server prefix. resolveMcpConfigJson 의 server 키와 일치해야 함. */
     private static final String MCP_SERVER_PREFIX = "mcp__aimbase-server__";
+    /**
+     * CR-147: 단계가 고정한 스킬과 판. 있으면 aimbase-server 항목 머리글 X-Aimbase-Skill-Set 으로 서버에 돌려주고,
+     * NATIVE 면 MCP 설정을 비우지 않고 aimbase-skills 항목 하나만 넣는다(BIZ-123).
+     * start() 호출 전에만 setSkillSet 으로 변경 가능.
+     */
+    private volatile List<SkillRef> skillSet;
+    /** CR-147: NATIVE 가 스킬 지정이 있을 때만 연결하는 스킬 도구 통로의 MCP 항목 키와 서버 경로. */
+    static final String SKILLS_SERVER_KEY = "aimbase-skills";
+    private static final String SKILLS_PATH = "/mcp-skills";
+    private static final String SKILLS_PREFIX = "mcp__" + SKILLS_SERVER_KEY + "__";
+    private static final List<String> SKILL_TOOLS = List.of(SkillOpenTool.NAME, SkillReadTool.NAME, SkillRunTool.NAME);
     /**
      * CR-068 후속: --system-prompt flag 로 CLI 의 기본 system prompt 를 우리 prompt 로 교체.
      * null 이면 CLI 기본(Claude Code 학습 패턴) 사용. 비어있으면 SYSTEM 메시지 prepend 폴백.
@@ -200,6 +217,14 @@ public class ClaudeCliWorker implements AutoCloseable {
             throw new IllegalStateException("Worker already started; cannot set workingDirectory after start()");
         }
         this.workingDirectory = (dir == null || dir.isBlank()) ? null : dir;
+    }
+
+    /** CR-147: 단계가 고정한 스킬과 판. 비어 있으면 지정 없음(기존 동작). */
+    public void setSkillSet(List<SkillRef> skills) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set skillSet after start()");
+        }
+        this.skillSet = (skills == null || skills.isEmpty()) ? null : List.copyOf(skills);
     }
 
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
@@ -850,12 +875,20 @@ public class ClaudeCliWorker implements AutoCloseable {
      * 내장 도구 cwd 와 동일 작업장을 보게 한다. CR-107 이 cwd(pb.directory)만 전파하고
      * 서버 MCP 도구는 default/general 폴백을 타던 이원화를 해소.
      *
-     * <p>workingDir 가 null 이거나 mcpConfig 에 aimbase-server 항목이 없으면 원본을 그대로 반환(기존 동작 보존).
+     * <p>CR-147: 스킬 지정이 있으면 X-Aimbase-Skill-Set 머리글도 같은 자리에 넣는다.
+     *
+     * <p>둘 다 없거나 mcpConfig 에 aimbase-server 항목이 없으면 원본을 그대로 반환(기존 동작 보존).
      */
     @SuppressWarnings("unchecked")
-    private static String injectWorkspaceHeader(String mcpConfig, String workingDir) {
-        if (workingDir == null || workingDir.isBlank()
-                || mcpConfig == null || mcpConfig.isBlank()) {
+    static String injectServerHeaders(String mcpConfig, String workingDir, List<SkillRef> skills) {
+        Map<String, String> added = new LinkedHashMap<>();
+        if (workingDir != null && !workingDir.isBlank()) {
+            added.put(WORKSPACE_HEADER, workingDir);
+        }
+        if (skills != null && !skills.isEmpty()) {
+            added.put(SkillSetHeader.NAME, SkillSetHeader.encode(skills));
+        }
+        if (added.isEmpty() || mcpConfig == null || mcpConfig.isBlank()) {
             return mcpConfig;
         }
         try {
@@ -874,26 +907,82 @@ public class ClaudeCliWorker implements AutoCloseable {
             Map<String, Object> headers = (headersObj instanceof Map)
                     ? (Map<String, Object>) headersObj
                     : new LinkedHashMap<>();
-            headers.put(WORKSPACE_HEADER, workingDir);
+            headers.putAll(added);
             server.put("headers", headers);
             return MAPPER.writeValueAsString(root);
         } catch (Exception e) {
             // 파싱/직렬화 실패 시 원본 유지 — 기능 안전 폴백.
-            log.warn("ClaudeCliWorker: failed to inject workspace header into MCP config — using original: {}",
+            log.warn("ClaudeCliWorker: failed to inject headers into MCP config, using original: {}",
                     e.getMessage());
             return mcpConfig;
         }
+    }
+
+    /**
+     * CR-147: NATIVE 에 스킬 지정이 있을 때 넘길 MCP 설정. aimbase-server 항목을 본떠 주소만 /mcp-skills 로 바꾼
+     * aimbase-skills 항목 하나다(같은 열쇠, 같은 머리글). 다른 서버 도구는 붙이지 않는다(BIZ-123).
+     */
+    static String skillsOnlyConfig(String mcpConfig) {
+        Map<String, Object> skills = new LinkedHashMap<>(serverEntry(mcpConfig));
+        skills.put("url", skillsUrl(String.valueOf(skills.get("url"))));
+        try {
+            return MAPPER.writeValueAsString(Map.of("mcpServers", Map.of(SKILLS_SERVER_KEY, skills)));
+        } catch (Exception e) {
+            throw new IllegalStateException("BIZ-123: 스킬 도구 MCP 설정을 만들지 못했습니다: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * CR-147: aimbase-server 항목. 스킬 지정이 있는데 이 항목이 없으면 스킬 도구에 닿을 길이 없다.
+     * 그대로 돌리면 모델이 없는 도구를 찾다가 지정과 무관한 답을 내므로 워커 기동을 실패시킨다.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> serverEntry(String mcpConfig) {
+        try {
+            Map<String, Object> root = MAPPER.readValue(mcpConfig, MAP_TYPE);
+            if (root.get("mcpServers") instanceof Map<?, ?> servers
+                    && servers.get("aimbase-server") instanceof Map<?, ?> server
+                    && server.get("url") instanceof String) {
+                return (Map<String, Object>) server;
+            }
+        } catch (Exception e) {
+            log.warn("ClaudeCliWorker: failed to read MCP config for skills: {}", e.getMessage());
+        }
+        throw new IllegalStateException(
+                "BIZ-123: 스킬 지정이 있는데 러너 MCP 설정에 aimbase-server 항목이 없어 스킬 도구를 연결할 수 없습니다");
+    }
+
+    /** aimbase-server 주소 .../mcp 를 .../mcp-skills 로. 끝이 /mcp 가 아니면 호스트 바로 아래로 둔다. */
+    static String skillsUrl(String serverUrl) {
+        String base = serverUrl.endsWith("/") ? serverUrl.substring(0, serverUrl.length() - 1) : serverUrl;
+        if (base.endsWith("/mcp")) {
+            return base.substring(0, base.length() - "/mcp".length()) + SKILLS_PATH;
+        }
+        return URI.create(base).resolve(SKILLS_PATH).toString();
     }
 
     private List<String> buildCommand() {
         // CR-104: 원본 도구명 → mcp__aimbase-server__<tool> 로 변환해 --allowedTools 주입.
         // CLI 가 MCP 서버에서 받는 도구는 server prefix 가 붙으므로 allowedTools 매칭도 같은 prefix 필요.
         // 비어있으면 null → 빌더 미적용(endpoint 노출 전체 사용).
+        boolean nativeWithSkills = toolMode == ClaudeCliCommandBuilder.ToolMode.NATIVE && skillSet != null;
         List<String> mcpAllowed = null;
         if (allowedToolNames != null && !allowedToolNames.isEmpty()) {
-            mcpAllowed = allowedToolNames.stream()
-                    .map(n -> MCP_SERVER_PREFIX + n)
-                    .toList();
+            List<String> names = new ArrayList<>();
+            allowedToolNames.forEach(n -> names.add(MCP_SERVER_PREFIX + n));
+            // CR-147: NATIVE 의 스킬 도구는 aimbase-skills 항목에서 오므로 그 이름으로도 허용한다.
+            if (nativeWithSkills) {
+                allowedToolNames.stream().filter(SKILL_TOOLS::contains).forEach(n -> names.add(SKILLS_PREFIX + n));
+            }
+            mcpAllowed = names;
+        }
+        // CR-117 작업장 경로, CR-147 스킬 지정 머리글을 aimbase-server 항목에 싣는다.
+        String mcpConfig = injectServerHeaders(mcpConfigJson, workingDirectory, skillSet);
+        String nativeMcpConfig = null;
+        if (nativeWithSkills) {
+            nativeMcpConfig = skillsOnlyConfig(mcpConfig);
+        } else if (skillSet != null) {
+            serverEntry(mcpConfig);   // AIMBASE, HYBRID 도 스킬 도구가 실릴 aimbase-server 항목이 있어야 한다
         }
         // CR-117: subagent OFF 면 CLI 본체 Agent 도구를 --disallowedTools 로 차단(자율 서브에이전트 spawn 방지).
         // 기본(disallowSubagent=false)이면 null → 빌더 미적용 = 현행 동작(subagent 허용).
@@ -901,7 +990,8 @@ public class ClaudeCliWorker implements AutoCloseable {
         return ClaudeCliCommandBuilder.builder(binaryPath)
                 .toolMode(toolMode)               // null 이면 빌더 default(AIMBASE)
                 .sealedNativeTools(sealedNativeTools)  // CR-126: null 이면 빌더 기본 상수
-                .mcpConfigJson(injectWorkspaceHeader(mcpConfigJson, workingDirectory))
+                .mcpConfigJson(mcpConfig)
+                .nativeMcpConfigJson(nativeMcpConfig)  // CR-147: NATIVE 에서만 쓰인다. null 이면 빈 설정
                 .allowedTools(mcpAllowed)         // CR-104: null 이면 빌더가 무시
                 .disallowedTools(disallowed)      // CR-117: null 이면 빌더가 무시
                 .streamJson(true)

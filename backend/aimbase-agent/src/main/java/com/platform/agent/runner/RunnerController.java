@@ -10,6 +10,7 @@ import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.ModelConfig;
 import com.platform.llm.model.UnifiedMessage;
 import com.platform.runner.claudecli.ClaudeCliCommandBuilder;
+import com.platform.tool.SkillRef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -25,6 +26,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -204,7 +206,25 @@ public class RunnerController {
                 .info("[CR107-DEBUG] toLlmRequest: runId={}, working_directory(received)={}",
                         req.getRunId(), req.getWorkingDirectory());
         return new LLMRequest(model, messages, null, config, true, req.getRunId())
-                .withWorkingDirectory(req.getWorkingDirectory());
+                .withWorkingDirectory(req.getWorkingDirectory())
+                .withSkillSet(toSkillSet(req.getSkillSet()));
+    }
+
+    /** CR-147: skill_set 항목을 판까지 받는다. 깨진 항목은 최신 판으로 넘어가지 않게 400 이다(BIZ-123). */
+    static List<SkillRef> toSkillSet(List<Map<String, Object>> raw) {
+        if (raw == null || raw.isEmpty()) return null;
+        List<SkillRef> skills = new ArrayList<>();
+        for (Map<String, Object> item : raw) {
+            if (item == null
+                    || !(item.get("name") instanceof String name) || name.isBlank()
+                    || !(item.get("scope") instanceof String scope) || scope.isBlank()
+                    || !(item.get("version") instanceof Integer version) || version < 1) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "skill_set item needs name, scope and version >= 1: " + item);
+            }
+            skills.add(new SkillRef(name, scope, version));
+        }
+        return skills;
     }
 
     private static ClaudeCliCommandBuilder.ToolMode parseToolMode(String raw) {

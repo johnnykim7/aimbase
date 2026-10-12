@@ -1,5 +1,6 @@
 package com.platform.runner.claudecli;
 
+import com.platform.tool.SkillRef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -213,6 +214,21 @@ public class ClaudeCliWorkerPool {
                                             List<String> allowedTools,
                                             String workingDirectory,
                                             boolean disallowSubagent) {
+        return getOrCreateMain(runId, model, configDir, systemPrompt, toolMode,
+                allowedTools, workingDirectory, disallowSubagent, null);
+    }
+
+    /**
+     * CR-147: 단계가 고정한 스킬과 판(skillSet) 추가. 메인 워커가 이미 살아있으면 무시한다.
+     * AGENT_CALL 은 단계마다 자식 세션(runId)이라 단계별 지정이 한 워커에 섞이지 않는다(BIZ-123).
+     */
+    public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
+                                            String systemPrompt,
+                                            ClaudeCliCommandBuilder.ToolMode toolMode,
+                                            List<String> allowedTools,
+                                            String workingDirectory,
+                                            boolean disallowSubagent,
+                                            List<SkillRef> skillSet) {
         RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
         synchronized (rw) {
             if (rw.main != null && rw.main.isAlive()) return rw.main;
@@ -237,6 +253,9 @@ public class ClaudeCliWorkerPool {
                 if (disallowSubagent) {
                     worker.setDisallowSubagent(true); // CR-117: CLI 본체 Agent 서브에이전트 차단
                 }
+                if (skillSet != null && !skillSet.isEmpty()) {
+                    worker.setSkillSet(skillSet);
+                }
                 worker.start();
                 rw.main = worker;
                 rw.forks.add(worker); // slot 추적용 (main 도 전체 리스트에 포함)
@@ -248,6 +267,10 @@ public class ClaudeCliWorkerPool {
             } catch (IOException e) {
                 rw.slots.release();
                 throw new ClaudeCliException("Failed to spawn main worker for run " + runId, e);
+            } catch (RuntimeException e) {
+                // CR-147: 기동 전 설정 검사 실패(스킬 통로 없음 등)도 잡은 자리를 돌려줘야 다음 호출이 대기하지 않는다.
+                rw.slots.release();
+                throw e;
             }
         }
     }

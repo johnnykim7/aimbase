@@ -64,6 +64,14 @@ public class RunnerChatRequest {
     @JsonProperty("disallow_subagent")
     private Boolean disallowSubagent;
 
+    /**
+     * CR-147: 워크플로우 단계가 고정한 스킬과 판 [{name, scope, version}].
+     * Worker 가 서버 MCP 항목에 X-Aimbase-Skill-Set 머리글로 싣고, NATIVE 면 aimbase-skills 항목만 연결한다(BIZ-123).
+     * null 이면 지정 없음(기존 동작).
+     */
+    @JsonProperty("skill_set")
+    private List<Map<String, Object>> skillSet;
+
     public String getRunId() { return runId; }
     public void setRunId(String runId) { this.runId = runId; }
     public String getModel() { return model; }
@@ -86,4 +94,6 @@ public class RunnerChatRequest {
     public void setWorkingDirectory(String workingDirectory) { this.workingDirectory = workingDirectory; }
     public Boolean getDisallowSubagent() { return disallowSubagent; }
     public void setDisallowSubagent(Boolean disallowSubagent) { this.disallowSubagent = disallowSubagent; }
+    public List<Map<String, Object>> getSkillSet() { return skillSet; }
+    public void setSkillSet(List<Map<String, Object>> skillSet) { this.skillSet = skillSet; }
 }

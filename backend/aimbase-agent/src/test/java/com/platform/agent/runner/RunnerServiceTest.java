@@ -7,6 +7,7 @@ import com.platform.llm.model.UnifiedMessage;
 import com.platform.runner.claudecli.ClaudeCliCommandBuilder;
 import com.platform.runner.claudecli.ClaudeCliWorker;
 import com.platform.runner.claudecli.ClaudeCliWorkerPool;
+import com.platform.tool.SkillRef;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -38,11 +40,12 @@ class RunnerServiceTest {
         pool = mock(ClaudeCliWorkerPool.class);
         worker = mock(ClaudeCliWorker.class);
         service = new RunnerService(pool, "claude-sonnet-4-5");
-        // 7-인자 오버로드를 정확히 타겟 — doReturn 스타일로 컴파일타임 오버로드 모호성 회피.
+        // RunnerService 가 부르는 9-인자 오버로드(CR-147 skillSet 까지)를 정확히 타겟. doReturn 으로 오버로드 모호성 회피.
         org.mockito.Mockito.doReturn(worker).when(pool).getOrCreateMain(
                 anyString(), nullable(String.class), nullable(String.class),
                 nullable(String.class), nullable(ClaudeCliCommandBuilder.ToolMode.class),
-                ArgumentMatchers.<List<String>>any(), nullable(String.class));
+                ArgumentMatchers.<List<String>>any(), nullable(String.class), anyBoolean(),
+                ArgumentMatchers.<List<SkillRef>>any());
     }
 
     private static LLMRequest request(String runId) {
@@ -105,6 +108,24 @@ class RunnerServiceTest {
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
 
         verify(pool, times(0)).shutdownForRun(eq("run-1"));
+    }
+
+    @Test
+    @DisplayName("CR-147: 요청의 스킬 지정이 메인 워커 기동에 그대로 넘어간다")
+    void skillSetReachesWorkerPool() {
+        LLMResponse ok = new LLMResponse(
+                "run-1", "claude-sonnet-4-5",
+                List.of(new com.platform.llm.model.ContentBlock.Text("ok")),
+                List.of(), new com.platform.llm.model.TokenUsage(0, 0),
+                LLMResponse.FinishReason.END, 1L, 0.0);
+        when(worker.turnFirst(any())).thenReturn(ok);
+        List<SkillRef> pins = List.of(new SkillRef("ax-proposal", "tenant", 1));
+
+        service.chat(request("run-1").withSkillSet(pins), ClaudeCliCommandBuilder.ToolMode.NATIVE, null, null);
+
+        verify(pool).getOrCreateMain(eq("run-1"), nullable(String.class), nullable(String.class),
+                nullable(String.class), eq(ClaudeCliCommandBuilder.ToolMode.NATIVE),
+                ArgumentMatchers.<List<String>>any(), nullable(String.class), anyBoolean(), eq(pins));
     }
 
     private static void assertThatNoException(LLMResponse resp) {

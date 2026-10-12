@@ -284,7 +284,7 @@ public class ClaudeCliRunnerClient {
         }
     }
 
-    private static Map<String, Object> buildBody(LLMRequest request, String toolMode,
+    static Map<String, Object> buildBody(LLMRequest request, String toolMode,
                                                    String configDir, String systemPromptOverride,
                                                    boolean subagentEnabled,
                                                    List<String> exposedTools) {
@@ -305,6 +305,12 @@ public class ClaudeCliRunnerClient {
         // HYBRID CLI 내장 Read/Bash 가 상대경로(attachments/...)로도 작업장을 읽는다. 비면 미전송(기존 동작).
         if (request.workingDirectory() != null && !request.workingDirectory().isBlank()) {
             body.put("working_directory", request.workingDirectory());
+        }
+        // CR-147: 단계가 고정한 스킬과 판. 러너가 MCP 머리글로 서버에 돌려준다(BIZ-123). 지정이 없으면 미전송.
+        if (request.skillSet() != null && !request.skillSet().isEmpty()) {
+            body.put("skill_set", request.skillSet().stream()
+                    .map(r -> Map.<String, Object>of("name", r.name(), "scope", r.scope(), "version", r.version()))
+                    .toList());
         }
         // CR-107 디버그: BE 가 agent 로 보내는 working_directory 추적.
         org.slf4j.LoggerFactory.getLogger(ClaudeCliRunnerClient.class)

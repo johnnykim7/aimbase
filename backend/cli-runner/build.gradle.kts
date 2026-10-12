@@ -6,6 +6,8 @@ dependencies {
     // ClaudeCliWorker 가 platform-core 의 LLMRequest/Response/UnifiedMessage 등 사용 중
     // Phase 4 에서 어댑터가 cli-runner 를 의존하는 방향으로 정리될 예정 (현재는 양방향 의존 회피 위해 platform-core 의존 유지)
     api(project(":platform-core"))
+    // CR-147: 스킬 지정(SkillRef)을 워커가 받는다. platform-core 는 SDK 를 implementation 으로만 묶는다
+    implementation(project(":sdk:tool-sdk-core"))
     api("org.slf4j:slf4j-api:2.0.16")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
 

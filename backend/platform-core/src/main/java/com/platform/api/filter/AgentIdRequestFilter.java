@@ -1,16 +1,20 @@
 package com.platform.api.filter;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.llm.adapter.RequestContext;
+import com.platform.skill.SkillSetHeader;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * CR-071 Phase 4: 요청 헤더 X-Aimbase-Agent-Id → ThreadLocal RequestContext 전파.
@@ -22,6 +26,9 @@ import java.io.IOException;
  * <p>CR-117: 추가로 X-Aimbase-Workspace-Path 헤더(CLI 워커의 run 격리 cwd)를 전파한다.
  * {@link com.platform.mcp.server.ServerMcpToolDispatcher} 가 file_write 등 도구의
  * ToolContext.workspacePath 로 채워, 내장 도구 cwd 와 동일 작업장을 보게 한다.
+ *
+ * <p>CR-147: X-Aimbase-Skill-Set 머리글(단계가 고정한 스킬과 판)도 전파한다. 값이 깨졌으면
+ * 최신 판으로 넘어가지 않도록 400 으로 거절한다(BIZ-123).
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 50)
@@ -31,17 +38,32 @@ public class AgentIdRequestFilter extends OncePerRequestFilter {
     /** CR-117: CLI 워커가 보내는 run 격리 작업장 절대경로 헤더. */
     public static final String WORKSPACE_HEADER = "X-Aimbase-Workspace-Path";
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         String agentId = request.getHeader(HEADER);
         String workspacePath = request.getHeader(WORKSPACE_HEADER);
+        String skillSet = request.getHeader(SkillSetHeader.NAME);
         try {
             if (agentId != null && !agentId.isBlank()) {
                 RequestContext.setAgentId(agentId.trim());
             }
             if (workspacePath != null && !workspacePath.isBlank()) {
                 RequestContext.setWorkspacePath(workspacePath.trim());
+            }
+            if (skillSet != null && !skillSet.isBlank()) {
+                try {
+                    RequestContext.setSkillSet(SkillSetHeader.decode(skillSet));
+                } catch (IllegalArgumentException e) {
+                    response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                    response.setCharacterEncoding("UTF-8");
+                    response.getWriter().write(MAPPER.writeValueAsString(
+                            Map.of("status", "ERROR", "message", e.getMessage())));
+                    return;
+                }
             }
             chain.doFilter(request, response);
         } finally {

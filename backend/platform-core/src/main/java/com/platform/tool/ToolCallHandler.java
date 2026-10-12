@@ -932,7 +932,9 @@ public class ToolCallHandler {
         LLMRequest request = new LLMRequest(
                 resolvedModel, messages, filteredTools.isEmpty() ? null : filteredTools,
                 config, true, sessionId, null, responseSchema)
-                .withWorkingDirectory(cwd);
+                .withWorkingDirectory(cwd)
+                // CR-147: 러너가 MCP 머리글로 돌려줘 서버 쪽 스킬 도구가 단계가 고정한 판을 쓴다(BIZ-123)
+                .withSkillSet(ctx != null ? ctx.skillSet() : null);
 
         final java.util.UUID runId = (ctx != null && ctx.workflowRunId() != null)
                 ? parseUuidSafe(ctx.workflowRunId()) : null;

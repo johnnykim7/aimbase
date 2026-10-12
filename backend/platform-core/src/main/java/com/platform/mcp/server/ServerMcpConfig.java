@@ -2,6 +2,9 @@ package com.platform.mcp.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.mcp.agent.McpToolConversion;
+import com.platform.tool.builtin.SkillOpenTool;
+import com.platform.tool.builtin.SkillReadTool;
+import com.platform.tool.builtin.SkillRunTool;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.ToolRegistry;
 import io.modelcontextprotocol.server.McpServer;
@@ -22,6 +25,7 @@ import org.springframework.web.servlet.function.ServerResponse;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,6 +47,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code toolRegistry.register()} 하는 {@code RemoteAgentToolExecutor})는 Spring 빈이 아니므로 이전 구현의
  * {@code allTools} 에 영영 들어오지 않았고, 그 결과 소비앱(bp-wes 등) 도구가 {@code /mcp/sse} 에 노출되지
  * 않았다 — 화이트리스트 추가로도 재기동으로도 풀 수 없는 구조적 누락이었다.</p>
+ *
+ * <p><b>CR-147</b>: 두 번째 통로 {@code /mcp-skills} 는 스킬 도구 세 개만 싣는다. NATIVE CLI 가 스킬 지정이
+ * 있을 때 이것만 연결한다(BIZ-123). 호출은 같은 {@link ServerMcpToolDispatcher} 를 탄다.</p>
  */
 @Configuration
 @ConditionalOnProperty(name = "mcp.server-exposure.enabled", havingValue = "true", matchIfMissing = true)
@@ -54,8 +61,13 @@ public class ServerMcpConfig {
     private final ServerMcpToolDispatcher dispatcher;
     private final org.springframework.context.ApplicationContext applicationContext;
 
+    /** CR-147: /mcp-skills 에 싣는 도구. */
+    static final List<String> SKILL_TOOLS = List.of(SkillOpenTool.NAME, SkillReadTool.NAME, SkillRunTool.NAME);
+
     /** 현재 MCP 서버에 실려 있는 도구 이름 — 주기 동기화의 델타 계산 기준. */
     private final Set<String> publishedTools = ConcurrentHashMap.newKeySet();
+    /** CR-147: /mcp-skills 에 실려 있는 도구 이름. */
+    private final Set<String> publishedSkillTools = ConcurrentHashMap.newKeySet();
 
     public ServerMcpConfig(@org.springframework.context.annotation.Lazy ToolRegistry toolRegistry,
                             ServerMcpToolDispatcher dispatcher,
@@ -100,8 +112,42 @@ public class ServerMcpConfig {
      */
     @Bean
     public McpSyncServer serverMcpServer(HttpServletStreamableServerTransportProvider serverMcpTransport) {
+        // CR-147: 도구를 요청 스레드에서 돌린다. 기본값은 boundedElastic 으로 넘겨 필터가 채운 ThreadLocal
+        // (TenantContext, RequestContext 의 작업장과 스킬 지정)이 빠지고 도구가 테넌트 DB 를 못 찾는다.
+        // 이 전송은 doPost 안에서 응답이 끝날 때까지 block 하므로 요청 스레드에 그대로 남는다.
         return McpServer.sync(serverMcpTransport)
+                .immediateExecution(true)
                 .serverInfo("aimbase-server", "1.0.0")
+                .capabilities(io.modelcontextprotocol.spec.McpSchema.ServerCapabilities.builder()
+                        .tools(true)
+                        .build())
+                .build();
+    }
+
+    /** CR-147: 스킬 도구 전용 통로. 전송과 서블릿, 서버를 /mcp 와 같은 방식으로 따로 둔다. */
+    @Bean
+    public HttpServletStreamableServerTransportProvider skillMcpTransport() {
+        return HttpServletStreamableServerTransportProvider.builder()
+                .jsonMapper(io.modelcontextprotocol.json.McpJsonDefaults.getMapper())
+                .mcpEndpoint("/mcp-skills")
+                .build();
+    }
+
+    @Bean
+    public org.springframework.boot.web.servlet.ServletRegistrationBean<HttpServletStreamableServerTransportProvider>
+            skillMcpServletRegistration(HttpServletStreamableServerTransportProvider skillMcpTransport) {
+        var reg = new org.springframework.boot.web.servlet.ServletRegistrationBean<>(skillMcpTransport, "/mcp-skills/*");
+        reg.setName("skillMcpStreamableServlet");
+        reg.setAsyncSupported(true);
+        reg.setLoadOnStartup(1);
+        return reg;
+    }
+
+    @Bean
+    public McpSyncServer skillMcpServer(HttpServletStreamableServerTransportProvider skillMcpTransport) {
+        return McpServer.sync(skillMcpTransport)
+                .immediateExecution(true)   // serverMcpServer 와 같은 이유
+                .serverInfo("aimbase-skills", "1.0.0")
                 .capabilities(io.modelcontextprotocol.spec.McpSchema.ServerCapabilities.builder()
                         .tools(true)
                         .build())
@@ -159,12 +205,21 @@ public class ServerMcpConfig {
         if (!toolRegistry.isBuiltinsRegistered()) {
             return publishedTools.size();
         }
-        McpSyncServer mcpServer = applicationContext.getBean("serverMcpServer", McpSyncServer.class);
-
         Map<String, ToolExecutor> desired = new HashMap<>();
         for (ToolExecutor tool : toolRegistry.getCliExposedTools()) {
             desired.put(tool.getDefinition().name(), tool);
         }
+        sync("serverMcpServer", desired, publishedTools);
+
+        // CR-147: /mcp-skills 는 CLI 노출 도구 가운데 스킬 도구만 싣는다. 노출에서 빠지면 여기서도 빠진다.
+        Map<String, ToolExecutor> skills = new HashMap<>(desired);
+        skills.keySet().retainAll(SKILL_TOOLS);
+        sync("skillMcpServer", skills, publishedSkillTools);
+        return publishedTools.size();
+    }
+
+    private void sync(String serverBean, Map<String, ToolExecutor> desired, Set<String> publishedTools) {
+        McpSyncServer mcpServer = applicationContext.getBean(serverBean, McpSyncServer.class);
 
         boolean changed = false;
 
@@ -184,9 +239,9 @@ public class ServerMcpConfig {
                         (exchange, request) -> dispatcher.dispatch(name, request.arguments())));
                 publishedTools.add(name);
                 changed = true;
-                log.info("Server MCP: tool exposed '{}'", name);
+                log.info("Server MCP {}: tool exposed '{}'", serverBean, name);
             } catch (Exception e) {
-                log.warn("Server MCP: failed to register tool '{}': {}", name, e.getMessage());
+                log.warn("Server MCP {}: failed to register tool '{}': {}", serverBean, name, e.getMessage());
             }
         }
 
@@ -199,11 +254,11 @@ public class ServerMcpConfig {
                 mcpServer.removeTool(name);
                 publishedTools.remove(name);
                 changed = true;
-                log.info("Server MCP: tool unexposed '{}'", name);
+                log.info("Server MCP {}: tool unexposed '{}'", serverBean, name);
             } catch (Exception e) {
                 // 제거 실패 시에도 추적 집합에서 빼야 재시도 루프에 갇히지 않는다.
                 publishedTools.remove(name);
-                log.warn("Server MCP: failed to remove tool '{}': {}", name, e.getMessage());
+                log.warn("Server MCP {}: failed to remove tool '{}': {}", serverBean, name, e.getMessage());
             }
         }
 
@@ -211,10 +266,9 @@ public class ServerMcpConfig {
             try {
                 mcpServer.notifyToolsListChanged();
             } catch (Exception e) {
-                log.debug("Server MCP: tools/list_changed notification failed: {}", e.getMessage());
+                log.debug("Server MCP {}: tools/list_changed notification failed: {}", serverBean, e.getMessage());
             }
         }
-        return publishedTools.size();
     }
 
 }

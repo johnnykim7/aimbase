@@ -142,9 +142,10 @@ public class RunnerService {
         // Pool 의 오버로드: spawn 시점에 systemPrompt/toolMode/allowedTools 모두 적용된다.
         // 같은 runId 재호출 시 Worker 가 이미 살아있으면 세 인자는 무시 (Pool 정책 — run 단위 도구 집합 고정).
         // CR-104: allowedTools = 호출의 도구 목록(원본명) → Worker 가 mcp__aimbase-server__ 변환 후 --allowedTools.
+        // CR-147: 단계가 고정한 스킬과 판은 Worker 가 MCP 머리글로 서버에 돌려준다(BIZ-123).
         ClaudeCliWorker worker = workerPool.getOrCreateMain(
                 runId, model, configDir, systemPromptOverride, toolMode, allowedTools,
-                request.workingDirectory(), disallowSubagent);
+                request.workingDirectory(), disallowSubagent, request.skillSet());
 
         boolean isFirst = firstTurnDone.putIfAbsent(runId, Boolean.TRUE) == null;
         List<UnifiedMessage> messages = request.messages();

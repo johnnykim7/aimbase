@@ -237,6 +237,21 @@ class ClaudeCliWorkerPoolTest {
         pool.shutdownReaper();
     }
 
+    @Test
+    void cr147_failed_main_start_gives_its_slot_back() {
+        // 스킬 지정이 있는데 서버 MCP 항목이 없으면 기동 전에 실패한다. 잡은 자리를 돌려줘야 다음 호출이 대기하지 않는다.
+        ClaudeCliWorkerPool pool = newPool(1);
+        List<com.platform.tool.SkillRef> pins = List.of(new com.platform.tool.SkillRef("ax-proposal", "tenant", 1));
+
+        assertThatThrownBy(() -> pool.getOrCreateMain("run-K", null, null, null,
+                ClaudeCliCommandBuilder.ToolMode.NATIVE, null, null, false, pins))
+                .hasMessageContaining("BIZ-123");
+
+        ClaudeCliWorker main = pool.getOrCreateMain("run-K", null, null);
+        assertThat(main.isAlive()).isTrue();
+        pool.shutdownForRun("run-K");
+    }
+
     private ClaudeCliWorkerPool newPool(int max) {
         // reaper 비활성(interval=0) — 일반 테스트가 reaper 간섭 없이 결정적으로 돌도록.
         return new ClaudeCliWorkerPool(

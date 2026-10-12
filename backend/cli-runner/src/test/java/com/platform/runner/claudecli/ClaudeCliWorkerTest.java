@@ -3,6 +3,8 @@ package com.platform.runner.claudecli;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.UnifiedMessage;
+import com.platform.skill.SkillSetHeader;
+import com.platform.tool.SkillRef;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -472,6 +474,101 @@ class ClaudeCliWorkerTest {
         String args = Files.readString(argsDump);
         // aimbase-server 항목이 없으므로 헤더 미주입 (기존 동작 보존)
         assertThat(args).doesNotContain("X-Aimbase-Workspace-Path");
+    }
+
+    // CR-147: 단계가 고정한 스킬 판을 서버로 돌려주는 머리글과 NATIVE 의 스킬 전용 통로(BIZ-123). TC-SKB-024.
+
+    private static final List<SkillRef> PINS = List.of(new SkillRef("ax-proposal", "tenant", 1));
+    private static final String SERVER_MCP = """
+            {"mcpServers":{"aimbase-server":{"type":"http","url":"http://h:8181/mcp",\
+            "headers":{"X-API-Key":"k"}}}}""";
+
+    private Path argDumpStub(Path argsDump) throws IOException {
+        return writeStub("""
+                #!/bin/bash
+                printf '%%s\\n' "$@" > '%s'
+                echo '{"type":"system","subtype":"init","session_id":"sess-sk"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-sk","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(argsDump.toString()));
+    }
+
+    private List<String> runAndDumpArgs(ClaudeCliCommandBuilder.ToolMode mode, List<SkillRef> skills,
+                                        List<String> allowedTools, String mcpConfig) throws IOException {
+        Path argsDump = tempDir.resolve("args-sk-" + System.nanoTime() + ".txt");
+        worker = new ClaudeCliWorker(argDumpStub(argsDump).toString(), null, null, false, null,
+                Duration.ofSeconds(10), mcpConfig);
+        worker.setToolMode(mode);
+        if (allowedTools != null) worker.setAllowedTools(allowedTools);
+        worker.setSkillSet(skills);
+        worker.start();
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+        return Files.readAllLines(argsDump);
+    }
+
+    private static String argAfter(List<String> args, String flag) {
+        return args.get(args.indexOf(flag) + 1);
+    }
+
+    @Test
+    void cr147_aimbase_mode_sends_pins_in_the_server_header() throws IOException {
+        List<String> args = runAndDumpArgs(ClaudeCliCommandBuilder.ToolMode.AIMBASE, PINS, null, SERVER_MCP);
+
+        String mcp = argAfter(args, "--mcp-config");
+        assertThat(mcp).contains("\"aimbase-server\"", "\"X-API-Key\"",
+                "\"" + SkillSetHeader.NAME + "\":\"" + SkillSetHeader.encode(PINS) + "\"");
+        assertThat(mcp).doesNotContain("aimbase-skills");
+    }
+
+    @Test
+    void cr147_native_mode_with_pins_gets_only_the_skill_route() throws IOException {
+        List<String> args = runAndDumpArgs(ClaudeCliCommandBuilder.ToolMode.NATIVE, PINS,
+                List.of("skill_open", "skill_read", "get_opportunity"), SERVER_MCP);
+
+        String mcp = argAfter(args, "--mcp-config");
+        assertThat(mcp).contains("\"aimbase-skills\"", "http://h:8181/mcp-skills", "\"X-API-Key\"",
+                SkillSetHeader.NAME);
+        assertThat(mcp).doesNotContain("aimbase-server", "http://h:8181/mcp\"");
+        assertThat(args).contains("mcp__aimbase-skills__skill_open", "mcp__aimbase-skills__skill_read");
+        assertThat(args).doesNotContain("mcp__aimbase-skills__get_opportunity");
+    }
+
+    @Test
+    void cr147_native_mode_without_pins_keeps_the_empty_config() throws IOException {
+        List<String> args = runAndDumpArgs(ClaudeCliCommandBuilder.ToolMode.NATIVE, null, null, SERVER_MCP);
+
+        assertThat(argAfter(args, "--mcp-config")).isEqualTo("{\"mcpServers\":{}}");
+    }
+
+    @Test
+    void cr147_pins_without_a_server_entry_fail_at_start() throws IOException {
+        for (ClaudeCliCommandBuilder.ToolMode mode : ClaudeCliCommandBuilder.ToolMode.values()) {
+            ClaudeCliWorker w = new ClaudeCliWorker(binary.toString(), null, null, false, null,
+                    Duration.ofSeconds(10), "{\"mcpServers\":{\"aimbase\":{\"command\":\"java\"}}}");
+            w.setToolMode(mode);
+            w.setSkillSet(PINS);
+            assertThatThrownBy(w::start).as(mode.name())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("BIZ-123");
+            assertThat(w.isAlive()).isFalse();
+        }
+    }
+
+    @Test
+    void cr147_skill_set_cannot_change_after_start() throws IOException {
+        worker = new ClaudeCliWorker(binary.toString(), null, null, false, null, Duration.ofSeconds(10), SERVER_MCP);
+        worker.start();
+        assertThatThrownBy(() -> worker.setSkillSet(PINS)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void cr147_skills_url_sits_next_to_the_server_route() {
+        assertThat(ClaudeCliWorker.skillsUrl("http://h:8181/mcp")).isEqualTo("http://h:8181/mcp-skills");
+        assertThat(ClaudeCliWorker.skillsUrl("http://h:8181/mcp/")).isEqualTo("http://h:8181/mcp-skills");
+        assertThat(ClaudeCliWorker.skillsUrl("https://a.example.com/base/mcp")).isEqualTo("https://a.example.com/base/mcp-skills");
+        assertThat(ClaudeCliWorker.skillsUrl("http://h/mcp/sse")).isEqualTo("http://h/mcp-skills");
     }
 
     private Path writeStub(String body) throws IOException {

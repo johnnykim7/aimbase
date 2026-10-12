@@ -179,6 +179,31 @@ class ClaudeCliCommandBuilderTest {
     }
 
     @Test
+    @DisplayName("CR-147 NATIVE 모드: 스킬 지정이 있으면 스킬 전용 MCP 설정만 연결")
+    void native_mode_uses_the_skill_only_config_when_given() {
+        String skillsOnly = "{\"mcpServers\":{\"aimbase-skills\":{\"type\":\"http\",\"url\":\"http://h/mcp-skills\"}}}";
+        List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
+                .toolMode(ClaudeCliCommandBuilder.ToolMode.NATIVE)
+                .mcpConfigJson(AIMBASE_MCP)
+                .nativeMcpConfigJson(skillsOnly)
+                .build();
+
+        assertThat(cmd).containsSequence("--mcp-config", skillsOnly);
+        assertThat(cmd).doesNotContain("--disallowedTools");
+    }
+
+    @Test
+    @DisplayName("CR-147 AIMBASE 모드: 스킬 전용 설정은 무시하고 서버 설정을 연결")
+    void aimbase_mode_ignores_the_native_config() {
+        List<String> cmd = ClaudeCliCommandBuilder.builder("claude")
+                .mcpConfigJson(AIMBASE_MCP)
+                .nativeMcpConfigJson("{\"mcpServers\":{\"aimbase-skills\":{}}}")
+                .build();
+
+        assertThat(cmd).containsSequence("--mcp-config", AIMBASE_MCP);
+    }
+
+    @Test
     @DisplayName("HYBRID 모드: 네이티브 + MCP 둘 다 — --tools 미명시 + Aimbase MCP 연결")
     void hybrid_mode_allows_both() {
         List<String> cmd = ClaudeCliCommandBuilder.builder("claude")

@@ -1,7 +1,10 @@
 package com.platform.llm.adapter;
 
+import com.platform.tool.SkillRef;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
 
 /**
  * CR-071 Phase 4: 요청 헤더 X-Aimbase-Agent-Id 를 ThreadLocal 로 전파.
@@ -21,6 +24,11 @@ public final class RequestContext {
      * 누락 시 null → WorkspaceResolver 가 default/general 폴백 (기존 동작 보존).
      */
     private static final ThreadLocal<String> WORKSPACE_PATH = new ThreadLocal<>();
+    /**
+     * CR-147: CLI 워커가 X-Aimbase-Skill-Set 머리글로 돌려주는 단계 고정 스킬과 판(BIZ-123).
+     * 서버 MCP 도구가 ToolContext.skillSet 으로 채운다. 없으면 null 이라 스킬 도구가 이름으로 최신 판을 찾는다.
+     */
+    private static final ThreadLocal<List<SkillRef>> SKILL_SET = new ThreadLocal<>();
 
     private RequestContext() {}
 
@@ -32,6 +40,11 @@ public final class RequestContext {
     public static void setWorkspacePath(String path) { WORKSPACE_PATH.set(path); }
 
     public static String getWorkspacePath() { return WORKSPACE_PATH.get(); }
+
+    /** CR-147: 서버 MCP 도구 호출에 실려 온 단계 고정 스킬과 판. */
+    public static void setSkillSet(List<SkillRef> skills) { SKILL_SET.set(skills); }
+
+    public static List<SkillRef> getSkillSet() { return SKILL_SET.get(); }
 
     /** CR-075: JwtAuthenticationFilter 가 widget 토큰 인증 시 set. */
     public static void setUserRef(String ref) { USER_REF.set(ref); }
@@ -56,5 +69,6 @@ public final class RequestContext {
         AGENT_ID.remove();
         USER_REF.remove();
         WORKSPACE_PATH.remove();
+        SKILL_SET.remove();
     }
 }

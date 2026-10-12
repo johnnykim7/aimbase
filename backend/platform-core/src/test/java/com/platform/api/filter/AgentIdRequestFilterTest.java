@@ -1,6 +1,8 @@
 package com.platform.api.filter;
 
 import com.platform.llm.adapter.RequestContext;
+import com.platform.skill.SkillSetHeader;
+import com.platform.tool.SkillRef;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -8,8 +10,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -127,5 +135,38 @@ class AgentIdRequestFilterTest {
         } catch (Exception ignored) {}
 
         assertThat(RequestContext.getAgentId()).isNull();
+    }
+
+    @Test
+    @DisplayName("CR-147: X-Aimbase-Skill-Set 머리글이 chain 진행 중 RequestContext 에 set")
+    void skillSetHeaderPresent() throws Exception {
+        List<SkillRef> pins = List.of(new SkillRef("ax-proposal", "tenant", 1));
+        when(request.getHeader(SkillSetHeader.NAME)).thenReturn(SkillSetHeader.encode(pins));
+
+        Object[] captured = {"unset"};
+        org.mockito.Mockito.doAnswer(inv -> {
+            captured[0] = RequestContext.getSkillSet();
+            return null;
+        }).when(chain).doFilter(request, response);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(captured[0]).isEqualTo(pins);
+        assertThat(RequestContext.getSkillSet()).isNull();
+    }
+
+    @Test
+    @DisplayName("CR-147: 깨진 X-Aimbase-Skill-Set 은 최신 판으로 넘어가지 않고 400")
+    void brokenSkillSetHeaderIsRejected() throws Exception {
+        when(request.getHeader(SkillSetHeader.NAME)).thenReturn("not base64 !");
+        StringWriter body = new StringWriter();
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+
+        filter.doFilter(request, response, chain);
+
+        verify(response).setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        verify(chain, never()).doFilter(any(), any());
+        assertThat(body.toString()).contains("BIZ-123");
+        assertThat(RequestContext.getSkillSet()).isNull();
     }
 }

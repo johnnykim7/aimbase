@@ -81,6 +81,7 @@ public final class ClaudeCliCommandBuilder {
     // 모드/정책
     private ToolMode toolMode = ToolMode.AIMBASE;
     private String mcpConfigJson;       // AIMBASE/HYBRID 시 사용. NATIVE 면 무시
+    private String nativeMcpConfigJson; // CR-147: NATIVE 에서만 사용. 스킬 지정이 있을 때 aimbase-skills 항목 하나
     private boolean strictMcpConfig = true;        // 잠금 정책: 글로벌 ~/.claude 격리
     private String permissionMode = "bypassPermissions";  // 잠금: stdio 자동화 환경
     private boolean sealNativeTools = true;        // AIMBASE 시 네이티브 도구 봉인 여부
@@ -124,6 +125,15 @@ public final class ClaudeCliCommandBuilder {
 
     public ClaudeCliCommandBuilder mcpConfigJson(String json) {
         this.mcpConfigJson = json;
+        return this;
+    }
+
+    /**
+     * CR-147: NATIVE 모드에 넘길 MCP 설정. 비어 있으면 NATIVE 는 지금처럼 빈 설정이다.
+     * 단계에 스킬 지정이 있을 때 Worker 가 스킬 도구 통로 하나만 담아 넘긴다(BIZ-123).
+     */
+    public ClaudeCliCommandBuilder nativeMcpConfigJson(String json) {
+        this.nativeMcpConfigJson = json;
         return this;
     }
 
@@ -298,7 +308,8 @@ public final class ClaudeCliCommandBuilder {
     /**
      * 도구 모드별 flag 적용:
      * - AIMBASE: --disallowedTools <built-in...> (네이티브 봉인, CR-126) + --strict-mcp-config + --mcp-config <json>
-     * - NATIVE: MCP 미연결 — --strict-mcp-config + --mcp-config {빈} (글로벌 격리만 적용)
+     * - NATIVE: MCP 미연결 — --strict-mcp-config + --mcp-config {빈} (글로벌 격리만 적용).
+     *   CR-147: 스킬 지정이 있으면 nativeMcpConfigJson(aimbase-skills 하나)
      * - HYBRID: 네이티브 + MCP 양쪽 (--tools 봉인 안 함, MCP 는 연결)
      * 호출처가 toolsSpec/allowedTools/disallowedTools 를 명시하면 추가 적용.
      */
@@ -344,7 +355,9 @@ public final class ClaudeCliCommandBuilder {
 
     private String resolveMcpJson() {
         if (toolMode == ToolMode.NATIVE) {
-            return "{\"mcpServers\":{}}";
+            return nativeMcpConfigJson != null && !nativeMcpConfigJson.isBlank()
+                    ? nativeMcpConfigJson
+                    : "{\"mcpServers\":{}}";
         }
         // AIMBASE / HYBRID
         if (mcpConfigJson != null && !mcpConfigJson.isBlank()) {

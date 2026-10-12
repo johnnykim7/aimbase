@@ -327,6 +327,37 @@ class ServerMcpToolDispatcherTest {
         assertThat(captured.get().workspacePath()).isNull();
     }
 
+    // CR-147: 러너가 머리글로 돌려준 단계 고정 판이 스킬 도구의 ToolContext 에 닿는지
+
+    @Test
+    void cr147_skill_set_header_propagated_into_toolcontext() {
+        java.util.concurrent.atomic.AtomicReference<ToolContext> captured =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        ToolExecutor tool = capturingEnhancedTool("skill_open", captured);
+        List<com.platform.tool.SkillRef> pins = List.of(new com.platform.tool.SkillRef("ax-proposal", "tenant", 1));
+
+        com.platform.llm.adapter.RequestContext.setSkillSet(pins);
+        try {
+            assertThat(dispatcher.dispatch(tool, "skill_open", Map.of()).isError()).isFalse();
+        } finally {
+            com.platform.llm.adapter.RequestContext.clear();
+        }
+
+        assertThat(captured.get().skillSet()).isEqualTo(pins);
+    }
+
+    @Test
+    void cr147_no_skill_set_header_leaves_toolcontext_without_pins() {
+        java.util.concurrent.atomic.AtomicReference<ToolContext> captured =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        ToolExecutor tool = capturingEnhancedTool("skill_open", captured);
+        com.platform.llm.adapter.RequestContext.clear();
+
+        dispatcher.dispatch(tool, "skill_open", Map.of());
+
+        assertThat(captured.get().skillSet()).isNullOrEmpty();
+    }
+
     private static ToolExecutor capturingEnhancedTool(
             String name, java.util.concurrent.atomic.AtomicReference<ToolContext> sink) {
         UnifiedToolDef def = new UnifiedToolDef(name, "test", Map.of("type", "object"));

@@ -75,7 +75,8 @@ public class SecurityConfig {
                 // 기타 SSE / 관리 MCP — 인증 없음
                 .requestMatchers("/sse/**", "/admin-mcp/**").permitAll()
                 // CR-072: 서버 도구 MCP endpoint — X-API-Key 인증 (ApiKeyAuthenticationFilter 가 처리)
-                .requestMatchers("/mcp/**").authenticated()
+                // CR-147: 스킬 도구 전용 통로 /mcp-skills 도 같은 인증
+                .requestMatchers("/mcp/**", "/mcp-skills/**").authenticated()
                 // 인증 엔드포인트
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // 사이드카 토큰 조회 (인증 없이 접근 가능 — 사이드카 기동 시 호출)

@@ -255,15 +255,16 @@ public class ServerMcpToolDispatcher {
      */
     private ToolContext buildToolContext() {
         String workspacePath = RequestContext.getWorkspacePath();
-        if (workspacePath == null || workspacePath.isBlank()) {
-            return ToolContext.minimal(null, null);
-        }
-        // minimal 과 동일 (tenantId/sessionId=null, READ_ONLY/NOT_REQUIRED) + workspacePath 주입.
-        return new ToolContext(
-                null, null, null, null, null, null, null, null,
-                PermissionLevel.READ_ONLY, ApprovalState.NOT_REQUIRED,
-                workspacePath, false, 0
-        );
+        ToolContext context = (workspacePath == null || workspacePath.isBlank())
+                ? ToolContext.minimal(null, null)
+                // minimal 과 동일 (tenantId/sessionId=null, READ_ONLY/NOT_REQUIRED) + workspacePath 주입.
+                : new ToolContext(
+                        null, null, null, null, null, null, null, null,
+                        PermissionLevel.READ_ONLY, ApprovalState.NOT_REQUIRED,
+                        workspacePath, false, 0
+                );
+        // CR-147: X-Aimbase-Skill-Set 으로 온 단계 고정 판(BIZ-123). 없으면 스킬 도구가 이름으로 최신 판을 찾는다.
+        return context.withSkillSet(RequestContext.getSkillSet());
     }
 
     private String resolveSessionId() {
