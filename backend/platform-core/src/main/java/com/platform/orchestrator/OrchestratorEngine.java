@@ -250,7 +250,8 @@ public class OrchestratorEngine {
                 effectiveRunId, request.workflowStepId(), request.subagentRunId(),
                 request.connectionId(),
                 request.userId(), PermissionLevel.FULL,
-                ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
+                ApprovalState.NOT_REQUIRED, workspacePath, false, 0)
+                .withSkillSet(request.skillSet());   // CR-147: 단계가 고정한 스킬과 판
 
         // 3-1. RAG 컨텍스트 주입 (Phase 3: ragSourceId 지정 시)
         // CR-058: buildContextWithCitations 사용 — 위젯 UI에 표시할 citations 메타데이터 동반.
@@ -605,7 +606,8 @@ public class OrchestratorEngine {
                 effectiveRunId, request.workflowStepId(), request.subagentRunId(),
                 request.connectionId(),
                 request.userId(), PermissionLevel.FULL,
-                ApprovalState.NOT_REQUIRED, workspacePath, false, 0);
+                ApprovalState.NOT_REQUIRED, workspacePath, false, 0)
+                .withSkillSet(request.skillSet());   // CR-147: 단계가 고정한 스킬과 판
 
         LLMAdapter adapter;
         String resolvedModel;

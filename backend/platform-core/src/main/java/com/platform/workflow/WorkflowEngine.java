@@ -67,6 +67,9 @@ public class WorkflowEngine {
      */
     private final WorkflowCancellationRegistry cancelRegistry;
 
+    /** CR-147: 단계 지정 스킬 고정. 미주입 환경(일부 단위 테스트)이면 고정하지 않고 실행기가 스스로 해석한다. */
+    private final com.platform.skill.StepSkillService stepSkills;
+
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
                           PendingApprovalRepository pendingApprovalRepository,
@@ -79,7 +82,8 @@ public class WorkflowEngine {
                           org.springframework.beans.factory.ObjectProvider<com.platform.config.WorkspaceProperties> workspacePropertiesProvider,
                           org.springframework.beans.factory.ObjectProvider<com.platform.agent.ActiveCliWorkerRegistry> activeCliWorkerRegistryProvider,
                           org.springframework.beans.factory.ObjectProvider<com.platform.llm.ConnectionAdapterFactory> connectionAdapterFactoryProvider,
-                          org.springframework.beans.factory.ObjectProvider<WorkflowCancellationRegistry> cancelRegistryProvider) {
+                          org.springframework.beans.factory.ObjectProvider<WorkflowCancellationRegistry> cancelRegistryProvider,
+                          org.springframework.beans.factory.ObjectProvider<com.platform.skill.StepSkillService> stepSkillsProvider) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -98,6 +102,7 @@ public class WorkflowEngine {
         // CR-121: 미주입 환경(일부 단위 테스트)이면 자체 인스턴스로 폴백 — 스텝 실행기와 공유 안 되지만 엔진 자체 동작은 유지.
         WorkflowCancellationRegistry cr = cancelRegistryProvider != null ? cancelRegistryProvider.getIfAvailable() : null;
         this.cancelRegistry = cr != null ? cr : new WorkflowCancellationRegistry();
+        this.stepSkills = stepSkillsProvider != null ? stepSkillsProvider.getIfAvailable() : null;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
@@ -461,7 +466,9 @@ public class WorkflowEngine {
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Step not found in workflow: " + stepId));
 
-        return executeWithRetry(step, context, parseErrorHandling(workflowEntity));
+        // CR-147: 병렬 가지는 STEP_START 를 남기지 않지만 재시도가 같은 판을 쓰도록 여기서 고정한다.
+        StepContext stepContext = stepSkills != null ? context.withSkillPins(stepSkills.pin(step)) : context;
+        return executeWithRetry(step, stepContext, parseErrorHandling(workflowEntity));
     }
 
     /**
@@ -628,11 +635,9 @@ public class WorkflowEngine {
             if (eventPublisher != null) {
                 eventPublisher.stepRunning(child.getId(), child.getParentRunId(), step.id(), startedAt);
             }
-            if (eventRecorder != null) {
-                eventRecorder.stepStart(child.getId(), step.id(), step.type().name());
-            }
+            StepContext stepContext = startStep(child.getId(), step, context);
 
-            Map<String, Object> result = executeWithRetry(step, context, errorHandling);
+            Map<String, Object> result = executeWithRetry(step, stepContext, errorHandling);
             long stepEnd = System.currentTimeMillis();
             Instant completedAt = Instant.ofEpochMilli(stepEnd);
 
@@ -753,12 +758,10 @@ public class WorkflowEngine {
                     if (eventPublisher != null) {
                         eventPublisher.stepRunning(run.getId(), run.getParentRunId(), step.id(), startedAt);
                     }
-                    // CR-090: STEP_START
-                    if (eventRecorder != null) {
-                        eventRecorder.stepStart(run.getId(), step.id(), step.type().name());
-                    }
+                    // CR-090: STEP_START, CR-147: 단계 지정 스킬 고정
+                    StepContext stepContext = startStep(run.getId(), step, context);
 
-                    Map<String, Object> result = executeWithRetry(step, context, errorHandling);
+                    Map<String, Object> result = executeWithRetry(step, stepContext, errorHandling);
                     long stepEnd = System.currentTimeMillis();
                     Instant completedAt = Instant.ofEpochMilli(stepEnd);
 
@@ -1013,6 +1016,27 @@ public class WorkflowEngine {
         return java.nio.file.Path.of(base, tenantId, "runs", runId).toString();
     }
 
+    /**
+     * CR-147: STEP_START 를 남기고, 단계 지정 스킬을 판까지 고정한 문맥을 돌려준다(BIZ-121).
+     * 돌려준 문맥은 그 단계 실행에만 넘기고 다음 단계로는 넘기지 않는다. 재시도는 같은 고정을 쓴다.
+     * 고정에 실패해도 STEP_START 는 남기고 예외를 던져 단계 실패로 처리되게 한다.
+     */
+    StepContext startStep(UUID runId, WorkflowStep step, StepContext context) {
+        com.platform.skill.StepSkillPins pins;
+        try {
+            pins = stepSkills != null ? stepSkills.pin(step) : null;
+        } catch (RuntimeException e) {
+            if (eventRecorder != null) {
+                eventRecorder.stepStart(runId, step.id(), step.type().name());
+            }
+            throw e;
+        }
+        if (eventRecorder != null) {
+            eventRecorder.stepStart(runId, step.id(), step.type().name(), pins != null ? pins.refs() : List.of());
+        }
+        return pins != null ? context.withSkillPins(pins) : context;
+    }
+
     private Map<String, Object> executeWithRetry(WorkflowStep step, StepContext context, ErrorHandling errorHandling) {
         StepExecutor executor = executors.get(step.type());
         if (executor == null) {
@@ -1205,14 +1229,11 @@ public class WorkflowEngine {
                     eventPublisher.stepRunning(run.getId(), run.getParentRunId(), step.id(),
                             startedAt, iterationIndex);
                 }
-                // CR-090: STEP_START (cyclic)
-                if (eventRecorder != null) {
-                    eventRecorder.stepStart(run.getId(), step.id(), step.type().name());
-                }
-
                 Map<String, Object> result;
                 try {
-                    result = executeWithRetry(step, context, errorHandling);
+                    // CR-090: STEP_START (cyclic), CR-147: 고정 실패도 아래에서 단계 실패로 처리한다
+                    StepContext stepContext = startStep(run.getId(), step, context);
+                    result = executeWithRetry(step, stepContext, errorHandling);
                 } catch (Exception e) {
                     log.error("Cyclic run '{}': step '{}' failed: {}", run.getId(), step.id(), e.getMessage());
                     long failedAtMs = System.currentTimeMillis();

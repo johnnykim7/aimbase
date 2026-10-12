@@ -37,7 +37,7 @@ class AgentCallStepExecutorCr106Test {
     @Mock private AgentOrchestrator orchestrator;
 
     private AgentCallStepExecutor executor() {
-        return new AgentCallStepExecutor(orchestrator);
+        return new AgentCallStepExecutor(orchestrator, null);
     }
 
     private WorkflowStep agentStep(String id) {

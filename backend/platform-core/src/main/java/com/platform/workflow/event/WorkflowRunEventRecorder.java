@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -33,8 +34,14 @@ public class WorkflowRunEventRecorder {
     }
 
     public void stepStart(UUID runId, String stepId, String stepType) {
+        stepStart(runId, stepId, stepType, List.of());
+    }
+
+    /** CR-147: 단계가 시작할 때 고정한 스킬과 판을 payload skills 로 남긴다(지정이 없으면 싣지 않는다). */
+    public void stepStart(UUID runId, String stepId, String stepType, List<Map<String, Object>> skills) {
         Map<String, Object> payload = new LinkedHashMap<>();
         if (stepType != null) payload.put("step_type", stepType);
+        if (skills != null && !skills.isEmpty()) payload.put("skills", skills);
         publish(buildEvent(runId, stepId, null, EventType.STEP_START, null, null, payload, null, null));
     }
 

@@ -312,6 +312,11 @@ public class SubagentRunner {
             }
         }
 
+        // CR-147: 단계 지정 스킬 목록과 files 내용(T3-17 3.5). CLI 는 시스템 메시지를 첫 사용자 메시지 앞에 붙여 보낸다.
+        if (req.skills() != null && req.skills().systemMessage() != null && !req.skills().systemMessage().isBlank()) {
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, req.skills().systemMessage()));
+        }
+
         messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, req.prompt()));
 
         // CR-088: config.response_schema → ChatRequest.ResponseFormat 변환.
@@ -352,7 +357,7 @@ public class SubagentRunner {
                 req.workflowRunId(),
                 req.workflowStepId(),
                 context.getSubagentRunId()
-        );
+        ).withSkillSet(req.skills() != null ? req.skills().skillSet() : null);   // CR-147: 도구 호출이 고정한 판만 쓰게 한다
 
         ChatResponse response = orchestratorEngine.chat(chatRequest);
         long durationMs = System.currentTimeMillis() - startMs;

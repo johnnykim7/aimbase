@@ -1,16 +1,25 @@
 package com.platform.workflow.step;
 
 import com.platform.agent.AgentOrchestrator;
+import com.platform.agent.SkillAttachment;
 import com.platform.agent.SubagentRequest;
 import com.platform.agent.SubagentResult;
+import com.platform.skill.PinnedSkill;
+import com.platform.skill.StepSkillPins;
+import com.platform.skill.StepSkillService;
+import com.platform.tool.builtin.SkillOpenTool;
+import com.platform.tool.builtin.SkillReadTool;
+import com.platform.tool.builtin.SkillRunTool;
 import com.platform.workflow.StepContext;
 import com.platform.workflow.model.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -47,10 +56,17 @@ public class AgentCallStepExecutor implements StepExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(AgentCallStepExecutor.class);
 
-    private final AgentOrchestrator agentOrchestrator;
+    /** CR-147: 스킬 지정이 있는 에이전트가 허용 목록과 상관없이 늘 받는 도구. */
+    static final List<String> SKILL_TOOLS = List.of(SkillOpenTool.NAME, SkillReadTool.NAME, SkillRunTool.NAME);
 
-    public AgentCallStepExecutor(@org.springframework.context.annotation.Lazy AgentOrchestrator agentOrchestrator) {
+    private final AgentOrchestrator agentOrchestrator;
+    /** CR-147: 단계 지정 스킬. null 이면 config.skills 를 무시한다(단위 테스트). */
+    private final StepSkillService stepSkills;
+
+    public AgentCallStepExecutor(@org.springframework.context.annotation.Lazy AgentOrchestrator agentOrchestrator,
+                                 ObjectProvider<StepSkillService> stepSkillsProvider) {
         this.agentOrchestrator = agentOrchestrator;
+        this.stepSkills = stepSkillsProvider != null ? stepSkillsProvider.getIfAvailable() : null;
     }
 
     @Override
@@ -63,20 +79,23 @@ public class AgentCallStepExecutor implements StepExecutor {
     public Map<String, Object> execute(WorkflowStep step, StepContext context) {
         Map<String, Object> config = context.resolveMap(step.config());
         long startMs = System.currentTimeMillis();
+        // CR-147: 엔진이 단계 시작 때 고정한 스킬(BIZ-121). 재시도도 같은 판을 쓴다.
+        StepSkillPins pins = stepSkills != null ? stepSkills.pinsFor(step, context) : StepSkillPins.none(step.id());
 
         // 멀티 에이전트 모드
         if (config.containsKey("agents")) {
-            return executeMultiAgent(config, context, step.id(), startMs);
+            return executeMultiAgent(config, context, step.id(), startMs, pins);
         }
 
         // 단일 에이전트 모드
-        return executeSingleAgent(config, context, step.id(), startMs);
+        return executeSingleAgent(config, context, step.id(), startMs, pins);
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> executeSingleAgent(Map<String, Object> config,
-                                                    StepContext context, String stepId, long startMs) {
-        SubagentRequest request = buildRequest(config, context, stepId, true);
+                                                    StepContext context, String stepId, long startMs,
+                                                    StepSkillPins pins) {
+        SubagentRequest request = buildRequest(config, context, stepId, true, pins.skills());
         SubagentResult result = agentOrchestrator.runSingle(request);
         // FAILED/TIMEOUT 은 Exception 으로 승격해야 WorkflowEngine.executeWithRetry 가 retry/failed 처리한다.
         // 그대로 두면 result map 만 채우고 정상 return → status=completed 가짜 성공.
@@ -89,15 +108,17 @@ public class AgentCallStepExecutor implements StepExecutor {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> executeMultiAgent(Map<String, Object> config,
-                                                   StepContext context, String stepId, long startMs) {
+                                                   StepContext context, String stepId, long startMs,
+                                                   StepSkillPins pins) {
         List<Map<String, Object>> agentConfigs = (List<Map<String, Object>>) config.get("agents");
         String execution = (String) config.getOrDefault("execution", "parallel");
 
         List<SubagentRequest> requests = new ArrayList<>();
-        for (Map<String, Object> agentConfig : agentConfigs) {
+        for (int i = 0; i < agentConfigs.size(); i++) {
             // CR-106: 멀티 에이전트는 한 step 에 여러 agent 가 같은 stepId 공유 → 결정적 키 충돌 위험.
             // timeout retry 멱등화는 단일 AGENT_CALL 장기작업 대상이므로 멀티 경로는 비활성(enableResume=false).
-            requests.add(buildRequest(agentConfig, context, stepId, false));
+            // CR-147: 스킬은 에이전트 config 마다 따로 지정한다.
+            requests.add(buildRequest(agentConfigs.get(i), context, stepId, false, pins.forAgent(i)));
         }
 
         AgentOrchestrator.OrchestratedResult orchestrated;
@@ -134,7 +155,7 @@ public class AgentCallStepExecutor implements StepExecutor {
     }
 
     private SubagentRequest buildRequest(Map<String, Object> config, StepContext context, String stepId,
-                                         boolean enableResume) {
+                                         boolean enableResume, List<PinnedSkill> skills) {
         String description = (String) config.getOrDefault("description", "workflow-agent");
         String prompt = (String) config.get("prompt");
         if (prompt == null || prompt.isBlank()) {
@@ -182,12 +203,37 @@ public class AgentCallStepExecutor implements StepExecutor {
         // CR-102: 워크플로우 run/step 연결 키 전파 — 서브에이전트 내부 도구 루프 이벤트를 run 타임라인에 적재
         // CR-107 후속: 부모 run 의 workspacePath 전파 → 서브에이전트가 TOOL_CALL(download_file) 이 쓴
         // run 격리 workspace 를 본다(새 childSessionId 의 tenant/project 폴백 단절 해소).
+        // CR-147: 스킬 목록 시스템 메시지와 고정한 판을 싣고, 허용 목록이 있으면 스킬 도구를 더한다(T3-17 3.6).
+        SkillAttachment attachment = null;
+        Map<String, Object> requestConfig = config;
+        if (!skills.isEmpty()) {
+            attachment = new SkillAttachment(StepSkillPins.toSkillSet(skills), stepSkills.agentSystemMessage(skills));
+            requestConfig = withSkillTools(config);
+        }
+
         return new SubagentRequest(
                 description, prompt, model, connectionId,
                 isolation, false, timeoutMs,
-                config, context.sessionId(), com.platform.agent.AgentType.GENERAL,
+                requestConfig, context.sessionId(), com.platform.agent.AgentType.GENERAL,
                 context.workflowRunId(), stepId, resumeSessionId, context.workspacePath(),
-                requireTextOutput);
+                requireTextOutput, attachment);
+    }
+
+    /** CR-147: config.tools 가 허용 목록이면 스킬 도구 3개를 더한 사본. 허용 목록이 없으면 그대로 둔다. */
+    static Map<String, Object> withSkillTools(Map<String, Object> config) {
+        Object tools = config.get("tools");
+        List<String> allow = new ArrayList<>();
+        if (tools instanceof List<?> list) {
+            list.stream().filter(java.util.Objects::nonNull).map(Object::toString).forEach(allow::add);
+        } else if (tools instanceof String s && !s.isBlank()) {
+            allow.add(s.trim());
+        } else {
+            return config;
+        }
+        SKILL_TOOLS.stream().filter(t -> !allow.contains(t)).forEach(allow::add);
+        Map<String, Object> copy = new LinkedHashMap<>(config);
+        copy.put("tools", allow);
+        return copy;
     }
 
     /**

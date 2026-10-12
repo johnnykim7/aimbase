@@ -50,7 +50,8 @@ class WorkflowEngineInactiveWorkflowTest {
                 null,
                 provider(mock(com.platform.agent.ActiveCliWorkerRegistry.class)),
                 provider(mock(com.platform.llm.ConnectionAdapterFactory.class)),
-                provider(new WorkflowCancellationRegistry()));
+                provider(new WorkflowCancellationRegistry()),
+                null); // CR-147: stepSkillsProvider
 
         assertThatThrownBy(() -> engine.execute("gone", Map.of(), null))
                 .isInstanceOf(IllegalArgumentException.class)

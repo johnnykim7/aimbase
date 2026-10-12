@@ -25,6 +25,7 @@ import java.util.Map;
  *        null 이면 기존 동작(세션 workspaceRef → tenant/project 폴백). TOOL_CALL 이 쓴 파일을 AGENT_CALL 이 못 보던 단절 해소.
  * @param requireTextOutput CR-117: true(기본) 면 turn 이 텍스트/structured 둘 다 비면 FAILED 로 판정(빈응답=실패).
  *        false 면 도구만 쓰고 끝내는 에이전트(빈 텍스트 정상)를 허용 → 빈응답도 COMPLETED 통과. 빈응답 자식 재시도/감지 정책의 토글.
+ * @param skills CR-147: AGENT_CALL 단계가 고정한 스킬. null 이면 지정 없음
  */
 public record SubagentRequest(
         String description,
@@ -41,7 +42,8 @@ public record SubagentRequest(
         String workflowStepId,
         String resumeSessionId,
         String workspacePath,
-        boolean requireTextOutput
+        boolean requireTextOutput,
+        SkillAttachment skills
 ) {
     public enum IsolationMode {
         NONE,       // 격리 없이 동일 컨텍스트에서 실행
@@ -54,7 +56,7 @@ public record SubagentRequest(
                            boolean runInBackground, long timeoutMs,
                            Map<String, Object> config, String parentSessionId) {
         this(description, prompt, model, connectionId, isolation,
-             runInBackground, timeoutMs, config, parentSessionId, AgentType.GENERAL, null, null, null, null, true);
+             runInBackground, timeoutMs, config, parentSessionId, AgentType.GENERAL, null, null, null, null, true, null);
     }
 
     /** 기존 10-arg 생성자 호환 (CR-102 워크플로우 연결 키 없음) */
@@ -64,7 +66,7 @@ public record SubagentRequest(
                            Map<String, Object> config, String parentSessionId,
                            AgentType agentType) {
         this(description, prompt, model, connectionId, isolation,
-             runInBackground, timeoutMs, config, parentSessionId, agentType, null, null, null, null, true);
+             runInBackground, timeoutMs, config, parentSessionId, agentType, null, null, null, null, true, null);
     }
 
     /** 기존 12-arg 생성자 호환 (CR-102 워크플로우 연결 키 포함, CR-106 resumeSessionId 없음) */
@@ -75,7 +77,7 @@ public record SubagentRequest(
                            AgentType agentType, String workflowRunId, String workflowStepId) {
         this(description, prompt, model, connectionId, isolation,
              runInBackground, timeoutMs, config, parentSessionId, agentType,
-             workflowRunId, workflowStepId, null, null, true);
+             workflowRunId, workflowStepId, null, null, true, null);
     }
 
     /** 기존 13-arg 생성자 호환 (CR-106 resumeSessionId 포함, CR-107 후속 workspacePath 없음) */
@@ -87,7 +89,7 @@ public record SubagentRequest(
                            String resumeSessionId) {
         this(description, prompt, model, connectionId, isolation,
              runInBackground, timeoutMs, config, parentSessionId, agentType,
-             workflowRunId, workflowStepId, resumeSessionId, null, true);
+             workflowRunId, workflowStepId, resumeSessionId, null, true, null);
     }
 
     /** 기존 14-arg 생성자 호환 (CR-107 workspacePath 포함, CR-117 requireTextOutput 기본 true) */
@@ -99,7 +101,19 @@ public record SubagentRequest(
                            String resumeSessionId, String workspacePath) {
         this(description, prompt, model, connectionId, isolation,
              runInBackground, timeoutMs, config, parentSessionId, agentType,
-             workflowRunId, workflowStepId, resumeSessionId, workspacePath, true);
+             workflowRunId, workflowStepId, resumeSessionId, workspacePath, true, null);
+    }
+
+    /** 기존 15-arg 생성자 호환 (CR-117 requireTextOutput 포함, CR-147 skills 없음) */
+    public SubagentRequest(String description, String prompt, String model,
+                           String connectionId, IsolationMode isolation,
+                           boolean runInBackground, long timeoutMs,
+                           Map<String, Object> config, String parentSessionId,
+                           AgentType agentType, String workflowRunId, String workflowStepId,
+                           String resumeSessionId, String workspacePath, boolean requireTextOutput) {
+        this(description, prompt, model, connectionId, isolation,
+             runInBackground, timeoutMs, config, parentSessionId, agentType,
+             workflowRunId, workflowStepId, resumeSessionId, workspacePath, requireTextOutput, null);
     }
 
     public SubagentRequest {

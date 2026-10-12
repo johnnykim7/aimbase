@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +51,66 @@ public class WorkflowValidator {
             // CR-087: FOREACH config 구조 검증
             if (WorkflowStep.StepType.FOREACH.name().equals(type)) {
                 validateForeach(location, asMap(step.get("config"), location));
+            }
+
+            // CR-147: 단계 스킬 지정 구조 검증. 이름과 판이 있는지는 실행 때 본다(판은 나중에 올라올 수 있다).
+            validateStepSkills(location, type, step.get("config"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════
+    // 단계 스킬 지정 (CR-147 T3-17 3.6, TC-SKB-025)
+    // ═══════════════════════════════════════════════
+
+    void validateStepSkills(String location, String type, Object configObj) {
+        boolean llm = WorkflowStep.StepType.LLM_CALL.name().equals(type);
+        boolean agent = WorkflowStep.StepType.AGENT_CALL.name().equals(type);
+        if (WorkflowStep.StepType.FOREACH.name().equals(type)) {
+            Map<String, Object> config = asMap(configObj, location + ".config");
+            if (config != null && config.get("body") instanceof Map<?, ?> body) {
+                validateStepSkills(location + " body", asString(body.get("type")), body.get("config"));
+            }
+            return;
+        }
+        if (!llm && !agent) return;
+        Map<String, Object> config = asMap(configObj, location + ".config");
+        if (config == null) return;
+        validateSkills(location, "config.skills", config.get("skills"));
+        if (agent && config.get("agents") instanceof List<?> agents) {
+            for (int i = 0; i < agents.size(); i++) {
+                if (agents.get(i) instanceof Map<?, ?> a) {
+                    validateSkills(location, "config.agents[" + i + "].skills", a.get("skills"));
+                }
+            }
+        }
+    }
+
+    private void validateSkills(String location, String key, Object value) {
+        if (value == null) return;
+        if (!(value instanceof List<?> items)) {
+            throw bad(location + ": " + key + " must be an array");
+        }
+        Set<String> names = new HashSet<>();
+        for (int i = 0; i < items.size(); i++) {
+            String at = key + "[" + i + "]";
+            if (!(items.get(i) instanceof Map<?, ?> item)) {
+                throw bad(location + ": " + at + " must be an object");
+            }
+            if (!(item.get("name") instanceof String name) || name.isBlank()) {
+                throw bad(location + ": " + at + ".name must not be empty");
+            }
+            if (!names.add(name.trim())) {
+                throw bad(location + ": " + key + " has skill '" + name.trim() + "' more than once");
+            }
+            Object version = item.get("version");
+            if (version != null && !((version instanceof Integer || version instanceof Long)
+                    && ((Number) version).longValue() >= 1)) {
+                throw bad(location + ": " + at + ".version must be a positive integer");
+            }
+            Object files = item.get("files");
+            if (files != null && (!(files instanceof List<?> list)
+                    || list.stream().anyMatch(f -> !(f instanceof String s) || s.isBlank()))) {
+                throw bad(location + ": " + at + ".files must be an array of file paths");
             }
         }
     }

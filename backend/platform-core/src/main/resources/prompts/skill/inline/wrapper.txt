@@ -1,0 +1,6 @@
+Follow the instructions of the skill below for this task. Paths in them are relative to the skill bundle.
+
+<skill name="{{name}}" scope="{{scope}}" version="{{version}}">
+{{instructions}}
+
+{{files}}</skill>

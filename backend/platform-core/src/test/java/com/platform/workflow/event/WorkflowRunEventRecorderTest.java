@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -48,6 +49,18 @@ class WorkflowRunEventRecorderTest {
         assertThat(saved.getEventType()).isEqualTo(EventType.STEP_START);
         assertThat(saved.getPayload()).containsEntry("step_type", "LLM_CALL");
         assertThat(saved.getDurationMs()).isNull();
+    }
+
+    @Test
+    @DisplayName("CR-147: stepStart 에 고정한 스킬을 주면 payload.skills 로 남는다")
+    void stepStartWithSkills() throws Exception {
+        UUID runId = UUID.randomUUID();
+        List<Map<String, Object>> skills = List.of(Map.of("name", "demo", "scope", "tenant", "version", 2));
+
+        recorder.stepStart(runId, "step1", "AGENT_CALL", skills);
+
+        WorkflowRunEventEntity saved = waitForSave();
+        assertThat(saved.getPayload()).containsEntry("step_type", "AGENT_CALL").containsEntry("skills", skills);
     }
 
     @Test

@@ -1,0 +1,5 @@
+Skills are available for this task. A skill is a bundle of instructions, reference files and scripts.
+Before you start, open the skill that fits the task with skill_open (name) and follow its instructions.
+Read bundle files with skill_read and run bundle scripts with skill_run.
+
+Skills:

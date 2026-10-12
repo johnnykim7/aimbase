@@ -56,7 +56,7 @@ class AgentCallStepExecutorTest {
                 worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory,
                 new com.platform.agent.ActiveCliWorkerRegistry());
         AgentOrchestrator orchestrator = new AgentOrchestrator(runner);
-        executor = new AgentCallStepExecutor(orchestrator);
+        executor = new AgentCallStepExecutor(orchestrator, null);
     }
 
     @Test

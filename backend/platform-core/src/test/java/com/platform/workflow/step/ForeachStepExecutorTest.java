@@ -38,7 +38,7 @@ class ForeachStepExecutorTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<WorkflowRunEventRecorder> noRecorder = mock(ObjectProvider.class);
         when(noRecorder.getIfAvailable()).thenReturn(null);
-        executor = new ForeachStepExecutor(applicationContext, noRecorder);
+        executor = new ForeachStepExecutor(applicationContext, noRecorder, null);
     }
 
     // ─── fake body executor: item_var 의 필드를 echo, 호출 순서/스레드 기록 ───

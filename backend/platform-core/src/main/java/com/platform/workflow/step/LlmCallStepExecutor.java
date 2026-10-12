@@ -9,6 +9,7 @@ import com.platform.llm.adapter.StructuredOutputNormalizer;
 import com.platform.llm.model.*;
 import com.platform.llm.router.ModelRouter;
 import com.platform.schema.SchemaValidator;
+import com.platform.skill.StepSkillService;
 import com.platform.workflow.StepContext;
 import com.platform.workflow.event.WorkflowEventPublisher;
 import com.platform.workflow.event.WorkflowRunEventRecorder;
@@ -58,13 +59,16 @@ public class LlmCallStepExecutor implements StepExecutor {
     /** CR-090: workflow_run_events 비동기 기록. null 허용(테스트 편의). */
     private final WorkflowRunEventRecorder eventRecorder;
     private final SchemaValidator schemaValidator;
+    /** CR-147: 단계 지정 스킬. null 이면 config.skills 를 무시한다(테스트 편의 3-arg 생성자). */
+    private final StepSkillService stepSkills;
 
     @org.springframework.beans.factory.annotation.Autowired
     public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
                                 com.platform.service.PromptTemplateService promptTemplateService,
                                 org.springframework.beans.factory.ObjectProvider<WorkflowEventPublisher> eventPublisherProvider,
                                 org.springframework.beans.factory.ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider,
-                                SchemaValidator schemaValidator) {
+                                SchemaValidator schemaValidator,
+                                org.springframework.beans.factory.ObjectProvider<StepSkillService> stepSkillsProvider) {
         this.modelRouter = modelRouter;
         this.promptTemplateService = promptTemplateService;
         this.connectionAdapterFactory = connectionAdapterFactory;
@@ -72,6 +76,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         this.eventPublisher = eventPublisherProvider != null ? eventPublisherProvider.getIfAvailable() : null;
         this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
         this.schemaValidator = schemaValidator;
+        this.stepSkills = stepSkillsProvider != null ? stepSkillsProvider.getIfAvailable() : null;
     }
 
     /** 하위 호환: eventPublisher/eventRecorder 없는 3-arg 생성자 (기존 테스트/비스트리밍 사용처). */
@@ -83,11 +88,20 @@ public class LlmCallStepExecutor implements StepExecutor {
         this.eventPublisher = null;
         this.eventRecorder = null;
         this.schemaValidator = new SchemaValidator(MAPPER);
+        this.stepSkills = null;
     }
 
     @Override
     public WorkflowStep.StepType supports() {
         return WorkflowStep.StepType.LLM_CALL;
+    }
+
+    /** CR-147: 단계 지정 스킬의 안내서와 files 내용을 system 뒤에 붙인다(T3-17 3.6). 상한을 넘으면 단계 실패. */
+    private String withSkills(String system, WorkflowStep step, StepContext context) {
+        if (stepSkills == null) return system;
+        String skillText = stepSkills.inlineText(stepSkills.pinsFor(step, context).skills());
+        if (skillText.isEmpty()) return system;
+        return system == null || system.isBlank() ? skillText : system + "\n\n" + skillText;
     }
 
     @Override
@@ -108,7 +122,7 @@ public class LlmCallStepExecutor implements StepExecutor {
 
         // 변수 치환
         String prompt = context.resolve(promptTemplate);
-        String system = systemTemplate != null ? context.resolve(systemTemplate) : null;
+        String system = withSkills(systemTemplate != null ? context.resolve(systemTemplate) : null, step, context);
 
         // connection_id가 있으면 ConnectionAdapterFactory 사용, 없으면 ModelRouter 폴백
         LLMAdapter adapter;

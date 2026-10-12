@@ -1,5 +1,7 @@
 package com.platform.workflow.step;
 
+import com.platform.skill.StepSkillPins;
+import com.platform.skill.StepSkillService;
 import com.platform.workflow.StepContext;
 import com.platform.workflow.event.WorkflowRunEventRecorder;
 import com.platform.workflow.model.WorkflowStep;
@@ -91,10 +93,15 @@ public class ForeachStepExecutor implements StepExecutor {
      */
     private final WorkflowRunEventRecorder eventRecorder;
 
+    /** CR-147: body 단계 지정 스킬을 반복 전에 한 번 고정해 모든 반복이 같은 판을 쓰게 한다. */
+    private final StepSkillService stepSkills;
+
     public ForeachStepExecutor(ApplicationContext applicationContext,
-                               ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider) {
+                               ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider,
+                               ObjectProvider<StepSkillService> stepSkillsProvider) {
         this.applicationContext = applicationContext;
         this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
+        this.stepSkills = stepSkillsProvider != null ? stepSkillsProvider.getIfAvailable() : null;
     }
 
     @Override
@@ -159,6 +166,10 @@ public class ForeachStepExecutor implements StepExecutor {
         if (bodyExecutor == null) {
             throw new IllegalStateException(
                     "FOREACH step '" + step.id() + "': no executor for body type " + bodyStep.type());
+        }
+
+        if (stepSkills != null) {
+            context = context.withSkillPins(stepSkills.pin(bodyStep));
         }
 
         List<Map<String, Object>> results = "parallel".equals(mode)
@@ -308,6 +319,11 @@ public class ForeachStepExecutor implements StepExecutor {
                                        String onItemError, int itemRetryMax) {
         StepContext itemCtx = injectItem(context, item, index, itemVar);
         WorkflowStep itemStep = withItemId(bodyStep, index);
+        StepSkillPins bodyPins = context.skillPins() != null && bodyStep.id().equals(context.skillPins().stepId())
+                ? context.skillPins() : null;
+        if (bodyPins != null) {
+            itemCtx = itemCtx.withSkillPins(bodyPins.forStep(itemStep.id()));
+        }
         int maxAttempts = 1 + Math.max(0, itemRetryMax);
         Exception last = null;
 
@@ -317,7 +333,8 @@ public class ForeachStepExecutor implements StepExecutor {
         UUID runUuid = parseRunUuid(context.workflowRunId());
         long childStart = System.currentTimeMillis();
         if (eventRecorder != null && runUuid != null) {
-            eventRecorder.stepStart(runUuid, itemStep.id(), bodyStep.type().name());
+            eventRecorder.stepStart(runUuid, itemStep.id(), bodyStep.type().name(),
+                    bodyPins != null ? bodyPins.refs() : List.of());
         }
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {

@@ -1,5 +1,6 @@
 package com.platform.workflow;
 
+import com.platform.skill.StepSkillPins;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +23,8 @@ public record StepContext(
         Map<String, Object> stepResults,  // {"stepId": {"output": ..., ...}}
         Map<String, Object> loopData,     // CR-055: EVALUATOR_LOOP iteration 변수 ({{loop.*}} 참조용)
         String previousAttemptFailure,    // CR-106: executeWithRetry 가 다음 attempt 에 직전 실패 메시지를 전달 (null=첫 시도/이전 실패 없음)
-        String workspacePath              // CR-107: run 의 격리 workspace 절대경로(세션 workspaceRef). TOOL_CALL 이 ToolContext 로 전파해 도구가 default/general 폴백 대신 run workspace 에 쓰게 한다. null=미지정(폴백 허용)
+        String workspacePath,             // CR-107: run 의 격리 workspace 절대경로(세션 workspaceRef). TOOL_CALL 이 ToolContext 로 전파해 도구가 default/general 폴백 대신 run workspace 에 쓰게 한다. null=미지정(폴백 허용)
+        StepSkillPins skillPins           // CR-147: 엔진이 단계 시작 때 고정한 스킬. stepId 가 다른 단계의 것이면 쓰지 않는다. null=고정 없음
 ) {
 
     private static final Logger log = LoggerFactory.getLogger(StepContext.class);
@@ -31,21 +33,29 @@ public record StepContext(
     /** 기존 호출부 호환용 5-arg 생성자 — loopData=null, previousAttemptFailure=null, workspacePath=null. */
     public StepContext(String workflowRunId, String workflowId, String sessionId,
                        Map<String, Object> inputData, Map<String, Object> stepResults) {
-        this(workflowRunId, workflowId, sessionId, inputData, stepResults, null, null, null);
+        this(workflowRunId, workflowId, sessionId, inputData, stepResults, null, null, null, null);
     }
 
     /** 기존 호출부 호환용 6-arg 생성자 (CR-055 loopData 포함, previousAttemptFailure/workspacePath 없음). */
     public StepContext(String workflowRunId, String workflowId, String sessionId,
                        Map<String, Object> inputData, Map<String, Object> stepResults,
                        Map<String, Object> loopData) {
-        this(workflowRunId, workflowId, sessionId, inputData, stepResults, loopData, null, null);
+        this(workflowRunId, workflowId, sessionId, inputData, stepResults, loopData, null, null, null);
     }
 
     /** 기존 호출부 호환용 7-arg 생성자 (CR-106 previousAttemptFailure 포함, CR-107 workspacePath 없음). */
     public StepContext(String workflowRunId, String workflowId, String sessionId,
                        Map<String, Object> inputData, Map<String, Object> stepResults,
                        Map<String, Object> loopData, String previousAttemptFailure) {
-        this(workflowRunId, workflowId, sessionId, inputData, stepResults, loopData, previousAttemptFailure, null);
+        this(workflowRunId, workflowId, sessionId, inputData, stepResults, loopData, previousAttemptFailure, null, null);
+    }
+
+    /** 기존 호출부 호환용 8-arg 생성자 (CR-107 workspacePath 포함, CR-147 skillPins 없음). */
+    public StepContext(String workflowRunId, String workflowId, String sessionId,
+                       Map<String, Object> inputData, Map<String, Object> stepResults,
+                       Map<String, Object> loopData, String previousAttemptFailure, String workspacePath) {
+        this(workflowRunId, workflowId, sessionId, inputData, stepResults, loopData, previousAttemptFailure,
+                workspacePath, null);
     }
 
     /**
@@ -54,7 +64,7 @@ public record StepContext(
      */
     public StepContext withWorkspacePath(String workspacePath) {
         return new StepContext(workflowRunId, workflowId, sessionId, inputData, stepResults,
-                loopData, previousAttemptFailure, workspacePath);
+                loopData, previousAttemptFailure, workspacePath, skillPins);
     }
 
     /**
@@ -64,7 +74,13 @@ public record StepContext(
      */
     public StepContext withRetryFailure(String failureMessage) {
         return new StepContext(workflowRunId, workflowId, sessionId, inputData, stepResults,
-                loopData, failureMessage, workspacePath);
+                loopData, failureMessage, workspacePath, skillPins);
+    }
+
+    /** CR-147: 단계 시작 때 고정한 스킬을 실은 사본. 엔진은 이 사본을 그 단계 실행에만 넘긴다. */
+    public StepContext withSkillPins(StepSkillPins pins) {
+        return new StepContext(workflowRunId, workflowId, sessionId, inputData, stepResults,
+                loopData, previousAttemptFailure, workspacePath, pins);
     }
 
     /**
@@ -291,7 +307,7 @@ public record StepContext(
         Map<String, Object> newResults = new LinkedHashMap<>(stepResults != null ? stepResults : Map.of());
         newResults.put(stepId, result);
         return new StepContext(workflowRunId, workflowId, sessionId, inputData, newResults,
-                loopData, previousAttemptFailure, workspacePath);
+                loopData, previousAttemptFailure, workspacePath, skillPins);
     }
 
     /**
@@ -344,7 +360,7 @@ public record StepContext(
             newResults.put(outputChannel, result);
         }
         return new StepContext(workflowRunId, workflowId, sessionId, inputData, newResults,
-                loopData, previousAttemptFailure, workspacePath);
+                loopData, previousAttemptFailure, workspacePath, skillPins);
     }
 
     /**
@@ -354,6 +370,6 @@ public record StepContext(
      */
     public StepContext withLoopVars(Map<String, Object> loopVars) {
         return new StepContext(workflowRunId, workflowId, sessionId, inputData, stepResults,
-                loopVars, previousAttemptFailure, workspacePath);
+                loopVars, previousAttemptFailure, workspacePath, skillPins);
     }
 }
