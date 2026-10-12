@@ -57,6 +57,10 @@ public abstract class SkillBundleStore<B extends SkillBundleBase, V extends Skil
         return versions.findByBundleIdAndVersion(bundleId, version).map(SkillBundleVersionBase.class::cast);
     }
 
+    public Optional<SkillBundleVersionBase> findVersionById(UUID versionId) {
+        return versions.findById(versionId).map(SkillBundleVersionBase.class::cast);
+    }
+
     public List<SkillBundleVersionBase> listVersions(UUID bundleId) {
         return new ArrayList<>(versions.findByBundleIdOrderByVersionDesc(bundleId));
     }

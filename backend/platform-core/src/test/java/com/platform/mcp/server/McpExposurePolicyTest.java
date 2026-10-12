@@ -94,15 +94,16 @@ class McpExposurePolicyTest {
     }
 
     @Test
-    void default_fallback_matches_42_tools_excluding_parse_document() {
+    void default_fallback_matches_45_tools_excluding_parse_document() {
         // V66 seed CSV 와 동일 집합이어야 함(환경별 도구집합 갈림 방지). 개수 + parse_document 부재 고정.
-        assertThat(McpExposurePolicy.DEFAULT_FALLBACK).hasSize(42);
+        assertThat(McpExposurePolicy.DEFAULT_FALLBACK).hasSize(45);
         assertThat(McpExposurePolicy.DEFAULT_FALLBACK).doesNotContain("parse_document");
         assertThat(McpExposurePolicy.DEFAULT_FALLBACK)
                 .doesNotContain("team_create", "team_delete", "enter_plan_mode",
                         "exit_plan_mode", "verify_plan_execution", "temp_cleanup");
         assertThat(McpExposurePolicy.DEFAULT_FALLBACK)
-                .contains("web_search", "bash", "file_write", "builtin_grep", "ocr_image");
+                .contains("web_search", "bash", "file_write", "builtin_grep", "ocr_image",
+                        "skill_open", "skill_read", "skill_run");
     }
 
     private static ToolExecutor legacyTool(String name) {

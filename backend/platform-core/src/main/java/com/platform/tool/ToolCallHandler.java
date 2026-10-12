@@ -387,12 +387,7 @@ public class ToolCallHandler {
             if (toolContext != null && toolContext.permissionLevel() == PermissionLevel.AUTO) {
                 List<String> callNames = response.toolCalls().stream().map(ToolCall::name).toList();
                 PermissionLevel resolved = permissionClassifier.classify(callNames, toolRegistry);
-                effectiveContext = new ToolContext(
-                        toolContext.tenantId(), toolContext.appId(), toolContext.projectId(),
-                        toolContext.sessionId(), toolContext.workflowRunId(), toolContext.stepId(),
-                        toolContext.subagentRunId(),
-                        toolContext.actorUserId(), resolved, toolContext.approvalState(),
-                        toolContext.workspacePath(), toolContext.dryRun(), toolContext.turnNumber());
+                effectiveContext = toolContext.withPermissionLevel(resolved);
                 log.debug("AUTO permission resolved: tools={} → {}", callNames, resolved);
             } else {
                 effectiveContext = toolContext;
@@ -568,12 +563,7 @@ public class ToolCallHandler {
             if (toolContext != null && toolContext.permissionLevel() == PermissionLevel.AUTO) {
                 List<String> callNames = toolCalls.stream().map(ToolCall::name).toList();
                 PermissionLevel resolved = permissionClassifier.classify(callNames, toolRegistry);
-                effectiveContext = new ToolContext(
-                        toolContext.tenantId(), toolContext.appId(), toolContext.projectId(),
-                        toolContext.sessionId(), toolContext.workflowRunId(), toolContext.stepId(),
-                        toolContext.subagentRunId(),
-                        toolContext.actorUserId(), resolved, toolContext.approvalState(),
-                        toolContext.workspacePath(), toolContext.dryRun(), toolContext.turnNumber());
+                effectiveContext = toolContext.withPermissionLevel(resolved);
             } else {
                 effectiveContext = toolContext;
             }

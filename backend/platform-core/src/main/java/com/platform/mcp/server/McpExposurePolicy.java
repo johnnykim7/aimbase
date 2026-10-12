@@ -41,7 +41,7 @@ public class McpExposurePolicy {
     public static final String SETTING_KEY = "mcp.cli-exposed-tools";
 
     /**
-     * 설정 부재 시 안전 폴백 (fail-safe). V66 seed CSV 와 동일한 42개.
+     * 설정 부재 시 안전 폴백 (fail-safe). V66 seed CSV 42개에 CR-147 스킬 도구 3개(V69)를 더한 45개.
      * 내부 전용(team_create / enter_plan_mode / exit_plan_mode / verify_plan_execution /
      * temp_cleanup / team_delete) 6개와 {@code parse_document} 는 의도적으로 제외 — 화이트리스트에 없으면 NONE.
      */
@@ -75,7 +75,9 @@ public class McpExposurePolicy {
             "builtin_patch_apply", "builtin_structured_search", "builtin_document_section_read",
             "builtin_path_info", "builtin_workspace_snapshot",
             // 유틸
-            "zip_extract", "calculate", "get_current_time"
+            "zip_extract", "calculate", "get_current_time",
+            // 스킬 묶음 (CR-147)
+            "skill_open", "skill_read", "skill_run"
     );
 
     private final PlatformSettingsService settings;

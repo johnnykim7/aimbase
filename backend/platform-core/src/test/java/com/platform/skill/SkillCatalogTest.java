@@ -5,6 +5,7 @@ import com.platform.domain.SkillBundleEntity;
 import com.platform.domain.SkillBundleVersionEntity;
 import com.platform.domain.master.PlatformSkillBundleEntity;
 import com.platform.domain.master.PlatformSkillBundleVersionEntity;
+import com.platform.tool.SkillRef;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,7 +22,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * CR-147 BIZ-120: 이름 해석. TC-SKB-011, TC-SKB-012, TC-SKB-026.
+ * CR-147 BIZ-120, BIZ-121: 이름 해석. TC-SKB-011, TC-SKB-012, TC-SKB-015, TC-SKB-026.
  */
 class SkillCatalogTest {
 
@@ -121,5 +122,47 @@ class SkillCatalogTest {
 
         assertThat(catalog.resolve("shared", null).scope()).isEqualTo(SkillScope.PLATFORM);
         assertThatThrownBy(() -> catalog.resolve("none", null)).isInstanceOf(SkillNotFoundException.class);
+    }
+
+    @Test
+    void TC_SKB_015_name_outside_skill_set_is_rejected() {
+        tenantBundle("a", 1, true, 1);
+        tenantBundle("b", 1, true, 1);
+        List<SkillRef> set = List.of(new SkillRef("a", "tenant", 1));
+
+        assertThat(catalog.resolveForCall("a", set).name()).isEqualTo("a");
+        assertThatThrownBy(() -> catalog.resolveForCall("b", set))
+                .isInstanceOf(SkillNotFoundException.class)
+                .hasMessageContaining("BIZ-121");
+    }
+
+    @Test
+    void skill_set_uses_pinned_version_even_after_newer_upload_or_deactivation() {
+        tenantBundle("a", 2, false, 1, 2);
+
+        ResolvedSkill r = catalog.resolveForCall("a", List.of(new SkillRef("a", "tenant", 1)));
+
+        assertThat(r.version()).isEqualTo(1);
+        assertThat(r.description()).isEqualTo("tenant v1");
+        assertThat(r.workspaceDir()).isEqualTo(".skills/a/v1");
+    }
+
+    @Test
+    void skill_set_keeps_pinned_scope() {
+        tenantBundle("a", 1, true, 1);
+        platformBundle("a", 3, 3);
+
+        ResolvedSkill r = catalog.resolveForCall("a", List.of(new SkillRef("a", "platform", 3)));
+
+        assertThat(r.scope()).isEqualTo(SkillScope.PLATFORM);
+        assertThat(r.description()).isEqualTo("platform v3");
+    }
+
+    @Test
+    void empty_skill_set_means_no_designation() {
+        tenantBundle("a", 2, true, 1, 2);
+
+        assertThat(catalog.resolveForCall("a", null).version()).isEqualTo(2);
+        assertThat(catalog.resolveForCall("a", List.of()).version()).isEqualTo(2);
     }
 }

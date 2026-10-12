@@ -1,0 +1,4 @@
+Follow the instructions below for this task. Paths in them are relative to the skill bundle.
+- Read a bundle file with skill_read (name, path). Read only the files the current step needs.
+- Run a bundle script with skill_run (name, script). To run a script you wrote in the workspace, call skill_run with script only.
+- When skill_run runs, the bundle is unpacked in the bundle directory, so scripts you write can load bundle files from there.
