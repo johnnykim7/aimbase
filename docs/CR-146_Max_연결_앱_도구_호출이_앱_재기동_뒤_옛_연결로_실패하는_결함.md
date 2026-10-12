@@ -4,7 +4,7 @@
 - 원본 요구사항: `docs/origins/원본_요구사항_CR146_Max_연결_앱_도구_호출_재기동_뒤_실패_20261012.md`
 - 요청: 입찰대행 플랫폼 CR-150 창
 - 규모: 소. 새 API, 화면, 테이블이 없다. /mcp 도구 호출과 바깥 MCP 호출 중 재연결의 결함 수정
-- 상태: 진행중
+- 상태: 완료 (2026-10-12, AWS 와 옛 서버 반영)
 
 ---
 
@@ -93,3 +93,13 @@ DB 스키마 변경은 없다.
 - 08:23:54 앱(bidding-agency) 재기동, 이어서 REST 재연결 성공(도구 19개)
 - 08:25 cli-runner-bidding-tools-001 채팅으로 get_opportunity 호출 성공, 공고 제목을 받았다. 앱 로그에 재연결 뒤 새 MCP 세션으로 tools/call 이 들어왔다
 - 첫 시도는 러너가 "turn() called before turnFirst()" 로 거절했다. 이 세션의 워커가 1시간 47분 전 쉬는 워커 정리(CR-121)로 닫혔는데 러너의 첫 턴 표시(RunnerService.firstTurnDone)는 남아, 새 워커에 이어지는 턴으로 보냈다. 실패 처리에서 표시가 지워져 두 번째 시도는 정상이었다. 러너 결함이라 이번 범위 밖이다
+- 08:30 같은 연결 새 채팅(get_opportunity_analysis)은 600초 뒤 끊겼다. /mcp 호출은 앱까지 갔고 CLI 는 08:30:10 에 답을 냈다(CLI 세션 기록). 러너가 CLI 출력을 가상 스레드로 읽는데 러너 CPU 가 2개라 그 실행 자리 2개가 아직 살아 있던 다른 채팅 워커의 출력 읽기(파이프 대기)에 모두 묶여, 새 워커의 출력을 읽지 못했다. 이것도 러너 결함이라 이번 범위 밖이다
+
+### 6.5 옛 서버 (2026-10-12, 59.8.160.12)
+
+- 반영 전 api jar 는 AWS 반영 전 jar 와 지문이 같다(d20d23c6). AWS 와 같은 jar(21d37ffb)로 같은 방식으로 반영했다. 사용자 22:25 승인
+- 22:28 api 반영. aimbase-api:cr146-20261012 를 latest 로, 롤백용 aimbase-api:pre-cr146-20261012
+- 롤백: `docker tag aimbase-api:pre-cr146-20261012 aimbase-api:latest && cd /home/therecommerce/aimbase && docker compose up -d --force-recreate api`
+- 기동 15초 뒤 healthy, ERROR 0건. axopm_companyA 의 rag-pipeline 자동 연결(도구 42개), 에이전트 다시 붙음
+- bidding_system 의 입찰대행 MCP 등록은 연결 시간 초과다. 옛 서버에 입찰대행 앱이 떠 있지 않다(8183 포트 없음). 연결 코드는 이번에 바뀌지 않았다
+- 옛 서버에서는 입찰대행 앱이 없어 그 도구를 부를 수 없으므로 /mcp 도구 호출은 시험하지 않았다. 같은 jar 의 동작은 AWS 에서 확인했다(6.4)
