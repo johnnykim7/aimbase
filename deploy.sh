@@ -14,6 +14,7 @@
 #         ./deploy.sh agent   (러너 1개 — aimbase-agent 만)
 #         ./deploy.sh agents  (러너 전체 4개 — bidding/axopm/workmap/wes)
 #         ./deploy.sh mcp     (BE + 러너 전체 — MCP 프로토콜 변경 시 필수)
+#         ./deploy.sh sandbox (스킬 실행 컨테이너 소스 동기화 + 이미지 재빌드 + 재기동)
 #
 # ⚠️ CR-124 이후: BE 와 러너는 MCP transport(Streamable HTTP)가 맞아야 도구 호출이 된다.
 #    한쪽만 올리면 그 사이 BE↔agent 도구 호출이 실패하므로, MCP 관련 배포는
@@ -70,6 +71,23 @@ deploy_rag() {
   echo "━━━ RAG 이미지 빌드 & 재시작 ━━━"
   ssh_run "cd $REMOTE && docker compose up -d --build rag-pipeline"
   echo "✅ RAG 완료 → $REMOTE/python-sidecar/"
+}
+
+# CR-147: 스킬 스크립트 실행 컨테이너. 열쇠가 비면 컨테이너가 기동을 거부하므로 서버 .env 를 먼저 본다.
+# api 가 실행 컨테이너 망에 붙는 것은 api 를 다시 만들 때다(./deploy.sh be).
+deploy_sandbox() {
+  echo "[sandbox] 소스 동기화"
+  if ! ssh_run "grep -Eq '^SKILL_SANDBOX_API_KEY=.+' $REMOTE/.env"; then
+    echo "서버 $REMOTE/.env 에 SKILL_SANDBOX_API_KEY 가 없습니다. 운용 가이드대로 넣은 뒤 다시 실행하세요."
+    exit 1
+  fi
+  ssh_run "mkdir -p $REMOTE/skill-sandbox"
+  scp_send skill-sandbox/Dockerfile skill-sandbox/server.py "$SERVER:$REMOTE/skill-sandbox/"
+  scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
+
+  echo "[sandbox] 이미지 빌드와 재시작"
+  ssh_run "cd $REMOTE && docker compose up -d --build skill-sandbox"
+  echo "[sandbox] 완료: $REMOTE/skill-sandbox/"
 }
 
 deploy_agent() {
@@ -129,8 +147,9 @@ case "$TARGET" in
   agent)  deploy_agent ;;
   agents) deploy_agents ;;
   mcp)    deploy_mcp ;;
+  sandbox) deploy_sandbox ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|all]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|all]"; exit 1 ;;
 esac
 
 echo ""

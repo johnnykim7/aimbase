@@ -63,6 +63,25 @@ services:
       retries: 10
       start_period: 30s
 
+  # ── CR-147 스킬 스크립트 실행 컨테이너 ──
+  # 맥에서 bootRun 으로 띄운 api 가 http://localhost:18147 로 부른다(application-local.yml).
+  # 작업장 경로를 맥과 같은 경로로 붙여야 api 가 넘긴 경로를 컨테이너가 그대로 읽는다.
+  # 운영과 달리 내부 망이 아니다. 내부 망에는 호스트 포트를 열 수 없어서다.
+  skill-sandbox:
+    build:
+      context: ./skill-sandbox
+      dockerfile: Dockerfile
+    init: true
+    ports:
+      - "18147:8300"
+    volumes:
+      - ${HOME}/aimbase-workspace:${HOME}/aimbase-workspace
+    environment:
+      SKILL_SANDBOX_API_KEY: ${SKILL_SANDBOX_API_KEY:-local-skill-sandbox-key}
+      SANDBOX_WORKSPACE_ROOT: ${HOME}/aimbase-workspace
+    mem_limit: 2g
+    cpus: 2
+
   # ── Python Sidecar — RAG Pipeline MCP Server ──
   rag-pipeline:
     build:

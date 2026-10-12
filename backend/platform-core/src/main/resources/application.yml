@@ -210,6 +210,13 @@ aimbase:
     base: ${AIMBASE_WORKSPACE_BASE:/data/workspaces}
     whitelist-roots:
       - ${AIMBASE_WORKSPACE_WHITELIST:${user.home}/Documents/GitHub/bp-fulfillment-infra}
+  # CR-147: 스킬 스크립트 실행 컨테이너. 주소와 열쇠는 환경마다 달라 global_config 가 아니라 여기 둔다.
+  # 열쇠는 실행 컨테이너와 같은 SKILL_SANDBOX_API_KEY 를 읽는다(운영 .env 한 줄을 둘이 같이 쓴다).
+  skill-sandbox:
+    url: ${SKILL_SANDBOX_URL:http://skill-sandbox:8300}
+    api-key: ${SKILL_SANDBOX_API_KEY:}
+    connect-timeout-seconds: ${SKILL_SANDBOX_CONNECT_TIMEOUT_SECONDS:5}
+    response-grace-seconds: ${SKILL_SANDBOX_RESPONSE_GRACE_SECONDS:30}
   # CR-132: CLI 산출물(out/) 다운로드 유예 시간. TTL 초과 mtime 파일은 GC 가 삭제.
   artifact:
     ttl-hours: ${AIMBASE_ARTIFACT_TTL_HOURS:24}

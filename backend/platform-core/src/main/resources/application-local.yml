@@ -10,6 +10,19 @@ spring:
       api-key: ${OPENAI_API_KEY:}
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}/v1
 
+aimbase:
+  workspace:
+    # 맥에는 /data 가 없어 기본값(/data/workspaces)으로는 run 작업장을 만들지 못한다.
+    # 작업장 뿌리는 화이트리스트 안이어야 하므로 기본 화이트리스트에 같은 경로를 더한다.
+    base: ${AIMBASE_WORKSPACE_BASE:${user.home}/aimbase-workspace}
+    whitelist-roots:
+      - ${AIMBASE_WORKSPACE_WHITELIST:${user.home}/Documents/GitHub/bp-fulfillment-infra}
+      - ${AIMBASE_WORKSPACE_BASE:${user.home}/aimbase-workspace}
+  # CR-147: 로컬 실행 컨테이너는 포트 레지스트리의 18147. 열쇠는 docker-compose.yml 의 로컬 기본값과 같다.
+  skill-sandbox:
+    url: ${SKILL_SANDBOX_URL:http://localhost:18147}
+    api-key: ${SKILL_SANDBOX_API_KEY:local-skill-sandbox-key}
+
 # Python RAG Pipeline MCP Server
 rag:
   mcp:
