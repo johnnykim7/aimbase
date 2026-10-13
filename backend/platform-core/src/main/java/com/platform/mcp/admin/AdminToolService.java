@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.domain.WorkflowEntity;
 import com.platform.repository.*;
 import com.platform.workflow.WorkflowEngine;
+import com.platform.workflow.WorkflowValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -30,6 +31,8 @@ public class AdminToolService {
     private final WorkflowRepository workflowRepository;
     private final WorkflowRunRepository workflowRunRepository;
     private final WorkflowEngine workflowEngine;
+    private final WorkflowValidator workflowValidator;
+    private final ProjectRepository projectRepository;
 
     public AdminToolService(ObjectMapper objectMapper,
                             ConnectionRepository connectionRepository,
@@ -39,7 +42,9 @@ public class AdminToolService {
                             PolicyRepository policyRepository,
                             WorkflowRepository workflowRepository,
                             WorkflowRunRepository workflowRunRepository,
-                            WorkflowEngine workflowEngine) {
+                            WorkflowEngine workflowEngine,
+                            WorkflowValidator workflowValidator,
+                            ProjectRepository projectRepository) {
         this.objectMapper = objectMapper;
         this.connectionRepository = connectionRepository;
         this.knowledgeSourceRepository = knowledgeSourceRepository;
@@ -49,6 +54,8 @@ public class AdminToolService {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.workflowEngine = workflowEngine;
+        this.workflowValidator = workflowValidator;
+        this.projectRepository = projectRepository;
     }
 
     // ── 조회 도구 (6개) ──────────────────────────────────────
@@ -156,16 +163,27 @@ public class AdminToolService {
                 .orElse("{\"error\":\"Workflow not found: " + id + "\"}");
     }
 
+    // CR-149: 저장 API(WorkflowController)를 거치지 않는 저장 경로라 같은 검사를 여기서도 한다
     @SuppressWarnings("unchecked")
     public String createWorkflow(Map<String, Object> input) {
+        String name = requireString(input, "name");
+        List<Map<String, Object>> steps = (List<Map<String, Object>>) input.get("steps");
+        Map<String, Object> errorHandling = (Map<String, Object>) input.get("error_handling");
+        String projectId = (String) input.get("project_id");
+        workflowValidator.validate(steps);
+        workflowValidator.validateErrorHandling(errorHandling);
+        if (projectId != null && !projectRepository.existsById(projectId)) {
+            throw new IllegalArgumentException("Project not found: " + projectId);
+        }
+
         WorkflowEntity entity = new WorkflowEntity();
         entity.setId(UUID.randomUUID().toString());
-        entity.setName(requireString(input, "name"));
+        entity.setName(name);
         entity.setDomain((String) input.get("domain"));
-        entity.setProjectId((String) input.get("project_id"));
+        entity.setProjectId(projectId);
         entity.setTriggerConfig((Map<String, Object>) input.getOrDefault("trigger_config", Map.of("type", "manual")));
-        entity.setSteps((List<Map<String, Object>>) input.get("steps"));
-        entity.setErrorHandling((Map<String, Object>) input.get("error_handling"));
+        entity.setSteps(steps);
+        entity.setErrorHandling(errorHandling);
         entity.setOutputSchema((Map<String, Object>) input.get("output_schema"));
         entity.setInputSchema((Map<String, Object>) input.get("input_schema"));
         entity.setActive(true);
@@ -175,6 +193,12 @@ public class AdminToolService {
     @SuppressWarnings("unchecked")
     public String updateWorkflow(Map<String, Object> input) {
         String id = requireString(input, "workflow_id");
+        if (input.containsKey("steps")) {
+            workflowValidator.validate((List<Map<String, Object>>) input.get("steps"));
+        }
+        if (input.containsKey("error_handling")) {
+            workflowValidator.validateErrorHandling((Map<String, Object>) input.get("error_handling"));
+        }
         return workflowRepository.findByIdAndIsActiveTrue(id)
                 .map(entity -> {
                     if (input.containsKey("name")) entity.setName((String) input.get("name"));

@@ -7,6 +7,7 @@ import com.platform.domain.WorkflowEntity;
 import com.platform.domain.WorkflowRunEntity;
 import com.platform.repository.*;
 import com.platform.workflow.WorkflowEngine;
+import com.platform.workflow.WorkflowValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -14,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
 
@@ -37,6 +39,7 @@ class AdminToolServiceTest {
     @Mock private WorkflowRepository workflowRepository;
     @Mock private WorkflowRunRepository workflowRunRepository;
     @Mock private WorkflowEngine workflowEngine;
+    @Mock private ProjectRepository projectRepository;
 
     private AdminToolService service;
     private final ObjectMapper objectMapper = new ObjectMapper()
@@ -54,7 +57,9 @@ class AdminToolServiceTest {
                 policyRepository,
                 workflowRepository,
                 workflowRunRepository,
-                workflowEngine
+                workflowEngine,
+                new WorkflowValidator(),
+                projectRepository
         );
     }
 
@@ -230,13 +235,73 @@ class AdminToolServiceTest {
         input.put("project_id", "proj-x");
         input.put("trigger_config", Map.of("type", "webhook"));
         input.put("steps", List.of(Map.of("id", "s1", "type", "TOOL_USE")));
-        input.put("error_handling", Map.of("strategy", "retry", "max_retries", 3));
+        input.put("error_handling", Map.of("retryMaxAttempts", 3, "retryDelayMs", 1000));
         input.put("output_schema", Map.of("type", "object"));
+        when(projectRepository.existsById("proj-x")).thenReturn(true);
 
         String result = service.createWorkflow(input);
 
         assertThat(result).contains("\"domain\":\"sales\"");
+        assertThat(result).contains("\"projectId\":\"proj-x\"");
         assertThat(result).contains("webhook");
+        assertThat(result).contains("\"retryMaxAttempts\":3");
+    }
+
+    // TC-MCP-ADM-006
+    @Test
+    void createWorkflow_legacyErrorHandling_isRejectedWithoutSaving() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("name", "Legacy WF");
+        input.put("steps", List.of(Map.of("id", "s1", "type", "LLM_CALL")));
+        input.put("error_handling", Map.of("strategy", "retry", "max_retries", 3));
+
+        assertThatThrownBy(() -> service.createWorkflow(input))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("is not allowed");
+        verify(workflowRepository, never()).save(any());
+    }
+
+    // TC-MCP-ADM-007
+    @Test
+    void createWorkflow_unknownProject_isRejectedWithoutSaving() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("name", "Ghost Project WF");
+        input.put("project_id", "ghost");
+        input.put("steps", List.of(Map.of("id", "s1", "type", "LLM_CALL")));
+        when(projectRepository.existsById("ghost")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.createWorkflow(input))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Project not found: ghost");
+        verify(workflowRepository, never()).save(any());
+    }
+
+    // TC-MCP-ADM-008
+    @Test
+    void createWorkflow_invalidStepConfig_isRejectedWithoutSaving() {
+        Map<String, Object> input = new HashMap<>();
+        input.put("name", "Broken Loop WF");
+        input.put("steps", List.of(Map.of("id", "loop", "type", "EVALUATOR_LOOP")));
+
+        assertThatThrownBy(() -> service.createWorkflow(input))
+                .isInstanceOf(ResponseStatusException.class);
+        verify(workflowRepository, never()).save(any());
+    }
+
+    // TC-MCP-ADM-009
+    @Test
+    void updateWorkflow_legacyErrorHandling_keepsExistingValue() {
+        WorkflowEntity entity = buildWorkflow("wf-1", "Original");
+        entity.setErrorHandling(Map.of("retryMaxAttempts", 1, "retryDelayMs", 500));
+        Map<String, Object> input = new HashMap<>();
+        input.put("workflow_id", "wf-1");
+        input.put("error_handling", Map.of("max_retries", 3));
+
+        assertThatThrownBy(() -> service.updateWorkflow(input))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("errorHandling.max_retries is not allowed");
+        assertThat(entity.getErrorHandling()).containsEntry("retryMaxAttempts", 1);
+        verify(workflowRepository, never()).save(any());
     }
 
     @Test

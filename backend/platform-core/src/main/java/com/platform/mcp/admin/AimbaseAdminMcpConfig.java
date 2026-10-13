@@ -1,5 +1,6 @@
 package com.platform.mcp.admin;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpServerFeatures;
@@ -12,6 +13,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.ServerResponse;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -26,6 +28,7 @@ import java.util.function.Function;
 public class AimbaseAdminMcpConfig {
 
     private static final Logger log = LoggerFactory.getLogger(AimbaseAdminMcpConfig.class);
+    private static final ObjectMapper ERROR_JSON = new ObjectMapper();
 
     /** CR-124 (SDK 2.0.0): SSE → Streamable HTTP 전환. 상세 사유는 ServerMcpConfig 참조. */
     @Bean
@@ -62,7 +65,7 @@ public class AimbaseAdminMcpConfig {
               - HUMAN_INPUT: {"message":"...", "timeout_hours":24}
               - SUB_WORKFLOW: {"workflow_id":"..."}
             - trigger_config: {"type":"manual"} 또는 {"type":"webhook","path":"/hooks/..."} 또는 {"type":"schedule","cron":"..."}
-            - error_handling: {"strategy":"stop_on_first"|"continue"|"retry", "max_retries":3}
+            - error_handling: {"retryMaxAttempts":2, "retryDelayMs":3000} (0 이상 정수, 그 밖의 칸은 거부)
             - 도구 호출 루프 최대 5회 (BIZ-001)
             """;
 
@@ -115,7 +118,7 @@ public class AimbaseAdminMcpConfig {
                     "project_id", propStr("프로젝트 ID (선택, 미지정 시 회사 공유)"),
                     "trigger_config", propObj("트리거 설정"),
                     "steps", propArray("DAG 스텝 배열"),
-                    "error_handling", propObj("에러 처리 전략"),
+                    "error_handling", propObj("재시도 설정 {retryMaxAttempts, retryDelayMs} (선택)"),
                     "output_schema", propObj("출력 스키마 (선택)"),
                     "input_schema", propObj("입력 스키마 (선택, JSON Schema 형식으로 입력 파라미터 정의)")),
                     List.of("name", "steps")),
@@ -128,7 +131,7 @@ public class AimbaseAdminMcpConfig {
                     "name", propStr("새 이름"),
                     "trigger_config", propObj("새 트리거 설정"),
                     "steps", propArray("새 스텝 배열"),
-                    "error_handling", propObj("새 에러 처리 전략"),
+                    "error_handling", propObj("새 재시도 설정 {retryMaxAttempts, retryDelayMs}"),
                     "output_schema", propObj("새 출력 스키마"),
                     "input_schema", propObj("새 입력 스키마 (JSON Schema 형식)")),
                     List.of("workflow_id")),
@@ -222,18 +225,33 @@ public class AimbaseAdminMcpConfig {
                         .addTextContent(result)
                         .isError(false)
                         .build();
+            } catch (ResponseStatusException e) {
+                // CR-149: 저장 검사 거부는 클로드가 고쳐 다시 부를 입력 오류라 사유만 돌려준다
+                log.warn("MCP tool '{}' rejected: {}", name, e.getReason());
+                return errorResult(e.getReason());
             } catch (Exception e) {
                 log.error("MCP tool '{}' failed: {}", name, e.getMessage(), e);
-                return McpSchema.CallToolResult.builder()
-                        .addTextContent("{\"error\":\"" + e.getMessage() + "\"}")
-                        .isError(true)
-                        .build();
+                return errorResult(e.getMessage());
             } finally {
                 if (tenantSet) {
                     com.platform.tenant.TenantContext.clear();
                 }
             }
         });
+    }
+
+    // 사유에 따옴표가 섞여도 결과 JSON 이 깨지지 않게 직렬화한다
+    private static McpSchema.CallToolResult errorResult(String message) {
+        String text;
+        try {
+            text = ERROR_JSON.writeValueAsString(Map.of("error", String.valueOf(message)));
+        } catch (JsonProcessingException e) {
+            text = "{\"error\":\"tool failed\"}";
+        }
+        return McpSchema.CallToolResult.builder()
+                .addTextContent(text)
+                .isError(true)
+                .build();
     }
 
     // CR-124 (SDK 2.0.0): JsonSchema 레코드 대신 Map 으로 조립한다.
