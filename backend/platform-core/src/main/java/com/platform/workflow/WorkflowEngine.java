@@ -11,6 +11,7 @@ import com.platform.repository.WorkflowRepository;
 import com.platform.repository.WorkflowRunRepository;
 import com.platform.tenant.TenantContext;
 import com.platform.workflow.model.ErrorHandling;
+import com.platform.workflow.model.GraphMode;
 import com.platform.workflow.model.WorkflowStep;
 import com.platform.workflow.step.StepExecutor;
 import org.slf4j.Logger;
@@ -1082,7 +1083,7 @@ public class WorkflowEngine {
     static final int STEP_BUDGET_DEFAULT = 50;
 
     boolean isCyclicMode(WorkflowEntity entity) {
-        return "cyclic".equalsIgnoreCase(entity.getGraphMode());
+        return GraphMode.parse(entity.getGraphMode()) == GraphMode.CYCLIC;
     }
 
     /**
@@ -1432,13 +1433,10 @@ public class WorkflowEngine {
 
     private ErrorHandling parseErrorHandling(WorkflowEntity entity) {
         Map<String, Object> raw = entity.getErrorHandling();
-        if (raw == null) return ErrorHandling.defaults();
-        try {
-            return objectMapper.convertValue(raw, ErrorHandling.class);
-        } catch (Exception e) {
-            log.warn("Failed to parse errorHandling config, using defaults: {}", e.getMessage());
-            return ErrorHandling.defaults();
+        if (raw != null && !ErrorHandling.KEYS.containsAll(raw.keySet())) {
+            log.warn("Workflow '{}' errorHandling has unknown fields, ignored: {}", entity.getId(), raw.keySet());
         }
+        return ErrorHandling.from(raw);
     }
 
     // ─── 위상 정렬 (Kahn's Algorithm) ─────────────────────────────────────

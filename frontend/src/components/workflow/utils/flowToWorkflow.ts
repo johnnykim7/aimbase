@@ -27,7 +27,7 @@ export const BE_TO_FE_TYPE: Record<string, string> = Object.fromEntries(
 export function flowToWorkflow(
   nodes: Node[],
   edges: Edge[],
-  meta: { id: string; name: string; description?: string; trigger?: string; status?: string; inputSchema?: Record<string, unknown>; outputSchema?: Record<string, unknown> }
+  meta: Omit<WorkflowRequest, "steps">
 ): WorkflowRequest {
   // body 접기: parentId 있는 서브노드는 독립 step 으로 내보내지 않고
   // 부모 FOREACH 의 config.body 로 합친다 (BE 는 body 를 단일 중첩 객체로 받음).
@@ -76,16 +76,7 @@ export function flowToWorkflow(
     };
   });
 
-  return {
-    id: meta.id,
-    name: meta.name,
-    description: meta.description,
-    trigger: meta.trigger,
-    steps,
-    inputSchema: meta.inputSchema,
-    outputSchema: meta.outputSchema,
-    status: meta.status,
-  };
+  return { ...meta, steps };
 }
 
 /**

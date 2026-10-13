@@ -19,6 +19,9 @@ public class WorkflowEntity {
     @Column(length = 200, nullable = false)
     private String name;
 
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
     @Column(length = 50)
     private String domain;
 
@@ -71,6 +74,8 @@ public class WorkflowEntity {
     public void setId(String id) { this.id = id; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
     public String getDomain() { return domain; }
     public void setDomain(String domain) { this.domain = domain; }
     public String getProjectId() { return projectId; }

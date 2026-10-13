@@ -18,6 +18,14 @@ export const useWorkflows = (my?: boolean) =>
     retry: false,
   });
 
+export const useWorkflow = (id?: string) =>
+  useQuery({
+    queryKey: ["workflows", "detail", id],
+    queryFn: () => workflowsApi.get(id as string).then((r) => r.data.data),
+    enabled: !!id,
+    retry: false,
+  });
+
 export const useCreateWorkflow = () => {
   const qc = useQueryClient();
   return useMutation({

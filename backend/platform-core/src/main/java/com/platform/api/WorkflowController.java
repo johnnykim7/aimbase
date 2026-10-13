@@ -1,11 +1,14 @@
 package com.platform.api;
 
+import com.platform.auth.ResourceOwner;
 import com.platform.domain.WorkflowEntity;
 import com.platform.domain.WorkflowRunEntity;
 import com.platform.domain.WorkflowRunEventEntity;
+import com.platform.repository.ProjectRepository;
 import com.platform.repository.WorkflowRepository;
 import com.platform.repository.WorkflowRunEventRepository;
 import com.platform.repository.WorkflowRunRepository;
+import com.platform.tenant.ProjectContext;
 import com.platform.workflow.WorkflowEngine;
 import com.platform.workflow.WorkflowValidator;
 import com.platform.workflow.event.WorkflowRunSubscriberRegistry;
@@ -39,19 +42,25 @@ public class WorkflowController {
     private final WorkflowValidator workflowValidator;
     private final WorkflowRunSubscriberRegistry subscriberRegistry;
     private final WorkflowRunEventRepository eventRepository;
+    private final ProjectRepository projectRepository;
+    private final ResourceOwner resourceOwner;
 
     public WorkflowController(WorkflowRepository workflowRepository,
                                WorkflowRunRepository workflowRunRepository,
                                WorkflowEngine workflowEngine,
                                WorkflowValidator workflowValidator,
                                WorkflowRunSubscriberRegistry subscriberRegistry,
-                               WorkflowRunEventRepository eventRepository) {
+                               WorkflowRunEventRepository eventRepository,
+                               ProjectRepository projectRepository,
+                               ResourceOwner resourceOwner) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.workflowEngine = workflowEngine;
         this.workflowValidator = workflowValidator;
         this.subscriberRegistry = subscriberRegistry;
         this.eventRepository = eventRepository;
+        this.projectRepository = projectRepository;
+        this.resourceOwner = resourceOwner;
     }
 
     @GetMapping
@@ -59,8 +68,18 @@ public class WorkflowController {
     public ApiResponse<?> list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String domain
+            @RequestParam(required = false) String domain,
+            @RequestParam(defaultValue = "false") boolean my
     ) {
+        // CR-149: 2026-04-04 통합 커밋에서 빠진 내 것만 보기(CR-022)와 프로젝트 필터(CR-021)
+        if (my) {
+            String userId = resourceOwner.currentUserId();
+            if (userId != null) return ApiResponse.ok(workflowRepository.findByCreatedByAndIsActiveTrue(userId));
+        }
+        String projectId = ProjectContext.getProjectId();
+        if (projectId != null) {
+            return ApiResponse.ok(workflowRepository.findByProjectIdOrSharedAndIsActiveTrue(projectId));
+        }
         var pageable = PageRequest.of(page, size);
         if (domain != null) {
             return ApiResponse.ok(workflowRepository.findByDomainAndIsActiveTrue(domain));
@@ -73,15 +92,29 @@ public class WorkflowController {
     @Operation(summary = "워크플로우 생성")
     public ApiResponse<WorkflowEntity> create(@Valid @RequestBody WorkflowRequest request) {
         workflowValidator.validate(request.steps());
+        workflowValidator.validateErrorHandling(request.errorHandling());
+        String id = request.id() != null && !request.id().isBlank() ? request.id() : UUID.randomUUID().toString();
+        // save 는 같은 id 를 덮어쓰고 삭제(비활성)된 워크플로우도 되살리므로 저장 전에 막는다
+        if (workflowRepository.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Workflow already exists: " + id);
+        }
+        String projectId = request.projectId() != null ? request.projectId() : ProjectContext.getProjectId();
+        if (projectId != null && !projectRepository.existsById(projectId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project not found: " + projectId);
+        }
         WorkflowEntity entity = new WorkflowEntity();
-        entity.setId(request.id());
+        entity.setId(id);
         entity.setName(request.name());
+        entity.setDescription(request.description());
         entity.setDomain(request.domain());
+        entity.setProjectId(projectId);
+        entity.setGraphMode(workflowValidator.graphMode(request.graphMode()));
         entity.setTriggerConfig(request.triggerConfig());
         entity.setSteps(request.steps());
         entity.setErrorHandling(request.errorHandling());
         entity.setOutputSchema(request.outputSchema());
         entity.setInputSchema(request.inputSchema());
+        entity.setCreatedBy(resourceOwner.ownerIdToRecord());
         entity.setActive(true);
         return ApiResponse.ok(workflowRepository.save(entity));
     }
@@ -100,10 +133,15 @@ public class WorkflowController {
     public ApiResponse<WorkflowEntity> update(@PathVariable String id,
                                                @Valid @RequestBody WorkflowRequest request) {
         workflowValidator.validate(request.steps());
+        workflowValidator.validateErrorHandling(request.errorHandling());
+        String graphMode = workflowValidator.graphMode(request.graphMode());
         WorkflowEntity entity = workflowRepository.findByIdAndIsActiveTrue(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Workflow not found: " + id));
+        // 프로젝트 귀속과 도메인은 생성 때만 정한다(T3-2)
         entity.setName(request.name());
+        entity.setDescription(request.description());
+        entity.setGraphMode(graphMode);
         entity.setTriggerConfig(request.triggerConfig());
         entity.setSteps(request.steps());
         entity.setErrorHandling(request.errorHandling());
@@ -413,9 +451,12 @@ public class WorkflowController {
     }
 
     public record WorkflowRequest(
-            @NotBlank String id,
+            String id,
             @NotBlank String name,
+            String description,
             String domain,
+            String projectId,
+            String graphMode,
             @NotNull Map<String, Object> triggerConfig,
             @NotNull List<Map<String, Object>> steps,
             Map<String, Object> errorHandling,

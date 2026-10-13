@@ -14,6 +14,8 @@ interface StudioToolbarProps {
   onToggleSchema?: () => void;
   schemaActive?: boolean;
   saving?: boolean;
+  /** 기존 워크플로우를 다 불러오기 전에는 저장하지 않는다(CR-149) */
+  canSave?: boolean;
   running?: boolean;
   dirty?: boolean;
   /** 임베드 모드: 이름/설명/뒤로가기 숨기고 액션 버튼만 표시 */
@@ -32,6 +34,7 @@ export function StudioToolbar({
   onToggleSchema,
   schemaActive,
   saving,
+  canSave = true,
   running,
   dirty,
   compact,
@@ -109,7 +112,7 @@ export function StudioToolbar({
             {running ? "실행 중..." : "실행"}
           </ActionButton>
         )}
-        <ActionButton small variant="primary" onClick={onSave} disabled={saving}>
+        <ActionButton small variant="primary" onClick={onSave} disabled={saving || !canSave}>
           {saving ? "저장 중..." : "저장"}
         </ActionButton>
       </div>

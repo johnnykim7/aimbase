@@ -45,7 +45,9 @@ class WorkflowControllerGetEventsTest {
                 mock(WorkflowEngine.class),
                 mock(WorkflowValidator.class),
                 mock(WorkflowRunSubscriberRegistry.class),
-                eventRepository);
+                eventRepository,
+                mock(com.platform.repository.ProjectRepository.class),
+                mock(com.platform.auth.ResourceOwner.class));
     }
 
     @Test

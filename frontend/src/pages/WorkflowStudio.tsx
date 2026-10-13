@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ReactFlow,
@@ -25,7 +25,7 @@ import WorkflowNode from "../components/workflow/nodes/WorkflowNode";
 import ForeachGroupNode from "../components/workflow/nodes/ForeachGroupNode";
 import { flowToWorkflow, hasCycle } from "../components/workflow/utils/flowToWorkflow";
 import { workflowToFlow, autoLayout } from "../components/workflow/utils/workflowToFlow";
-import { useWorkflows, useCreateWorkflow } from "../hooks/useWorkflows";
+import { useWorkflow, useCreateWorkflow } from "../hooks/useWorkflows";
 import { useUpdateWorkflow, useRunWorkflow } from "../hooks/useWorkflows";
 
 const nodeTypes = { workflowNode: WorkflowNode, foreachGroup: ForeachGroupNode };
@@ -39,6 +39,9 @@ const GROUP_PAD_X = 16;
 // FOREACH body 로 들어갈 수 있는 스텝 타입 (단일 body)
 const BODY_ELIGIBLE = new Set(["llm", "tool", "agent", "large_input", "sub_workflow"]);
 
+// 스튜디오에는 트리거 칸이 없어 새 워크플로우는 수동 실행으로 만든다(T3-3)
+const NEW_WORKFLOW_TRIGGER = { type: "manual" };
+
 let idCounter = 0;
 function nextId() {
   return `node_${Date.now()}_${idCounter++}`;
@@ -51,15 +54,11 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition } = useReactFlow();
 
-  const { data: workflows = [] } = useWorkflows();
+  // 목록 첫 페이지에서 찾으면 그 밖의 워크플로우를 빈 단계로 저장할 수 있어 상세 조회로 불러온다
+  const { data: existingWorkflow, isError: loadFailed } = useWorkflow(id);
   const createWorkflow = useCreateWorkflow();
   const updateWorkflow = useUpdateWorkflow();
   const runWorkflow = useRunWorkflow();
-
-  const existingWorkflow = useMemo(
-    () => (id ? workflows.find((w) => w.id === id) : undefined),
-    [id, workflows]
-  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([] as Edge[]);
@@ -230,6 +229,7 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
   }, [nodes, edges, setNodes, setEdges]);
 
   const handleSave = useCallback(async () => {
+    if (!loaded) return;
     if (hasCycle(nodes, edges)) {
       alert("순환 의존이 감지되었습니다. DAG에는 순환이 허용되지 않습니다.");
       return;
@@ -258,7 +258,10 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
       id: workflowId,
       name,
       description,
-      status: "draft",
+      // 화면에 칸이 없는 설정은 불러온 값을 그대로 보낸다. 수정은 통째로 바꾸므로 빠뜨리면 지워진다.
+      triggerConfig: existingWorkflow?.triggerConfig ?? NEW_WORKFLOW_TRIGGER,
+      errorHandling: existingWorkflow?.errorHandling ?? undefined,
+      graphMode: existingWorkflow?.graphMode ?? undefined,
       inputSchema: parsedInputSchema,
       outputSchema: parsedSchema,
     });
@@ -275,7 +278,8 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
       console.error("저장 실패:", err);
       alert("저장에 실패했습니다.");
     }
-  }, [nodes, edges, id, name, description, isNew, createWorkflow, updateWorkflow, navigate]);
+  }, [nodes, edges, id, name, description, inputSchema, outputSchema, existingWorkflow, loaded, isNew,
+      createWorkflow, updateWorkflow, navigate]);
 
   const handleRun = useCallback(async () => {
     if (!id) {
@@ -313,10 +317,16 @@ function StudioInner({ embedded }: { embedded?: boolean }) {
         onToggleSchema={() => setShowSchemaPanel((p) => !p)}
         schemaActive={showSchemaPanel}
         saving={createWorkflow.isPending || updateWorkflow.isPending}
+        canSave={loaded}
         running={runWorkflow.isPending}
         dirty={dirty}
         compact={embedded}
       />
+      {loadFailed && (
+        <div className="px-4 py-2 text-xs text-destructive border-b border-border">
+          워크플로우를 불러오지 못해 저장할 수 없습니다.
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         <NodePalette />

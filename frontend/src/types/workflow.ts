@@ -15,6 +15,11 @@ export interface Workflow {
   id: string;
   name: string;
   description?: string;
+  domain?: string | null;
+  projectId?: string | null;
+  graphMode?: string | null;
+  triggerConfig?: Record<string, unknown>;
+  errorHandling?: Record<string, unknown> | null;
   trigger?: string;
   steps?: WorkflowStep[];
   inputSchema?: Record<string, unknown>;
@@ -40,15 +45,19 @@ export interface WorkflowRun {
   steps?: { stepId: string; status: string; output?: unknown }[];
 }
 
+/** CR-149: 서버 저장 API 계약(T3-2). 서버는 이 밖의 칸을 400 으로 거부한다. */
 export interface WorkflowRequest {
-  id: string;
+  id?: string;
   name: string;
   description?: string;
-  trigger?: string;
-  steps?: WorkflowStep[];
+  domain?: string;
+  projectId?: string;
+  graphMode?: string;
+  triggerConfig: Record<string, unknown>;
+  steps: WorkflowStep[];
+  errorHandling?: Record<string, unknown>;
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
-  status?: string;
 }
 
 export type PlatformWorkflow = Workflow;

@@ -46,7 +46,9 @@ class WorkflowControllerDeleteTest {
                 engine,
                 mock(WorkflowValidator.class),
                 mock(WorkflowRunSubscriberRegistry.class),
-                mock(WorkflowRunEventRepository.class));
+                mock(WorkflowRunEventRepository.class),
+                mock(com.platform.repository.ProjectRepository.class),
+                mock(com.platform.auth.ResourceOwner.class));
     }
 
     private static WorkflowEntity workflow(String id) {
@@ -82,7 +84,7 @@ class WorkflowControllerDeleteTest {
     void inactiveDefinitionIsNotFound() {
         when(workflowRepository.findByIdAndIsActiveTrue("gone")).thenReturn(Optional.empty());
         var request = new WorkflowController.WorkflowRequest(
-                "gone", "gone", null, Map.of(), List.of(), null, null, null);
+                "gone", "gone", null, null, null, null, Map.of(), List.of(), null, null, null);
 
         assertNotFound(() -> controller.get("gone"));
         assertNotFound(() -> controller.update("gone", request));
@@ -111,7 +113,7 @@ class WorkflowControllerDeleteTest {
         when(workflowRepository.findByIsActiveTrue(any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(workflow("wf-1"))));
 
-        controller.list(0, 20, null);
+        controller.list(0, 20, null, false);
 
         verify(workflowRepository).findByIsActiveTrue(any(Pageable.class));
         verify(workflowRepository, never()).findAll(any(Pageable.class));

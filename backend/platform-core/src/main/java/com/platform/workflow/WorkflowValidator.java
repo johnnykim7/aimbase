@@ -1,6 +1,8 @@
 package com.platform.workflow;
 
 import com.platform.workflow.step.EvaluatorLoopStepExecutor;
+import com.platform.workflow.model.ErrorHandling;
+import com.platform.workflow.model.GraphMode;
 import com.platform.workflow.model.WorkflowStep;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -10,6 +12,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * 워크플로우 생성/수정 시 스텝 config 유효성 검증.
@@ -320,6 +323,35 @@ public class WorkflowValidator {
         if (n.intValue() < 1) {
             throw bad(location + ": config." + key + " must be >= 1 (got " + n.intValue() + ")");
         }
+    }
+
+    /**
+     * CR-149: 재시도 설정은 ErrorHandling.KEYS 칸만, 0 이상 정수로 받는다.
+     * 다른 이름의 칸은 실행 때 무시되어 소비앱이 적은 값이 기본값으로 바뀌는 것을 저장 때 알린다.
+     */
+    public void validateErrorHandling(Map<String, Object> errorHandling) {
+        if (errorHandling == null) return;
+        for (Map.Entry<String, Object> e : errorHandling.entrySet()) {
+            String key = e.getKey();
+            if (!ErrorHandling.KEYS.contains(key)) {
+                throw bad("errorHandling." + key + " is not allowed (allowed: "
+                        + String.join(", ", new TreeSet<>(ErrorHandling.KEYS)) + ")");
+            }
+            long max = ErrorHandling.RETRY_MAX_ATTEMPTS.equals(key) ? Integer.MAX_VALUE : Long.MAX_VALUE;
+            Object v = e.getValue();
+            if (!(v instanceof Integer || v instanceof Long) || ((Number) v).longValue() < 0 || ((Number) v).longValue() > max) {
+                throw bad("errorHandling." + key + " must be a non-negative integer");
+            }
+        }
+    }
+
+    /** CR-149: 저장할 실행 모드. 비우면 dag, dag 와 cyclic 밖은 400. */
+    public String graphMode(String raw) {
+        GraphMode mode = GraphMode.parse(raw);
+        if (mode == null) {
+            throw bad("graphMode must be dag or cyclic (got '" + raw + "')");
+        }
+        return mode.value();
     }
 
     // ═══════════════════════════════════════════════

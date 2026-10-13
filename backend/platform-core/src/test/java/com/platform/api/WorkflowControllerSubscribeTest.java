@@ -42,7 +42,9 @@ class WorkflowControllerSubscribeTest {
     void setUp() {
         controller = new WorkflowController(workflowRepository, workflowRunRepository,
                 workflowEngine, workflowValidator, subscriberRegistry,
-                org.mockito.Mockito.mock(com.platform.repository.WorkflowRunEventRepository.class));
+                org.mockito.Mockito.mock(com.platform.repository.WorkflowRunEventRepository.class),
+                org.mockito.Mockito.mock(com.platform.repository.ProjectRepository.class),
+                org.mockito.Mockito.mock(com.platform.auth.ResourceOwner.class));
     }
 
     @Test

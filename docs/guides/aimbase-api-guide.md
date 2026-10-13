@@ -325,7 +325,7 @@ curl -X POST /api/v1/workflows \
 | `inputSchema` | object | X | 실행 시 입력 검증 JSON Schema |
 | `outputSchema` | object | X | 출력 스키마 |
 | `errorHandling` | object | X | 스텝 재시도. `retryMaxAttempts`(0 이상 정수, 기본 2), `retryDelayMs`(0 이상 정수, 기본 3000). 적지 않은 칸은 기본값, 그 밖의 칸은 400 (CR-149) |
-| `projectId` | string | X | 프로젝트 귀속. 생성 때 생략하면 `X-Project-Id` 헤더, 그것도 없으면 모든 프로젝트 공유. 수정은 바꾸지 않는다 |
+| `projectId` | string | X | 프로젝트 귀속. 생성 때 생략하면 `X-Project-Id` 헤더, 그것도 없으면 모든 프로젝트 공유. 없는 프로젝트면 400. 수정은 바꾸지 않는다 |
 | `graphMode` | string | X | 실행 모드. `dag`(기본, 생략 시) = 위상정렬 1-pass. `cyclic` = 워크리스트 스케줄러, 임의 노드 순환 + ROUTER N-way 분기 추종 (CR-084). 그 밖의 값은 400 |
 
 **스텝 타입과 config**:
