@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.17.0** | 2026-10-13 | Aimbase v8.18.0 기준
+> **v3.18.0** | 2026-10-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -270,7 +270,7 @@ curl -X POST /api/v1/workflows \
     "name": "Evidence 요건 설계 (EV-DESIGN)",
     "domain": "axopm",
     "triggerConfig": { "type": "manual" },
-    "errorHandling": { "strategy": "stop_on_first", "maxRetries": 1 },
+    "errorHandling": { "retryMaxAttempts": 1, "retryDelayMs": 3000 },
     "inputSchema": {
       "type": "object",
       "required": ["outcomeId", "statement"],
@@ -316,16 +316,17 @@ curl -X POST /api/v1/workflows \
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| `id` | string | O | 워크플로우 ID (생성 시 자동 생성, 수정 시 필수) |
+| `id` | string | X | 워크플로우 ID. 생성 때 비우면 서버가 UUID 를 만든다. 이미 있는 id(삭제한 것 포함)면 409. 수정은 경로의 id 를 쓴다 |
 | `name` | string | O | 워크플로우 이름 |
+| `description` | string | X | 설명 (CR-149) |
 | `triggerConfig` | object | O | 트리거 설정 (`{ "type": "manual" }` 등) |
 | `steps` | array | O | 스텝 배열 (아래 스텝 타입 참조) |
-| `domain` | string | X | 도메인 분류 |
+| `domain` | string | X | 도메인 분류. 생성 때만 쓴다 |
 | `inputSchema` | object | X | 실행 시 입력 검증 JSON Schema |
 | `outputSchema` | object | X | 출력 스키마 |
-| `errorHandling` | object | X | 에러 전략 (`strategy`, `maxRetries`) |
-| `projectId` | string | X | 프로젝트 귀속 (생략 시 `X-Project-Id` 헤더) |
-| `graphMode` | string | X | 실행 모드. `dag`(기본, 생략 시) = 위상정렬 1-pass. `cyclic` = 워크리스트 스케줄러, 임의 노드 순환 + ROUTER N-way 분기 추종 (CR-084) |
+| `errorHandling` | object | X | 스텝 재시도. `retryMaxAttempts`(0 이상 정수, 기본 2), `retryDelayMs`(0 이상 정수, 기본 3000). 적지 않은 칸은 기본값, 그 밖의 칸은 400 (CR-149) |
+| `projectId` | string | X | 프로젝트 귀속. 생성 때 생략하면 `X-Project-Id` 헤더, 그것도 없으면 모든 프로젝트 공유. 수정은 바꾸지 않는다 |
+| `graphMode` | string | X | 실행 모드. `dag`(기본, 생략 시) = 위상정렬 1-pass. `cyclic` = 워크리스트 스케줄러, 임의 노드 순환 + ROUTER N-way 분기 추종 (CR-084). 그 밖의 값은 400 |
 
 **스텝 타입과 config**:
 
@@ -459,7 +460,7 @@ curl -X POST /api/v1/workflows \
 
 ### 4-2. 워크플로우 수정
 
-PUT은 **전체 교체**(full replace)입니다. 변경하지 않는 필드도 모두 포함해야 합니다.
+PUT은 **전체 교체**(full replace)입니다. 변경하지 않는 필드도 모두 포함해야 합니다. 보내지 않은 선택 칸(description, graphMode, errorHandling, inputSchema, outputSchema)은 비워지거나 기본값이 됩니다. 표에 없는 칸을 보내면 400 입니다.
 
 ```bash
 curl -X PUT /api/v1/workflows/{id} \
@@ -470,16 +471,16 @@ curl -X PUT /api/v1/workflows/{id} \
     "steps": [ ... ],
     "inputSchema": { ... },
     "outputSchema": { ... },
-    "errorHandling": { "strategy": "stop_on_first", "maxRetries": 2 }
+    "errorHandling": { "retryMaxAttempts": 2, "retryDelayMs": 3000 }
   }'
 ```
 
-> **주의**: body에 `id` 필드가 필수입니다 (path의 `{id}`와 동일 값).
+> body 의 `id` 는 생략할 수 있습니다. 수정 대상은 path 의 `{id}` 입니다.
 
 ### 4-3. 워크플로우 조회
 
 ```bash
-# 목록
+# 목록. X-Project-Id 가 있으면 그 프로젝트와 공유 워크플로우만, my=true 면 내가 만든 것만
 GET /api/v1/workflows
 
 # 상세 (inputSchema 포함)
@@ -2189,6 +2190,7 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.18.0 | 2026-10-13 | **CR-149 워크플로우 저장 계약 정합** (§ 4-1). `description` 추가. 그동안 400 이던 `projectId`, `graphMode` 를 받고 `id` 를 비우면 서버가 만든다. 생성 때 이미 있는 `id` 는 409(전에는 기존 워크플로우를 덮어씀). 목록은 `X-Project-Id` 가 있으면 그 프로젝트와 공유 워크플로우만, `my=true` 면 내가 만든 것만. `errorHandling` 칸 이름을 실제(`retryMaxAttempts`, `retryDelayMs`)로 바로잡음. 이전 문서의 `strategy`, `maxRetries` 는 실행 때 무시되고 있었고 이제 저장 때 400 |
 | v3.17.0 | 2026-10-13 | **CR-147 스킬 묶음** (§ 24). 스킬 묶음 올리기와 조회 API(테넌트 전용, 플랫폼 공용, 판), 워크플로우 단계 config `skills`, 모델 도구 skill_open, skill_read, skill_run, CLI 세 모드 스킬 통로(NATIVE 는 `/mcp-skills`). 헤더 버전을 변경 이력 최신에 맞춤 |
 | v3.16.0 | 2026-08-06 | **CR-137 — 영상 판독 API 신설 + 업로드 상한 정합** (§ 23). ① **`POST/GET /api/v1/vision-jobs`**: 영상을 올리면 서버가 ffmpeg 로 프레임 N장(기본 6, 1~20)을 균등 간격 추출해 VLM 에 태우고 판독 결과를 반환(job 등록→폴링). 지원 MIME 4종 MP4/MOV/WebM/AVI 를 **매직넘버로 판정**하되, iOS 가 `.mov` 를 `video/mp4` 로 보내는 등 헤더 표기가 기기마다 달라 영상은 `video/*` 계열만 일치하면 통과(이미지는 기존대로 엄격). 프레임 추출은 **서버**에서 한다 — 소비앱이 늘어나도 canvas·코덱 분기를 앱마다 재구현하지 않고, 원본이 서버에 남아 재판독·감사가 가능하다. 촬영 UI 는 소비앱 몫. 사진 1장은 이 API 가 아니라 기존 § 18-4 첨부 경로를 쓰며, 채팅 첨부에 영상을 올리면 400 으로 거부하고 이 API 로 안내한다. 원본은 24h 후 GC(BIZ-114), 프레임은 판독 직후 삭제. ② **⚠️ BIZ-115 — 수량은 VLM 에 직접 묻지 말 것**(§ 23-3): 박스 9개의 라벨을 전부 정확히 읽어놓고 "총 7개"라 답하며 7B·32B 동일 — 모델 크기로 해결 안 되는 구조적 한계다. 나열시켜 코드로 셀 것. ③ **업로드 상한 3계층 정합**(회귀 수정): nginx 100m 보다 Spring multipart 가 50MB 로 작아 **50~100MB 파일이 nginx 를 통과하고 Spring 에서 터지던** 실제 버그를 해소(50MB→100MB). § 22 전사 job 상한 표기도 1GB→100MB 로 정정 — 기존 1GB 는 앞단 두 계층에 먼저 막혀 **도달 불가능한 값**이었다. 단위 `MimeValidatorTest` +11 / `FrameExtractorTest` 10 / `VisionJobServiceTest` 8 PASS + platform-core 회귀 GREEN |
 | v3.15.0 | 2026-08-05 | **CR-136 — OpenAI 호환 어댑터 멀티모달(이미지 블록) 전달** (§ 18-4). `OpenAICompatibleAdapter.toMessage()` 가 `ContentBlock.Text` 만 필터링해 **이미지 블록을 조용히 버리던** 갭 해소(에러가 안 나서 모델이 사진 없이 답을 지어내는, 더 위험한 실패였음). 이미지가 포함된 USER 메시지는 OpenAI 멀티파트 `content` 배열(`image_url` = base64 → `data:{mediaType};base64,{data}`, URL → 그대로)로 전달하고, 이미지 없는 메시지는 기존 단일 문자열 경로를 그대로 타 **하위호환**. 빈 data/url 이미지 블록과 빈 텍스트 블록은 파트에서 제외(일부 서버가 빈 파트에 400 반환). 영향 범위 = `openai_compatible` 계열 전부(vLLM/Ollama/LM Studio/DeepSeek/LocalAI) + 이 어댑터에 위임하는 `BedrockAdapter`/`VertexAIAdapter`. 텍스트 경로·API 표면 무변화. 단위 `OpenAICompatibleAdapterTest` 9 PASS + platform-core 회귀 946 PASS. e2e(로컬 LM Studio Qwen2.5-VL): 7B = SKU 라벨 정독·개수 오답(구조적 한계 재현), 32B = 라벨 9개·개수 9개·이상 박스 전부 정확. **주의: 수량은 VLM 에 직접 묻지 말고 나열시켜 코드로 셀 것**(7B/32B 모두 카운팅 실패 — 모델 크기로 해결 안 됨) |

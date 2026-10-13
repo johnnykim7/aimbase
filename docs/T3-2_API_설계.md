@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 6.5 | 최종 수정: 2026-10-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147
+> 설계 버전: 6.6 | 최종 수정: 2026-10-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -545,13 +545,21 @@
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| id | String | ✅ | 워크플로우 ID |
+| id | String | 선택 | 워크플로우 ID. 생성 때 비우면 서버가 UUID 를 만든다. 이미 있는 id(비활성 포함)면 409. 수정은 경로의 id 를 쓴다 [CR-149] |
 | name | String | ✅ | 워크플로우 이름 |
-| domain | String | 선택 | 도메인 분류 |
+| description | String | 선택 | 설명 [CR-149] |
+| domain | String | 선택 | 도메인 분류. 생성 때만 쓴다 |
+| projectId | String | 선택 | 프로젝트 귀속. 생성 때 비우면 `X-Project-Id` 머리글, 그것도 없으면 공유. 수정은 바꾸지 않는다 [CR-021, CR-149] |
+| graphMode | String | 선택 | `dag`(기본) 또는 `cyclic`. 그 밖은 400 [CR-084, CR-149] |
 | triggerConfig | Map | ✅ | 트리거 설정 (JSONB) |
 | steps | List\<Map\> | ✅ | 스텝 정의 목록 |
-| errorHandling | Map | 선택 | 에러 처리 설정 (retry 등) |
+| errorHandling | Map | 선택 | `retryMaxAttempts`(0 이상 정수, 기본 2), `retryDelayMs`(0 이상 정수, 기본 3000). 그 밖의 칸이나 형식 오류는 400 [CR-149] |
 | outputSchema | Map | 선택 | 출력 스키마 (JSON Schema) |
+| inputSchema | Map | 선택 | 입력 파라미터 스키마 |
+
+표에 없는 칸은 400 으로 거부한다. PUT 은 통째로 바꾸므로 보내지 않은 선택 칸(description, graphMode, errorHandling, outputSchema, inputSchema)은 비워지거나 기본값이 된다. 생성한 사용자는 created_by 에 남는다(CR-022).
+
+목록 `GET /workflows`: `my=true` 면 내가 만든 것만(CR-022), 그렇지 않고 `X-Project-Id` 머리글이 있으면 그 프로젝트와 공유 워크플로우만(CR-021), 둘 다 없으면 전체(domain 필터, 페이지). 모두 활성만이다(BIZ-116) [CR-149 복구].
 
 ```json
 {
