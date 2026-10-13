@@ -62,6 +62,7 @@ const CATEGORY_LABELS: Record<string, { label: string; description: string }> = 
   session: { label: "Session", description: "세션 TTL, 메시지 수/크기 제한" },
   compaction: { label: "Compaction", description: "컨텍스트 압축 임계값 (% 단위)" },
   llm: { label: "LLM", description: "프로바이더/어댑터 정책 — Claude CLI 어댑터 허용 테넌트 등" },
+  skills: { label: "Skills", description: "스킬 묶음 올리기 상한, 스킬 도구 읽기와 스크립트 실행 한도" },
 };
 
 export default function PlatformSettings() {

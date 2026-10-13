@@ -97,8 +97,20 @@ public class SkillBundleService {
     }
 
     public Map<String, Object> getBundle(String name, SkillScope scope) {
+        return bundleDetail(locate(name, scope), false);
+    }
+
+    /** 테넌트 화면 상세. 목록과 같은 기준으로 활성 테넌트 전용에 가려진 공용은 shadowed. */
+    public Map<String, Object> getBundleForTenant(String name, SkillScope scope) {
         Located located = locate(name, scope);
-        Map<String, Object> result = bundleSummary(located.bundle(), located.store().scope(), false);
+        boolean shadowed = located.store().scope() == SkillScope.PLATFORM
+                && catalog.store(SkillScope.TENANT).findBundle(located.bundle().getName())
+                        .filter(SkillBundleBase::isActive).isPresent();
+        return bundleDetail(located, shadowed);
+    }
+
+    private Map<String, Object> bundleDetail(Located located, boolean shadowed) {
+        Map<String, Object> result = bundleSummary(located.bundle(), located.store().scope(), shadowed);
         result.put("versions", located.store().listVersions(located.bundle().getId()).stream()
                 .map(this::versionSummary).toList());
         return result;

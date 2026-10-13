@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 6.4 | 최종 수정: 2026-10-12 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147
+> 설계 버전: 6.5 | 최종 수정: 2026-10-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -2371,7 +2371,7 @@ PY-019(독성 분류 강화)는 기존 `validate_output` 도구 내부 로직 �
 |--------|------|------|------|
 | GET | `/skill-bundles` | 테넌트 전용과 플랫폼 공용 묶음 목록. 항목마다 scope(tenant, platform), latest_version, is_active, shadowed | 🔒 |
 | POST | `/skill-bundles` | multipart `file`(zip). 테넌트 전용으로 올린다 (BIZ-118, BIZ-119) | 🔒 |
-| GET | `/skill-bundles/{name}` | 묶음 상세와 판 목록. 쿼리 `scope`(tenant, platform), 없으면 이름 해석 결과 (BIZ-120) | 🔒 |
+| GET | `/skill-bundles/{name}` | 묶음 상세와 판 목록. 쿼리 `scope`(tenant, platform), 없으면 이름 해석 결과 (BIZ-120). shadowed 는 목록과 같은 기준 | 🔒 |
 | GET | `/skill-bundles/{name}/versions/{version}` | 판 상세. frontmatter, instructions, files(path, size_bytes, is_text), warnings. 쿼리 `scope` | 🔒 |
 | GET | `/skill-bundles/{name}/versions/{version}/file` | 파일 하나. 쿼리 `path`, `scope`. 텍스트면 content, 아니면 size_bytes 만 | 🔒 |
 | PATCH | `/skill-bundles/{name}` | {is_active}. 테넌트 전용만 | 🔒 |

@@ -47,7 +47,7 @@ public class SkillBundleController {
     @Operation(summary = "스킬 묶음 상세와 판 목록")
     public ApiResponse<Map<String, Object>> get(@PathVariable String name,
                                                 @RequestParam(required = false) String scope) {
-        return ApiResponse.ok(service.getBundle(name, SkillScope.fromValue(scope)));
+        return ApiResponse.ok(service.getBundleForTenant(name, SkillScope.fromValue(scope)));
     }
 
     @GetMapping("/{name}/versions/{version}")

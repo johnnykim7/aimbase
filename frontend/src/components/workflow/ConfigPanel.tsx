@@ -6,6 +6,7 @@ import { usePrompts } from "../../hooks/usePrompts";
 import { useMCPServers } from "../../hooks/useMCPServers";
 import { useTools } from "../../hooks/useTools";
 import { usePlatformWorkflows } from "../../hooks/usePlatformWorkflows";
+import { SkillPinsField } from "./SkillPinsField";
 import type { Connection } from "../../types/connection";
 import type { Prompt } from "../../types/prompt";
 import type { MCPServer, MCPToolDef } from "../../types/mcp";
@@ -31,7 +32,7 @@ interface ConfigField {
   label: string;
   placeholder?: string;
   multiline?: boolean;
-  type?: "text" | "select" | "multiselect";
+  type?: "text" | "select" | "multiselect" | "skills";
   options?: SelectOption[];
   fetchOptions?: string;
   onSelectFill?: (value: string, allData: unknown[]) => Record<string, string>;
@@ -52,7 +53,7 @@ const TAB_LABELS: Record<TabKey, string> = {
 
 const LLM_TAB_KEYS: Record<TabKey, string[]> = {
   basic: ["connection_id", "model", "temperature"],
-  prompt: ["prompt", "system"],
+  prompt: ["prompt", "system", "skills"],
   tool: ["tool_choice", "allowed_tools", "blocked_tools"],
   schema: ["response_schema"],
 };
@@ -143,7 +144,8 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
 
   // CR-055: EVALUATOR_LOOP의 generator/evaluator/pass_criteria는 중첩 객체로 저장되어야 함
   // CR-120: LARGE_INPUT output_schema(JSON), FOREACH body(중첩 스텝)도 객체 보존
-  const JSON_CONFIG_KEYS = ["response_schema", "input", "generator", "evaluator", "pass_criteria", "output_schema", "body"];
+  // CR-147: skills 는 [{name, version, files}] 배열
+  const JSON_CONFIG_KEYS = ["response_schema", "input", "generator", "evaluator", "pass_criteria", "output_schema", "body", "skills"];
   // CR-120: 쉼표 구분 문자열 → 배열로 직렬화할 키
   const CSV_ARRAY_KEYS = ["focus_areas"];
 
@@ -167,6 +169,8 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
         else delete parsed[key];
       }
     });
+    // CR-147: 빈 글로 남기면 서버가 배열이 아니라고 거부한다(BIZ-121)
+    if (typeof parsed.skills === "string" && !parsed.skills.trim()) delete parsed.skills;
     onUpdate(node.id, { ...node.data, label, config: parsed });
     setShowSaved(true);
     setTimeout(() => setShowSaved(false), 1500);
@@ -193,7 +197,20 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
     platformWfError,
   });
 
+  const isLlmType = stepType === "LLM_CALL" || stepType === "llm";
+
   const renderField = (field: ConfigField) => {
+    if (field.type === "skills") {
+      return (
+        <SkillPinsField
+          key={node.id}
+          value={config[field.key] ?? ""}
+          onChange={(v) => setConfig((c) => ({ ...c, [field.key]: v }))}
+          stepKind={isLlmType ? "LLM_CALL" : "AGENT_CALL"}
+        />
+      );
+    }
+
     if (field.type === "select") {
       const hasOptions = field.options && field.options.length > 0;
       if (!hasOptions) {
@@ -298,8 +315,6 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
       />
     );
   };
-
-  const isLlmType = stepType === "LLM_CALL" || stepType === "llm";
 
   const visibleFields = isLlmType
     ? configFields.filter((f) => LLM_TAB_KEYS[activeTab]?.includes(f.key))
@@ -453,6 +468,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
         { key: "model", label: "모델", placeholder: "예: claude-sonnet-4-20250514, auto" },
         { key: "prompt", label: "프롬프트", placeholder: "{{input}} 변수 사용 가능", multiline: true },
         { key: "system", label: "시스템 메시지", placeholder: "선택사항", multiline: true },
+        { key: "skills", label: "스킬", type: "skills" },
         { key: "temperature", label: "Temperature", placeholder: "0.7" },
         { key: "tool_choice", label: "도구 선택 (CR-006)", placeholder: "auto | none | required | {tool_name}" },
         {
@@ -570,6 +586,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
           ],
         },
         { key: "timeout_ms", label: "타임아웃 (ms)", placeholder: "120000" },
+        { key: "skills", label: "스킬", type: "skills" },
         { key: "agents", label: "멀티에이전트 (JSON)", placeholder: '[{"description":"agent-1","prompt":"..."}]', multiline: true },
         {
           key: "execution",

@@ -26,6 +26,7 @@ import {
   Clock,
   Sparkles,
   History,
+  Package,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,7 @@ const PLATFORM_ITEMS: NavItemDef[] = [
   { path: "/platform/subscriptions", icon: CreditCard, label: "구독 관리" },
   { path: "/platform/api-keys", icon: KeyRound, label: "API Key 관리" },
   { path: "/platform/monitoring", icon: Globe, label: "플랫폼 현황" },
+  { path: "/platform/skill-bundles", icon: Package, label: "공용 스킬" },
   { path: "/platform/settings", icon: Settings2, label: "런타임 설정" },
 ];
 

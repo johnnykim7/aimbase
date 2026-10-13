@@ -4,7 +4,7 @@ import {
   LayoutDashboard, PlugZap, Wrench, FileJson, Shield, MessageSquare,
   Zap, BookOpen, Target, FileText, FolderOpen, Users, BarChart3,
   Building2, CreditCard, KeyRound, Globe,
-  MessageSquareText, MessageCircle, Layers, Settings2, History,
+  MessageSquareText, MessageCircle, Layers, Settings2, History, Sparkles, Package,
 } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { ImpersonationBanner } from "./ImpersonationBanner";
@@ -37,11 +37,13 @@ const ROUTE_HEADERS: Record<string, RouteHeader> = {
   "/chat":                  { title: "Chat", subtitle: "워크스페이스 기반 대화형 채팅", icon: <MessageCircle className={ICON} /> },
   "/context-recipes":       { title: "Context Recipe", subtitle: "컨텍스트 조립 전략 정의 및 소스 관리", icon: <Layers className={ICON} /> },
   "/domain-configs":        { title: "도메인 설정", subtitle: "도메인 앱별 기본 런타임, Recipe, 스코프 설정", icon: <Settings2 className={ICON} /> },
+  "/skills":                { title: "스킬", subtitle: "모델과 연결이 같은 방식으로 쓰는 스킬 묶음과 지시문형 스킬", icon: <Sparkles className={ICON} /> },
   "/monitoring":            { title: "모니터링", subtitle: "비용 추적 및 모델 성능", icon: <BarChart3 className={ICON} /> },
   "/platform/tenants":      { title: "테넌트 관리", subtitle: "Super Admin — 플랫폼 테넌트 전체 관리", icon: <Building2 className={ICON} /> },
   "/platform/subscriptions":{ title: "구독/쿼터 관리", subtitle: "Super Admin — 테넌트별 사용 한도 설정", icon: <CreditCard className={ICON} /> },
   "/platform/api-keys":     { title: "API Key 관리", subtitle: "Super Admin — 시스템 API Key 발급 및 관리", icon: <KeyRound className={ICON} /> },
   "/platform/monitoring":   { title: "플랫폼 현황", subtitle: "Super Admin — 전체 테넌트 사용량 총괄", icon: <Globe className={ICON} /> },
+  "/platform/skill-bundles":{ title: "공용 스킬", subtitle: "Super Admin, 모든 테넌트가 같이 쓰는 스킬 묶음", icon: <Package className={ICON} /> },
   "/platform/settings":    { title: "런타임 설정", subtitle: "Super Admin — 서버 재기동 없이 플랫폼 설정 미세조정", icon: <Settings2 className={ICON} /> },
 };
 

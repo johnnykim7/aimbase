@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Badge } from "../components/common/Badge";
 import { ActionButton } from "../components/common/ActionButton";
 import { Modal } from "../components/common/Modal";
@@ -9,6 +10,15 @@ import { Page } from "../components/layout/Page";
 import { Sparkles, Trash2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { skillsApi, type Skill } from "../api/skills";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import {
+  SkillBundleBoard,
+  UploadBundleButton,
+  useSkillBundleUpload,
+} from "../components/skills/SkillBundleBoard";
+
+// CR-147: 묶음형이 기본 탭. 탭을 주소에 두어 새로 고침과 뒤로 가기에도 남는다.
+type SkillTab = "bundles" | "instructions";
 
 const emptyForm = {
   name: "",
@@ -48,65 +58,86 @@ export default function Skills() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
-  if (isLoading) return <LoadingSpinner fullPage />;
+  const [params, setParams] = useSearchParams();
+  const tab: SkillTab = params.get("tab") === "instructions" ? "instructions" : "bundles";
+  const upload = useSkillBundleUpload("/skill-bundles");
 
   return (
     <Page
       actions={
-        <ActionButton variant="primary" icon="+" onClick={() => { setForm(emptyForm); setShowModal(true); }}>
-          새 스킬
-        </ActionButton>
+        tab === "bundles" ? (
+          <UploadBundleButton upload={upload} />
+        ) : (
+          <ActionButton variant="primary" icon="+" onClick={() => { setForm(emptyForm); setShowModal(true); }}>
+            새 스킬
+          </ActionButton>
+        )
       }
     >
-      {skills.length === 0 ? (
-        <EmptyState
-          icon={<Sparkles className="size-6" />}
-          title="등록된 스킬이 없습니다"
-          description="프롬프트와 도구 조합을 재사용 가능한 스킬로 등록하세요"
-          action={
-            <ActionButton variant="primary" icon="+" onClick={() => setShowModal(true)}>
-              스킬 추가
-            </ActionButton>
-          }
-        />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {skills.map((skill: Skill) => (
-            <div
-              key={skill.id}
-              className="bg-card border border-border rounded-xl p-5 flex flex-col gap-3"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-base">{skill.name}</h3>
-                <div className="flex gap-1">
-                  <button
-                    className="p-1.5 rounded hover:bg-destructive/10"
-                    onClick={() => {
-                      if (confirm(`'${skill.name}' 스킬을 삭제하시겠습니까?`))
-                        deleteSkill.mutate(skill.id);
-                    }}
-                  >
-                    <Trash2 className="size-4 text-destructive" />
-                  </button>
+      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
+        <TabsList variant="line" className="mb-5">
+          <TabsTrigger value="bundles">묶음형</TabsTrigger>
+          <TabsTrigger value="instructions">지시문형</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="bundles">
+          <SkillBundleBoard base="/skill-bundles" upload={upload} />
+        </TabsContent>
+
+        <TabsContent value="instructions">
+          {isLoading ? (
+            <LoadingSpinner />
+          ) : skills.length === 0 ? (
+            <EmptyState
+              icon={<Sparkles className="size-6" />}
+              title="등록된 스킬이 없습니다"
+              description="프롬프트와 도구 조합을 재사용 가능한 스킬로 등록하세요"
+              action={
+                <ActionButton variant="primary" icon="+" onClick={() => setShowModal(true)}>
+                  스킬 추가
+                </ActionButton>
+              }
+            />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {skills.map((skill: Skill) => (
+                <div
+                  key={skill.id}
+                  className="bg-card border border-border rounded-xl p-5 flex flex-col gap-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-base">{skill.name}</h3>
+                    <div className="flex gap-1">
+                      <button
+                        className="p-1.5 rounded hover:bg-destructive/10"
+                        onClick={() => {
+                          if (confirm(`'${skill.name}' 스킬을 삭제하시겠습니까?`))
+                            deleteSkill.mutate(skill.id);
+                        }}
+                      >
+                        <Trash2 className="size-4 text-destructive" />
+                      </button>
+                    </div>
+                  </div>
+                  {skill.description && (
+                    <p className="text-sm text-muted-foreground line-clamp-2">{skill.description}</p>
+                  )}
+                  <div className="flex flex-wrap gap-1">
+                    {skill.tags?.map((tag) => (
+                      <Badge key={tag} color="muted">{tag}</Badge>
+                    ))}
+                  </div>
+                  {skill.tools?.length > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      도구: {skill.tools.join(", ")}
+                    </div>
+                  )}
                 </div>
-              </div>
-              {skill.description && (
-                <p className="text-sm text-muted-foreground line-clamp-2">{skill.description}</p>
-              )}
-              <div className="flex flex-wrap gap-1">
-                {skill.tags?.map((tag) => (
-                  <Badge key={tag} color="muted">{tag}</Badge>
-                ))}
-              </div>
-              {skill.tools?.length > 0 && (
-                <div className="text-xs text-muted-foreground">
-                  도구: {skill.tools.join(", ")}
-                </div>
-              )}
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* 생성 모달 */}
       <Modal

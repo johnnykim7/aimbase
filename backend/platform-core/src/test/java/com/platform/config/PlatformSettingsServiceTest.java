@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 /**
@@ -82,6 +83,20 @@ class PlatformSettingsServiceTest {
         List<String> result = service.getStringList("widget.allowed-origins", List.of());
 
         assertThat(result).containsExactly("a", "b", "c");
+    }
+
+    @Test
+    void getAllGrouped_includesSkillSettings() {
+        when(configRepository.findByConfigKeyStartingWith(anyString()))
+                .thenReturn(List.of());
+        when(configRepository.findByConfigKeyStartingWith("skills."))
+                .thenReturn(List.of(entity("skills.read-max-bytes", "262144")));
+
+        var grouped = service.getAllGrouped(null);
+
+        assertThat(grouped).containsOnlyKeys("skills");
+        assertThat(grouped.get("skills")).extracting(PlatformSettingsService.SettingItem::key)
+                .containsExactly("skills.read-max-bytes");
     }
 
     private GlobalConfigEntity entity(String key, String value) {
