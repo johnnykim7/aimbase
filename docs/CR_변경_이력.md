@@ -105,7 +105,7 @@
 | CR-146 | [Max 연결 앱 도구 호출이 앱 재기동 뒤 옛 연결로 실패하는 결함](CR-146_Max_연결_앱_도구_호출이_앱_재기동_뒤_옛_연결로_실패하는_결함.md) | — | — | — | — |
 | CR-147 | [스킬 묶음 범용화](T3-17_CR-147_스킬묶음_범용화_설계서.md). **요청**: 입찰대행 플랫폼이 Claude Code 스킬 묶음(.skill)을 지시문으로 풀지 않고 그대로 올려 Claude 와 다른 LLM, API 연결과 CLI 연결 모두에서 쓰려 함. **조치**: 묶음 zip 올리기와 판(플랫폼 공용, 테넌트 전용), 모델 도구 skill_open, skill_read, skill_run, 스크립트 전용 실행 컨테이너, 워크플로우 단계 지정, CLI 세 모드 같은 도구 (BIZ-118~123) | 신규 | High | v3.x | 구현완료, 운영 배포 대기 |
 | CR-148 | [CLI 러너가 채팅 출력을 못 읽거나 쉬었다 이어 쓰는 첫 메시지를 거절하는 결함](CR-148_CLI_러너가_채팅_출력을_못_읽거나_쉬었다_이어_쓰는_첫_메시지를_거절하는_결함.md) | — | — | — | — |
-| CR-149 | 워크플로우 저장 API 와 스튜디오를 가이드 계약에 맞춤(결함). **발견 경위**: CR-147 화면 점검 중 스튜디오 저장 400. **원인**: 4월 통합 커밋에서 프로젝트 귀속, 내 것만 보기, 아이디 자동 생성이 빠졌고 설명, 실행 모드는 저장 API 에 없었으며 가이드의 오류 처리 칸 이름이 실제와 달랐다. **조치**: 저장 API 와 목록 필터를 가이드 계약대로 되살리고 스튜디오 저장 본문을 맞춤 | 결함 | High | v3.x | 구현완료 |
+| CR-149 | 워크플로우 저장 API 와 스튜디오를 가이드 계약에 맞춤(결함). **발견 경위**: CR-147 화면 점검 중 스튜디오 저장 400. **원인**: 4월 통합 커밋에서 프로젝트 귀속, 내 것만 보기, 아이디 자동 생성이 빠졌고 설명, 실행 모드는 저장 API 에 없었으며 가이드의 오류 처리 칸 이름이 실제와 달랐다. **조치**: 저장 API 와 목록 필터를 가이드 계약대로 되살리고 스튜디오 저장 본문과 관리 도구(MCP) 저장을 맞춤 | 결함 | High | v3.x | 구현중 |
 
 ---
 
@@ -2438,16 +2438,17 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   4. errorHandling 은 retryMaxAttempts, retryDelayMs(0 이상 정수)만 받고 그 밖은 저장 때 400. 실행 때는 없는 칸을 기본값(2, 3000)으로 채우고, 옛 행의 모르는 칸은 버리고 아는 칸만 읽는다
   5. 스튜디오는 상세 조회로 불러오고 다 불러오기 전에는 저장하지 않는다. 저장 본문에서 status, trigger 를 빼고 화면에 칸이 없는 triggerConfig, errorHandling, graphMode 는 불러온 값을 그대로 보낸다. 새 워크플로우의 triggerConfig 는 {"type": "manual"}
   6. 서버가 모르는 칸을 거부하는 것은 유지한다
-- **결정 (2026-10-13 사용자)**: 10:52:38 서버가 설명을 저장(①), 13:18:49 저장 API 를 가이드 계약대로 한 번에 맞춤(①)
+  7. 관리 도구(MCP)의 create_workflow, update_workflow 도 저장 API 와 같은 검사를 거친다. 단계 설정 검사, errorHandling 칸 검사, 생성 때 없는 프로젝트 거부. 검사에 걸리면 저장하지 않고 오류 결과(isError)에 사유를 담는다. 도구 설명과 AXOPM 워크플로우 가이드의 errorHandling 예시를 retryMaxAttempts, retryDelayMs 로 고친다
+- **결정 (2026-10-13 사용자)**: 10:52:38 서버가 설명을 저장(①), 13:18:49 저장 API 를 가이드 계약대로 한 번에 맞춤(①), 14:37:26 관리 도구(MCP)도 같은 검사를 거치게 함(①, 원본 5절)
 - **기존 동작 변경**: 프로젝트를 고른 상태의 워크플로우 목록이 그 프로젝트와 공유 것만 보인다. errorHandling 에 모르는 칸을 보내면 저장이 거부된다(지금은 저장되고 실행 때 무시). 일부 칸만 적은 errorHandling 의 재시도 간격이 0 에서 기본 3000ms 로 바뀐다
-- **영향 모듈**: domain(WorkflowEntity), api(WorkflowController), auth(ResourceOwner), workflow(WorkflowValidator, ErrorHandling, WorkflowEngine), Tenant 마이그레이션, frontend(WorkflowStudio, flowToWorkflow, useWorkflows, types/workflow)
+- **영향 모듈**: domain(WorkflowEntity), api(WorkflowController), auth(ResourceOwner), workflow(WorkflowValidator, ErrorHandling, WorkflowEngine), mcp/admin(AdminToolService, AimbaseAdminMcpConfig), Tenant 마이그레이션, frontend(WorkflowStudio, flowToWorkflow, useWorkflows, types/workflow)
 - **영향도**: High (스튜디오로 워크플로우를 만들거나 고칠 수 없고, 가이드대로 부른 소비앱이 거부되거나 설정이 무시됨)
 - **영향 범위**: PRD-039, CR-021, CR-022, CR-084, CR-147(단계 스킬 지정 저장)
-- **영향 설계서**: T1-1(PRD-039), T3-1(workflows 칸 보정과 description), T3-2(워크플로우 생성/수정 요청과 목록), T3-3(WorkflowStudio 불러오기와 저장), T3-5(TC-WF-022~033), aimbase-api-guide(워크플로우 생성 칸, errorHandling)
+- **영향 설계서**: T1-1(PRD-039), T3-1(workflows 칸 보정과 description), T3-2(워크플로우 생성/수정 요청과 목록), T3-3(WorkflowStudio 불러오기와 저장), T3-5(TC-WF-022~033, TC-MCP-ADM-006~009), aimbase-api-guide(워크플로우 생성 칸, errorHandling), aimbase-workflow-guide-for-axopm(errorHandling 예시)
 - **영향 없음 확인**: T1-3(새 규칙 없음), T1-5 FSM(워크플로우 상태 전이 없음), T1-6 이벤트(바뀌는 이벤트 없음), T2-1, T2-2(구현 규약 변경 없음), T3-4(스튜디오 순서 표 없음)
 - **범위 밖**: 워크플로우 목록 화면의 트리거, 상태, 실행 횟수, 성공률 칸이 서버가 주지 않는 칸을 읽는 문제(원본 4절). 저장 검사 오류 문구가 화면에 "Bad Request" 로만 보이는 문제(ResponseStatusException 이 오류 응답 틀을 타지 않음). 따로 올린다
 - **검증 (로컬, 2026-10-13)**: 단위 시험 전체 통과. API 실측으로 TC-WF-022, 024~026, 028~032 확인. 스튜디오 화면 시험으로 TC-WF-023(저장 200, 설명 저장, triggerConfig, errorHandling, graphMode, 단계 스킬 유지)과 새 워크플로우 생성(수동 실행 트리거) 확인. TC-WF-027, 033 은 단위 시험
-- **상태**: 구현완료, 운영 배포 대기
+- **상태**: 구현중(변경 내용 7 추가)
 
 ---
 

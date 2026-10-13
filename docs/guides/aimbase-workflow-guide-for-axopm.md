@@ -293,7 +293,7 @@ Claude Code가 생성하는 워크플로우:
       "depends_on": ["check_critical"]
     }
   ],
-  "error_handling": { "strategy": "retry", "max_retries": 2 }
+  "error_handling": { "retryMaxAttempts": 2, "retryDelayMs": 3000 }
 }
 ```
 
