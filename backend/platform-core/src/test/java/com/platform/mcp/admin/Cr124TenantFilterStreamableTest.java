@@ -41,6 +41,8 @@ class Cr124TenantFilterStreamableTest {
             @Override
             public void doFilter(jakarta.servlet.ServletRequest rq, jakarta.servlet.ServletResponse rs) {
                 seen.set(TenantContext.getTenantId());
+                // CR-150: 인증과 테넌트 대조를 통과한 요청으로 둔다(AdminMcpTenantGuard 몫)
+                rq.setAttribute(AdminMcpTenantGuard.ACCEPTED_TENANT_ATTR, TenantContext.getTenantId());
             }
         };
         filter.doFilter(req, new MockHttpServletResponse(), chain);

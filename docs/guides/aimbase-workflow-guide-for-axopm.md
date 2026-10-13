@@ -25,7 +25,7 @@ AXOPM 프로젝트의 `.mcp.json`에 Aimbase Admin MCP 서버를 등록합니다
 > 단일 엔드포인트). 옛 설정으로는 Claude CLI 가 요구하는 프로토콜 `2025-11-25` 협상이
 > 불가해 **도구가 0개**로 보인다.
 
-- **URL에 `tenant_id` 쿼리 파라미터 필수** — 테넌트 DB 라우팅에 사용
+- **URL에 `tenant_id` 쿼리 파라미터 필수** — 테넌트 DB 라우팅에 사용. API 키를 발급한 테넌트와 같아야 한다(다르면 403)
 - **`X-API-Key` 헤더 필수 (CR-150, 2026-10-14)** — Aimbase 관리 화면 `API Key 관리`(`/platform/api-keys`)에서 **같은 테넌트를 지정해** 발급한 키. 키 없이, 테넌트를 지정하지 않은 키로, 또는 키와 다른 `tenant_id` 로 붙으면 403 으로 거부된다
 - 키는 `.mcp.json` 에 직접 적지 말고 환경변수로 전달한다(예: `"X-API-Key": "${AIMBASE_ADMIN_API_KEY}"`)
 - Aimbase BE가 `http://localhost:8080`에서 기동 중이어야 합니다

@@ -3,6 +3,7 @@ package com.platform.config;
 import com.platform.auth.ApiKeyAuthenticationFilter;
 import com.platform.auth.JwtAuthenticationFilter;
 import com.platform.auth.JwtProvider;
+import com.platform.mcp.admin.AdminMcpTenantGuard;
 import com.platform.repository.master.ApiKeyRepository;
 import com.platform.repository.RoleRepository;
 import com.platform.repository.UserRepository;
@@ -72,8 +73,10 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/**", "/swagger-ui/**", "/api-docs/**", "/ws/**").permitAll()
                 // CR-058: 위젯 번들·가이드 정적 리소스 — 인증 없이 공개 (소비앱이 CDN 처럼 소비)
                 .requestMatchers("/widget/**").permitAll()
-                // 기타 SSE / 관리 MCP — 인증 없음
-                .requestMatchers("/sse/**", "/admin-mcp/**").permitAll()
+                // 기타 SSE 는 인증 없음
+                .requestMatchers("/sse/**").permitAll()
+                // CR-150: 관리 도구 MCP 는 X-API-Key 또는 로그인 토큰으로 인증. 테넌트 대조는 AdminMcpTenantGuard
+                .requestMatchers("/admin-mcp/**").authenticated()
                 // CR-072: 서버 도구 MCP endpoint — X-API-Key 인증 (ApiKeyAuthenticationFilter 가 처리)
                 // CR-147: 스킬 도구 전용 통로 /mcp-skills 도 같은 인증
                 .requestMatchers("/mcp/**", "/mcp-skills/**").authenticated()
@@ -95,7 +98,8 @@ public class SecurityConfig {
                 .anyRequest().permitAll()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterAfter(apiKeyFilter, JwtAuthenticationFilter.class);
+            .addFilterAfter(apiKeyFilter, JwtAuthenticationFilter.class)
+            .addFilterAfter(new AdminMcpTenantGuard(), ApiKeyAuthenticationFilter.class);
 
         return http.build();
     }

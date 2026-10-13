@@ -35,6 +35,9 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(ApiKeyAuthenticationFilter.class);
     private static final String API_KEY_HEADER = "X-API-Key";
 
+    /** CR-150: 테넌트 없이 발급한 키로 인증한 요청 표시. 관리 도구(MCP)가 이 키를 거부한다. */
+    public static final String TENANTLESS_KEY_ATTR = ApiKeyAuthenticationFilter.class.getName() + ".tenantlessKey";
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final ApiKeyRepository apiKeyRepository;
@@ -86,6 +89,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 // tenant_id가 null이면 도메인 전용 키 — 기존 TenantContext(헤더 기반) 유지
                 if (apiKeyEntity.getTenantId() != null) {
                     TenantContext.setTenantId(apiKeyEntity.getTenantId());
+                } else {
+                    request.setAttribute(TENANTLESS_KEY_ATTR, Boolean.TRUE);
                 }
 
                 // 시스템 키 — ADMIN 권한 부여

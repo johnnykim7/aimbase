@@ -134,9 +134,6 @@ public class McpTenantSessionFilter implements Filter {
         if (tenantParam != null) {
             // 응답 시작 전에 DataSource 가 준비되어야 함
             dataSourceManager.getTenantDataSource(tenantParam);
-            if (sessionId != null) {
-                bindSession(sessionId, tenantParam);
-            }
             log.info("MCP connected: tenant '{}', DataSource ensured (path={}, session={})",
                     tenantParam, path, abbreviate(sessionId));
         }
@@ -152,27 +149,44 @@ public class McpTenantSessionFilter implements Filter {
 
             chain.doFilter(request, response);
         } finally {
-            // CR-125: DELETE 는 세션 종료 신호다. 해당 매핑을 즉시 제거한다.
-            if ("DELETE".equalsIgnoreCase(req.getMethod()) && sessionId != null) {
-                unbindSession(sessionId);
-                log.info("MCP session unbound on DELETE: session={}", abbreviate(sessionId));
-            }
-
-            // CR-125: initialize 요청은 세션 ID가 응답 헤더로 처음 발급된다.
-            // 요청 헤더엔 없었으므로, 체인 처리 후 응답 헤더를 읽어 그때 매핑을 심는다.
-            if (sessionId == null && tenantParam != null && response instanceof HttpServletResponse res) {
-                String issued = trimToNull(res.getHeader(SESSION_ID_HEADER));
-                if (issued != null) {
-                    bindSession(issued, tenantParam);
-                    log.info("MCP session bound: session={} → tenant '{}'",
-                            abbreviate(issued), tenantParam);
-                }
+            // CR-150: 세션을 묶고 푸는 것은 인증과 테넌트 대조를 통과한 요청만 한다.
+            // 묶는 테넌트는 인증 주체의 테넌트다(통과했다면 tenant_id 와 같다).
+            String accepted = (String) req.getAttribute(AdminMcpTenantGuard.ACCEPTED_TENANT_ATTR);
+            if (accepted != null) {
+                bindOrUnbind(req, response, sessionId, tenantParam, accepted);
             }
 
             // CR-124: Streamable 은 요청마다 스레드가 재사용될 수 있어, 이 필터가 심은 값은
             // 같은 요청 범위에서 되돌린다(누수 방지). 원래 값이 있던 경우는 건드리지 않는다.
             if (tenantSet) {
                 TenantContext.clear();
+            }
+        }
+    }
+
+    private static void bindOrUnbind(HttpServletRequest req, ServletResponse response,
+                                     String sessionId, String tenantParam, String accepted) {
+        // CR-125: DELETE 는 세션 종료 신호다. 해당 매핑을 즉시 제거한다.
+        if ("DELETE".equalsIgnoreCase(req.getMethod())) {
+            if (sessionId != null) {
+                unbindSession(sessionId);
+                log.info("MCP session unbound on DELETE: session={}", abbreviate(sessionId));
+            }
+            return;
+        }
+        if (sessionId != null) {
+            if (tenantParam != null) {
+                bindSession(sessionId, accepted);
+            }
+            return;
+        }
+        // CR-125: initialize 요청은 세션 ID가 응답 헤더로 처음 발급된다.
+        // 요청 헤더엔 없었으므로, 체인 처리 후 응답 헤더를 읽어 그때 매핑을 심는다.
+        if (response instanceof HttpServletResponse res) {
+            String issued = trimToNull(res.getHeader(SESSION_ID_HEADER));
+            if (issued != null) {
+                bindSession(issued, accepted);
+                log.info("MCP session bound: session={}, tenant '{}'", abbreviate(issued), accepted);
             }
         }
     }
