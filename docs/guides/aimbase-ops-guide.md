@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.8.0** | 2026-10-11 | Aimbase v8.18.0 기준
+> **v3.9.0** | 2026-10-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -358,6 +358,67 @@ redis-cli -h localhost -p 6379 get "stt:rate:sess-abc"
 - [ ] `/widget/v1/aimbase-chat.umd.global.js` 번들이 최신(33KB+)인지 확인 — Gradle `copyWidgetBundle` 태스크가 빌드 시 자동 수행
 - [ ] 테넌트 Connection 에 OpenAI 등록 + `connected` 상태 확인 (위젯 STT 는 테넌트 OpenAI 키를 공유)
 - [ ] 샘플 consumer HTTPS 환경에서 마이크 버튼 노출 → 녹음 5초 → 입력창 자동 삽입 확인 (골든 패스)
+
+### 2-8. 플랫폼 공용 스킬과 실행 컨테이너 운영 [CR-147]
+
+Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트가 같이 쓰게 합니다. 테넌트 전용 스킬은 § 3-17, API 는 api-guide § 24.
+
+**화면**: 사이드바 Super Admin 묶음의 "공용 스킬"(`/platform/skill-bundles`).
+
+| 작업 | 방법 | 결과 |
+|---|---|---|
+| 올리기 | 묶음 올리기 단추, 파일 선택 | 결과 창에 판 번호와 경고. 내용이 직전 판과 같으면 새 판을 만들지 않는다 |
+| 새 판 | 상세 창의 새 판 올리기 | 판 번호가 1 는다. 옛 판은 그대로 남는다 |
+| 보기 | 행 선택 | 판 목록, 안내서, 파일, 올릴 때 경고 |
+| 끄기 | 상세 창의 비활성으로, 확인 | 모든 테넌트에서 쓰이지 않는다. 같은 이름의 테넌트 전용이 없는 테넌트는 이 스킬을 지정한 단계가 실패한다 |
+| 다시 켜기 | 활성으로, 또는 다시 올리기 | 활성으로 돌아온다 |
+
+같은 이름을 테넌트가 올리면 그 테넌트에서는 테넌트 전용이 먼저 쓰입니다(BIZ-120). 올릴 때 경고(안내서가 가리키는 파일이 없음, 폴더 이름과 스킬 이름이 다름, 실행 컨테이너가 돌리지 못하는 스크립트)는 거부가 아니므로 묶음 작성자에게 알려 고칩니다.
+
+**런타임 설정**: 사이드바 Super Admin 묶음 "런타임 설정" 의 Skills 카드.
+
+| 키 | 기본값 | 뜻 |
+|---|---|---|
+| skills.bundle-max-bytes | 20971520 | zip 크기와 푼 합계 상한 |
+| skills.bundle-max-files | 500 | 파일 수 상한 |
+| skills.file-max-bytes | 10485760 | 파일 하나 상한 |
+| skills.description-max-chars | 1024 | SKILL.md 앞머리 description 글자 수 |
+| skills.ignored-entries | `__MACOSX/,.DS_Store` | 올릴 때 제외하는 항목 |
+| skills.runnable-extensions | `.py,.js,.mjs,.sh` | 올릴 때 scripts 폴더 경고 기준 |
+| skills.read-max-bytes | 262144 | skill_read 한 번에 읽는 양 |
+| skills.inline-max-bytes | 262144 | 단계 지시문에 붙이는 합계 |
+| skills.script-timeout-seconds | 120 | skill_run 기본 시간 |
+| skills.script-timeout-max-seconds | 600 | skill_run 최대 시간 |
+| skills.script-output-max-bytes | 65536 | stdout, stderr 각각 |
+
+**실행 컨테이너(skill-sandbox)**: 스킬 스크립트(skill_run)만 돌리는 컨테이너입니다. 바깥 인터넷이 없는 내부 망(`skill-sandbox-net`)에만 붙고 비밀값을 받지 않습니다(BIZ-122). api 만 그 망에 같이 붙습니다.
+
+처음 올릴 때 순서:
+
+1. 서버 `.env` 에 열쇠를 넣는다. 비어 있으면 컨테이너가 기동을 거부하고 `./deploy.sh sandbox` 도 멈춘다.
+   ```bash
+   echo "SKILL_SANDBOX_API_KEY=$(openssl rand -hex 32)" >> <서버 배포 경로>/.env
+   ```
+2. `./deploy.sh sandbox` 로 실행 컨테이너를 만든다.
+3. `./deploy.sh be` 로 api 를 다시 만든다. 이때 api 가 실행 컨테이너 망에 붙고 열쇠를 읽는다. 스킬 묶음 테이블 마이그레이션(Master, Tenant)도 이때 적용된다.
+4. `./deploy.sh fe` 로 화면을 올린다.
+5. CLI 연결을 쓰면 `./deploy.sh agents` 로 러너를 올린다. 옛 러너는 단계의 스킬 지정을 Aimbase 로 보내지 못한다.
+
+스크립트가 쓸 패키지 추가: 운영 망에서 스크립트가 패키지를 내려받을 수 없으므로 이미지에 미리 넣습니다. `skill-sandbox/Dockerfile` 의 `pip install`(Python), `npm install -g`(Node), `apt-get install`(시스템) 줄에 추가하고 `./deploy.sh sandbox` 로 다시 만듭니다. 지금 들어 있는 것은 그 파일이 정본입니다.
+
+| 증상 | 확인 |
+|---|---|
+| skill_run 이 "실행 컨테이너에 닿지 못했습니다" 로 실패 | `docker compose ps skill-sandbox` 가 healthy 인지, api 를 sandbox 이후에 다시 만들었는지 |
+| skill_run 이 "실행 컨테이너가 거부했습니다(401)" 로 실패 |
+| skill_run 이 "BIZ-122: 실행 컨테이너 주소나 열쇠가 설정되지 않았습니다" | api 가 `.env` 의 열쇠를 읽지 못했다. `.env` 를 고친 뒤 `./deploy.sh be` | api 와 실행 컨테이너가 같은 `.env` 열쇠를 읽는지. 열쇠를 바꿨으면 둘 다 다시 만든다 |
+| 스크립트가 모듈을 못 찾음 | 위 패키지 추가 절차 |
+| 스크립트가 시간 초과 | `skills.script-timeout-seconds` 상향, 또는 모델이 timeout_seconds 를 주게 안내서를 고친다 |
+
+**배포 전 체크리스트**:
+- [ ] 서버 `.env` 에 `SKILL_SANDBOX_API_KEY` 가 있다
+- [ ] sandbox, be, fe(, agents) 순서로 올렸다
+- [ ] 공용 스킬 화면에서 묶음 하나를 올리고 상세가 열린다
+- [ ] 스킬을 지정한 AGENT_CALL 단계 하나를 돌려 실행 내역의 단계 시작 이벤트에 스킬과 판이 남는다
 
 ---
 
@@ -941,6 +1002,42 @@ CLI(`/mcp/sse`) 경로와 API 어댑터가 모델에 싣는 도구 화이트리�
 - 단일 에이전트 또는 멀티에이전트(parallel/sequential) 지원
 - `{{input.key}}`, `{{stepId.field}}` 변수 치환 지원
 
+### 3-17. 스킬 묶음 관리 [CR-147]
+
+**화면**: 사이드바 "스킬"(`/skills`). 탭이 두 개입니다.
+
+| 탭 | 내용 |
+|---|---|
+| 묶음형(기본) | 올린 스킬 묶음. 우리 전용과 플랫폼 공용이 같이 보인다 |
+| 지시문형 | 지금까지 쓰던 지시문형 스킬. 바뀐 것 없음 |
+
+묶음형 탭:
+- 묶음 올리기로 우리 전용 스킬을 올린다. 올릴 때마다 새 판이 생기고 옛 판은 남는다.
+- 상태가 "우리 전용에 가려짐" 인 공용 스킬은 같은 이름의 우리 전용 스킬이 있어 쓰이지 않는다.
+- 공용 스킬은 보기만 한다. 우리 전용 스킬은 비활성으로 바꿀 수 있다. 끄면 같은 이름의 공용 스킬이 대신 쓰이고, 없으면 이 스킬을 지정한 단계가 실패한다.
+
+**워크플로우 단계 지정**: 워크플로우 스튜디오에서 LLM_CALL(프롬프트 탭 맨 아래) 또는 AGENT_CALL 노드 설정의 "스킬" 칸.
+
+| 칸 | 선택 |
+|---|---|
+| 스킬 | 활성이고 가려지지 않은 스킬만 목록에 나온다 |
+| 판 | 최신(실행 때 가장 큰 판) 또는 판 번호 고정 |
+| 미리 붙일 파일 | 처음부터 지시문에 붙일 텍스트 파일 |
+
+| 단계 | 동작 |
+|---|---|
+| LLM_CALL | 스크립트를 돌리지 않는다. 안내서와 선택한 파일이 지시문에 붙는다 |
+| AGENT_CALL | 에이전트가 skill_open, skill_read 로 스킬을 열어 읽고 skill_run 으로 스크립트를 돌린다. 선택한 파일은 처음부터 붙는다. API 연결과 CLI 연결(AIMBASE, HYBRID, NATIVE)이 같은 도구를 쓴다 |
+
+판은 단계 시작 때 정해지고, 실행 내역의 단계 시작 이벤트에 스킬 이름, 범위, 판이 남는다. 판을 고정해 두면 새 판을 올려도 그 단계는 바뀌지 않는다.
+
+| 증상 | 확인 |
+|---|---|
+| 스킬 칸에 "쓸 수 없음" 또는 "판 N 이 없어 이 단계가 실패합니다" | 스킬이 비활성이거나 가려졌는지, 판 번호가 있는지 |
+| "선택한 판에 없는 파일" | 판을 바꿔 그 파일이 없어졌다. 제외 단추로 지정에서 제외한다 |
+| 단계가 크기 초과로 실패 | 미리 붙일 파일을 줄이거나 `skills.inline-max-bytes` 상향(Super Admin) |
+| skill_run 이 실패 | § 2-8 실행 컨테이너 표 |
+
 ---
 
 ## 4. 운영 시나리오
@@ -1452,6 +1549,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.9.0 | 2026-10-13 | **CR-147 스킬 묶음** (§ 2-8, § 3-17). 플랫폼 공용 스킬 화면과 런타임 설정 Skills 카드, 스크립트 실행 컨테이너 첫 배포 순서(서버 `.env` 의 SKILL_SANDBOX_API_KEY, sandbox, be, fe, agents)와 패키지 추가 절차, 테넌트 스킬 화면 묶음형 탭, 워크플로우 단계 스킬 지정 |
 | v3.8.0 | 2026-10-11 | **CR-145 — MCP 서버 등록 머리글** (§ 3-7). 등록 config `headers` 를 모든 MCP 요청에 싣고, 조회 응답에서 값을 `****` 로 가림. 수정 시 `****` 는 저장값 유지 |
 | v3.7.0 | 2026-06-18 | **현행화 — 헤더 동기화 + CR-105/107/109/110/111/114/116 운영분 누락 보강**. 헤더를 v1.7.0(2026-04-10, v6.4.0) → v3.7.0(2026-06-18, v8.18.0)로 정정(변경이력은 v3.6.0까지 갱신돼 있었으나 헤더가 stale). **§ 3-5 워크플로우 관리**: ① 실행 중지·재실행 운영(`POST /workflows/runs/{runId}/cancel` 협조적 + `?force=true` CLI worker 즉시 kill, `/rerun` 새 run 실행 — CR-105/116) + 소비앱 UI 권장 패턴 + 멀티노드 주의, API 표에 cancel/rerun 2행 추가. ② run별 격리 workspace(CR-107) — agent 컨테이너 동일 volume 마운트(`./workspace:/data/workspace`) 필수, 누락 시 turn timeout. ③ CLI worker 좀비 누수 점검(CR-109/114) — `ps -ef \| grep claude` 누적 확인 + 응급 pkill 후 force-cancel/rerun. **§ 3-13 Native Tool 관리**: CLI/API 도구 노출 목록 런타임 외부화(CR-110) — `global_config.mcp.cli-exposed-tools` CSV 단일 소스(V66 master seed 42개), 제거=런타임 즉시/추가=재기동, parse_document+내부 6개 제외. **시나리오 H**: 장기 AGENT_CALL turn timeout 정렬(CR-111/106) — agent `spring.mvc.async.request-timeout`(600s, `AIMBASE_AGENT_ASYNC_TIMEOUT_MS`) + BE `anthropic-cli.http-timeout-seconds`(`ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS`) 3겹 정렬, retry 멱등 안전망. 코드 실측 기반(`WorkflowController`/`WorkflowEngine`/`docker-compose.prod.yml`/`application.yml`/V66 SQL). 신규 코드 없음 — 문서만 |
 | v3.6.0 | 2026-06-12 | **CR-102 2차 — 내부 도구 루프 가시화** (§ 3-5 보강). 실행 내역 타임라인에 AGENT_CALL 서브에이전트 도구 루프 + CLI 어댑터 내부 관찰 이벤트 추가 표시. 이벤트량 증가 — 용량 모니터링 항목 갱신 |

@@ -103,7 +103,7 @@
 | CR-144 | 워크플로우 삭제 시 실행 기록 보존 (실행한 워크플로우 삭제 불가 결함). **발견 경위**: LexFlow 점검용 워크플로우를 운영에서 삭제하려다 500. **원인**: 삭제가 행을 지우는데 workflow_runs 외래키가 참조 중이라 DB 가 거부. **조치**: 삭제를 is_active=false 비활성화로 바꾸고 목록·상세·수정·새 실행에서 제외, 진행 중 run 과 실행 기록 조회는 유지 (BIZ-116). 설계 `docs/CR-144_워크플로우_삭제_실행기록_보존_설계.md`. 2026-10-10 운영 BE 배포, lexflow-cr143-check 삭제 204 와 이전 run 조회 200 확인 | 변경 | Medium | v3.x | 완료 |
 | CR-145 | [MCP 서버 등록에 머리글 싣기](CR-145_MCP_서버_등록에_머리글_싣기.md). **요청**: 입찰대행 플랫폼 CR-144 가 자기 MCP 통로에 X-API-Key 확인을 넣는데 Aimbase 는 등록 주소만 쓰고 머리글을 싣지 못함. **조치**: 등록 config 에 headers(이름과 값)를 받아 SSE 연결, 메시지 보내기, Streamable 모든 요청에 싣고, 등록 조회 응답과 로그에서 값을 가림. 수정 시 가린 값(****)은 저장값 유지 (BIZ-117). 2026-10-11 운영 BE 배포, 기존 MCP 자동 연결 유지 확인 | 변경 | Small | v3.x | 완료 |
 | CR-146 | [Max 연결 앱 도구 호출이 앱 재기동 뒤 옛 연결로 실패하는 결함](CR-146_Max_연결_앱_도구_호출이_앱_재기동_뒤_옛_연결로_실패하는_결함.md) | — | — | — | — |
-| CR-147 | [스킬 묶음 범용화](T3-17_CR-147_스킬묶음_범용화_설계서.md). **요청**: 입찰대행 플랫폼이 Claude Code 스킬 묶음(.skill)을 지시문으로 풀지 않고 그대로 올려 Claude 와 다른 LLM, API 연결과 CLI 연결 모두에서 쓰려 함. **조치**: 묶음 zip 올리기와 판(플랫폼 공용, 테넌트 전용), 모델 도구 skill_open, skill_read, skill_run, 스크립트 전용 실행 컨테이너, 워크플로우 단계 지정, CLI 세 모드 같은 도구 (BIZ-118~123) | 신규 | High | v3.x | 설계 |
+| CR-147 | [스킬 묶음 범용화](T3-17_CR-147_스킬묶음_범용화_설계서.md). **요청**: 입찰대행 플랫폼이 Claude Code 스킬 묶음(.skill)을 지시문으로 풀지 않고 그대로 올려 Claude 와 다른 LLM, API 연결과 CLI 연결 모두에서 쓰려 함. **조치**: 묶음 zip 올리기와 판(플랫폼 공용, 테넌트 전용), 모델 도구 skill_open, skill_read, skill_run, 스크립트 전용 실행 컨테이너, 워크플로우 단계 지정, CLI 세 모드 같은 도구 (BIZ-118~123) | 신규 | High | v3.x | 구현완료, 운영 배포 대기 |
 | CR-148 | [CLI 러너가 채팅 출력을 못 읽거나 쉬었다 이어 쓰는 첫 메시지를 거절하는 결함](CR-148_CLI_러너가_채팅_출력을_못_읽거나_쉬었다_이어_쓰는_첫_메시지를_거절하는_결함.md) | — | — | — | — |
 
 ---
@@ -2414,9 +2414,13 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 모듈**: domain, repository(master, tenant), api, tool/builtin, workflow/step, agent(SubagentRunner), mcp/server, llm/adapter(ClaudeCliRunnerClient), cli-runner, aimbase-agent(RunnerService), frontend(Skills, platform, workflow ConfigPanel), docker-compose, 새 컨테이너 skill-sandbox
 - **영향도**: High
 - **영향 범위**: BIZ-024(플랫폼 API), BIZ-020(감사 로그), CR-035(지시문형 스킬, 변경 없음), CR-104/CR-110(노출 정책), CR-117(작업장 머리글), CR-107(run 작업장)
-- **영향 설계서**: T1-1(PRD-341~346, FE-038~040), T1-3(BIZ-118~123), T1-7(CR-147 작업 단위), T2-1(skill-sandbox), T3-1(스킬 묶음 테이블 6개), T3-2(스킬 묶음 API, 단계 config, 도구, /mcp-skills), T3-3(스킬 화면), T3-4(올리기, 상세, 단계 지정), T3-5(TC-SKB-001~026), T3-17(신규)
+- **영향 설계서**: T1-1(PRD-341~346, FE-038~040), T1-3(BIZ-118~123), T1-7(CR-147 작업 단위), T2-1(skill-sandbox), T3-1(스킬 묶음 테이블 6개), T3-2(스킬 묶음 API, 단계 config, 도구, /mcp-skills), T3-3(스킬 화면), T3-4(올리기, 상세, 단계 지정), T3-5(TC-SKB-001~028), T3-17(신규), aimbase-api-guide v3.17.0(§ 24), aimbase-ops-guide v3.9.0(§ 2-8, § 3-17)
 - **영향 없음 확인**: T1-5 FSM(묶음은 활성 여부만 있고 상태 전이가 없다), T1-6 이벤트 계약(워크플로우 run 이벤트는 T1-6 범위 밖, STEP_START payload 에 칸만 는다), T2-2(구현 규약 변경 없음)
-- **상태**: 설계
+- **구현 (2026-10-13)**: 커밋 ece3426(보관과 올리기 API), af0bb02(skill_open, skill_read), e5b392e(실행 컨테이너와 skill_run), 00c074e(단계 지정과 판 고정), a4eba66(CLI 세 모드 통로), bf7e61c(화면: 스킬 묶음형 탭, 공용 스킬, 단계 스킬 칸, 런타임 설정 Skills 카드). 로컬에서 API 연결 AGENT_CALL, CLI 세 모드(AIMBASE, HYBRID, NATIVE), 실행 컨테이너 스크립트, 화면 브라우저 자동 점검까지 확인
+- **기존 동작 변경**: 서버 MCP 통로(`/mcp`)의 도구 실행을 SDK 기본 스레드에서 요청 스레드로 옮겼다(`immediateExecution(true)`). 필터가 채운 테넌트와 요청 문맥이 도구까지 이어진다. 스킬 도구가 아닌 기존 서버 도구도 같은 스레드에서 돈다
+- **화면 결정 (2026-10-13 사용자)**: 컨셉만 먼저(T3-3 v3.2), 컨셉 그대로 승인
+- **남은 일**: 운영 배포(서버 `.env` 의 SKILL_SANDBOX_API_KEY, sandbox, be, fe, agents 순서, ops-guide § 2-8). 워크플로우 스튜디오 저장이 CR-147 과 무관하게 400(요청 본문의 description 을 서버가 받지 않음)이라 화면에서 단계 스킬 지정을 저장할 수 없다. 별도 결함으로 처리
+- **상태**: 구현완료, 운영 배포 대기
 
 ---
 

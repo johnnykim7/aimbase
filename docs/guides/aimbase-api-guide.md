@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.15.0** | 2026-08-05 | Aimbase v8.18.0 기준
+> **v3.17.0** | 2026-10-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2091,9 +2091,105 @@ VLM 은 **라벨을 정확히 나열해놓고도 총계를 틀린다.** 실측�
 | 413 | 파일 100MB 초과 |
 | 422 | 매직넘버와 Content-Type 계열 불일치 |
 
+## 24. 스킬 묶음 [CR-147]
+
+Claude Code 스킬 묶음(`.skill` 또는 `.zip`, 맨 위나 최상위 폴더 하나 바로 아래에 `SKILL.md`)을 그대로 올리면, 어느 모델과 연결(API 연결, CLI 연결의 AIMBASE, HYBRID, NATIVE)이든 같은 도구로 목록, 안내서, 파일, 스크립트 순으로 씁니다. 지시문형 스킬(`/skills`)과는 별개이며 둘 다 그대로 씁니다.
+
+### 24-1. 범위와 판
+
+| 범위 | 경로 | 설명 |
+|---|---|---|
+| 테넌트 전용 | `/api/v1/skill-bundles` | 그 테넌트에서만 쓴다 |
+| 플랫폼 공용 | `/api/v1/platform/skill-bundles` | Super Admin 이 올리고 모든 테넌트가 같이 쓴다 |
+
+- 같은 이름이면 활성 테넌트 전용이 공용보다 먼저 쓰인다(BIZ-120). 가려진 공용은 목록과 상세에서 `shadowed: true` 다.
+- 올릴 때마다 판 번호가 1씩 는다. 직전 판과 내용이 같으면 새 판을 만들지 않는다(`created: false`). 판은 고치거나 지우지 않는다(BIZ-119).
+- 삭제는 비활성화다. 다시 올리면 활성으로 돌아온다(`reactivated: true`).
+
+### 24-2. 엔드포인트 (테넌트)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/skill-bundles` | 테넌트 전용과 공용 목록. 항목마다 `name`, `description`, `scope`(tenant, platform), `latest_version`, `is_active`, `shadowed` |
+| POST | `/skill-bundles` | multipart `file`. 테넌트 전용으로 올린다. 응답 `{name, scope, version, created, reactivated, warnings[{code, path}]}` |
+| GET | `/skill-bundles/{name}?scope=` | 상세와 판 목록(`versions[{version, file_count, total_bytes, warnings, uploaded_by, created_at}]`). scope 가 없으면 이름 해석 결과 |
+| GET | `/skill-bundles/{name}/versions/{version}?scope=` | 판 상세. `frontmatter`, `instructions`(안내서 본문), `files[{path, size_bytes, is_text}]`, `warnings` |
+| GET | `/skill-bundles/{name}/versions/{version}/file?path=&scope=` | 파일 하나. 텍스트면 `content`(길면 `truncated: true`), 아니면 크기만 |
+| PATCH | `/skill-bundles/{name}` | `{is_active}`. 테넌트 전용만 바뀐다 |
+| DELETE | `/skill-bundles/{name}` | 비활성화. 테넌트 전용만 |
+
+플랫폼 경로는 같은 모양이고 scope 쿼리가 없습니다. 올릴 때 경고(`warnings`)는 거부가 아닙니다.
+
+| 경고 code | 뜻 |
+|---|---|
+| MISSING_REFERENCE | 안내서가 가리키는 파일이 묶음에 없다 |
+| FOLDER_NAME_MISMATCH | 최상위 폴더 이름과 앞머리 name 이 다르다 |
+| UNSUPPORTED_SCRIPT | scripts 폴더에 실행 컨테이너가 돌리지 못하는 확장자가 있다 |
+
+```bash
+curl -X POST "$AIMBASE/api/v1/skill-bundles" \
+  -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $TENANT" \
+  -F "file=@ax-proposal.skill"
+```
+
+### 24-3. 워크플로우 단계 지정 (BIZ-121)
+
+LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로우 스튜디오 노드 설정의 "스킬" 칸이 같은 값을 만듭니다.
+
+```json
+"skills": [
+  { "name": "ax-proposal", "version": 3, "files": ["references/01-rfp-analysis.md"] },
+  { "name": "sam-gov-review" }
+]
+```
+
+| 칸 | 설명 |
+|---|---|
+| name | 필수. 한 단계에 같은 name 은 한 번 |
+| version | 선택. 없으면 단계 시작 때의 최신 판 |
+| files | 선택. 처음부터 지시문에 붙일 묶음 안 텍스트 파일 |
+
+- 판은 단계 시작 때 한 번 정해지고 재시도와 FOREACH 항목 전부가 같은 판을 쓴다. 실행 내역의 단계 시작 이벤트에 `skills[{name, scope, version}]` 가 남는다.
+- LLM_CALL 은 스크립트를 돌리지 않는다. 안내서와 files 내용이 단계 system 뒤에 붙는다.
+- AGENT_CALL 은 스킬 목록이 시스템 메시지로 붙고, 모델이 skill_open, skill_read, skill_run 으로 쓴다. 도구 허용 목록(`tools`)이 있으면 세 도구가 자동으로 추가된다. 멀티 에이전트(`agents`)는 에이전트마다 skills 를 받는다.
+- 형식 오류(배열이 아님, name 빈 값이나 중복, version 이 1 이상 정수가 아님, files 가 문자열 배열이 아님)는 저장 때 400 이다. 이름이나 판이 없는 것, 붙일 파일이 없거나 텍스트가 아닌 것, 붙인 합계가 `skills.inline-max-bytes` 를 넘는 것은 실행 때 단계 실패다.
+
+### 24-4. 모델 도구
+
+| 도구 | 입력 | 결과 |
+|---|---|---|
+| skill_open | name | 범위, 판, 안내서 본문, 파일 목록 |
+| skill_read | name, path, offset, limit | 줄 번호가 붙은 본문. 한 번에 `skills.read-max-bytes` 까지, 넘으면 다음 offset 안내 |
+| skill_run | name(선택), script, args, timeout_seconds | exit_code, timed_out, stdout, stderr, changed_files |
+
+- 단계에 지정이 있으면 세 도구는 지정한 스킬과 판만 받는다. 지정이 없으면 활성 묶음을 이름으로 받는다.
+- skill_run 은 run 작업장이 있는 호출에서만 된다. name 이 있으면 묶음 안 스크립트, 없으면 작업장 안 파일(모델이 file_write 로 만든 조립 파일 등)을 돌린다. 실행기는 확장자로 정한다(`.py` python3, `.js` `.mjs` node, `.sh` bash).
+- 스크립트는 비밀값과 바깥 인터넷이 없는 실행 컨테이너에서만 돈다(BIZ-122). 0 이 아닌 종료 코드는 도구 실패가 아니라 결과다.
+
+### 24-5. CLI 연결
+
+소비앱이 따로 할 일은 없습니다. 러너가 단계의 스킬 지정을 Aimbase MCP 통로 머리글(`X-Aimbase-Skill-Set`)로 보냅니다(BIZ-123).
+
+| 모드 | 스킬 도구를 받는 통로 |
+|---|---|
+| AIMBASE, HYBRID | 기존 서버 MCP 통로 `/mcp` |
+| NATIVE | 스킬 지정이 있을 때만 스킬 도구 세 개만 있는 `/mcp-skills`. 다른 Aimbase 도구는 붙지 않는다 |
+
+러너 MCP 설정에 aimbase-server 항목이 없는데 스킬 지정이 있으면 워커 기동이 실패합니다.
+
+### 24-6. 에러
+
+| 코드 | 원인 |
+|---|---|
+| 400 BIZ-118 | zip 이 아님, 경로 이탈이나 심볼릭 링크, 크기나 파일 수 상한 초과, SKILL.md 위치 오류, 앞머리 name 또는 description 오류 |
+| 400 | 단계 config skills 형식 오류(워크플로우 저장 때, BIZ-121) |
+| 404 | 묶음 또는 판이 없음 |
+| 403 | 테넌트 경로로 플랫폼 경로를 부름, 또는 Super Admin 이 아님 |
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.17.0 | 2026-10-13 | **CR-147 스킬 묶음** (§ 24). 스킬 묶음 올리기와 조회 API(테넌트 전용, 플랫폼 공용, 판), 워크플로우 단계 config `skills`, 모델 도구 skill_open, skill_read, skill_run, CLI 세 모드 스킬 통로(NATIVE 는 `/mcp-skills`). 헤더 버전을 변경 이력 최신에 맞춤 |
 | v3.16.0 | 2026-08-06 | **CR-137 — 영상 판독 API 신설 + 업로드 상한 정합** (§ 23). ① **`POST/GET /api/v1/vision-jobs`**: 영상을 올리면 서버가 ffmpeg 로 프레임 N장(기본 6, 1~20)을 균등 간격 추출해 VLM 에 태우고 판독 결과를 반환(job 등록→폴링). 지원 MIME 4종 MP4/MOV/WebM/AVI 를 **매직넘버로 판정**하되, iOS 가 `.mov` 를 `video/mp4` 로 보내는 등 헤더 표기가 기기마다 달라 영상은 `video/*` 계열만 일치하면 통과(이미지는 기존대로 엄격). 프레임 추출은 **서버**에서 한다 — 소비앱이 늘어나도 canvas·코덱 분기를 앱마다 재구현하지 않고, 원본이 서버에 남아 재판독·감사가 가능하다. 촬영 UI 는 소비앱 몫. 사진 1장은 이 API 가 아니라 기존 § 18-4 첨부 경로를 쓰며, 채팅 첨부에 영상을 올리면 400 으로 거부하고 이 API 로 안내한다. 원본은 24h 후 GC(BIZ-114), 프레임은 판독 직후 삭제. ② **⚠️ BIZ-115 — 수량은 VLM 에 직접 묻지 말 것**(§ 23-3): 박스 9개의 라벨을 전부 정확히 읽어놓고 "총 7개"라 답하며 7B·32B 동일 — 모델 크기로 해결 안 되는 구조적 한계다. 나열시켜 코드로 셀 것. ③ **업로드 상한 3계층 정합**(회귀 수정): nginx 100m 보다 Spring multipart 가 50MB 로 작아 **50~100MB 파일이 nginx 를 통과하고 Spring 에서 터지던** 실제 버그를 해소(50MB→100MB). § 22 전사 job 상한 표기도 1GB→100MB 로 정정 — 기존 1GB 는 앞단 두 계층에 먼저 막혀 **도달 불가능한 값**이었다. 단위 `MimeValidatorTest` +11 / `FrameExtractorTest` 10 / `VisionJobServiceTest` 8 PASS + platform-core 회귀 GREEN |
 | v3.15.0 | 2026-08-05 | **CR-136 — OpenAI 호환 어댑터 멀티모달(이미지 블록) 전달** (§ 18-4). `OpenAICompatibleAdapter.toMessage()` 가 `ContentBlock.Text` 만 필터링해 **이미지 블록을 조용히 버리던** 갭 해소(에러가 안 나서 모델이 사진 없이 답을 지어내는, 더 위험한 실패였음). 이미지가 포함된 USER 메시지는 OpenAI 멀티파트 `content` 배열(`image_url` = base64 → `data:{mediaType};base64,{data}`, URL → 그대로)로 전달하고, 이미지 없는 메시지는 기존 단일 문자열 경로를 그대로 타 **하위호환**. 빈 data/url 이미지 블록과 빈 텍스트 블록은 파트에서 제외(일부 서버가 빈 파트에 400 반환). 영향 범위 = `openai_compatible` 계열 전부(vLLM/Ollama/LM Studio/DeepSeek/LocalAI) + 이 어댑터에 위임하는 `BedrockAdapter`/`VertexAIAdapter`. 텍스트 경로·API 표면 무변화. 단위 `OpenAICompatibleAdapterTest` 9 PASS + platform-core 회귀 946 PASS. e2e(로컬 LM Studio Qwen2.5-VL): 7B = SKU 라벨 정독·개수 오답(구조적 한계 재현), 32B = 라벨 9개·개수 9개·이상 박스 전부 정확. **주의: 수량은 VLM 에 직접 묻지 말고 나열시켜 코드로 셀 것**(7B/32B 모두 카운팅 실패 — 모델 크기로 해결 안 됨) |
 | v3.14.0 | 2026-08-05 | **CR-133/134/135 음성 인식(STT) 확장** — ① § 22 신설: 회의녹음 배치 전사 `POST/GET /api/v1/transcribe-jobs`(job 등록→폴링, 최대 1GB, 길이 제한 없음). 1시간 녹음이 동기 응답 불가라 위젯 STT(§ 19, 60초 제한)와 경로를 분리. ② § 19 갱신: STT 백엔드가 OpenAI 고정이 아님 — 플랫폼 설정 `stt.provider` 로 로컬(맥 MLX 사이드카, 비용 0)/OpenAI 선택, 로컬 실패 시 OpenAI 폴백(CR-134). 호출 방식은 동일하므로 소비앱 변경 불필요. ③ **[STT 연동 가이드](aimbase-stt-guide.md) 신설** — 3경로(짧은 발화/긴 녹음/실시간 WS 스트리밍) 선택 기준과 브라우저 클라이언트 예제. 실시간 스트리밍(CR-135)은 사이드카 단독 동작이며 aimbase 연동 전이라 가이드에서만 다룬다 |
