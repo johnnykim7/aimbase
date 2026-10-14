@@ -16,11 +16,11 @@
 #         ./deploy.sh mcp     (BE + 러너 전체 — MCP 프로토콜 변경 시 필수)
 #         ./deploy.sh sandbox (스킬 실행 컨테이너 소스 동기화 + 이미지 재빌드 + 재기동)
 #
-# AWS 서버(우진비드, /opt/wjbid/aimbase). compose 는 docker-compose.aws.yml, 화면은 없다.
-#         ./deploy.sh aws-sandbox (스킬 실행 컨테이너)
-#         ./deploy.sh aws-be      (api)
-#         ./deploy.sh aws-agent   (러너)
-#         ./deploy.sh aws         (위 셋을 이 순서로)
+# 우진비드 AWS 서버(/opt/wjbid/aimbase). 나중에 생길 AXOPM AWS 와 구분해 wjbid 로 부른다. compose 는 docker-compose.wjbid.yml, 화면은 없다.
+#         ./deploy.sh wjbid-sandbox (스킬 실행 컨테이너)
+#         ./deploy.sh wjbid-be      (api)
+#         ./deploy.sh wjbid-agent   (러너)
+#         ./deploy.sh wjbid         (위 셋을 이 순서로)
 #
 # ⚠️ CR-124 이후: BE 와 러너는 MCP transport(Streamable HTTP)가 맞아야 도구 호출이 된다.
 #    한쪽만 올리면 그 사이 BE↔agent 도구 호출이 실패하므로, MCP 관련 배포는
@@ -146,94 +146,94 @@ deploy_mcp() {
   echo "════ 완료 — /mcp Streamable 엔드포인트로 BE·러너 정렬됨 ════"
 }
 
-# AWS 서버는 소스와 빌드 도구 없이 이미지와 환경 파일만 있다. 여기서 만든 jar 와 Dockerfile 을 build/ 아래로 보내
+# 우진비드 AWS 서버는 소스와 빌드 도구 없이 이미지와 환경 파일만 있다. 여기서 만든 jar 와 Dockerfile 을 build/ 아래로 보내
 # 서버에서 이미지를 만든다. 바꾸기 전 이미지는 pre-<시각> 태그로 남겨 되돌릴 수 있게 한다.
-AWS_SERVER="ubuntu@54.116.150.247"
-AWS_SSH_KEY="$HOME/.ssh/wjbid-prod.pem"
-AWS_REMOTE="/opt/wjbid/aimbase"
-AWS_HEALTH_URL="http://127.0.0.1:8280/actuator/health"
-AWS_STAMP="$(date +%Y%m%d-%H%M%S)"
+WJBID_SERVER="ubuntu@54.116.150.247"
+WJBID_SSH_KEY="$HOME/.ssh/wjbid-prod.pem"
+WJBID_REMOTE="/opt/wjbid/aimbase"
+WJBID_HEALTH_URL="http://127.0.0.1:8280/actuator/health"
+WJBID_STAMP="$(date +%Y%m%d-%H%M%S)"
 
-aws_run()  { ssh -i "$AWS_SSH_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=10 "$AWS_SERVER" "$@"; }
-aws_send() { scp -q -i "$AWS_SSH_KEY" -o IdentitiesOnly=yes "$@"; }
+wjbid_run()  { ssh -i "$WJBID_SSH_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=10 "$WJBID_SERVER" "$@"; }
+wjbid_send() { scp -q -i "$WJBID_SSH_KEY" -o IdentitiesOnly=yes "$@"; }
 
 # api 와 실행 컨테이너가 같이 읽는 열쇠는 sandbox.env 한 줄이다. api.env 를 실행 컨테이너에 붙이지 않기 위해 따로 둔다.
-aws_require_sandbox_key() {
-  if ! aws_run "grep -Eq '^SKILL_SANDBOX_API_KEY=.+' $AWS_REMOTE/sandbox.env 2>/dev/null"; then
-    echo "AWS $AWS_REMOTE/sandbox.env 에 SKILL_SANDBOX_API_KEY 가 없습니다. 운용 가이드대로 넣은 뒤 다시 실행하세요."
+wjbid_require_sandbox_key() {
+  if ! wjbid_run "grep -Eq '^SKILL_SANDBOX_API_KEY=.+' $WJBID_REMOTE/sandbox.env 2>/dev/null"; then
+    echo "우진비드 AWS $WJBID_REMOTE/sandbox.env 에 SKILL_SANDBOX_API_KEY 가 없습니다. 운용 가이드대로 넣은 뒤 다시 실행하세요."
     exit 1
   fi
 }
 
-aws_sync_compose() {
-  aws_send docker-compose.aws.yml "$AWS_SERVER:$AWS_REMOTE/docker-compose.yml.new"
-  aws_run "cd $AWS_REMOTE && diff -u docker-compose.yml docker-compose.yml.new || true"
+wjbid_sync_compose() {
+  wjbid_send docker-compose.wjbid.yml "$WJBID_SERVER:$WJBID_REMOTE/docker-compose.yml.new"
+  wjbid_run "cd $WJBID_REMOTE && diff -u docker-compose.yml docker-compose.yml.new || true"
   # 서버의 backup/ 은 root 소유(DB 덤프)라 쓸 수 없어 따로 둔다.
-  aws_run "cd $AWS_REMOTE && mkdir -p deploy-backup && cp -p docker-compose.yml deploy-backup/docker-compose.yml.$AWS_STAMP && mv docker-compose.yml.new docker-compose.yml"
+  wjbid_run "cd $WJBID_REMOTE && mkdir -p deploy-backup && cp -p docker-compose.yml deploy-backup/docker-compose.yml.$WJBID_STAMP && mv docker-compose.yml.new docker-compose.yml"
 }
 
-aws_keep_image() {
-  aws_run "docker image inspect $1:latest >/dev/null 2>&1 && docker tag $1:latest $1:pre-$AWS_STAMP || true"
-  echo "[aws] 되돌리기: docker tag $1:pre-$AWS_STAMP $1:latest && cd $AWS_REMOTE && docker compose up -d --force-recreate $2"
+wjbid_keep_image() {
+  wjbid_run "docker image inspect $1:latest >/dev/null 2>&1 && docker tag $1:latest $1:pre-$WJBID_STAMP || true"
+  echo "[wjbid] 되돌리기: docker tag $1:pre-$WJBID_STAMP $1:latest && cd $WJBID_REMOTE && docker compose up -d --force-recreate $2"
 }
 
-aws_wait_healthy() {
-  if ! aws_run "for i in \$(seq 1 180); do s=\$(docker inspect --format '{{.State.Health.Status}}' \$(cd $AWS_REMOTE && docker compose ps -q $1) 2>/dev/null); [ \"\$s\" = healthy ] && exit 0; sleep 1; done; exit 1"; then
-    echo "[aws] $1 이 180초 안에 healthy 가 되지 않았습니다."
-    aws_run "cd $AWS_REMOTE && docker compose logs --tail 80 $1" || true
+wjbid_wait_healthy() {
+  if ! wjbid_run "for i in \$(seq 1 180); do s=\$(docker inspect --format '{{.State.Health.Status}}' \$(cd $WJBID_REMOTE && docker compose ps -q $1) 2>/dev/null); [ \"\$s\" = healthy ] && exit 0; sleep 1; done; exit 1"; then
+    echo "[wjbid] $1 이 180초 안에 healthy 가 되지 않았습니다."
+    wjbid_run "cd $WJBID_REMOTE && docker compose logs --tail 80 $1" || true
     exit 1
   fi
-  echo "[aws] $1 healthy"
+  echo "[wjbid] $1 healthy"
 }
 
-deploy_aws_sandbox() {
-  echo "[aws-sandbox] 소스 전송"
-  aws_require_sandbox_key
-  aws_run "mkdir -p $AWS_REMOTE/build/skill-sandbox"
-  aws_send skill-sandbox/Dockerfile skill-sandbox/server.py "$AWS_SERVER:$AWS_REMOTE/build/skill-sandbox/"
-  aws_sync_compose
-  aws_keep_image aimbase-skill-sandbox skill-sandbox
-  echo "[aws-sandbox] 이미지 빌드와 재시작"
-  aws_run "cd $AWS_REMOTE && docker compose up -d --build skill-sandbox"
-  aws_wait_healthy skill-sandbox
+deploy_wjbid_sandbox() {
+  echo "[wjbid-sandbox] 소스 전송"
+  wjbid_require_sandbox_key
+  wjbid_run "mkdir -p $WJBID_REMOTE/build/skill-sandbox"
+  wjbid_send skill-sandbox/Dockerfile skill-sandbox/server.py "$WJBID_SERVER:$WJBID_REMOTE/build/skill-sandbox/"
+  wjbid_sync_compose
+  wjbid_keep_image aimbase-skill-sandbox skill-sandbox
+  echo "[wjbid-sandbox] 이미지 빌드와 재시작"
+  wjbid_run "cd $WJBID_REMOTE && docker compose up -d --build skill-sandbox"
+  wjbid_wait_healthy skill-sandbox
 }
 
-deploy_aws_be() {
-  echo "[aws-be] 빌드"
+deploy_wjbid_be() {
+  echo "[wjbid-be] 빌드"
   (cd backend && ./gradlew platform-core:bootJar)
-  aws_require_sandbox_key
+  wjbid_require_sandbox_key
   FAT_JAR=$(find backend/platform-core/build/libs -name '*.jar' ! -name '*plain*')
-  aws_run "mkdir -p $AWS_REMOTE/build/backend/platform-core/build/libs"
+  wjbid_run "mkdir -p $WJBID_REMOTE/build/backend/platform-core/build/libs"
   # Dockerfile 이 libs 의 *.jar 를 모두 복사하므로 이름을 하나로 고정해 덮어쓴다.
-  aws_send "$FAT_JAR" "$AWS_SERVER:$AWS_REMOTE/build/backend/platform-core/build/libs/platform-core.jar"
-  aws_send backend/platform-core/Dockerfile "$AWS_SERVER:$AWS_REMOTE/build/backend/platform-core/Dockerfile"
-  aws_sync_compose
-  aws_keep_image aimbase-api api
-  echo "[aws-be] 이미지 빌드와 api 재시작"
-  aws_run "cd $AWS_REMOTE && docker compose build api && docker compose up -d --force-recreate api"
-  aws_wait_healthy api
+  wjbid_send "$FAT_JAR" "$WJBID_SERVER:$WJBID_REMOTE/build/backend/platform-core/build/libs/platform-core.jar"
+  wjbid_send backend/platform-core/Dockerfile "$WJBID_SERVER:$WJBID_REMOTE/build/backend/platform-core/Dockerfile"
+  wjbid_sync_compose
+  wjbid_keep_image aimbase-api api
+  echo "[wjbid-be] 이미지 빌드와 api 재시작"
+  wjbid_run "cd $WJBID_REMOTE && docker compose build api && docker compose up -d --force-recreate api"
+  wjbid_wait_healthy api
 }
 
-deploy_aws_agent() {
-  echo "[aws-agent] 빌드"
+deploy_wjbid_agent() {
+  echo "[wjbid-agent] 빌드"
   (cd backend && ./gradlew aimbase-agent:bootJar)
   AGENT_JAR=$(find backend/aimbase-agent/build/libs -name '*.jar' ! -name '*plain*')
-  aws_run "mkdir -p $AWS_REMOTE/build/backend/aimbase-agent/build/libs"
-  aws_send "$AGENT_JAR" "$AWS_SERVER:$AWS_REMOTE/build/backend/aimbase-agent/build/libs/aimbase-agent.jar"
-  aws_send backend/aimbase-agent/Dockerfile "$AWS_SERVER:$AWS_REMOTE/build/backend/aimbase-agent/Dockerfile"
-  aws_sync_compose
-  aws_keep_image aimbase-aimbase-agent aimbase-agent
-  echo "[aws-agent] 이미지 빌드와 러너 재시작"
-  aws_run "cd $AWS_REMOTE && docker compose build aimbase-agent && docker compose up -d --force-recreate aimbase-agent"
-  aws_wait_healthy aimbase-agent
+  wjbid_run "mkdir -p $WJBID_REMOTE/build/backend/aimbase-agent/build/libs"
+  wjbid_send "$AGENT_JAR" "$WJBID_SERVER:$WJBID_REMOTE/build/backend/aimbase-agent/build/libs/aimbase-agent.jar"
+  wjbid_send backend/aimbase-agent/Dockerfile "$WJBID_SERVER:$WJBID_REMOTE/build/backend/aimbase-agent/Dockerfile"
+  wjbid_sync_compose
+  wjbid_keep_image aimbase-aimbase-agent aimbase-agent
+  echo "[wjbid-agent] 이미지 빌드와 러너 재시작"
+  wjbid_run "cd $WJBID_REMOTE && docker compose build aimbase-agent && docker compose up -d --force-recreate aimbase-agent"
+  wjbid_wait_healthy aimbase-agent
 }
 
 case "$TARGET" in
-  aws-sandbox) deploy_aws_sandbox; echo "배포 완료: AWS $AWS_SERVER skill-sandbox"; exit 0 ;;
-  aws-be)      deploy_aws_be; echo "배포 완료: AWS $AWS_SERVER api"; exit 0 ;;
-  aws-agent)   deploy_aws_agent; echo "배포 완료: AWS $AWS_SERVER aimbase-agent"; exit 0 ;;
+  wjbid-sandbox) deploy_wjbid_sandbox; echo "배포 완료: 우진비드 AWS $WJBID_SERVER skill-sandbox"; exit 0 ;;
+  wjbid-be)      deploy_wjbid_be; echo "배포 완료: 우진비드 AWS $WJBID_SERVER api"; exit 0 ;;
+  wjbid-agent)   deploy_wjbid_agent; echo "배포 완료: 우진비드 AWS $WJBID_SERVER aimbase-agent"; exit 0 ;;
   # && 로 잇으면 함수 안에서 set -e 가 꺼져 실패해도 다음 단계로 간다. 한 줄씩 부른다.
-  aws)         deploy_aws_sandbox; deploy_aws_be; deploy_aws_agent; echo "배포 완료: AWS $AWS_SERVER skill-sandbox, api, aimbase-agent"; exit 0 ;;
+  wjbid)       deploy_wjbid_sandbox; deploy_wjbid_be; deploy_wjbid_agent; echo "배포 완료: 우진비드 AWS $WJBID_SERVER skill-sandbox, api, aimbase-agent"; exit 0 ;;
 esac
 
 case "$TARGET" in
@@ -245,7 +245,7 @@ case "$TARGET" in
   mcp)    deploy_mcp ;;
   sandbox) deploy_sandbox ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|all|aws-sandbox|aws-be|aws-agent|aws]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid]"; exit 1 ;;
 esac
 
 echo ""

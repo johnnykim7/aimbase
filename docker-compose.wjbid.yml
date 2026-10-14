@@ -1,4 +1,4 @@
-# AWS 서버(우진비드, /opt/wjbid/aimbase) 의 compose. ./deploy.sh aws* 가 서버의 docker-compose.yml 로 올린다.
+# 우진비드 AWS 서버(/opt/wjbid/aimbase) 의 compose. ./deploy.sh wjbid* 가 서버의 docker-compose.yml 로 올린다.
 # 서버에서 고치지 않는다. 고칠 일이 있으면 이 파일을 고치고 배포한다.
 # 비밀값은 서버의 api.env, rag.env, agent.env, sandbox.env 에 있고 저장소에는 없다.
 # 이미지는 서버의 build/ 아래로 보낸 jar 와 Dockerfile 로 만든다(59.8.160.12 와 같은 Dockerfile).

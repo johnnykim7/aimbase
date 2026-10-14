@@ -404,13 +404,13 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 4. `./deploy.sh fe` 로 화면을 올린다.
 5. CLI 연결을 쓰면 `./deploy.sh agents` 로 러너를 올린다. 옛 러너는 단계의 스킬 지정을 Aimbase 로 보내지 못한다.
 
-AWS 서버(우진비드, `/opt/wjbid/aimbase`) 순서 [CR-151]: compose 는 저장소의 `docker-compose.aws.yml` 이 정본이고 배포할 때 서버 파일을 바꿉니다. 비밀값은 서버의 `api.env`, `rag.env`, `agent.env`, `sandbox.env` 에 있습니다. AWS 에는 관리 화면이 없어 스킬 묶음은 API(api-guide § 24)로 올립니다.
+우진비드 AWS 서버(`/opt/wjbid/aimbase`) 순서 [CR-151]: 나중에 생길 AXOPM AWS 와 구분해 배포 대상 이름은 `wjbid` 로 시작합니다. compose 는 저장소의 `docker-compose.wjbid.yml` 이 정본이고 배포할 때 서버 파일을 바꿉니다. 비밀값은 서버의 `api.env`, `rag.env`, `agent.env`, `sandbox.env` 에 있습니다. AWS 에는 관리 화면이 없어 스킬 묶음은 API(api-guide § 24)로 올립니다.
 
-1. 서버 `sandbox.env` 에 열쇠를 넣는다. api 와 실행 컨테이너가 이 한 줄을 같이 읽고, 실행 컨테이너에는 `api.env` 를 붙이지 않는다. 없으면 `aws-sandbox` 와 `aws-be` 가 멈춘다.
+1. 서버 `sandbox.env` 에 열쇠를 넣는다. api 와 실행 컨테이너가 이 한 줄을 같이 읽고, 실행 컨테이너에는 `api.env` 를 붙이지 않는다. 없으면 `wjbid-sandbox` 와 `wjbid-be` 가 멈춘다.
    ```bash
    echo "SKILL_SANDBOX_API_KEY=$(openssl rand -hex 32)" >> /opt/wjbid/aimbase/sandbox.env && chmod 600 /opt/wjbid/aimbase/sandbox.env
    ```
-2. `./deploy.sh aws` 로 실행 컨테이너, api, 러너를 이 순서로 올린다. 하나씩은 `aws-sandbox`, `aws-be`, `aws-agent`.
+2. `./deploy.sh wjbid` 로 실행 컨테이너, api, 러너를 이 순서로 올린다. 하나씩은 `wjbid-sandbox`, `wjbid-be`, `wjbid-agent`.
 3. 스크립트가 바꾸기 전 이미지를 `pre-<시각>` 태그로 남기고 되돌리는 명령을 출력한다. 바꾸기 전 compose 는 서버 `deploy-backup/` 에 남는다.
 
 스크립트가 쓸 패키지 추가: 운영 망에서 스크립트가 패키지를 내려받을 수 없으므로 이미지에 미리 넣습니다. `skill-sandbox/Dockerfile` 의 `pip install`(Python), `npm install -g`(Node), `apt-get install`(시스템) 줄에 추가하고 `./deploy.sh sandbox` 로 다시 만듭니다. 지금 들어 있는 것은 그 파일이 정본입니다.
@@ -1558,7 +1558,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
-| v3.10.0 | 2026-10-14 | **CR-151 AWS 서버 배포** (§ 2-8). AWS 서버(우진비드) 순서: `sandbox.env` 열쇠, `./deploy.sh aws`, 되돌리기. § 2-8 증상 표의 어긋난 두 줄 바로잡음 |
+| v3.10.0 | 2026-10-14 | **CR-151 AWS 서버 배포** (§ 2-8). 우진비드 AWS 서버 순서: `sandbox.env` 열쇠, `./deploy.sh wjbid`, 되돌리기. § 2-8 증상 표의 어긋난 두 줄 바로잡음 |
 | v3.9.0 | 2026-10-13 | **CR-147 스킬 묶음** (§ 2-8, § 3-17). 플랫폼 공용 스킬 화면과 런타임 설정 Skills 카드, 스크립트 실행 컨테이너 첫 배포 순서(서버 `.env` 의 SKILL_SANDBOX_API_KEY, sandbox, be, fe, agents)와 패키지 추가 절차, 테넌트 스킬 화면 묶음형 탭, 워크플로우 단계 스킬 지정 |
 | v3.8.0 | 2026-10-11 | **CR-145 — MCP 서버 등록 머리글** (§ 3-7). 등록 config `headers` 를 모든 MCP 요청에 싣고, 조회 응답에서 값을 `****` 로 가림. 수정 시 `****` 는 저장값 유지 |
 | v3.7.0 | 2026-06-18 | **현행화 — 헤더 동기화 + CR-105/107/109/110/111/114/116 운영분 누락 보강**. 헤더를 v1.7.0(2026-04-10, v6.4.0) → v3.7.0(2026-06-18, v8.18.0)로 정정(변경이력은 v3.6.0까지 갱신돼 있었으나 헤더가 stale). **§ 3-5 워크플로우 관리**: ① 실행 중지·재실행 운영(`POST /workflows/runs/{runId}/cancel` 협조적 + `?force=true` CLI worker 즉시 kill, `/rerun` 새 run 실행 — CR-105/116) + 소비앱 UI 권장 패턴 + 멀티노드 주의, API 표에 cancel/rerun 2행 추가. ② run별 격리 workspace(CR-107) — agent 컨테이너 동일 volume 마운트(`./workspace:/data/workspace`) 필수, 누락 시 turn timeout. ③ CLI worker 좀비 누수 점검(CR-109/114) — `ps -ef \| grep claude` 누적 확인 + 응급 pkill 후 force-cancel/rerun. **§ 3-13 Native Tool 관리**: CLI/API 도구 노출 목록 런타임 외부화(CR-110) — `global_config.mcp.cli-exposed-tools` CSV 단일 소스(V66 master seed 42개), 제거=런타임 즉시/추가=재기동, parse_document+내부 6개 제외. **시나리오 H**: 장기 AGENT_CALL turn timeout 정렬(CR-111/106) — agent `spring.mvc.async.request-timeout`(600s, `AIMBASE_AGENT_ASYNC_TIMEOUT_MS`) + BE `anthropic-cli.http-timeout-seconds`(`ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS`) 3겹 정렬, retry 멱등 안전망. 코드 실측 기반(`WorkflowController`/`WorkflowEngine`/`docker-compose.prod.yml`/`application.yml`/V66 SQL). 신규 코드 없음 — 문서만 |

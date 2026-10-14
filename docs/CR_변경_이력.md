@@ -107,7 +107,7 @@
 | CR-148 | [CLI 러너가 채팅 출력을 못 읽거나 쉬었다 이어 쓰는 첫 메시지를 거절하는 결함](CR-148_CLI_러너가_채팅_출력을_못_읽거나_쉬었다_이어_쓰는_첫_메시지를_거절하는_결함.md) | — | — | — | — |
 | CR-149 | 워크플로우 저장 API 와 스튜디오를 가이드 계약에 맞춤(결함). **발견 경위**: CR-147 화면 점검 중 스튜디오 저장 400. **원인**: 4월 통합 커밋에서 프로젝트 귀속, 내 것만 보기, 아이디 자동 생성이 빠졌고 설명, 실행 모드는 저장 API 에 없었으며 가이드의 오류 처리 칸 이름이 실제와 달랐다. **조치**: 저장 API 와 목록 필터를 가이드 계약대로 되살리고 스튜디오 저장 본문과 관리 도구(MCP) 저장을 맞춤 | 결함 | High | v3.x | 구현완료 |
 | CR-150 | 관리 도구(MCP) 접속에 인증이 없음(결함). **발견 경위**: CR-149 관리 도구 저장 검사 실측 중 키 없이 워크플로우가 만들어짐. **원인**: `/admin-mcp/**` 를 인증 없이 열어 두었고 테넌트는 연결 주소의 tenant_id 를 그대로 믿음. **조치**: 테넌트에 묶인 API 키나 그 테넌트 로그인 토큰만 받고, 주소와 세션의 테넌트를 키의 테넌트와 대조 (BIZ-124) | 결함 | High | v3.x | 구현완료 |
-| CR-151 | AWS 서버(우진비드) 배포 대상 추가. **배경**: 우진비드가 쓰는 Aimbase 는 AWS 서버에 따로 있는데 배포 스크립트가 없어 CR-146 은 jar 를 손으로 바꿨고, 스킬 실행 컨테이너도 없다. **조치**: AWS compose 를 저장소(`docker-compose.aws.yml`)로 옮기고 실행 컨테이너를 더했으며, `./deploy.sh aws-sandbox, aws-be, aws-agent, aws` 를 추가 | 변경 | Medium | v3.x | 구현완료 |
+| CR-151 | AWS 서버(우진비드) 배포 대상 추가. **배경**: 우진비드가 쓰는 Aimbase 는 AWS 서버에 따로 있는데 배포 스크립트가 없어 CR-146 은 jar 를 손으로 바꿨고, 스킬 실행 컨테이너도 없다. **조치**: AWS compose 를 저장소(`docker-compose.wjbid.yml`)로 옮기고 실행 컨테이너를 더했으며, `./deploy.sh wjbid-sandbox, wjbid-be, wjbid-agent, wjbid` 를 추가(나중에 생길 AXOPM AWS 와 구분해 wjbid 로 부름) | 변경 | Medium | v3.x | 구현완료 |
 
 ---
 
@@ -2480,18 +2480,18 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **원본 요구사항**: [docs/origins/원본_요구사항_CR151_AWS_배포_대상_20261014.md](origins/원본_요구사항_CR151_AWS_배포_대상_20261014.md)
 - **배경**: 우진비드(bidding_system 테넌트)가 쓰는 Aimbase 는 AWS 서버(54.116.150.247, /opt/wjbid/aimbase)에 따로 있다. 배포 스크립트에는 59.8.160.12 대상만 있어 CR-146 은 jar 를 손으로 바꿔 넣었다. AWS compose 는 서버에만 있고 스킬 실행 컨테이너가 없어 CR-147 을 쓸 수 없다
 - **변경 내용**:
-  1. AWS compose 를 저장소 `docker-compose.aws.yml` 로 옮긴다. 서버의 현재 파일에 build 설정(api, 러너), 실행 컨테이너(skill-sandbox)와 내부 망, 러너 기동 판정(healthcheck)을 더했다. 배포가 서버 파일을 이것으로 바꾸고 바꾸기 전 파일은 `deploy-backup/` 에 남긴다
-  2. `./deploy.sh aws-sandbox`, `aws-be`, `aws-agent`, `aws`(이 순서로 셋). 이 맥에서 만든 jar 와 Dockerfile 을 서버 `build/` 로 보내 서버에서 이미지를 만든다. 바꾸기 전 이미지는 `pre-<시각>` 태그로 남기고 되돌리는 명령을 출력한다. 기동 판정은 컨테이너 healthy 다
-  3. 실행 컨테이너와 api 가 같이 쓰는 열쇠는 서버 `sandbox.env` 한 줄이다. 실행 컨테이너에 api.env 를 붙이지 않기 위해 따로 둔다(BIZ-122). 없으면 aws-sandbox 와 aws-be 가 멈춘다
+  1. AWS compose 를 저장소 `docker-compose.wjbid.yml` 로 옮긴다. 서버의 현재 파일에 build 설정(api, 러너), 실행 컨테이너(skill-sandbox)와 내부 망, 러너 기동 판정(healthcheck)을 더했다. 배포가 서버 파일을 이것으로 바꾸고 바꾸기 전 파일은 `deploy-backup/` 에 남긴다
+  2. `./deploy.sh wjbid-sandbox`, `wjbid-be`, `wjbid-agent`, `wjbid`(이 순서로 셋). 나중에 생길 AXOPM AWS 와 구분해 대상 이름을 wjbid 로 시작한다(2026-10-14 17:33 사용자). 이 맥에서 만든 jar 와 Dockerfile 을 서버 `build/` 로 보내 서버에서 이미지를 만든다. 바꾸기 전 이미지는 `pre-<시각>` 태그로 남기고 되돌리는 명령을 출력한다. 기동 판정은 컨테이너 healthy 다
+  3. 실행 컨테이너와 api 가 같이 쓰는 열쇠는 서버 `sandbox.env` 한 줄이다. 실행 컨테이너에 api.env 를 붙이지 않기 위해 따로 둔다(BIZ-122). 없으면 wjbid-sandbox 와 wjbid-be 가 멈춘다
 - **결정 (2026-10-14 사용자)**: 17:14:39 배포 스크립트에 AWS 대상을 추가(①)
-- **영향 모듈**: deploy.sh, docker-compose.aws.yml(신규)
+- **영향 모듈**: deploy.sh, docker-compose.wjbid.yml(신규)
 - **영향도**: Medium (AWS 운영 서버 구성을 저장소 파일이 정하게 된다)
 - **영향 범위**: CR-146(AWS 손 배포), CR-147(실행 컨테이너)
 - **영향 설계서**: aimbase-ops-guide § 2-8(AWS 서버 순서)
 - **영향 없음 확인**: T1, T2-1(새 라이브러리 없음), T3(앱 동작 변경 없음). 앱 소스 변경 없음
 - **범위 밖**: AWS 에 관리 화면(FE)이 없어 스킬 묶음은 API 로 올린다. rag-pipeline 이미지는 다루지 않는다
 - **검증**: 스크립트 문법 검사, AWS 서버의 임시 폴더에서 `docker compose config` 통과
-- **첫 실행 (2026-10-14 17:28)**: 서버 `backup/` 이 root 소유라 compose 교체가 실패했고, `aws` 대상이 단계를 && 로 이어 set -e 가 꺼진 탓에 다음 단계로 진행했다. 실행 컨테이너 기동 판정에서 멈춰 서버는 바뀌지 않았다. 백업 폴더를 `deploy-backup/` 으로 바꾸고 단계를 한 줄씩 부르게 고쳤다
+- **첫 실행 (2026-10-14 17:28)**: 서버 `backup/` 이 root 소유라 compose 교체가 실패했고, `wjbid` 대상(당시 이름 aws)이 단계를 && 로 이어 set -e 가 꺼진 탓에 다음 단계로 진행했다. 실행 컨테이너 기동 판정에서 멈춰 서버는 바뀌지 않았다. 백업 폴더를 `deploy-backup/` 으로 바꾸고 단계를 한 줄씩 부르게 고쳤다
 - **상태**: 구현완료, AWS 배포 대기
 
 ---
