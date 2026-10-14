@@ -2496,6 +2496,21 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 
 ---
 
+## CR 후보 (발번 전)
+
+> 작업 중 발견했고 아직 CR 로 열지 않은 것이다. 착수할 때 CR 번호를 붙이고 이 표에서 지운다. 2026-10-15 사용자 00:55 기록 승인.
+
+| 순번 | 무엇 | 발견 | 근거 | 확인 정도 |
+|---|---|---|---|---|
+| 1 | 워크플로우 목록 화면의 트리거, 상태, 실행 횟수, 성공률 칸이 서버가 주지 않는 칸을 읽는다 | CR-149 (2026-10-13) | CR-149 원본 4절, CR-149 카드 범위 밖 | CR-149 때 화면과 응답을 대조해 확인. 이후 다시 보지 않음 |
+| 2 | 저장 검사가 거부할 때 화면에 이유 없이 "Bad Request" 만 보인다. ResponseStatusException 이 오류 응답 틀(ApiResponse)을 타지 않는다 | CR-149 (2026-10-13) | CR-149 카드 범위 밖 | CR-149 때 확인 |
+| 3 | 프롬프트, 프로젝트, 스키마, 지식 소스 생성이 created_by 에 로그인 주체 id 를 그대로 적는다. 시스템 API 키나 임퍼소네이션처럼 users 에 없는 주체면 외래키로 실패할 수 있다. 워크플로우는 CR-149 에서 ResourceOwner 로 고쳤다 | CR-149 (2026-10-13) | tenant V30 외래키, PromptController.java:74, ProjectController.java:59, SchemaController.java:77, KnowledgeController.java:119 | 소스로 확인. 실제 실패는 재현하지 않음 |
+| 4 | 테넌트 없이 발급한 API 키가 일반 API 에서 X-Tenant-Id 머리글로 어느 테넌트든 admin 으로 다룰 수 있다. CR-086 대조는 로그인 토큰에만 있다 | CR-150 (2026-10-14) | ApiKeyAuthenticationFilter.java:88-102, CR-150 카드 범위 밖 | 소스로 확인. 요청으로 재현하지 않음. 도메인 전용 키의 의도된 동작인지 먼저 정한다 |
+| 5 | 시험 설정이 docker info 를 시간 제한 없이 기다려, Docker 가 멈추면 bootRun, bootJar 를 포함한 모든 gradle 호출이 멈춘다 | CR-150 (2026-10-14) | backend/platform-core/build.gradle.kts:110-111 | 실제로 20분 넘게 멈춘 것을 확인. 배포 때는 멈춘 docker info 를 끊어 진행했다 |
+| 6 | 화면 시험 도구가 없다. 이 저장소 CLAUDE.md 는 FE 훅 시험(use*.test.ts)을 필수로 두지만 frontend/package.json 에 시험 명령과 도구가 없고 훅 시험 파일도 없다 | CR-149 (2026-10-13) | frontend/package.json scripts, frontend/src/hooks | 확인 |
+
+---
+
 ## 작성 가이드
 
 **카드 구조**:
