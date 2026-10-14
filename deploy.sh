@@ -168,7 +168,8 @@ aws_require_sandbox_key() {
 aws_sync_compose() {
   aws_send docker-compose.aws.yml "$AWS_SERVER:$AWS_REMOTE/docker-compose.yml.new"
   aws_run "cd $AWS_REMOTE && diff -u docker-compose.yml docker-compose.yml.new || true"
-  aws_run "cd $AWS_REMOTE && mkdir -p backup && cp -p docker-compose.yml backup/docker-compose.yml.$AWS_STAMP && mv docker-compose.yml.new docker-compose.yml"
+  # 서버의 backup/ 은 root 소유(DB 덤프)라 쓸 수 없어 따로 둔다.
+  aws_run "cd $AWS_REMOTE && mkdir -p deploy-backup && cp -p docker-compose.yml deploy-backup/docker-compose.yml.$AWS_STAMP && mv docker-compose.yml.new docker-compose.yml"
 }
 
 aws_keep_image() {
@@ -231,7 +232,8 @@ case "$TARGET" in
   aws-sandbox) deploy_aws_sandbox; echo "배포 완료: AWS $AWS_SERVER skill-sandbox"; exit 0 ;;
   aws-be)      deploy_aws_be; echo "배포 완료: AWS $AWS_SERVER api"; exit 0 ;;
   aws-agent)   deploy_aws_agent; echo "배포 완료: AWS $AWS_SERVER aimbase-agent"; exit 0 ;;
-  aws)         deploy_aws_sandbox && deploy_aws_be && deploy_aws_agent; echo "배포 완료: AWS $AWS_SERVER skill-sandbox, api, aimbase-agent"; exit 0 ;;
+  # && 로 잇으면 함수 안에서 set -e 가 꺼져 실패해도 다음 단계로 간다. 한 줄씩 부른다.
+  aws)         deploy_aws_sandbox; deploy_aws_be; deploy_aws_agent; echo "배포 완료: AWS $AWS_SERVER skill-sandbox, api, aimbase-agent"; exit 0 ;;
 esac
 
 case "$TARGET" in

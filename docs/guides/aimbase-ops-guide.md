@@ -411,7 +411,7 @@ AWS 서버(우진비드, `/opt/wjbid/aimbase`) 순서 [CR-151]: compose 는 저�
    echo "SKILL_SANDBOX_API_KEY=$(openssl rand -hex 32)" >> /opt/wjbid/aimbase/sandbox.env && chmod 600 /opt/wjbid/aimbase/sandbox.env
    ```
 2. `./deploy.sh aws` 로 실행 컨테이너, api, 러너를 이 순서로 올린다. 하나씩은 `aws-sandbox`, `aws-be`, `aws-agent`.
-3. 스크립트가 바꾸기 전 이미지를 `pre-<시각>` 태그로 남기고 되돌리는 명령을 출력한다. 바꾸기 전 compose 는 서버 `backup/` 에 남는다.
+3. 스크립트가 바꾸기 전 이미지를 `pre-<시각>` 태그로 남기고 되돌리는 명령을 출력한다. 바꾸기 전 compose 는 서버 `deploy-backup/` 에 남는다.
 
 스크립트가 쓸 패키지 추가: 운영 망에서 스크립트가 패키지를 내려받을 수 없으므로 이미지에 미리 넣습니다. `skill-sandbox/Dockerfile` 의 `pip install`(Python), `npm install -g`(Node), `apt-get install`(시스템) 줄에 추가하고 `./deploy.sh sandbox` 로 다시 만듭니다. 지금 들어 있는 것은 그 파일이 정본입니다.
 
