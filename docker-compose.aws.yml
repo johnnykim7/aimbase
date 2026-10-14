@@ -1,0 +1,105 @@
+# AWS 서버(우진비드, /opt/wjbid/aimbase) 의 compose. ./deploy.sh aws* 가 서버의 docker-compose.yml 로 올린다.
+# 서버에서 고치지 않는다. 고칠 일이 있으면 이 파일을 고치고 배포한다.
+# 비밀값은 서버의 api.env, rag.env, agent.env, sandbox.env 에 있고 저장소에는 없다.
+# 이미지는 서버의 build/ 아래로 보낸 jar 와 Dockerfile 로 만든다(59.8.160.12 와 같은 Dockerfile).
+name: aimbase
+services:
+  api:
+    image: aimbase-api:latest
+    build:
+      context: ./build/backend
+      dockerfile: platform-core/Dockerfile
+    restart: unless-stopped
+    # sandbox.env 에는 실행 컨테이너와 같이 쓰는 열쇠 한 줄만 있다.
+    env_file: [api.env, sandbox.env]
+    environment:
+      SKILL_SANDBOX_URL: http://skill-sandbox:8300
+    mem_limit: 1536m
+    ports: ["127.0.0.1:8280:8080", "172.17.0.1:8280:8080"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./claude-accounts:/home/appuser/.claude-accounts
+      - ./aimbase-storage:/data/aimbase
+      - ./workspace:/data/workspace
+    # skill-sandbox 는 skill-sandbox-net 에만 있으므로 api 가 그 망에 더 붙는다.
+    networks:
+      - default
+      - skill-sandbox-net
+    # api 는 기동 때 한 번만 문서 해석기의 도구 목록을 받아 두므로 해석기가 먼저 떠 있어야 한다.
+    depends_on:
+      rag-pipeline:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+  rag-pipeline:
+    image: aimbase-rag-pipeline:latest
+    restart: unless-stopped
+    env_file: rag.env
+    ports: ["127.0.0.1:8281:8000"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./aimbase-storage:/data/aimbase
+      - ./workspace:/data/workspace
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('localhost', 8000), 3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+  aimbase-agent:
+    image: aimbase-aimbase-agent:latest
+    build:
+      context: ./build/backend
+      dockerfile: aimbase-agent/Dockerfile
+    restart: unless-stopped
+    env_file: agent.env
+    mem_limit: 1024m
+    volumes:
+      - ./workspace:/data/workspace
+      - ./claude-accounts:/home/appuser/.claude-accounts
+    # 작업기는 기동 때 api 에 한 번 등록하고, 실패하면 등록 없이 계속 돌아 일을 받지 못한다.
+    depends_on:
+      api:
+        condition: service_healthy
+    # 포트는 agent.env 의 SERVER_PORT(8290)다. deploy.sh 가 이 상태로 기동 완료를 판정한다.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8290/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # CR-147 스킬 스크립트 실행 컨테이너(T3-17 2.4, 3.7). 59.8.160.12 의 docker-compose.prod.yml 과 같은 구성이다.
+  # 인터넷이 없는 내부 망에만 붙고 작업장 볼륨 하나만 받는다.
+  # api.env 는 붙이지 않는다. DB, LLM, 암호화 키가 들어 있어 스크립트가 읽을 수 있게 되기 때문이다.
+  skill-sandbox:
+    image: aimbase-skill-sandbox:latest
+    build:
+      context: ./build/skill-sandbox
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    env_file: sandbox.env
+    volumes:
+      - ./workspace:/data/workspace
+    environment:
+      SANDBOX_WORKSPACE_ROOT: /data/workspace
+      SANDBOX_MAX_CONCURRENCY: "2"
+    mem_limit: 2g
+    cpus: 2
+    networks:
+      - skill-sandbox-net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8300/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  skill-sandbox-net:
+    internal: true
