@@ -2556,7 +2556,8 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   1. ApiKeyAuthenticationFilter 가 `X-API-Key` 가 없으면 `Authorization: ApiKey <키>` 의 키로 인증한다. 스킴 이름은 대소문자를 가리지 않고, 둘 다 있으면 X-API-Key 를 쓴다. `Bearer` 는 건드리지 않는다
   2. 위젯 토큰 발급(WidgetTokenController)의 "API 키로 온 요청만" 검사도 같은 판정을 쓴다
   3. 실행기(cli-runner ClaudeCliAdapterConfig)가 aimbase-server 항목에 키를 `Authorization: ApiKey <키>` 로만 싣는다. NATIVE 의 aimbase-skills 항목은 이 항목을 본떠 같은 머리글을 쓴다
-- **결정 (2026-10-25 사용자)**: 19:25:03 "1=1" (서버가 Authorization 머리글로도 받고 실행기가 그 머리글로 보냄)
+  4. 실행기가 CLI 를 띄울 때 남기는 자체 기록(ClaudeCliWorker "start: cmd=")이 --mcp-config 값을 통째로 찍어 키 원문이 컨테이너 기록에 남았다. 기록에 남길 때만 그 값 안의 headers, env 값을 [REDACTED] 로 가린다(배포 뒤 소스 대조로 발견, 사용자 22:26:43 /전승 으로 이 CR 에 포함)
+- **결정 (2026-10-25 사용자)**: 19:25:03 "1=1" (서버가 Authorization 머리글로도 받고 실행기가 그 머리글로 보냄). 22:26:43 /전승 (실행기 시작 기록의 키도 이 CR 에서 가리고 실행기만 다시 반영)
 - **영향 모듈**: platform-core(ApiKeyAuthenticationFilter, WidgetTokenController), cli-runner(ClaudeCliAdapterConfig), aimbase-agent(cli-runner 를 쓰므로 다시 빌드)
 - **영향도**: Medium (키 노출은 실행기 컨테이너 안에 한정. X-API-Key 는 그대로 받으므로 기존 소비앱과 옛 실행기는 바뀌지 않는다. 반영 순서는 api 먼저, 실행기 나중)
 - **영향 범위**: CR-025(시스템 API 키), CR-058(위젯 토큰), CR-072(서버 MCP 통로), CR-147(aimbase-skills), CR-150(관리 도구 MCP 인증)
@@ -2565,7 +2566,8 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **구현 (2026-10-25)**: 단위시험 통과(ApiKeyAuthenticationFilterTest 4건 신규, WidgetTokenControllerTest 9건, ClaudeCliAdapterConfigTest 6건, ClaudeCliWorkerTest 30건). 로컬 서버(8181)에서 `Authorization: ApiKey` 로 /mcp 도구 46개, /mcp-skills 도구 3개를 받았고, 같은 키를 `Bearer` 로 보내면 403. 서버 CLI 와 같은 2.1.197 을 실행기 설정과 같은 머리글로 붙이자 aimbase-server 가 connected, 도구 46개였고, 접속 기록의 Authorization 값은 [REDACTED], 기록 안에 키 원문 0건
 - **시험항목 (2026-10-25)**: 영역 01 에 IT-01-009(실행기 CLI 접속 기록에 키가 남지 않음, 서버), IT-01-010(Authorization: ApiKey 인증과 실행기 머리글, 단위)을 넣었다
 - **배포 (2026-10-25)**: 사용자 승인 21:12:05(AWS api), 21:55:10(AWS 실행기, 옛 서버). AWS 우진 api 21:1x KST 기동 뒤 실행기 컨테이너 안에서 같은 키를 `Authorization: ApiKey` 와 `X-API-Key` 로 /mcp 초기화해 둘 다 200, 실행기 21:56 KST healthy. 옛 서버(59.8.160.12) `./deploy.sh mcp` 로 api 21:57, 실행기 6개 21:57 KST 모두 healthy. 되돌리기 태그는 AWS aimbase-api:pre-20261025-211216, aimbase-aimbase-agent:pre-20261025-215524, 옛 서버 api 와 실행기 6개 모두 pre-20261025-215644. 실행기를 새로 만들면서 키가 든 AWS 실행기 CLI 기록 35개도 함께 지워졌다. 배포 확인 시점까지 두 서버 모두 CLI 워커가 새로 뜨지 않아 새 기록은 아직 없다
-- **상태**: 배포. 실행기 CLI 가 새로 뜬 뒤 접속 기록에서 키가 가려지는지 확인 대기(IT-01-009)
+- **구현 2 (2026-10-25)**: 변경 4. cli-runner 단위시험 전부 통과(ClaudeCliWorkerTest 에 IT-01-010 7 추가)
+- **상태**: 배포(변경 1~3). 변경 4 는 실행기 재반영 대기. 실행기 CLI 가 새로 뜬 뒤 접속 기록과 실행기 기록에서 키가 가려지는지 확인 대기(IT-01-009)
 
 ## CR 후보 (발번 전)
 

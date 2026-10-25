@@ -55,6 +55,7 @@ public class ClaudeCliWorker implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(ClaudeCliWorker.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+    private static final String REDACTED = "[REDACTED]";
 
     /** stdout 파싱 스레드가 라인별로 적재하는 이벤트 큐. consumer 측은 {@code type=result} 이벤트까지 polling. */
     private final BlockingQueue<StreamEvent> eventQueue = new LinkedBlockingQueue<>();
@@ -278,7 +279,7 @@ public class ClaudeCliWorker implements AutoCloseable {
             }
         }
 
-        log.info("ClaudeCliWorker start: cmd={}, configDir={}, cwd={}", cmd, configDir,
+        log.info("ClaudeCliWorker start: cmd={}, configDir={}, cwd={}", redactMcpConfig(cmd), configDir,
                 pb.directory() != null ? pb.directory() : "(default)");
         this.process = pb.start();
         this.stdin = new BufferedWriter(new OutputStreamWriter(
@@ -984,6 +985,40 @@ public class ClaudeCliWorker implements AutoCloseable {
         }
         throw new IllegalStateException(
                 "BIZ-123: 스킬 지정이 있는데 러너 MCP 설정에 aimbase-server 항목이 없어 스킬 도구를 연결할 수 없습니다");
+    }
+
+    /**
+     * CR-154: 기록에 남길 명령. --mcp-config 값 안의 머리글과 환경변수 값을 가린다. 서버 API 키가 머리글에 들어 있다.
+     * 읽지 못하는 값은 통째로 가린다.
+     */
+    static List<String> redactMcpConfig(List<String> cmd) {
+        List<String> out = new ArrayList<>(cmd);
+        for (int i = 0; i + 1 < out.size(); i++) {
+            if ("--mcp-config".equals(out.get(i))) {
+                out.set(i + 1, redactMcpSecrets(out.get(i + 1)));
+            }
+        }
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String redactMcpSecrets(String mcpConfig) {
+        try {
+            Map<String, Object> root = MAPPER.readValue(mcpConfig, MAP_TYPE);
+            if (root.get("mcpServers") instanceof Map<?, ?> servers) {
+                for (Object server : servers.values()) {
+                    if (!(server instanceof Map<?, ?> entry)) continue;
+                    for (String key : List.of("headers", "env")) {
+                        if (entry.get(key) instanceof Map<?, ?> values) {
+                            ((Map<String, Object>) values).replaceAll((k, v) -> REDACTED);
+                        }
+                    }
+                }
+            }
+            return MAPPER.writeValueAsString(root);
+        } catch (Exception e) {
+            return REDACTED;
+        }
     }
 
     /** CR-152: MCP 설정 JSON 의 서버 이름. 읽지 못하면 빈 집합이라 연결 확인 없이 기존대로 돈다. */

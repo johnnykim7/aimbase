@@ -665,6 +665,23 @@ class ClaudeCliWorkerTest {
                 .hasMessageNotContaining("aimbase-server");
     }
 
+    @Test
+    @DisplayName("IT-01-010 7 시작_기록은_MCP_설정의_머리글과_환경변수_값을_가린다")
+    void cr154_start_log_redacts_mcp_header_and_env_values() {
+        String mcp = """
+                {"mcpServers":{"aimbase-server":{"type":"http","url":"http://h:8181/mcp",
+                "headers":{"Authorization":"ApiKey plat-secret-1","X-Aimbase-Agent-Id":"a1"}},
+                "tool":{"command":"npx","env":{"TOKEN":"secret-2"}}}}""";
+
+        List<String> logged = ClaudeCliWorker.redactMcpConfig(List.of("claude", "--mcp-config", mcp, "--model", "m"));
+
+        assertThat(logged.get(2)).doesNotContain("plat-secret-1", "secret-2", "a1")
+                .contains("http://h:8181/mcp", "[REDACTED]");
+        assertThat(logged).containsSubsequence("claude", "--mcp-config").endsWith("--model", "m");
+        assertThat(ClaudeCliWorker.redactMcpConfig(List.of("--mcp-config", "not json")))
+                .containsExactly("--mcp-config", "[REDACTED]");
+    }
+
     private Path writeStub(String body) throws IOException {
         Path p = tempDir.resolve("claude-stub-" + System.nanoTime() + ".sh");
         Files.writeString(p, body);
