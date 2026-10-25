@@ -2,6 +2,7 @@ package com.platform.runner.claudecli;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,6 +34,7 @@ class ClaudeCliAdapterConfigTest {
     }
 
     @Test
+    @DisplayName("IT-01-010 5 서버_노출이면_aimbase-server_에_키를_Authorization_ApiKey_머리글로만_싣는다")
     void emits_dual_keys_when_server_exposure_enabled() throws Exception {
         ClaudeCliAdapterConfig cfg = new ClaudeCliAdapterConfig();
         cfg.setAimbaseAgentJar("/opt/aimbase/aimbase-agent.jar");
@@ -52,7 +54,9 @@ class ClaudeCliAdapterConfigTest {
         assertThat(server.get("type").asText()).isEqualTo("http");
         assertThat(server.get("url").asText()).isEqualTo("https://aimbase.example.com/mcp");
         JsonNode headers = server.get("headers");
-        assertThat(headers.get("X-API-Key").asText()).isEqualTo("k-secret");
+        // CR-154: CLI 접속 기록이 가리는 Authorization 머리글로만 키를 싣는다
+        assertThat(headers.get("Authorization").asText()).isEqualTo("ApiKey k-secret");
+        assertThat(headers.has("X-API-Key")).isFalse();
         assertThat(headers.get("X-Aimbase-Agent-Id").asText()).isEqualTo("agent-uuid-1");
     }
 

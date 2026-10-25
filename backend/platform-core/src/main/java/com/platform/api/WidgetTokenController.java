@@ -1,6 +1,7 @@
 package com.platform.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.platform.auth.ApiKeyAuthenticationFilter;
 import com.platform.auth.JwtProvider;
 import com.platform.config.PlatformSettingsService;
 import com.platform.tenant.TenantContext;
@@ -24,7 +25,6 @@ import java.util.*;
 public class WidgetTokenController {
 
     private static final Logger log = LoggerFactory.getLogger(WidgetTokenController.class);
-    private static final String API_KEY_HEADER = "X-API-Key";
 
     private final JwtProvider jwtProvider;
     private final PlatformSettingsService settings;
@@ -38,7 +38,7 @@ public class WidgetTokenController {
     public ResponseEntity<?> issueWidgetToken(@RequestBody IssueRequest req,
                                               HttpServletRequest httpReq) {
         // 1) API Key 인증 통과분만 허용 (JWT 로 호출 금지)
-        if (httpReq.getHeader(API_KEY_HEADER) == null) {
+        if (ApiKeyAuthenticationFilter.resolveApiKey(httpReq) == null) {
             return ResponseEntity.status(401)
                     .body(ApiResponse.error("API Key is required to issue widget token"));
         }

@@ -28,7 +28,7 @@ Aimbase 서버에 등록된 도구 32개 중 CLI 노출 대상 24개를 **MCP �
 | # | 키워드 | 결정 |
 |---|---|---|
 | 1 | MCP 서버 구현 | `mcp-spring-webmvc` 0.10.0 재사용 (sdk-mcp 변환 유틸 공유) |
-| 2 | 인증 | `X-API-Key` 만 (tenant 자동 결정). 기존 `ApiKeyAuthenticationFilter` 재사용. `/mcp/**` permitAll() 제거 |
+| 2 | 인증 | `X-API-Key` 만 (tenant 자동 결정). 기존 `ApiKeyAuthenticationFilter` 재사용. `/mcp/**` permitAll() 제거. CR-154 부터 같은 키를 `Authorization: ApiKey <키>` 로도 받고, 실행기 CLI 설정은 이 형식으로 싣는다(CLI 가 MCP 접속 기록에서 이름이 Authorization 으로 끝나는 머리글만 가림) |
 | 3 | 화이트리스트 | `ToolContractMeta.mcpExposureLevel` enum (NONE/CLI/EXTERNAL). 기본 NONE. 24개 CLI / 8개 NONE |
 | 4 | ToolMode 와 관계 | 직교. `mcp.server-exposure.enabled` 플래그로 on/off |
 | 5 | 이름 충돌 | prefix 자동 분리(`mcp__aimbase-server__*`). 충돌 감지 로깅만 |
@@ -204,7 +204,7 @@ public List<UnifiedToolDef> getToolsForMcpExposure(McpExposureLevel level, ToolC
     "aimbase-server": {
       "url": "${aimbase.server.base-url}/mcp/sse",
       "headers": {
-        "X-API-Key": "${apiKey}",
+        "Authorization": "ApiKey ${apiKey}",
         "X-Aimbase-Agent-Id": "${agentId}"
       }
     }

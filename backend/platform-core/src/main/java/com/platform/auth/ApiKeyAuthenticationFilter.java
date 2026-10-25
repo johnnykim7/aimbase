@@ -28,12 +28,17 @@ import java.util.Map;
 
 /**
  * API Key 인증 필터.
- * X-API-Key 헤더의 값을 SHA-256 해시하여 DB의 api_key_hash와 비교한다.
+ * X-API-Key 헤더 또는 Authorization: ApiKey 헤더의 값을 SHA-256 해시하여 DB의 api_key_hash와 비교한다.
  */
 public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(ApiKeyAuthenticationFilter.class);
     private static final String API_KEY_HEADER = "X-API-Key";
+    /**
+     * CR-154: Claude CLI 는 MCP 접속 기록에 머리글을 그대로 적고, 이름이 Authorization 으로 끝나는 머리글만 가린다.
+     * 키를 기록에 남기지 않으려는 호출자(실행기 CLI)는 이 형식으로 보낸다. 스킴 이름은 대소문자를 가리지 않는다(RFC 7235).
+     */
+    private static final String AUTHORIZATION_SCHEME = "ApiKey ";
 
     /** CR-150: 테넌트 없이 발급한 키로 인증한 요청 표시. 관리 도구(MCP)가 이 키를 거부한다. */
     public static final String TENANTLESS_KEY_ATTR = ApiKeyAuthenticationFilter.class.getName() + ".tenantlessKey";
@@ -61,8 +66,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        String apiKey = request.getHeader(API_KEY_HEADER);
-        if (apiKey == null || apiKey.isBlank()) {
+        String apiKey = resolveApiKey(request);
+        if (apiKey == null) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -134,6 +139,20 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /** 요청에 실린 API 키. X-API-Key 가 우선이고, 없으면 Authorization: ApiKey 값이다. 둘 다 없으면 null. */
+    public static String resolveApiKey(HttpServletRequest request) {
+        String key = request.getHeader(API_KEY_HEADER);
+        if (key != null && !key.isBlank()) {
+            return key;
+        }
+        String auth = request.getHeader("Authorization");
+        if (auth != null && auth.regionMatches(true, 0, AUTHORIZATION_SCHEME, 0, AUTHORIZATION_SCHEME.length())) {
+            String value = auth.substring(AUTHORIZATION_SCHEME.length()).trim();
+            return value.isEmpty() ? null : value;
+        }
+        return null;
     }
 
     private void setAuthentication(UserPrincipal principal, HttpServletRequest request) {

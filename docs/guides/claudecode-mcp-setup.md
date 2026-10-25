@@ -136,7 +136,7 @@ curl http://localhost:8290/v1/health -H "X-Api-Key: <RUNNER_API_KEY>"
       "type": "http",
       "url": "https://aimbase.your-org.com/mcp",
       "headers": {
-        "X-API-Key": "<테넌트 키>",
+        "Authorization": "ApiKey <테넌트 키>",
         "X-Aimbase-Agent-Id": "a3bc1..."
       }
     }
@@ -156,7 +156,7 @@ CLI 가 두 서버 모두에 connect 후 도구 카탈로그를 prefix 분리해
 
 | 헤더 | 처리 필터 | 용도 |
 |---|---|---|
-| `X-API-Key` | `ApiKeyAuthenticationFilter` | tenant_id 자동 결정 (필수) |
+| `Authorization: ApiKey <키>` (또는 `X-API-Key`) | `ApiKeyAuthenticationFilter` | tenant_id 자동 결정 (필수). Claude CLI 는 MCP 접속 기록 파일(`~/.cache/claude-cli-nodejs/<폴더>/mcp-logs-<서버>/`)에 머리글을 그대로 적고 이름이 Authorization 으로 끝나는 것만 가리므로, CLI 설정에는 Authorization 으로 싣는다(CR-154) |
 | `X-Aimbase-Agent-Id` | `AgentIdRequestFilter` | 세션 식별 + Hook 컨텍스트 (선택) |
 
 서버 측 거버넌스 (`/mcp` 진입 도구 호출):
@@ -232,6 +232,7 @@ Connection 의 `config.tool_mode` 값에 따라 CLI 가 사용할 수 있는 도
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v1.3.0 | 2026-10-25 | **CR-154** § 4 CLI 설정 예시의 키 머리글을 `Authorization: ApiKey <키>` 로 바꿈. `X-API-Key` 로 두면 CLI 가 MCP 접속 기록 파일에 키를 그대로 남긴다 |
 | v1.2.0 | 2026-06-18 | **현행화 — 도구 노출 26→42 + 화이트리스트 외부화 + timeout/좀비 트러블슈팅**. § 1 그림 `--runner-mode` → SERVLET 모드(CR-073 폐지 반영). § 4 서버 도구 노출 개수 26 고정 표기 제거 — CR-104(28→42, `file_write`/`bash`/`download_file` 추가) + CR-110(`global_config.mcp.cli-exposed-tools` CSV 단일 소스, 제거=즉시/추가=재기동) 반영, 화이트리스트 항목·on/off 블록 갱신. § 7 트러블슈팅에 `No such tool`(CR-104) + AGENT_CALL turn timeout/force-cancel/rerun/좀비(CR-111/116/109/114) 추가. 코드 실측(`McpExposurePolicy`/V66 SQL/`ClaudeCliCommandBuilder`). 신규 코드 없음 — 문서만 |
 | v1.1.0 | 2026-04-28 | CR-072 + CR-073 — 다중 mcpServers (`aimbase-local` + `aimbase-server`) 로 SDK 14개 + 서버 도구 26개 노출. `--runner-mode` 플래그 폐지 (후방 호환). `mcp.server-exposure.enabled` / `mcp.rate-limit.requests-per-minute` 키 추가 |
 | v1.0.0 | 2026-04-27 | CR-071 초판 — Claude Code MCP 연동 + aimbase-agent `--runner-mode` 셋업 |

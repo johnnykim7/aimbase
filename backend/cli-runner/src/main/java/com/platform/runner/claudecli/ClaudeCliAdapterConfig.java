@@ -35,7 +35,7 @@ public class ClaudeCliAdapterConfig {
     private String javaCommand = "java";
     /** CR-072: 서버 측 MCP endpoint 노출 시 mcpServers 의 "aimbase-server" 항목으로 박을 base URL. 비어있으면 미박음. */
     private String serverMcpBaseUrl = "";
-    /** CR-072: aimbase-server MCP endpoint 호출용 X-API-Key 헤더 값. */
+    /** CR-072: aimbase-server MCP endpoint 호출용 API 키. CR-154 부터 Authorization: ApiKey 머리글로 싣는다. */
     private String serverMcpApiKey = "";
     /** CR-072: aimbase-server MCP endpoint 호출용 X-Aimbase-Agent-Id 헤더 값. */
     private String serverMcpAgentId = "";
@@ -110,7 +110,7 @@ public class ClaudeCliAdapterConfig {
      *   <li>그 외에는 mcpServers 객체를 합성:
      *     <ul>
      *       <li>{@code aimbaseAgentJar} 가 있으면 {@code aimbase-local} (stdio) 박음.</li>
-     *       <li>{@code serverMcpBaseUrl} 이 있으면 {@code aimbase-server} (SSE, X-API-Key/X-Aimbase-Agent-Id 헤더) 박음. (CR-072)</li>
+     *       <li>{@code serverMcpBaseUrl} 이 있으면 {@code aimbase-server} (Authorization: ApiKey/X-Aimbase-Agent-Id 헤더) 박음. (CR-072, CR-154)</li>
      *     </ul>
      *   </li>
      *   <li>둘 다 비어있으면 {@code {"mcpServers":{}}}.</li>
@@ -151,7 +151,9 @@ public class ClaudeCliAdapterConfig {
             server.put("url", base + "/mcp");
             java.util.Map<String, String> headers = new java.util.LinkedHashMap<>();
             if (serverMcpApiKey != null && !serverMcpApiKey.isBlank()) {
-                headers.put("X-API-Key", serverMcpApiKey);
+                // CR-154: CLI 는 MCP 접속 기록 파일에 머리글을 적으면서 이름이 Authorization 으로 끝나는 것만 가린다.
+                // X-API-Key 로 보내면 키가 실행기 디스크에 그대로 남는다.
+                headers.put("Authorization", "ApiKey " + serverMcpApiKey);
             }
             if (serverMcpAgentId != null && !serverMcpAgentId.isBlank()) {
                 headers.put("X-Aimbase-Agent-Id", serverMcpAgentId);

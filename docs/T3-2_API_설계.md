@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 6.7 | 최종 수정: 2026-10-14 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150
+> 설계 버전: 6.8 | 최종 수정: 2026-10-25 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -1065,7 +1065,7 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 
 ### API Key 인증
 
-`X-API-Key` 헤더로 인증. JWT와 API Key 중 하나로 인증 가능.
+`X-API-Key` 헤더 또는 `Authorization: ApiKey <키>` 헤더로 인증(CR-154. 둘 다 있으면 X-API-Key). JWT와 API Key 중 하나로 인증 가능.
 
 ### 관리 도구 MCP 접속 인증 [CR-150]
 

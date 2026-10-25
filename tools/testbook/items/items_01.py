@@ -1,5 +1,5 @@
-# 영역 01 CLI 작업과 앱 도구 시험항목. 근거는 CR-152(T3-12 § 4.3), CR-153(T1-3 BIZ-125, T3-13 § 4.4, T3-5 TC-MCP-RES-001~005)이다.
-# 두 CR 의 대상 기능(PRD-306, PRD-281)은 T1-1 에 행이 없어 req·fc 를 비워 두고 src 에 CR 번호를 적는다.
+# 영역 01 CLI 작업과 앱 도구 시험항목. 근거는 CR-152(T3-12 § 4.3), CR-153(T1-3 BIZ-125, T3-13 § 4.4, T3-5 TC-MCP-RES-001~005), CR-154(T1-1 PRD-107, T3-5 TC-AK-011~015)이다.
+# CR-152, CR-153 의 대상 기능(PRD-306, PRD-281)은 T1-1 에 행이 없어 req·fc 를 비워 두고 src 에 CR 번호를 적는다. CR-154 도 같은 영역이라 같게 둔다.
 
 ITEMS = [
 
@@ -84,5 +84,33 @@ dict(id='IT-01-008', flow='큰 도구 결과', kind='정상', title='도구 결�
      judge=['단위', '단위'],
      pair={1: [1], 2: [2]},
      src=['CR-153'], pri='High'),
+
+dict(id='IT-01-009', flow='앱 도구 서버 키', kind='정상', title='실행기 CLI 의 앱 도구 서버 접속 기록에 서버 API 키가 남지 않는다',
+     pre='앱 도구 서버(MCP)가 붙은 CLI 연결과 그 연결로 앱 도구를 부르는 AGENT_CALL 단계가 있는 워크플로우 1개, 실행기 컨테이너에 들어갈 수 있는 서버 계정',
+     steps='1. 실행기(aimbase-agent)를 다시 띄운 뒤 그 워크플로우를 실행한다\n'
+           '2. 실행기 컨테이너의 ~/.cache/claude-cli-nodejs/-app/mcp-logs-aimbase-server/ 에서 실행 뒤 생긴 기록 파일을 연다',
+     expect='1. 실행 상태가 completed 고 AGENT_CALL 단계 이벤트에 앱 도구 호출이 1회 이상 남는다\n'
+            '2. 기록의 "HTTP transport options" 줄 머리글에서 Authorization 값이 [REDACTED] 다\n'
+            '3. 기록 폴더의 어느 파일에도 X-API-Key 머리글과 서버 API 키 원문이 없다',
+     judge=['서버', '서버', '서버'],
+     src=['CR-154'], pri='High'),
+
+dict(id='IT-01-010', flow='앱 도구 서버 키', kind='정상', title='서버가 Authorization: ApiKey 머리글의 키로 인증하고 실행기는 그 머리글로만 키를 싣는다',
+     pre='platform-core, cli-runner 단위시험(API 키 저장소를 흉내 낸다)',
+     steps='1. Authorization: ApiKey <테넌트 키> 로 요청한다\n'
+           '2. Authorization: apikey <테넌트 키> 로 요청한다\n'
+           '3. Authorization: Bearer <키 문자열> 로 요청한다\n'
+           '4. X-API-Key: <테넌트 키> 로 요청한다\n'
+           '5. 실행기에 서버 MCP 주소와 키를 설정하고 CLI 에 넘길 MCP 설정을 만든다\n'
+           '6. X-API-Key 없이 Authorization: ApiKey <키> 로 위젯 토큰 발급을 요청한다',
+     expect='1. 요청이 인증되고 테넌트가 그 키의 테넌트로 정해진다\n'
+            '2. 스킴을 소문자로 써도 1 과 같이 인증된다\n'
+            '3. 키를 조회하지 않고 인증 없이 다음 단계로 넘어간다\n'
+            '4. X-API-Key 요청도 1 과 같이 인증된다\n'
+            '5. aimbase-server 항목 머리글에 Authorization: ApiKey <키> 가 있고 X-API-Key 가 없다\n'
+            '6. 위젯 토큰 발급이 200 으로 토큰을 돌려준다',
+     judge=['단위', '단위', '단위', '단위', '단위', '단위'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5], 6: [6]},
+     src=['CR-154'], pri='High'),
 
 ]

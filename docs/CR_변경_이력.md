@@ -110,6 +110,7 @@
 | CR-151 | AWS 서버(우진비드) 배포 대상 추가. **배경**: 우진비드가 쓰는 Aimbase 는 AWS 서버에 따로 있는데 배포 스크립트가 없어 CR-146 은 jar 를 손으로 바꿨고, 스킬 실행 컨테이너도 없다. **조치**: AWS compose 를 저장소(`docker-compose.wjbid.yml`)로 옮기고 실행 컨테이너를 더했으며, `./deploy.sh wjbid-sandbox, wjbid-be, wjbid-agent, wjbid` 를 추가(나중에 생길 AXOPM AWS 와 구분해 wjbid 로 부름) | 변경 | Medium | v3.x | 완료 |
 | CR-152 | CLI 작업이 앱 도구 서버 연결 전에 시작해 도구 없이 끝나는 결함. **요청**: 입찰대행 플랫폼 CR-169(제안서 목차 단계가 도구를 못 불러 목차 0건). **원인**: CLI 2.1.197 은 MCP 서버 연결을 기다리지 않고 첫 턴을 시작한다. AWS 에서 연결에 약 0.3초가 걸리는 사이 턴이 먼저 나가 AIMBASE 모드 28회 모두 연결 중으로 시작했고, 모델이 도구 없이 설명문을 내도 단계는 COMPLETED 였다. **조치**: 러너가 MCP 서버를 넘길 때 CLI 가 연결을 기다리게 하고(상한은 러너 설정), 턴 시작 때 넘긴 서버가 하나라도 연결되지 않았으면 그 턴을 실패로 끝내 기존 재시도에 태운다 | 결함 | High | v3.x | 완료 |
 | CR-153 | CLI 로 나가는 앱 도구 결과가 8,000자로 잘리는 결함. **발견**: CR-152 운영 확인 중 입찰대행 proposal-design 목차 단계가 목차 입력 81,881자 가운데 8,000자만 받아 요구사항 연결이 빠짐(10회 모두). **원인**: 서버 MCP 통로와 Tool SDK MCP 서버가 결과를 고정 8,000자(앞 70%, 뒤 30%)로 자르고, 가운데는 되찾을 길이 없음. **변경**: 자르기를 없애고, 도구 목록의 도구마다 결과 크기 상한(`anthropic/maxResultSizeChars`, 런타임 설정 `orchestrator.mcp-tool-result-max-chars` 기본 200,000자)을 적어 CLI 가 그만큼 그대로 받게 함 | 결함 | High | v3.x | 완료 |
+| CR-154 | 실행기 CLI 의 MCP 접속 기록에 서버 API 키가 그대로 남는 결함. **발견**: CR-152 운영 확인 중 AWS 실행기 컨테이너의 CLI 접속 기록 35개에 키 원문. **원인**: CLI 는 이름이 Authorization 으로 끝나는 머리글만 가리는데 실행기가 키를 X-API-Key 로 넘김. **변경**: 서버가 `Authorization: ApiKey <키>` 도 받고, 실행기가 그 형식으로 넘김 | 결함 | Medium | v3.x | 구현 |
 
 ---
 
@@ -2545,6 +2546,26 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **운영 확인 (2026-10-25)**: AWS 반영 뒤 입찰대행 proposal-design 2회(62e37fb8 18:28 KST, 1d0bba1f 19:06 KST) 모두 completed. get_proposal_design_input 결과 본문이 앱이 낸 크기와 같은 81,881자, 81,887자로 끝까지 남았고 "결과 축약" 안내가 없다. 실행기 CLI 가 결과를 파일로 돌린 흔적(tool-results)은 0건. 두 회차 단계 결과문에 결과가 잘렸다는 설명이 없고, 저장한 목차의 연결되지 않은 SHALL 요구사항과 쓰지 않은 서류가 모두 0건이라고 적었다(반영 전에는 한 회차 13건)
 - **상태**: 완료(AWS, 옛 서버)
 
+### CR-154 | 실행기 CLI 의 MCP 접속 기록에 서버 API 키가 그대로 남는 결함
+- **대상 기능 ID**: PRD-107(API Key 인증), CR-072(서버 MCP 통로)
+- **변경 타입**: 변경(결함)
+- **원본 요구사항**: [docs/origins/원본_요구사항_CR154_CLI_접속기록_API키_노출_20261025.md](origins/원본_요구사항_CR154_CLI_접속기록_API키_노출_20261025.md)
+- **발견**: CR-152 운영 확인 중(CR 후보 7). AWS 우진 실행기 컨테이너 `~/.cache/claude-cli-nodejs/-app/mcp-logs-aimbase-server/*.jsonl` 35개 모두에 "HTTP transport options" 줄과 함께 서버 API 키 원문이 있었다. 옛 서버 실행기 6개에는 0개. 볼륨이 아니라 컨테이너를 다시 만들면 지워진다
+- **원인 (CLI 2.1.197 바이너리)**: MCP 접속 기록은 끌 수 없고(`initSinks` 가 늘 붙임), 머리글은 이름이 `authorization` 으로 끝날 때만 가린다. 환경변수 참조나 headersHelper 로 넘겨도 펼친 값이 적힌다. 실행기(ClaudeCliAdapterConfig)는 키를 `X-API-Key` 로 넘긴다
+- **변경 내용**:
+  1. ApiKeyAuthenticationFilter 가 `X-API-Key` 가 없으면 `Authorization: ApiKey <키>` 의 키로 인증한다. 스킴 이름은 대소문자를 가리지 않고, 둘 다 있으면 X-API-Key 를 쓴다. `Bearer` 는 건드리지 않는다
+  2. 위젯 토큰 발급(WidgetTokenController)의 "API 키로 온 요청만" 검사도 같은 판정을 쓴다
+  3. 실행기(cli-runner ClaudeCliAdapterConfig)가 aimbase-server 항목에 키를 `Authorization: ApiKey <키>` 로만 싣는다. NATIVE 의 aimbase-skills 항목은 이 항목을 본떠 같은 머리글을 쓴다
+- **결정 (2026-10-25 사용자)**: 19:25:03 "1=1" (서버가 Authorization 머리글로도 받고 실행기가 그 머리글로 보냄)
+- **영향 모듈**: platform-core(ApiKeyAuthenticationFilter, WidgetTokenController), cli-runner(ClaudeCliAdapterConfig), aimbase-agent(cli-runner 를 쓰므로 다시 빌드)
+- **영향도**: Medium (키 노출은 실행기 컨테이너 안에 한정. X-API-Key 는 그대로 받으므로 기존 소비앱과 옛 실행기는 바뀌지 않는다. 반영 순서는 api 먼저, 실행기 나중)
+- **영향 범위**: CR-025(시스템 API 키), CR-058(위젯 토큰), CR-072(서버 MCP 통로), CR-147(aimbase-skills), CR-150(관리 도구 MCP 인증)
+- **영향 설계서**: T1-1 PRD-107, T3-2 API Key 인증, T3-13 § 1.3 #2 와 설정 예시, T3-5 TC-AK-011~015, API 가이드 v3.19.0, Claude Code MCP 연동 가이드 v1.3.0
+- **영향 없음 확인**: T1-3(업무 규칙 변경 없음), T2(새 라이브러리 없음), T3-1(테이블 변경 없음), T3-3, T3-4(화면 변경 없음), 운용 가이드(관리 기능 변경 없음), SDK 가이드(Tool SDK 변경 없음)
+- **구현 (2026-10-25)**: 단위시험 통과(ApiKeyAuthenticationFilterTest 4건 신규, WidgetTokenControllerTest 9건, ClaudeCliAdapterConfigTest 6건, ClaudeCliWorkerTest 30건). 로컬 서버(8181)에서 `Authorization: ApiKey` 로 /mcp 도구 46개, /mcp-skills 도구 3개를 받았고, 같은 키를 `Bearer` 로 보내면 403. 서버 CLI 와 같은 2.1.197 을 실행기 설정과 같은 머리글로 붙이자 aimbase-server 가 connected, 도구 46개였고, 접속 기록의 Authorization 값은 [REDACTED], 기록 안에 키 원문 0건
+- **시험항목 (2026-10-25)**: 영역 01 에 IT-01-009(실행기 CLI 접속 기록에 키가 남지 않음, 서버), IT-01-010(Authorization: ApiKey 인증과 실행기 머리글, 단위)을 넣었다
+- **상태**: 구현. 반영은 api 먼저, 실행기 나중
+
 ## CR 후보 (발번 전)
 
 > 작업 중 발견했고 아직 CR 로 열지 않은 것이다. 착수할 때 CR 번호를 붙이고 이 표에서 지운다. 2026-10-15 사용자 00:55 기록 승인.
@@ -2557,7 +2578,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 | 4 | 테넌트 없이 발급한 API 키가 일반 API 에서 X-Tenant-Id 머리글로 어느 테넌트든 admin 으로 다룰 수 있다. CR-086 대조는 로그인 토큰에만 있다 | CR-150 (2026-10-14) | ApiKeyAuthenticationFilter.java:88-102, CR-150 카드 범위 밖 | 소스로 확인. 요청으로 재현하지 않음. 도메인 전용 키의 의도된 동작인지 먼저 정한다 |
 | 5 | 시험 설정이 docker info 를 시간 제한 없이 기다려, Docker 가 멈추면 bootRun, bootJar 를 포함한 모든 gradle 호출이 멈춘다 | CR-150 (2026-10-14) | backend/platform-core/build.gradle.kts:110-111 | 실제로 20분 넘게 멈춘 것을 확인. 배포 때는 멈춘 docker info 를 끊어 진행했다 |
 | 6 | 화면 시험 도구가 없다. 이 저장소 CLAUDE.md 는 FE 훅 시험(use*.test.ts)을 필수로 두지만 frontend/package.json 에 시험 명령과 도구가 없고 훅 시험 파일도 없다 | CR-149 (2026-10-13) | frontend/package.json scripts, frontend/src/hooks | 확인 |
-| 7 | 러너 안 CLI 가 MCP 연결 기록(`~/.cache/claude-cli-nodejs/-app/mcp-logs-aimbase-server/*.jsonl`)에 aimbase-server 머리글을 그대로 적어, 실행기 컨테이너 디스크에 서버 API 키가 남는다. AWS 에 37개 | CR-152 (2026-10-25) | AWS aimbase-agent 컨테이너 MCP 기록 파일, CR-152 카드 범위 밖 | 파일 하나를 열어 확인. 기록을 끄는 CLI 설정이 있는지, 키를 머리글 대신 다른 길로 넘길지 먼저 본다 |
+| 8 | 운영 compose 파일(docker-compose.prod.yml)에 실행기의 서버 MCP 키 원문 3종이 기본값으로 적혀 저장소에 올라가 있다. 2026-06-14(b0e91b2)부터 | CR-154 (2026-10-25) | docker-compose.prod.yml:130, 172, 212, 255, 305, 351, CR-154 카드 범위 밖 | 저장소 파일에서 확인. 그 키가 지금 운영에서 유효한지는 보지 않았다. 키를 서버 .env 로만 두고 기본값을 지울지, 키를 바꿀지 먼저 정한다 |
 
 ---
 

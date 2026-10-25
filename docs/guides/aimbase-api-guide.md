@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.18.0** | 2026-10-13 | Aimbase v8.18.0 기준
+> **v3.19.0** | 2026-10-25 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -78,7 +78,9 @@ API Key 사용 시 필수 헤더:
 | `X-API-Key` | 발급받은 시스템 API Key |
 | `Content-Type` | `application/json` |
 
-> **장점**: API Key에 `domain_app`(제품)과 `tenant_id`(테넌트)가 바인딩되어 있어 `Authorization`, `X-Tenant-Id` 헤더가 모두 불필요합니다. 테넌트 라우팅이 자동으로 처리됩니다.
+`X-API-Key` 대신 `Authorization: ApiKey <발급받은 키>` 로 보내도 됩니다(둘 다 있으면 `X-API-Key`). 요청 머리글을 기록 파일에 남기는 도구는 이 형식으로 보내세요. 예를 들어 Claude CLI 는 MCP 접속 기록에 머리글을 적으면서 이름이 Authorization 으로 끝나는 머리글만 가립니다(CR-154).
+
+> **장점**: API Key에 `domain_app`(제품)과 `tenant_id`(테넌트)가 바인딩되어 있어 로그인 토큰(`Authorization: Bearer`), `X-Tenant-Id` 헤더가 모두 불필요합니다. 테넌트 라우팅이 자동으로 처리됩니다.
 
 **API Key 발급**: 플랫폼 관리자(SUPER_ADMIN)가 `/api/v1/platform/api-keys` 엔드포인트로 발급합니다.
 
@@ -2190,6 +2192,7 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.19.0 | 2026-10-25 | **CR-154 API Key 를 Authorization 머리글로도 받음** (§ 인증). `Authorization: ApiKey <키>` 를 `X-API-Key` 와 같게 받는다. 위젯 토큰 발급도 같다. Claude CLI 처럼 머리글을 기록에 남기는 도구에서 키가 가려지게 하려는 것 |
 | v3.18.0 | 2026-10-13 | **CR-149 워크플로우 저장 계약 정합** (§ 4-1). `description` 추가. 그동안 400 이던 `projectId`, `graphMode` 를 받고 `id` 를 비우면 서버가 만든다. 생성 때 이미 있는 `id` 는 409(전에는 기존 워크플로우를 덮어씀). 목록은 `X-Project-Id` 가 있으면 그 프로젝트와 공유 워크플로우만, `my=true` 면 내가 만든 것만. `errorHandling` 칸 이름을 실제(`retryMaxAttempts`, `retryDelayMs`)로 바로잡음. 이전 문서의 `strategy`, `maxRetries` 는 실행 때 무시되고 있었고 이제 저장 때 400 |
 | v3.17.0 | 2026-10-13 | **CR-147 스킬 묶음** (§ 24). 스킬 묶음 올리기와 조회 API(테넌트 전용, 플랫폼 공용, 판), 워크플로우 단계 config `skills`, 모델 도구 skill_open, skill_read, skill_run, CLI 세 모드 스킬 통로(NATIVE 는 `/mcp-skills`). 헤더 버전을 변경 이력 최신에 맞춤 |
 | v3.16.0 | 2026-08-06 | **CR-137 — 영상 판독 API 신설 + 업로드 상한 정합** (§ 23). ① **`POST/GET /api/v1/vision-jobs`**: 영상을 올리면 서버가 ffmpeg 로 프레임 N장(기본 6, 1~20)을 균등 간격 추출해 VLM 에 태우고 판독 결과를 반환(job 등록→폴링). 지원 MIME 4종 MP4/MOV/WebM/AVI 를 **매직넘버로 판정**하되, iOS 가 `.mov` 를 `video/mp4` 로 보내는 등 헤더 표기가 기기마다 달라 영상은 `video/*` 계열만 일치하면 통과(이미지는 기존대로 엄격). 프레임 추출은 **서버**에서 한다 — 소비앱이 늘어나도 canvas·코덱 분기를 앱마다 재구현하지 않고, 원본이 서버에 남아 재판독·감사가 가능하다. 촬영 UI 는 소비앱 몫. 사진 1장은 이 API 가 아니라 기존 § 18-4 첨부 경로를 쓰며, 채팅 첨부에 영상을 올리면 400 으로 거부하고 이 API 로 안내한다. 원본은 24h 후 GC(BIZ-114), 프레임은 판독 직후 삭제. ② **⚠️ BIZ-115 — 수량은 VLM 에 직접 묻지 말 것**(§ 23-3): 박스 9개의 라벨을 전부 정확히 읽어놓고 "총 7개"라 답하며 7B·32B 동일 — 모델 크기로 해결 안 되는 구조적 한계다. 나열시켜 코드로 셀 것. ③ **업로드 상한 3계층 정합**(회귀 수정): nginx 100m 보다 Spring multipart 가 50MB 로 작아 **50~100MB 파일이 nginx 를 통과하고 Spring 에서 터지던** 실제 버그를 해소(50MB→100MB). § 22 전사 job 상한 표기도 1GB→100MB 로 정정 — 기존 1GB 는 앞단 두 계층에 먼저 막혀 **도달 불가능한 값**이었다. 단위 `MimeValidatorTest` +11 / `FrameExtractorTest` 10 / `VisionJobServiceTest` 8 PASS + platform-core 회귀 GREEN |

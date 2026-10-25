@@ -7,6 +7,7 @@ import com.platform.tenant.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -83,6 +84,27 @@ class WidgetTokenControllerTest {
         ResponseEntity<?> response = controller.issueWidgetToken(req, request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("IT-01-010 6 Authorization_ApiKey_로_온_요청도_발급한다")
+    void returnsToken_whenApiKeyInAuthorizationHeader() {
+        when(request.getHeader("X-API-Key")).thenReturn(null);
+        when(request.getHeader("Authorization")).thenReturn("ApiKey test-api-key");
+        when(settings.getStringList("widget.allowed-origins", List.of()))
+                .thenReturn(List.of("https://oms.com"));
+        when(settings.getStringList(eq("widget.allowed-scopes"), org.mockito.ArgumentMatchers.<List<String>>any()))
+                .thenReturn(List.of("chat:stream"));
+        when(settings.getInt("widget.token-ttl-seconds", 1800)).thenReturn(1800);
+        when(settings.getInt("widget.token-max-ttl-seconds", 3600)).thenReturn(3600);
+
+        WidgetTokenController.IssueRequest req = new WidgetTokenController.IssueRequest();
+        req.origin = "https://oms.com";
+        req.scopes = List.of("chat:stream");
+
+        ResponseEntity<?> response = controller.issueWidgetToken(req, request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
     }
 
     @Test
