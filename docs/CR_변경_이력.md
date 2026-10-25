@@ -110,7 +110,7 @@
 | CR-151 | AWS 서버(우진비드) 배포 대상 추가. **배경**: 우진비드가 쓰는 Aimbase 는 AWS 서버에 따로 있는데 배포 스크립트가 없어 CR-146 은 jar 를 손으로 바꿨고, 스킬 실행 컨테이너도 없다. **조치**: AWS compose 를 저장소(`docker-compose.wjbid.yml`)로 옮기고 실행 컨테이너를 더했으며, `./deploy.sh wjbid-sandbox, wjbid-be, wjbid-agent, wjbid` 를 추가(나중에 생길 AXOPM AWS 와 구분해 wjbid 로 부름) | 변경 | Medium | v3.x | 완료 |
 | CR-152 | CLI 작업이 앱 도구 서버 연결 전에 시작해 도구 없이 끝나는 결함. **요청**: 입찰대행 플랫폼 CR-169(제안서 목차 단계가 도구를 못 불러 목차 0건). **원인**: CLI 2.1.197 은 MCP 서버 연결을 기다리지 않고 첫 턴을 시작한다. AWS 에서 연결에 약 0.3초가 걸리는 사이 턴이 먼저 나가 AIMBASE 모드 28회 모두 연결 중으로 시작했고, 모델이 도구 없이 설명문을 내도 단계는 COMPLETED 였다. **조치**: 러너가 MCP 서버를 넘길 때 CLI 가 연결을 기다리게 하고(상한은 러너 설정), 턴 시작 때 넘긴 서버가 하나라도 연결되지 않았으면 그 턴을 실패로 끝내 기존 재시도에 태운다 | 결함 | High | v3.x | 완료 |
 | CR-153 | CLI 로 나가는 앱 도구 결과가 8,000자로 잘리는 결함. **발견**: CR-152 운영 확인 중 입찰대행 proposal-design 목차 단계가 목차 입력 81,881자 가운데 8,000자만 받아 요구사항 연결이 빠짐(10회 모두). **원인**: 서버 MCP 통로와 Tool SDK MCP 서버가 결과를 고정 8,000자(앞 70%, 뒤 30%)로 자르고, 가운데는 되찾을 길이 없음. **변경**: 자르기를 없애고, 도구 목록의 도구마다 결과 크기 상한(`anthropic/maxResultSizeChars`, 런타임 설정 `orchestrator.mcp-tool-result-max-chars` 기본 200,000자)을 적어 CLI 가 그만큼 그대로 받게 함 | 결함 | High | v3.x | 완료 |
-| CR-154 | 실행기 CLI 의 MCP 접속 기록에 서버 API 키가 그대로 남는 결함. **발견**: CR-152 운영 확인 중 AWS 실행기 컨테이너의 CLI 접속 기록 35개에 키 원문. **원인**: CLI 는 이름이 Authorization 으로 끝나는 머리글만 가리는데 실행기가 키를 X-API-Key 로 넘김. **변경**: 서버가 `Authorization: ApiKey <키>` 도 받고, 실행기가 그 형식으로 넘김 | 결함 | Medium | v3.x | 배포 |
+| CR-154 | 실행기 CLI 의 MCP 접속 기록에 서버 API 키가 그대로 남는 결함. **발견**: CR-152 운영 확인 중 AWS 실행기 컨테이너의 CLI 접속 기록 35개에 키 원문. **원인**: CLI 는 이름이 Authorization 으로 끝나는 머리글만 가리는데 실행기가 키를 X-API-Key 로 넘김. **변경**: 서버가 `Authorization: ApiKey <키>` 도 받고, 실행기가 그 형식으로 넘김 | 결함 | Medium | v3.x | 완료 |
 
 ---
 
@@ -2568,7 +2568,8 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **배포 (2026-10-25)**: 사용자 승인 21:12:05(AWS api), 21:55:10(AWS 실행기, 옛 서버). AWS 우진 api 21:1x KST 기동 뒤 실행기 컨테이너 안에서 같은 키를 `Authorization: ApiKey` 와 `X-API-Key` 로 /mcp 초기화해 둘 다 200, 실행기 21:56 KST healthy. 옛 서버(59.8.160.12) `./deploy.sh mcp` 로 api 21:57, 실행기 6개 21:57 KST 모두 healthy. 되돌리기 태그는 AWS aimbase-api:pre-20261025-211216, aimbase-aimbase-agent:pre-20261025-215524, 옛 서버 api 와 실행기 6개 모두 pre-20261025-215644. 실행기를 새로 만들면서 키가 든 AWS 실행기 CLI 기록 35개도 함께 지워졌다. 배포 확인 시점까지 두 서버 모두 CLI 워커가 새로 뜨지 않아 새 기록은 아직 없다
 - **구현 2 (2026-10-25)**: 변경 4. cli-runner 단위시험 전부 통과(ClaudeCliWorkerTest 에 IT-01-010 7 추가)
 - **배포 2 (2026-10-25, 22:26:43 /전승)**: 변경 4 를 실행기에만 다시 반영. AWS 우진 aimbase-agent(되돌림 태그 pre-20261025-223112, healthy), 옛 서버 실행기 6개(pre-20261025-223229). 반영 직후 7개 모두 실행 중, CLI 시작 기록 0줄, 컨테이너 기록과 MCP 접속 기록 폴더에 키 원문 0건
-- **상태**: 배포. 실행기 CLI 가 새로 뜬 뒤 접속 기록과 실행기 기록에서 키가 가려지는지 확인 대기(IT-01-009)
+- **운영 확인 (2026-10-25 22:4x, 사용자 22:39:18 승인)**: AWS 우진에서 입찰 도구 CLI 연결(cli-runner-bidding-tools-001)로 도구를 부르지 않는 채팅 1건을 보냄(세션 ff8fb13e). 입찰대행 워크플로우는 제안서 목차를 다시 저장(save_proposal_structure)해 쓰지 않았다. 응답 200, CLI 가 aimbase-server 도구 105개를 봄(서버가 Authorization: ApiKey 로 인증). 새 MCP 접속 기록의 "HTTP transport options" 줄은 Authorization [REDACTED], X-API-Key 없음. 실행기 시작 기록도 Authorization [REDACTED]. 컨테이너 기록과 접속 기록 폴더에 키 원문 0건. 옛 서버 실행기는 같은 소스로 반영했고 따로 돌려 보지 않았다
+- **상태**: 완료
 
 ## CR 후보 (발번 전)
 

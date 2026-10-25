@@ -88,7 +88,7 @@ dict(id='IT-01-008', flow='큰 도구 결과', kind='정상', title='도구 결�
 dict(id='IT-01-009', flow='앱 도구 서버 키', kind='정상', title='실행기 CLI 의 앱 도구 서버 접속 기록에 서버 API 키가 남지 않는다',
      pre='앱 도구 서버(MCP)가 붙은 CLI 연결과 그 연결로 앱 도구를 부르는 AGENT_CALL 단계가 있는 워크플로우 1개, 실행기 컨테이너에 들어갈 수 있는 서버 계정',
      steps='1. 실행기(aimbase-agent)를 다시 띄운 뒤 그 워크플로우를 실행한다\n'
-           '2. 실행기 컨테이너의 ~/.cache/claude-cli-nodejs/-app/mcp-logs-aimbase-server/ 에서 실행 뒤 생긴 기록 파일을 연다',
+           '2. 실행기 컨테이너의 ~/.cache/claude-cli-nodejs/<작업 폴더>/mcp-logs-aimbase-server/ 에서 실행 뒤 생긴 기록 파일을 연다(워크플로우는 -app, 채팅은 -data-workspace-chat-<세션>)',
      expect='1. 실행 상태가 completed 고 AGENT_CALL 단계 이벤트에 앱 도구 호출이 1회 이상 남는다\n'
             '2. 기록의 "HTTP transport options" 줄 머리글에서 Authorization 값이 [REDACTED] 다\n'
             '3. 기록 폴더의 어느 파일에도 X-API-Key 머리글과 서버 API 키 원문이 없다\n'
