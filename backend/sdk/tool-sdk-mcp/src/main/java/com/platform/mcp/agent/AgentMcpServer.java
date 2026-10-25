@@ -1,6 +1,5 @@
 package com.platform.mcp.agent;
 
-import com.platform.tool.McpResultTruncator;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.server.McpServer;
@@ -182,7 +181,7 @@ public class AgentMcpServer {
      *
      * <p>CR-067: EnhancedToolExecutor 의 default bridge 가 ToolResultRenderer 로 본문을 직렬화하므로
      * 별도 분기 없이 {@code tool.execute(args)} 한 줄로 본문이 정상 노출된다.
-     * 그 후 {@link McpResultTruncator} 로 길이 제한 적용. 예외는 isError=true 로 패킹.
+     * 결과는 자르지 않는다(CR-153). 예외는 isError=true 로 패킹.
      */
     static McpSchema.CallToolResult dispatch(ToolExecutor tool, String name, Map<String, Object> args) {
         return McpToolConversion.dispatch(tool, name, args);

@@ -92,6 +92,17 @@ class ServerMcpToolDispatcherTest {
     }
 
     @Test
+    void cr153_large_result_is_passed_through_untruncated() {
+        // TC-MCP-RES-001: 8,000자로 자르면 가운데를 되찾을 길이 없다. 크기는 도구 목록의 상한으로 CLI 가 정한다.
+        String big = "x".repeat(81_881);
+        McpSchema.CallToolResult result = dispatcher.dispatch(stubTool("get_proposal_design_input", big),
+                "get_proposal_design_input", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(((McpSchema.TextContent) result.content().get(0)).text()).isEqualTo(big);
+    }
+
+    @Test
     void dispatch_by_name_returns_error_when_tool_is_gone() {
         when(toolRegistry.getExecutor("get_opportunity")).thenReturn(null);
 

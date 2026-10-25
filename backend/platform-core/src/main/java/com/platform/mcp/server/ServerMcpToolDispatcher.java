@@ -9,7 +9,6 @@ import com.platform.hook.HookOutput;
 import com.platform.llm.adapter.RequestContext;
 import com.platform.policy.TokenBucketRateLimiter;
 import com.platform.tool.EnhancedToolExecutor;
-import com.platform.tool.McpResultTruncator;
 import com.platform.tenant.TenantContext;
 import com.platform.tool.ApprovalState;
 import com.platform.tool.PermissionLevel;
@@ -81,7 +80,7 @@ public class ServerMcpToolDispatcher {
      *   <li>PRE_TOOL_USE Hook — BLOCK 시 isError</li>
      *   <li>도구 실행 ({@link McpToolConversion} 의 dispatch 와 동일하지만 Hook 인지)</li>
      *   <li>POST_TOOL_USE / POST_TOOL_USE_FAILURE Hook</li>
-     *   <li>결과 truncate</li>
+     *   <li>결과는 자르지 않는다. 크기 상한은 도구 목록에 적어 CLI 가 정한다(CR-153, BIZ-125)</li>
      * </ol>
      * </p>
      */
@@ -158,17 +157,16 @@ public class ServerMcpToolDispatcher {
                         successContext(result)),
                 name);
 
-        String truncated = McpResultTruncator.truncate(name, result);
         if (mediaBlocks.isEmpty()) {
             // CR-124 (SDK 2.0.0): (String, boolean) 축약 생성자 제거 → builder 사용.
             return McpSchema.CallToolResult.builder()
-                    .addTextContent(truncated)
+                    .addTextContent(result)
                     .isError(false)
                     .build();
         }
-        // CR-101: 텍스트 + 멀티모달 블록 동시 운반. 텍스트만 truncate — base64 블록은 자르면 깨진다.
+        // CR-101: 텍스트 + 멀티모달 블록 동시 운반.
         McpSchema.CallToolResult.Builder builder = McpSchema.CallToolResult.builder()
-                .addTextContent(truncated);
+                .addTextContent(result);
         mediaBlocks.forEach(builder::addContent);
         return builder.isError(false).build();
     }

@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * CR-067: AgentMcpServer.dispatch 가 EnhancedToolExecutor 의 본문을 노출하고
- * legacy ToolExecutor 회귀 + 에러 직렬화 + truncator 적용까지 보장하는지 검증.
+ * legacy ToolExecutor 회귀 + 에러 직렬화 + 긴 본문을 자르지 않는지(CR-153) 검증.
  */
 class AgentMcpServerTest {
 
@@ -119,15 +119,15 @@ class AgentMcpServerTest {
     }
 
     @Test
-    @DisplayName("긴 본문은 McpResultTruncator 로 축약됨")
-    void long_body_is_truncated() {
-        String longText = "x".repeat(10_000);
+    @DisplayName("CR-153: 긴 본문을 자르지 않음 (TC-MCP-RES-005)")
+    void long_body_is_not_truncated() {
+        String longText = "x".repeat(81_881);
         EnhancedToolExecutor bigTool = new EnhancedToolExecutor() {
             @Override public ToolContractMeta getContractMeta() {
                 return ToolContractMeta.readOnlyNative("big", List.of());
             }
             @Override public ToolResult execute(Map<String, Object> input, ToolContext ctx) {
-                return ToolResult.ok(Map.of("content", longText), "big (10000)");
+                return ToolResult.ok(Map.of("content", longText), "big");
             }
             @Override public UnifiedToolDef getDefinition() {
                 return new UnifiedToolDef("big", "big", Map.of());
@@ -138,7 +138,6 @@ class AgentMcpServerTest {
 
         assertThat(result.isError()).isFalse();
         String text = ((McpSchema.TextContent) result.content().get(0)).text();
-        assertThat(text.length()).isLessThan(longText.length()); // 축약됨
-        assertThat(text).contains("결과 축약"); // McpResultTruncator 의 생략 메시지
+        assertThat(text).contains(longText);
     }
 }

@@ -750,7 +750,8 @@ Model Context Protocol 서버를 등록하여 도구를 확장합니다.
 | orchestrator.mcp-tool-result-max-chars | 200000 | CLI 가 도구 결과를 그대로 받는 최대 글자 수. CLI 자체 상한은 500000 |
 
 - 사이드바 Super Admin 묶음 "런타임 설정" 의 Orchestrator 카드에서 바꿉니다
-- 바꾼 값은 설정 캐시(5분)가 지난 뒤 30초 동기화 때 도구 목록에 실리고, 그 뒤 새로 뜨는 CLI 워커부터 씁니다
+- 런타임 설정 화면에서 바꾼 값은 다음 30초 동기화 때 도구 목록에 실리고, 그 뒤 새로 뜨는 CLI 워커부터 씁니다. DB 에서 직접 바꾼 값은 설정 캐시(5분)가 지난 뒤에 실립니다
+- 0 이하는 화면에서 저장되지 않습니다. DB 에 0 이하나 숫자가 아닌 값이 들어 있으면 기본값 200000 을 씁니다
 - 단계 결과문에 "truncated", "Output too large", "exceeds maximum allowed tokens" 가 보이면 그 도구 결과가 이 값을 넘은 것입니다. 값을 올리거나 도구가 나눠 주게 합니다
 
 ### 3-8. LLM 라우팅 설정

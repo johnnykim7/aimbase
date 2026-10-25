@@ -1,6 +1,5 @@
 package com.platform.mcp.agent;
 
-import com.platform.tool.McpResultTruncator;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -46,13 +45,24 @@ public final class McpToolConversion {
 
     /** ToolExecutor → MCP Tool 메타로 변환 (이름/설명/입력스키마). */
     public static McpSchema.Tool toMcpTool(ToolExecutor tool) {
+        return toMcpTool(tool, null);
+    }
+
+    /**
+     * CR-153: 도구 목록 항목에 {@code _meta} 를 싣는다. 서버 MCP 통로가 결과 크기 상한
+     * ({@code anthropic/maxResultSizeChars})을 CLI 에 알리는 데 쓴다.
+     */
+    public static McpSchema.Tool toMcpTool(ToolExecutor tool, Map<String, Object> meta) {
         UnifiedToolDef def = tool.getDefinition();
         // SDK 2.0.0: inputSchema 는 Map 오버로드 사용.
-        return McpSchema.Tool.builder()
+        McpSchema.Tool.Builder builder = McpSchema.Tool.builder()
                 .name(def.name())
                 .description(def.description())
-                .inputSchema(toJsonSchema(def.inputSchema()))
-                .build();
+                .inputSchema(toJsonSchema(def.inputSchema()));
+        if (meta != null && !meta.isEmpty()) {
+            builder.meta(meta);
+        }
+        return builder.build();
     }
 
     /**
@@ -60,12 +70,11 @@ public final class McpToolConversion {
      *
      * <p>CR-067: EnhancedToolExecutor 의 default bridge 가 {@code ToolResultRenderer} 로
      * 본문을 직렬화하므로 {@code tool.execute(args)} 한 줄로 본문 노출 가능.
-     * {@link McpResultTruncator} 로 길이 제한 적용. 예외는 isError=true 로 패킹.</p>
+     * 결과는 자르지 않는다(CR-153). 크기는 받는 쪽이 다룬다. 예외는 isError=true 로 패킹.</p>
      */
     public static McpSchema.CallToolResult dispatch(ToolExecutor tool, String name, Map<String, Object> args) {
         try {
             String result = tool.execute(args);
-            result = McpResultTruncator.truncate(name, result);
             // CR-124 (SDK 2.0.0): (String, boolean) 축약 생성자 제거 → builder 사용.
             return McpSchema.CallToolResult.builder()
                     .addTextContent(result)

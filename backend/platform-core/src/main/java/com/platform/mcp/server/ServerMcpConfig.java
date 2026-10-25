@@ -1,6 +1,7 @@
 package com.platform.mcp.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.config.PlatformSettingsService;
 import com.platform.mcp.agent.McpToolConversion;
 import com.platform.tool.builtin.SkillOpenTool;
 import com.platform.tool.builtin.SkillReadTool;
@@ -50,6 +51,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p><b>CR-147</b>: 두 번째 통로 {@code /mcp-skills} 는 스킬 도구 세 개만 싣는다. NATIVE CLI 가 스킬 지정이
  * 있을 때 이것만 연결한다(BIZ-123). 호출은 같은 {@link ServerMcpToolDispatcher} 를 탄다.</p>
+ *
+ * <p><b>CR-153</b>: 도구마다 결과 크기 상한({@code anthropic/maxResultSizeChars})을 싣는다. CLI 는 이 표시가
+ * 없으면 큰 결과를 파일로 돌리는데, AIMBASE 모드는 Read 가 봉인돼 모델이 읽지 못한다(BIZ-125).</p>
  */
 @Configuration
 @ConditionalOnProperty(name = "mcp.server-exposure.enabled", havingValue = "true", matchIfMissing = true)
@@ -60,6 +64,12 @@ public class ServerMcpConfig {
     private final ToolRegistry toolRegistry;
     private final ServerMcpToolDispatcher dispatcher;
     private final org.springframework.context.ApplicationContext applicationContext;
+    private final PlatformSettingsService platformSettings;
+
+    static final String RESULT_MAX_CHARS_KEY = "orchestrator.mcp-tool-result-max-chars";
+    static final int DEFAULT_RESULT_MAX_CHARS = 200_000;
+    /** CLI 2.1.x 가 읽는 도구 목록 항목의 결과 크기 상한 키. 최대 500,000 까지 받는다. */
+    static final String META_MAX_RESULT_SIZE_CHARS = "anthropic/maxResultSizeChars";
 
     /** CR-147: /mcp-skills 에 싣는 도구. */
     static final List<String> SKILL_TOOLS = List.of(SkillOpenTool.NAME, SkillReadTool.NAME, SkillRunTool.NAME);
@@ -68,13 +78,17 @@ public class ServerMcpConfig {
     private final Set<String> publishedTools = ConcurrentHashMap.newKeySet();
     /** CR-147: /mcp-skills 에 실려 있는 도구 이름. */
     private final Set<String> publishedSkillTools = ConcurrentHashMap.newKeySet();
+    /** CR-153: 실려 있는 도구에 적은 결과 크기 상한. 설정이 바뀌면 도구를 모두 다시 싣는다. */
+    private int publishedResultMaxChars;
 
     public ServerMcpConfig(@org.springframework.context.annotation.Lazy ToolRegistry toolRegistry,
                             ServerMcpToolDispatcher dispatcher,
-                            org.springframework.context.ApplicationContext applicationContext) {
+                            org.springframework.context.ApplicationContext applicationContext,
+                            PlatformSettingsService platformSettings) {
         this.toolRegistry = toolRegistry;
         this.dispatcher = dispatcher;
         this.applicationContext = applicationContext;
+        this.platformSettings = platformSettings;
     }
 
     /**
@@ -209,19 +223,42 @@ public class ServerMcpConfig {
         for (ToolExecutor tool : toolRegistry.getCliExposedTools()) {
             desired.put(tool.getDefinition().name(), tool);
         }
-        sync("serverMcpServer", desired, publishedTools);
+        int resultMaxChars = resultMaxChars();
+        boolean resized = resultMaxChars != publishedResultMaxChars;
+        Map<String, Object> meta = Map.of(META_MAX_RESULT_SIZE_CHARS, resultMaxChars);
+        sync("serverMcpServer", desired, publishedTools, meta, resized);
 
         // CR-147: /mcp-skills 는 CLI 노출 도구 가운데 스킬 도구만 싣는다. 노출에서 빠지면 여기서도 빠진다.
         Map<String, ToolExecutor> skills = new HashMap<>(desired);
         skills.keySet().retainAll(SKILL_TOOLS);
-        sync("skillMcpServer", skills, publishedSkillTools);
+        sync("skillMcpServer", skills, publishedSkillTools, meta, resized);
+        publishedResultMaxChars = resultMaxChars;
         return publishedTools.size();
     }
 
-    private void sync(String serverBean, Map<String, ToolExecutor> desired, Set<String> publishedTools) {
+    int resultMaxChars() {
+        int value = platformSettings.getInt(RESULT_MAX_CHARS_KEY, DEFAULT_RESULT_MAX_CHARS);
+        return value > 0 ? value : DEFAULT_RESULT_MAX_CHARS;
+    }
+
+    private void sync(String serverBean, Map<String, ToolExecutor> desired, Set<String> publishedTools,
+                      Map<String, Object> meta, boolean resized) {
         McpSyncServer mcpServer = applicationContext.getBean(serverBean, McpSyncServer.class);
 
         boolean changed = false;
+
+        // CR-153: 이름이 같으면 다시 싣지 않으므로, 상한이 바뀌면 모두 내렸다가 아래에서 새 값으로 싣는다.
+        if (resized) {
+            for (String name : new ArrayList<>(publishedTools)) {
+                try {
+                    mcpServer.removeTool(name);
+                } catch (Exception e) {
+                    log.warn("Server MCP {}: failed to remove tool '{}' for resize: {}", serverBean, name, e.getMessage());
+                }
+                publishedTools.remove(name);
+                changed = true;
+            }
+        }
 
         // 신규 노출 도구 추가
         for (Map.Entry<String, ToolExecutor> entry : desired.entrySet()) {
@@ -231,7 +268,7 @@ public class ServerMcpConfig {
             }
             ToolExecutor tool = entry.getValue();
             try {
-                McpSchema.Tool mcpTool = McpToolConversion.toMcpTool(tool);
+                McpSchema.Tool mcpTool = McpToolConversion.toMcpTool(tool, meta);
                 // CR-124 (SDK 2.0.0): 핸들러 2번째 인자가 Map → CallToolRequest 로 변경됨.
                 // CR-146: 실행기를 여기서 잡아 두면 바깥 MCP 재연결 뒤에도 닫힌 옛 연결을 부른다.
                 // 이름이 같으면 다시 싣지 않으므로 핸들러는 호출 때 이름으로 지금 실행기를 찾는다.
