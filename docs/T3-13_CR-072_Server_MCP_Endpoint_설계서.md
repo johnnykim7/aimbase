@@ -5,7 +5,7 @@
 - **작성일**: 2026-04-27
 - **상태**: 📝 설계 작성 (검토 대기)
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR072_ServerMcpEndpoint_20260427.md` (예정)
-- **관련 CR**: CR-041 (Agent Registry), CR-042 (aimbase-agent MCP stdio), CR-044 (CLI 두뇌 + Aimbase 손발), CR-050 (ClaudeCli LLM 어댑터), CR-069 (ToolMode), CR-071 (ClaudeCliAdapter 3경로 통일)
+- **관련 CR**: CR-041 (Agent Registry), CR-042 (aimbase-agent MCP stdio), CR-044 (CLI 두뇌 + Aimbase 손발), CR-050 (ClaudeCli LLM 어댑터), CR-069 (ToolMode), CR-071 (ClaudeCliAdapter 3경로 통일), CR-153 (도구 결과 크기, § 4.4)
 
 ---
 
@@ -140,9 +140,9 @@ Aimbase 서버에 등록된 도구 32개 중 CLI 노출 대상 24개를 **MCP �
   - tools/call 핸들러:
     1. PolicyEngine.evaluate(toolName, ctx, params) — DENY 시 MCP 에러
     2. ToolExecutor.execute(params, ctx) 호출
-    3. ToolResultRenderer.render() + McpResultTruncator (sdk-mcp 재사용)
+    3. ToolResultRenderer.render() (CR-153: 자르지 않는다, § 4.4)
     4. AuditLogService 기록
-의존: ToolResultRenderer, McpResultTruncator (sdk-mcp 모듈에서 공유)
+의존: ToolResultRenderer (sdk-mcp 모듈에서 공유)
 ```
 
 #### `ToolContractMeta.mcpExposureLevel` (sdk-tool-core)
@@ -261,7 +261,7 @@ public List<UnifiedToolDef> getToolsForMcpExposure(McpExposureLevel level, ToolC
       ↓ 실제 도구 실행 (외부 검색 API 호출 등)
       ↓ ToolResult 반환
   ↓ 3. ToolResultRenderer.render(result) → 본문 + 메타
-  ↓ 4. McpResultTruncator.truncate (8K)
+  ↓ 4. (CR-153: 자르지 않음. 크기는 tools/list 의 상한 표시로 CLI 가 정한다, § 4.4)
   ↓ 5. AuditLogService.log(toolName, ctx, success, duration)
   ↓
 [ServerMcpController]
@@ -279,6 +279,26 @@ public List<UnifiedToolDef> getToolsForMcpExposure(McpExposureLevel level, ToolC
 [Claude CLI / 모델]
   ↓ 에러 인지하여 다른 도구 / 다른 입력으로 재시도
 ```
+
+### 4.4 도구 결과 크기 (CR-153)
+
+처음 설계는 tools/call 결과를 8,000자(앞 70%, 뒤 30%)로 잘랐다(CR-044 의 토큰 절약). 잘린 가운데는 되찾을 길이 없어(result_id 없음) 큰 입력을 받는 단계가 일부만 보고 일했다. 입찰대행 proposal-design 의 목차 입력 81,881자가 8,000자로 잘려 요구사항 연결이 빠졌다.
+
+CR-153 부터는 이렇게 한다 (BIZ-125).
+
+1. /mcp, /mcp-skills 는 결과를 자르지 않는다(ServerMcpToolDispatcher).
+2. 도구 목록을 실을 때 도구마다 `_meta["anthropic/maxResultSizeChars"] = <상한>` 을 단다(ServerMcpConfig). 상한은 런타임 설정 `orchestrator.mcp-tool-result-max-chars`, 기본 200,000자. 0 이하이거나 읽을 수 없으면 기본값을 쓴다.
+3. 30초 동기화(syncOnce)가 설정값을 읽어, 실어 둔 값과 다르면 그 서버의 도구를 모두 내렸다 다시 싣는다. 도구 목록 변경 알림이 나가고, 새로 뜨는 CLI 워커부터 새 상한을 쓴다. 설정 캐시(5분)만큼 늦을 수 있다.
+4. Tool SDK 의 MCP 서버(AgentMcpServer, McpToolConversion.dispatch)도 자르지 않는다. 소비앱과 aimbase-agent 가 내놓는 도구 결과를 Aimbase 가 온전히 받아, API 경로는 ToolCallHandler 의 축약과 원본 보관(CR-048, result_id)이, CLI 경로는 위 상한이 맡는다. McpResultTruncator 는 쓰는 곳이 없어 지운다.
+
+CLI 2.1.197 이 MCP 결과를 다루는 방식(바이너리와 로컬 실측으로 확인):
+
+| 도구 목록의 상한 표시 | CLI 동작 |
+|---|---|
+| 없음 | 25,000 토큰(`MAX_MCP_OUTPUT_TOKENS`)을 넘으면 파일로 저장하고 알림만 준다. 그 아래라도 50,000자를 넘으면 파일로 저장하고 앞 2KB 만 준다 |
+| 있음 | 토큰 검사를 건너뛰고, min(표시값, 500,000)자까지 그대로 준다. 넘으면 파일로 저장하고 앞 2KB 만 준다 |
+
+AIMBASE 모드는 CLI 의 Read 를 봉인하므로(CR-126) 파일로 돌린 결과는 모델이 앞 2KB 만 보게 된다. 그래서 상한은 넉넉히 두고, 넘는 결과는 도구 쪽에서 나눠 주는 것이 맞다.
 
 ---
 

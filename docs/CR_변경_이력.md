@@ -108,7 +108,8 @@
 | CR-149 | 워크플로우 저장 API 와 스튜디오를 가이드 계약에 맞춤(결함). **발견 경위**: CR-147 화면 점검 중 스튜디오 저장 400. **원인**: 4월 통합 커밋에서 프로젝트 귀속, 내 것만 보기, 아이디 자동 생성이 빠졌고 설명, 실행 모드는 저장 API 에 없었으며 가이드의 오류 처리 칸 이름이 실제와 달랐다. **조치**: 저장 API 와 목록 필터를 가이드 계약대로 되살리고 스튜디오 저장 본문과 관리 도구(MCP) 저장을 맞춤 | 결함 | High | v3.x | 완료 |
 | CR-150 | 관리 도구(MCP) 접속에 인증이 없음(결함). **발견 경위**: CR-149 관리 도구 저장 검사 실측 중 키 없이 워크플로우가 만들어짐. **원인**: `/admin-mcp/**` 를 인증 없이 열어 두었고 테넌트는 연결 주소의 tenant_id 를 그대로 믿음. **조치**: 테넌트에 묶인 API 키나 그 테넌트 로그인 토큰만 받고, 주소와 세션의 테넌트를 키의 테넌트와 대조 (BIZ-124) | 결함 | High | v3.x | 완료 |
 | CR-151 | AWS 서버(우진비드) 배포 대상 추가. **배경**: 우진비드가 쓰는 Aimbase 는 AWS 서버에 따로 있는데 배포 스크립트가 없어 CR-146 은 jar 를 손으로 바꿨고, 스킬 실행 컨테이너도 없다. **조치**: AWS compose 를 저장소(`docker-compose.wjbid.yml`)로 옮기고 실행 컨테이너를 더했으며, `./deploy.sh wjbid-sandbox, wjbid-be, wjbid-agent, wjbid` 를 추가(나중에 생길 AXOPM AWS 와 구분해 wjbid 로 부름) | 변경 | Medium | v3.x | 완료 |
-| CR-152 | CLI 작업이 앱 도구 서버 연결 전에 시작해 도구 없이 끝나는 결함. **요청**: 입찰대행 플랫폼 CR-169(제안서 목차 단계가 도구를 못 불러 목차 0건). **원인**: CLI 2.1.197 은 MCP 서버 연결을 기다리지 않고 첫 턴을 시작한다. AWS 에서 연결에 약 0.3초가 걸리는 사이 턴이 먼저 나가 AIMBASE 모드 28회 모두 연결 중으로 시작했고, 모델이 도구 없이 설명문을 내도 단계는 COMPLETED 였다. **조치**: 러너가 MCP 서버를 넘길 때 CLI 가 연결을 기다리게 하고(상한은 러너 설정), 턴 시작 때 넘긴 서버가 하나라도 연결되지 않았으면 그 턴을 실패로 끝내 기존 재시도에 태운다 | 결함 | High | v3.x | 반영(확인 대기) |
+| CR-152 | CLI 작업이 앱 도구 서버 연결 전에 시작해 도구 없이 끝나는 결함. **요청**: 입찰대행 플랫폼 CR-169(제안서 목차 단계가 도구를 못 불러 목차 0건). **원인**: CLI 2.1.197 은 MCP 서버 연결을 기다리지 않고 첫 턴을 시작한다. AWS 에서 연결에 약 0.3초가 걸리는 사이 턴이 먼저 나가 AIMBASE 모드 28회 모두 연결 중으로 시작했고, 모델이 도구 없이 설명문을 내도 단계는 COMPLETED 였다. **조치**: 러너가 MCP 서버를 넘길 때 CLI 가 연결을 기다리게 하고(상한은 러너 설정), 턴 시작 때 넘긴 서버가 하나라도 연결되지 않았으면 그 턴을 실패로 끝내 기존 재시도에 태운다 | 결함 | High | v3.x | 완료 |
+| CR-153 | CLI 로 나가는 앱 도구 결과가 8,000자로 잘리는 결함. **발견**: CR-152 운영 확인 중 입찰대행 proposal-design 목차 단계가 목차 입력 81,881자 가운데 8,000자만 받아 요구사항 연결이 빠짐(10회 모두). **원인**: 서버 MCP 통로와 Tool SDK MCP 서버가 결과를 고정 8,000자(앞 70%, 뒤 30%)로 자르고, 가운데는 되찾을 길이 없음. **변경**: 자르기를 없애고, 도구 목록의 도구마다 결과 크기 상한(`anthropic/maxResultSizeChars`, 런타임 설정 `orchestrator.mcp-tool-result-max-chars` 기본 200,000자)을 적어 CLI 가 그만큼 그대로 받게 함 | 결함 | High | v3.x | 설계 |
 
 ---
 
@@ -2513,9 +2514,31 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 없음 확인**: T1(기능 추가 없음), T3-1(DB 없음), T3-2(API 없음), T3-3, T3-4(화면 없음). 가이드 문서는 러너 설정을 다루지 않아 변경 없음
 - **CR-146 과의 구분**: CR-146 은 붙은 뒤 옛 실행기를 불러 호출이 실패하는 것이고, 이것은 호출 전에 연결이 안 된 것이다. 재기동 없는 10:13, 10:16 KST 에도 났다
 - **검증 (로컬)**: 단위시험 ClaudeCliWorkerTest 30건 통과(새 5건: 연결 중이면 실패, 목록에 없으면 실패, 연결되면 진행하고 환경변수 전달, 서버 없으면 손대지 않음, NATIVE 스킬 지정은 aimbase-skills 만 확인). 실제 CLI 2.1.197 과 로컬 러너 jar 로, 1.5초 늦게 답하는 가짜 MCP 서버에서 고치기 전 기본값은 pending 으로 시작, 고친 러너는 connected 로 시작해 답을 냈다. 8초 늦는 서버에 상한 4초면 7.5초 만에 실패(`/v1/chat` 500, `/v1/chat/stream` error 이벤트)하고 CLI 프로세스가 남지 않았다
-- **상태**: AWS 반영, 확인 대기. 우진비드 AWS 2026-10-25 13:19~13:23 KST(./deploy.sh wjbid-agent, 사용자 승인 13:18:52). 운영 실행기를 만든 작업 사본에서 그 뒤 바뀐 것이 이 변경뿐임을 확인하고 그 사본으로 빌드했다(compose, Dockerfile 은 서버 것과 같음). 바꾸기 전 이미지는 `aimbase-aimbase-agent:pre-20261025-131911`. CLI 2.1.197 그대로, 실행기 등록 정상. 연속 10회 확인과 IT-10-001 은 입찰대행 CR-169 창에 요청. 옛 서버(59.8.160.12)는 따로 승인요청
+- **상태**: 완료(AWS). 우진비드 AWS 2026-10-25 13:19~13:23 KST(./deploy.sh wjbid-agent, 사용자 승인 13:18:52). 운영 실행기를 만든 작업 사본에서 그 뒤 바뀐 것이 이 변경뿐임을 확인하고 그 사본으로 빌드했다(compose, Dockerfile 은 서버 것과 같음). 바꾸기 전 이미지는 `aimbase-aimbase-agent:pre-20261025-131911`. CLI 2.1.197 그대로, 실행기 등록 정상. 연속 10회 확인과 IT-10-001 은 입찰대행 CR-169 창에 요청. 옛 서버(59.8.160.12)는 따로 승인요청
+- **운영 확인 (2026-10-25)**: 입찰대행 CR-169 창 회신(15:54~17:23 KST). 앱 재기동 15:55:51 직후 1회를 포함해 proposal-design 연속 10회가 모두 completed 이고 회차마다 save_proposal_structure 로 목차를 저장했다. 도구가 없다는 설명문은 0회. 같은 구간 실행기 기록 [CLI-INIT] 58회가 모두 `aimbase-server, status=connected` 이고 pending, failed, `not connected at turn start` 는 0회(Aimbase 쪽에서 실행기 로그로 대조). IT-10-001 은 관리자 검토(REVIEW)로 넘어가 충족. 이 10회 모두 목차 입력 도구 결과가 8,000자로 잘린 것은 CR-153 으로 따로 다룬다
 
 ---
+
+### CR-153 | CLI 로 나가는 앱 도구 결과가 8,000자로 잘리는 결함
+- **대상 기능 ID**: CR-072(서버 MCP 통로), CR-044 PRD-281(MCP 결과 축약), CR-041(Tool SDK MCP 서버)
+- **변경 타입**: 변경(결함)
+- **원본 요구사항**: [docs/origins/원본_요구사항_CLI_통로_도구_결과_8000자_자르기_20261025.md](origins/원본_요구사항_CLI_통로_도구_결과_8000자_자르기_20261025.md)
+- **발견**: CR-152 운영 확인 중. 입찰대행 proposal-design 의 design_structure 결과문이 "가운데가 잘려 factorTree 와 준수 매트릭스 앞부분이 안 보이고, 잘림 안내에 result_id 가 없어 되찾을 수 없다" 고 적고, 저장된 목차에서 요구사항 일부(한 회차 13건)가 연결되지 않았다. CR-152 반영 전 성공 회차에도 있었다
+- **원인**: get_proposal_design_input 결과 81,881자가 CLI 에 8,084자로 도착했다(연속 10회 모두. 실행 기록 본문의 생략 안내가 원본 81,881자 가운데 8,000자만 보이고 73,881자를 뺐다고 적음). 서버 MCP 통로(ServerMcpToolDispatcher.java:161)가 McpResultTruncator(기본 8,000자, 앞 70%, 뒤 30%)로 자른다. CR-044 때 Max 구독 토큰을 아끼려고 넣은 고정값이고, 잘린 가운데를 보관하지 않아 read_tool_result 로도 못 찾는다. 입찰대행 앱 MCP 응답에는 자르는 곳이 없다. Tool SDK 의 MCP 서버(McpToolConversion.dispatch, AgentMcpServer)도 같은 값으로 잘라, 소비앱과 aimbase-agent 의 도구는 Aimbase 에 닿기 전에 잘린다
+- **CLI 동작 (2.1.197 바이너리와 로컬 실측)**: 도구 목록에 크기 표시가 없으면 25,000 토큰을 넘는 결과는 파일로 저장하고 알림만 준다(81,881자 실측). `MAX_MCP_OUTPUT_TOKENS` 를 올려도 50,000자를 넘으면 파일로 저장하고 앞 2KB 만 준다(실측). 도구 목록의 그 도구에 `_meta["anthropic/maxResultSizeChars"]` 가 있으면 토큰 검사를 건너뛰고 min(값, 500,000)자까지 그대로 준다(값 200000 에서 81,881자 그대로 실측). AIMBASE 모드는 Read 를 봉인하므로(CR-126) 파일로 돌린 결과는 모델이 읽지 못한다
+- **변경 내용**:
+  1. 서버 MCP 통로(/mcp, /mcp-skills)는 결과를 자르지 않는다(ServerMcpToolDispatcher)
+  2. 도구를 실을 때 도구마다 `_meta["anthropic/maxResultSizeChars"]` 를 단다(ServerMcpConfig). 값은 런타임 설정 `orchestrator.mcp-tool-result-max-chars`, 기본 200,000. 0 이하나 숫자 아님은 기본값
+  3. 30초 동기화가 설정값을 읽어 실어 둔 값과 다르면 그 서버의 도구를 모두 다시 싣고 도구 목록 변경 알림을 낸다. 새로 뜨는 CLI 워커부터 새 값을 쓴다
+  4. Tool SDK MCP 서버(McpToolConversion.dispatch)도 자르지 않는다. tool-sdk-core 의 McpResultTruncator 는 쓰는 곳이 없어 지운다
+  5. Master 마이그레이션 `V70__cr153_seed_mcp_tool_result_max_chars.sql` 로 설정값을 넣는다(ON CONFLICT DO NOTHING)
+- **결정 (2026-10-25 사용자)**: 17:30:57 "1" (Aimbase 쪽 자르기를 빼고 크기는 CLI 장치에 맡기며, 한도는 런타임 설정으로). CLI 장치에 맡기는 방법은 결정 뒤 실측으로 도구 목록의 크기 표시로 정함(표시 없이는 파일로 돌아 AIMBASE 모드에서 못 읽음)
+- **영향 모듈**: platform-core(ServerMcpToolDispatcher, ServerMcpConfig, Master V70), tool-sdk-mcp(McpToolConversion, AgentMcpServer), tool-sdk-core(McpResultTruncator 제거), aimbase-agent(tool-sdk-mcp 를 쓰므로 다시 빌드)
+- **영향도**: High (CLI 연결로 큰 도구 결과를 받는 단계 전부. 상용은 입찰대행 proposal-design 등)
+- **영향 범위**: CR-044(축약 도입), CR-048(API 경로 원본 보관, 변경 없음), CR-072(서버 MCP 통로), CR-126(AIMBASE 봉인), CR-147(/mcp-skills), CR-152(같은 상용 단계)
+- **영향 설계서**: T1-3 BIZ-125, T3-13 § 3.1, § 4.2, § 4.4, T3-1 global_config seed, T3-5 TC-MCP-RES-001~005, 운용 가이드 v3.11.0 § 3-7, SDK 가이드 v1.4.0 § 7
+- **영향 없음 확인**: T1-1(기능 추가 없음, 기존 통로 동작 보정), T2(새 라이브러리 없음. MCP Java SDK 2.0.0 의 Tool.meta 사용), T3-2(REST API 없음), T3-3, T3-4(화면 변경 없음. 런타임 설정 화면은 orchestrator.* 키를 Orchestrator 카드에 저절로 보여 준다), API 가이드(소비앱 REST 변경 없음). 입찰대행 앱 변경 없음
+- **상태**: 설계
 
 ## CR 후보 (발번 전)
 

@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.10.0** | 2026-10-14 | Aimbase v8.18.0 기준
+> **v3.11.0** | 2026-10-25 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -742,6 +742,16 @@ Model Context Protocol 서버를 등록하여 도구를 확장합니다.
 - 수정할 때 값을 바꾸지 않을 머리글은 `****` 그대로 보내면 저장된 값이 유지됩니다. 요청에 빠진 머리글은 지워집니다
 - 수정 뒤 `POST /mcp-servers/{id}/reconnect` 로 다시 붙여야 새 머리글이 실립니다
 - 관리 화면 등록 창에는 머리글 칸이 없습니다. API 로 등록합니다
+
+**CLI 로 나가는 도구 결과 크기 (CR-153)**: Aimbase 는 CLI 연결(/mcp, /mcp-skills)로 나가는 도구 결과를 자르지 않습니다. 도구 목록에 도구마다 "결과는 최대 몇 자" 를 적어 보내고, CLI 는 그 크기까지 결과를 그대로 모델에 넘깁니다. 넘는 결과는 CLI 가 파일로 돌리는데, AIMBASE 모드는 파일 읽기가 막혀 있어 모델은 앞 2KB 만 보게 됩니다.
+
+| 키 | 기본값 | 뜻 |
+|---|---|---|
+| orchestrator.mcp-tool-result-max-chars | 200000 | CLI 가 도구 결과를 그대로 받는 최대 글자 수. CLI 자체 상한은 500000 |
+
+- 사이드바 Super Admin 묶음 "런타임 설정" 의 Orchestrator 카드에서 바꿉니다
+- 바꾼 값은 설정 캐시(5분)가 지난 뒤 30초 동기화 때 도구 목록에 실리고, 그 뒤 새로 뜨는 CLI 워커부터 씁니다
+- 단계 결과문에 "truncated", "Output too large", "exceeds maximum allowed tokens" 가 보이면 그 도구 결과가 이 값을 넘은 것입니다. 값을 올리거나 도구가 나눠 주게 합니다
 
 ### 3-8. LLM 라우팅 설정
 
@@ -1558,6 +1568,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.11.0 | 2026-10-25 | **CR-153 CLI 로 나가는 도구 결과 크기** (§ 3-7). 8,000자 고정 자르기를 없애고 런타임 설정 `orchestrator.mcp-tool-result-max-chars`(기본 200000) 추가 |
 | v3.10.0 | 2026-10-14 | **CR-151 AWS 서버 배포** (§ 2-8). 우진비드 AWS 서버 순서: `sandbox.env` 열쇠, `./deploy.sh wjbid`, 되돌리기. § 2-8 증상 표의 어긋난 두 줄 바로잡음 |
 | v3.9.0 | 2026-10-13 | **CR-147 스킬 묶음** (§ 2-8, § 3-17). 플랫폼 공용 스킬 화면과 런타임 설정 Skills 카드, 스크립트 실행 컨테이너 첫 배포 순서(서버 `.env` 의 SKILL_SANDBOX_API_KEY, sandbox, be, fe, agents)와 패키지 추가 절차, 테넌트 스킬 화면 묶음형 탭, 워크플로우 단계 스킬 지정 |
 | v3.8.0 | 2026-10-11 | **CR-145 — MCP 서버 등록 머리글** (§ 3-7). 등록 config `headers` 를 모든 MCP 요청에 싣고, 조회 응답에서 값을 `****` 로 가림. 수정 시 `****` 는 저장값 유지 |
