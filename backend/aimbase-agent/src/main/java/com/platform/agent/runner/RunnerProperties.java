@@ -29,6 +29,9 @@ public class RunnerProperties {
     /** CR-106: CLI turn 타임아웃(초). 장기 AGENT_CALL(다수 PDF 적재) 대응 설정화. 기본 300s. */
     private int turnTimeoutSeconds = 300;
 
+    /** CR-152: CLI 가 첫 턴 전에 MCP 서버 연결을 기다릴 상한(초). 그 안에 붙지 않으면 그 턴은 실패한다. */
+    private int mcpConnectTimeoutSeconds = 30;
+
     /** Aimbase MCP 서버 jar 경로 (AIMBASE/HYBRID tool-mode 일 때). */
     private String aimbaseMcpJar;
 
@@ -75,6 +78,8 @@ public class RunnerProperties {
     public void setMaxWorkers(int maxWorkers) { this.maxWorkers = maxWorkers; }
     public int getTurnTimeoutSeconds() { return turnTimeoutSeconds; }
     public void setTurnTimeoutSeconds(int turnTimeoutSeconds) { this.turnTimeoutSeconds = turnTimeoutSeconds; }
+    public int getMcpConnectTimeoutSeconds() { return mcpConnectTimeoutSeconds; }
+    public void setMcpConnectTimeoutSeconds(int mcpConnectTimeoutSeconds) { this.mcpConnectTimeoutSeconds = mcpConnectTimeoutSeconds; }
     public String getAimbaseMcpJar() { return aimbaseMcpJar; }
     public void setAimbaseMcpJar(String aimbaseMcpJar) { this.aimbaseMcpJar = aimbaseMcpJar; }
 

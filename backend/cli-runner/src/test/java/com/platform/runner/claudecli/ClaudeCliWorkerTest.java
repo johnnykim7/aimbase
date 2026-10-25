@@ -571,6 +571,94 @@ class ClaudeCliWorkerTest {
         assertThat(ClaudeCliWorker.skillsUrl("http://h/mcp/sse")).isEqualTo("http://h/mcp-skills");
     }
 
+    // CR-152: CLI 는 기본값으로 MCP 연결을 기다리지 않고 첫 턴을 시작한다. 스텁은 실제 CLI 처럼
+    // 입력을 받은 뒤 턴마다 init 을 내고, 기동 때 받은 환경변수를 파일에 남긴다.
+
+    private Path initStub(String mcpServers, Path envDump) throws IOException {
+        return writeStub("""
+                #!/bin/bash
+                echo "${MCP_CONNECTION_NONBLOCKING:-unset} ${MCP_CONNECT_TIMEOUT_MS:-unset}" > '%s'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"system","subtype":"init","session_id":"sess-mcp","mcp_servers":%s}'
+                  echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}'
+                  echo '{"type":"result","subtype":"success","result":"done","session_id":"sess-mcp","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(envDump.toString(), mcpServers));
+    }
+
+    private ClaudeCliWorker startWithInit(String mcpServers, String mcpConfig, Path envDump) throws IOException {
+        worker = new ClaudeCliWorker(initStub(mcpServers, envDump).toString(), null, null, false, null,
+                Duration.ofSeconds(10), mcpConfig);
+        worker.setMcpConnectTimeout(Duration.ofSeconds(15));
+        worker.start();
+        return worker;
+    }
+
+    @Test
+    void cr152_turn_fails_when_the_server_is_still_pending() throws IOException {
+        Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
+        startWithInit("[{\"name\":\"aimbase-server\",\"status\":\"pending\"}]", SERVER_MCP, env);
+
+        assertThatThrownBy(() -> worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go"))))
+                .isInstanceOf(ClaudeCliException.class)
+                .hasMessageContaining("aimbase-server=pending");
+    }
+
+    @Test
+    void cr152_turn_fails_when_the_server_is_not_listed() throws IOException {
+        Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
+        startWithInit("[]", SERVER_MCP, env);
+
+        assertThatThrownBy(() -> worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go"))))
+                .isInstanceOf(ClaudeCliException.class)
+                .hasMessageContaining("aimbase-server=missing");
+    }
+
+    @Test
+    void cr152_turn_runs_when_the_server_is_connected() throws IOException {
+        Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
+        startWithInit("[{\"name\":\"aimbase-server\",\"status\":\"connected\"}]", SERVER_MCP, env);
+
+        LLMResponse resp = worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        assertThat(resp.textContent()).isEqualTo("done");
+        assertThat(Files.readString(env).trim()).isEqualTo("false 15000");
+    }
+
+    @Test
+    void cr152_without_mcp_servers_the_cli_keeps_its_defaults() throws IOException {
+        Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
+        startWithInit("[]", null, env);
+
+        LLMResponse resp = worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        assertThat(resp.textContent()).isEqualTo("done");
+        // 워커는 손대지 않으므로 시험을 돌리는 프로세스의 값이 그대로 넘어간다.
+        assertThat(Files.readString(env).trim()).isEqualTo(
+                inherited(ClaudeCliWorker.ENV_MCP_NONBLOCKING) + " " + inherited(ClaudeCliWorker.ENV_MCP_CONNECT_TIMEOUT_MS));
+    }
+
+    private static String inherited(String name) {
+        String v = System.getenv(name);
+        return v == null || v.isEmpty() ? "unset" : v;
+    }
+
+    @Test
+    void cr152_native_mode_with_pins_waits_for_the_skill_route_only() throws IOException {
+        Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
+        worker = new ClaudeCliWorker(initStub("[{\"name\":\"aimbase-skills\",\"status\":\"pending\"}]", env).toString(),
+                null, null, false, null, Duration.ofSeconds(10), SERVER_MCP);
+        worker.setToolMode(ClaudeCliCommandBuilder.ToolMode.NATIVE);
+        worker.setSkillSet(PINS);
+        worker.start();
+
+        assertThatThrownBy(() -> worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go"))))
+                .isInstanceOf(ClaudeCliException.class)
+                .hasMessageContaining("aimbase-skills=pending")
+                .hasMessageNotContaining("aimbase-server");
+    }
+
     private Path writeStub(String body) throws IOException {
         Path p = tempDir.resolve("claude-stub-" + System.nanoTime() + ".sh");
         Files.writeString(p, body);

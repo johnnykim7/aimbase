@@ -45,15 +45,18 @@ public class RunnerAutoConfiguration {
     public ClaudeCliWorkerPool claudeCliWorkerPool(RunnerProperties props, ClaudeCliAdapterConfig adapterConfig) {
         // CR-072: 빌드된 mcpConfigJson 을 Worker 에 주입 — AIMBASE/HYBRID 일 때 CommandBuilder 가 그대로 박음.
         String mcpConfig = adapterConfig.resolveMcpConfigJson();
-        ClaudeCliWorkerPool.WorkerFactory factory = (model, resumeSessionId, forkSession, configDir) ->
-                new ClaudeCliWorker(
-                        props.getClaudeBinary(),
-                        model,
-                        resumeSessionId,
-                        forkSession,
-                        configDir,
-                        Duration.ofSeconds(props.getTurnTimeoutSeconds()),  // CR-106: 설정화 (기본 300s)
-                        mcpConfig);
+        ClaudeCliWorkerPool.WorkerFactory factory = (model, resumeSessionId, forkSession, configDir) -> {
+            ClaudeCliWorker worker = new ClaudeCliWorker(
+                    props.getClaudeBinary(),
+                    model,
+                    resumeSessionId,
+                    forkSession,
+                    configDir,
+                    Duration.ofSeconds(props.getTurnTimeoutSeconds()),  // CR-106: 설정화 (기본 300s)
+                    mcpConfig);
+            worker.setMcpConnectTimeout(Duration.ofSeconds(props.getMcpConnectTimeoutSeconds()));  // CR-152
+            return worker;
+        };
         // CR-121: reaper 설정 주입 — idle 좀비 워커 자동 회수.
         ClaudeCliWorkerPool pool = new ClaudeCliWorkerPool(factory, props.getMaxWorkers(), Duration.ofSeconds(60),
                 (com.platform.runner.claudecli.ClaudeCliCommandBuilder.ToolMode) null,

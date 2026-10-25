@@ -24,9 +24,12 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -111,6 +114,15 @@ public class ClaudeCliWorker implements AutoCloseable {
      * start() 호출 전에만 setSystemPrompt 로 변경 가능.
      */
     private volatile String systemPromptOverride;
+    /**
+     * CR-152: CLI 가 MCP 서버 연결을 기다릴 상한. CLI 는 기본값으로 연결을 기다리지 않고 첫 턴을 시작해서,
+     * 서버가 아직 붙지 않은 채 모델이 도구 없이 답을 끝낸다. null 이면 CLI 기본 상한(5초)을 쓴다.
+     */
+    private volatile Duration mcpConnectTimeout;
+    /** CR-152: 이 워커가 CLI 에 넘긴 MCP 서버 이름. 턴을 시작할 때 모두 connected 여야 한다. */
+    private volatile Set<String> requiredMcpServers = Set.of();
+    static final String ENV_MCP_NONBLOCKING = "MCP_CONNECTION_NONBLOCKING";
+    static final String ENV_MCP_CONNECT_TIMEOUT_MS = "MCP_CONNECT_TIMEOUT_MS";
 
     private final ReentrantLock turnLock = new ReentrantLock();
 
@@ -219,6 +231,14 @@ public class ClaudeCliWorker implements AutoCloseable {
         this.workingDirectory = (dir == null || dir.isBlank()) ? null : dir;
     }
 
+    /** CR-152: start() 호출 전, CLI 가 MCP 서버 연결을 기다릴 상한 설정. */
+    public void setMcpConnectTimeout(Duration timeout) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set mcpConnectTimeout after start()");
+        }
+        this.mcpConnectTimeout = timeout;
+    }
+
     /** CR-147: 단계가 고정한 스킬과 판. 비어 있으면 지정 없음(기존 동작). */
     public void setSkillSet(List<SkillRef> skills) {
         if (process != null) {
@@ -239,6 +259,13 @@ public class ClaudeCliWorker implements AutoCloseable {
             pb.environment().put("CLAUDE_CONFIG_DIR", configDir);
         }
         pb.environment().remove("CLAUDECODE");   // 중첩 세션 방지
+        // CR-152: 넘긴 MCP 서버가 있으면 연결이 끝난 뒤에 첫 턴을 시작하게 한다.
+        if (!requiredMcpServers.isEmpty()) {
+            pb.environment().put(ENV_MCP_NONBLOCKING, "false");
+            if (mcpConnectTimeout != null && mcpConnectTimeout.toMillis() > 0) {
+                pb.environment().put(ENV_MCP_CONNECT_TIMEOUT_MS, String.valueOf(mcpConnectTimeout.toMillis()));
+            }
+        }
 
         // CR-107 후속: CLI cwd 를 작업장으로 설정 → HYBRID CLI 내장 Read/Bash 가 상대경로로도 작업장을 읽는다.
         // 존재하는 디렉토리일 때만 적용(없는 경로면 ProcessBuilder.start 가 IOException → 안전하게 무시).
@@ -622,6 +649,13 @@ public class ClaudeCliWorker implements AutoCloseable {
                     if ("init".equals(json.get("subtype"))) {
                         log.info("[CLI-INIT] tools={}, mcp_servers={}",
                                 json.get("tools"), json.get("mcp_servers"));
+                        // CR-152: 서버가 붙지 않은 채 턴을 돌리면 모델이 도구 없이 설명문만 내고 정상 종료해
+                        // 호출 측이 COMPLETED 로 받는다. 시작 시점에 실패로 끊어 기존 재시도에 태운다.
+                        List<String> unconnected = unconnectedMcpServers(json.get("mcp_servers"), requiredMcpServers);
+                        if (!unconnected.isEmpty()) {
+                            log.warn("[CLI-INIT] MCP server not connected at turn start: {}", unconnected);
+                            throw new ClaudeCliException("MCP server not connected at turn start: " + unconnected);
+                        }
                     }
                 }
                 case "assistant" -> {
@@ -952,6 +986,41 @@ public class ClaudeCliWorker implements AutoCloseable {
                 "BIZ-123: 스킬 지정이 있는데 러너 MCP 설정에 aimbase-server 항목이 없어 스킬 도구를 연결할 수 없습니다");
     }
 
+    /** CR-152: MCP 설정 JSON 의 서버 이름. 읽지 못하면 빈 집합이라 연결 확인 없이 기존대로 돈다. */
+    static Set<String> mcpServerNames(String mcpConfig) {
+        if (mcpConfig == null || mcpConfig.isBlank()) return Set.of();
+        try {
+            if (MAPPER.readValue(mcpConfig, MAP_TYPE).get("mcpServers") instanceof Map<?, ?> servers) {
+                Set<String> names = new LinkedHashSet<>();
+                servers.keySet().forEach(k -> names.add(String.valueOf(k)));
+                return Collections.unmodifiableSet(names);
+            }
+        } catch (Exception e) {
+            log.warn("ClaudeCliWorker: failed to read MCP server names: {}", e.getMessage());
+        }
+        return Set.of();
+    }
+
+    /**
+     * CR-152: 턴 시작(system/init) 때 connected 가 아닌 서버를 "이름=상태" 로 돌려준다. 목록에 없으면 missing.
+     * init 에 mcp_servers 목록이 없으면 판단할 근거가 없어 빈 목록이다.
+     */
+    static List<String> unconnectedMcpServers(Object mcpServers, Set<String> required) {
+        if (required.isEmpty() || !(mcpServers instanceof List<?> list)) return List.of();
+        Map<String, String> status = new LinkedHashMap<>();
+        for (Object o : list) {
+            if (o instanceof Map<?, ?> m && m.get("name") != null) {
+                status.put(String.valueOf(m.get("name")), String.valueOf(m.get("status")));
+            }
+        }
+        List<String> unconnected = new ArrayList<>();
+        for (String name : required) {
+            String s = status.getOrDefault(name, "missing");
+            if (!"connected".equals(s)) unconnected.add(name + "=" + s);
+        }
+        return unconnected;
+    }
+
     /** aimbase-server 주소 .../mcp 를 .../mcp-skills 로. 끝이 /mcp 가 아니면 호스트 바로 아래로 둔다. */
     static String skillsUrl(String serverUrl) {
         String base = serverUrl.endsWith("/") ? serverUrl.substring(0, serverUrl.length() - 1) : serverUrl;
@@ -984,6 +1053,9 @@ public class ClaudeCliWorker implements AutoCloseable {
         } else if (skillSet != null) {
             serverEntry(mcpConfig);   // AIMBASE, HYBRID 도 스킬 도구가 실릴 aimbase-server 항목이 있어야 한다
         }
+        // CR-152: CLI 가 실제로 받는 설정은 NATIVE 면 nativeMcpConfig, 그 밖은 mcpConfig 다(빌더 resolveMcpJson 과 같은 기준).
+        requiredMcpServers = mcpServerNames(
+                toolMode == ClaudeCliCommandBuilder.ToolMode.NATIVE ? nativeMcpConfig : mcpConfig);
         // CR-117: subagent OFF 면 CLI 본체 Agent 도구를 --disallowedTools 로 차단(자율 서브에이전트 spawn 방지).
         // 기본(disallowSubagent=false)이면 null → 빌더 미적용 = 현행 동작(subagent 허용).
         List<String> disallowed = disallowSubagent ? List.of("Agent") : null;
