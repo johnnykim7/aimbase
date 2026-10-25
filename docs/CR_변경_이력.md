@@ -2514,7 +2514,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 없음 확인**: T1(기능 추가 없음), T3-1(DB 없음), T3-2(API 없음), T3-3, T3-4(화면 없음). 가이드 문서는 러너 설정을 다루지 않아 변경 없음
 - **CR-146 과의 구분**: CR-146 은 붙은 뒤 옛 실행기를 불러 호출이 실패하는 것이고, 이것은 호출 전에 연결이 안 된 것이다. 재기동 없는 10:13, 10:16 KST 에도 났다
 - **검증 (로컬)**: 단위시험 ClaudeCliWorkerTest 30건 통과(새 5건: 연결 중이면 실패, 목록에 없으면 실패, 연결되면 진행하고 환경변수 전달, 서버 없으면 손대지 않음, NATIVE 스킬 지정은 aimbase-skills 만 확인). 실제 CLI 2.1.197 과 로컬 러너 jar 로, 1.5초 늦게 답하는 가짜 MCP 서버에서 고치기 전 기본값은 pending 으로 시작, 고친 러너는 connected 로 시작해 답을 냈다. 8초 늦는 서버에 상한 4초면 7.5초 만에 실패(`/v1/chat` 500, `/v1/chat/stream` error 이벤트)하고 CLI 프로세스가 남지 않았다
-- **상태**: 완료(AWS). 우진비드 AWS 2026-10-25 13:19~13:23 KST(./deploy.sh wjbid-agent, 사용자 승인 13:18:52). 운영 실행기를 만든 작업 사본에서 그 뒤 바뀐 것이 이 변경뿐임을 확인하고 그 사본으로 빌드했다(compose, Dockerfile 은 서버 것과 같음). 바꾸기 전 이미지는 `aimbase-aimbase-agent:pre-20261025-131911`. CLI 2.1.197 그대로, 실행기 등록 정상. 연속 10회 확인과 IT-10-001 은 입찰대행 CR-169 창에 요청. 옛 서버(59.8.160.12)는 따로 승인요청
+- **상태**: 완료(AWS). 우진비드 AWS 2026-10-25 13:19~13:23 KST(./deploy.sh wjbid-agent, 사용자 승인 13:18:52). 운영 실행기를 만든 작업 사본에서 그 뒤 바뀐 것이 이 변경뿐임을 확인하고 그 사본으로 빌드했다(compose, Dockerfile 은 서버 것과 같음). 바꾸기 전 이미지는 `aimbase-aimbase-agent:pre-20261025-131911`. CLI 2.1.197 그대로, 실행기 등록 정상. 연속 10회 확인과 IT-10-001 은 입찰대행 CR-169 창에 요청. 옛 서버(59.8.160.12)는 2026-10-25 18:49~18:52 KST 에 CR-153 과 함께 반영(./deploy.sh mcp, 사용자 승인 18:48:11, 되돌리기 태그 `pre-20261025-182917`)
 - **운영 확인 (2026-10-25)**: 입찰대행 CR-169 창 회신(15:54~17:23 KST). 앱 재기동 15:55:51 직후 1회를 포함해 proposal-design 연속 10회가 모두 completed 이고 회차마다 save_proposal_structure 로 목차를 저장했다. 도구가 없다는 설명문은 0회. 같은 구간 실행기 기록 [CLI-INIT] 58회가 모두 `aimbase-server, status=connected` 이고 pending, failed, `not connected at turn start` 는 0회(Aimbase 쪽에서 실행기 로그로 대조). IT-10-001 은 관리자 검토(REVIEW)로 넘어가 충족. 이 10회 모두 목차 입력 도구 결과가 8,000자로 잘린 것은 CR-153 으로 따로 다룬다
 
 ---
@@ -2539,7 +2539,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 설계서**: T1-3 BIZ-125, T3-13 § 3.1, § 4.2, § 4.4, T3-1 global_config seed, T3-5 TC-MCP-RES-001~005, 운용 가이드 v3.11.0 § 3-7, SDK 가이드 v1.4.0 § 7
 - **영향 없음 확인**: T1-1(기능 추가 없음, 기존 통로 동작 보정), T2(새 라이브러리 없음. MCP Java SDK 2.0.0 의 Tool.meta 사용), T3-2(REST API 없음), T3-3, T3-4(화면 변경 없음. 런타임 설정 화면은 orchestrator.* 키를 Orchestrator 카드에 저절로 보여 준다), API 가이드(소비앱 REST 변경 없음). 입찰대행 앱 변경 없음
 - **구현 (2026-10-25)**: 107ea54. 단위시험 통과. 로컬 실측에서 /mcp 도구 46개와 /mcp-skills 도구 3개 모두 `anthropic/maxResultSizeChars`=200000 을 실었고, 설정을 300000 으로 바꾸자 캐시가 지난 뒤 동기화에서 두 통로 모두 새 값으로 다시 실렸다. 쓰는 곳이 없어진 McpResultTruncator.java 는 따로 지웠다
-- **배포 (2026-10-25)**: AWS 우진 api(18:12 KST 기동, Master V70 적용, get_proposal_design_input 다시 실림)와 aimbase-agent(18:13). 되돌리기 태그 aimbase-api:pre-20261025-180759, aimbase-aimbase-agent:pre-20261025-181308. 옛 서버(59.8.160.12)는 반영하지 않음
+- **배포 (2026-10-25)**: AWS 우진 api(18:12 KST 기동, Master V70 적용, get_proposal_design_input 다시 실림)와 aimbase-agent(18:13). 되돌리기 태그 aimbase-api:pre-20261025-180759, aimbase-aimbase-agent:pre-20261025-181308. 옛 서버(59.8.160.12)는 18:49~18:52 KST(./deploy.sh mcp: api 와 실행기 6개, 사용자 승인 18:48:11). 10-14 빌드 뒤 새로 들어간 것은 CR-152, CR-153 뿐임을 확인했다. Master V70 적용, 도구 다시 실림, 모두 healthy. 되돌리기 태그는 api 와 실행기 6개 모두 `pre-20261025-182917`
 - **상태**: 배포(AWS). 입찰대행 proposal-design 재실행으로 목차 입력이 잘리지 않고 닿는지 확인 대기
 
 ## CR 후보 (발번 전)
