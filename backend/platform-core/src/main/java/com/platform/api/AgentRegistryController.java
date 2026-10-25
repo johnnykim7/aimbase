@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -58,10 +59,13 @@ public class AgentRegistryController {
 
     /**
      * POST /api/v1/agents/{id}/heartbeat — 하트비트.
+     * CR-156: 그런 등록이 없으면 404. agent 는 다시 등록한다.
      */
     @PostMapping("/{id}/heartbeat")
     public Map<String, Object> heartbeat(@PathVariable UUID id) {
-        agentRegistryService.heartbeat(id);
+        if (!agentRegistryService.heartbeat(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "agent not registered: " + id);
+        }
         return Map.of("status", "ok");
     }
 

@@ -224,9 +224,12 @@ public class AgentRegistryService {
 
     /**
      * 하트비트 갱신.
+     * CR-156: 그런 등록이 없으면 false. agent 는 이를 보고 다시 등록한다.
+     * DEREGISTERED 는 true 로 둔다. 같은 userId 의 두 agent 가 서로 해제하며 번갈아 등록하지 않게 하려는 것이다(CR-075).
      */
-    public void heartbeat(UUID agentId) {
-        repository.findById(agentId).ifPresent(entity -> {
+    public boolean heartbeat(UUID agentId) {
+        Optional<AgentRegistryEntity> found = repository.findById(agentId);
+        found.ifPresent(entity -> {
             entity.setLastHeartbeatAt(OffsetDateTime.now());
             if ("STALE".equals(entity.getStatus())) {
                 entity.setStatus("ACTIVE");
@@ -234,6 +237,7 @@ public class AgentRegistryService {
             }
             repository.save(entity);
         });
+        return found.isPresent();
     }
 
     /**

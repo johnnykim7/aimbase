@@ -118,8 +118,9 @@ public class AimbaseRegistrationClient {
 
     /**
      * 하트비트 전송.
+     * CR-156: 응답 코드를 돌려준다. 404 면 Aimbase 가 이 등록을 모르는 것이다. 보내지 못했으면 0.
      */
-    public void heartbeat(String agentId) {
+    public int heartbeat(String agentId) {
         try {
             HttpRequest request = withCommonHeaders(HttpRequest.newBuilder()
                     .uri(URI.create(aimbaseBaseUrl + "/api/v1/agents/" + agentId + "/heartbeat"))
@@ -131,8 +132,10 @@ public class AimbaseRegistrationClient {
             if (response.statusCode() != 200) {
                 log.warn("Heartbeat returned status {}", response.statusCode());
             }
+            return response.statusCode();
         } catch (Exception e) {
             log.warn("Heartbeat failed for agent {}: {}", agentId, e.getMessage());
+            return 0;
         }
     }
 }

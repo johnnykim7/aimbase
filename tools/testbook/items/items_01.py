@@ -120,7 +120,7 @@ dict(id='IT-01-011', flow='앱 도구 서버 키', kind='예외', title='운영 
      pre='저장소 최신본, 두 운영 서버(옛 서버, 우진비드 AWS)에 들어갈 수 있는 계정',
      steps='1. 실행기 키 값을 주지 않고 운영 compose(docker-compose.prod.yml)를 docker compose config 로 읽는다\n'
            '2. 두 서버의 api, rag-pipeline, 실행기 컨테이너 환경값을 SHA-256 앞 8자리로 뽑아 저장소 파일(compose, .env 견본)의 값과 대조한다',
-     expect='1. compose 가 "RUNNER_API_KEY 값이 .env 에 없습니다" 로 멈춘다\n'
+     expect='1. compose 가 실행기 키 변수 하나를 들어 "<변수 이름> 값이 .env 에 없습니다" 로 멈추고 설정을 내지 않는다\n'
             '2. 컨테이너 환경값 가운데 저장소 파일 값과 앞 8자리가 같은 것은 읽는 코드가 없는 ENCRYPTION_KEY 뿐이다',
      judge=['서버', '서버'],
      pair={1: [1], 2: [2]},

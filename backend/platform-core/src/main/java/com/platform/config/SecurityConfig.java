@@ -84,10 +84,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // 사이드카 토큰 조회 (인증 없이 접근 가능 — 사이드카 기동 시 호출)
                 .requestMatchers("/api/v1/platform/agent-accounts/*/token").permitAll()
-                // CR-098: agent 자가등록/하트비트/해제 — 토큰 없는 부트스트랩 경로 (X-Tenant-Id 로 테넌트 식별).
-                // CR-041 설계상 agent 가 기동 시 스스로 등록한다. 테넌트 격리는 TenantResolver 가 X-Tenant-Id 로 보장.
-                .requestMatchers("/api/v1/agents/register", "/api/v1/agents/*/heartbeat").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/api/v1/agents/*").permitAll()
+                // CR-156: agent 등록, 하트비트, 해제는 열어 두지 않는다. 열어 두면 누구나 같은 이름으로 등록해
+                // CLI 요청을 가로챈다. 아래 /api/v1/** 인증을 받고, 테넌트 키의 테넌트에 등록된다(BIZ-126).
                 // RBAC
                 .requestMatchers("/api/v1/platform/**").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/apps/*/auth/**").permitAll()

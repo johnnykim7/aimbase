@@ -112,7 +112,7 @@
 | CR-153 | CLI 로 나가는 앱 도구 결과가 8,000자로 잘리는 결함. **발견**: CR-152 운영 확인 중 입찰대행 proposal-design 목차 단계가 목차 입력 81,881자 가운데 8,000자만 받아 요구사항 연결이 빠짐(10회 모두). **원인**: 서버 MCP 통로와 Tool SDK MCP 서버가 결과를 고정 8,000자(앞 70%, 뒤 30%)로 자르고, 가운데는 되찾을 길이 없음. **변경**: 자르기를 없애고, 도구 목록의 도구마다 결과 크기 상한(`anthropic/maxResultSizeChars`, 런타임 설정 `orchestrator.mcp-tool-result-max-chars` 기본 200,000자)을 적어 CLI 가 그만큼 그대로 받게 함 | 결함 | High | v3.x | 완료 |
 | CR-154 | 실행기 CLI 의 MCP 접속 기록에 서버 API 키가 그대로 남는 결함. **발견**: CR-152 운영 확인 중 AWS 실행기 컨테이너의 CLI 접속 기록 35개에 키 원문. **원인**: CLI 는 이름이 Authorization 으로 끝나는 머리글만 가리는데 실행기가 키를 X-API-Key 로 넘김. **변경**: 서버가 `Authorization: ApiKey <키>` 도 받고, 실행기가 그 형식으로 넘김 | 결함 | Medium | v3.x | 완료 |
 | CR-155 | 운영 키와 로그인 서명키가 저장소에 올라가 있음. **발견**: CR-154 작업 중(CR 후보 8). 해시 대조로 두 서버 실행기 키와 api, rag-pipeline 의 로그인 서명키(JWT_SECRET)가 저장소 파일 값과 같음을 확인. **조치**: 운영 compose 기본값 제거(값 없으면 멈춤), 두 서버의 서명키, 실행기 호출 키, 서버 MCP 키(실행기 전용 새 행), 등록 키를 서버에서 새로 만들어 교체 | 결함 | High | v3.x | 완료 |
-| CR-156 | 실행기 등록이 인증 없이 열려 있고, 등록에 실패하면 다시 시도하지 않음. **발견**: CR-155 후보 9(인증 없음), CR-155 재기동 뒤 옛 서버 실행기 6개 등록 빠짐(재시도 없음). **조치**: 등록, 상태 알림, 등록 해제를 테넌트 API 키로 인증. 실행기는 등록될 때까지 상태 알림 주기마다 다시 등록. 실행기마다 자기 테넌트 키로 등록과 서버 MCP 접속 | 결함 | High | v3.x | 설계 |
+| CR-156 | 실행기 등록이 인증 없이 열려 있고, 등록에 실패하면 다시 시도하지 않음. **발견**: CR-155 후보 9(인증 없음), CR-155 재기동 뒤 옛 서버 실행기 6개 등록 빠짐(재시도 없음). **조치**: 등록, 상태 알림, 등록 해제를 테넌트 API 키로 인증. 실행기는 등록될 때까지 상태 알림 주기마다 다시 등록. 실행기마다 자기 테넌트 키로 등록과 서버 MCP 접속 | 결함 | High | v3.x | 구현, 로컬 확인 |
 
 ---
 
@@ -2628,7 +2628,9 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 설계서**: T1-3(BIZ-126), T3-2(원격 에이전트 등록 인증), T3-5(TC-AGR-001~006), API 가이드 v3.20.0 § 14, SDK 가이드 v1.5.0 § 4.3, 운용 가이드 v3.13.0 § 2-9
 - **영향 없음 확인**: T1-1(원격 에이전트 등록 기능 항목 없음, CR-041 범위), T1-5 FSM(ACTIVE, STALE, DEREGISTERED 전이 그대로), T1-6 이벤트(AgentRegisteredEvent 그대로), T2-1(새 라이브러리 없음), T2-2(구현 규약 변경 없음), T3-1(테이블 변경 없음), T3-3, T3-4(화면 없음)
 - **시험항목 (2026-10-25)**: 영역 01 에 IT-01-012(실행기 등록은 테넌트 키로만 되고, api 보다 먼저 떠도 등록된다, 서버×2)
-- **상태**: 설계
+- **구현 (2026-10-25)**: SecurityConfig 에서 등록 경로 permitAll 삭제. AgentRegistryService.heartbeat 가 등록 유무를 돌려주고 AgentRegistryController 가 없으면 404. AgentLifecycle 이 상태 알림 주기마다 등록 id 가 없거나 404 면 다시 등록(heartbeatTick). docker-compose.prod.yml 실행기 6개의 AGENT_API_KEY 를 각 서버 MCP 키 변수로, .env.prod.template 에 AXOPM_, WORKMAP_SERVER_MCP_API_KEY 추가, AGENT_API_KEY 삭제. 단위시험 TC-AGR-001~006 통과(AgentRegistryHeartbeatTest, AgentLifecycleReregisterTest), tool-sdk-mcp 전체 35건 통과. IT-01-011 기대결과 1 을 고침(compose 가 빠진 변수 가운데 어느 것을 들어 멈출지는 정해져 있지 않다)
+- **로컬 확인 (2026-10-25)**: api 8181, tenant_dev 키. 키 없음, 틀린 키로 등록 403. 맞는 키로 등록 201, 상태 알림 200, 모르는 id 상태 알림 404, 해제 204. 키 없는 상태 알림, 해제 403. api 를 끈 채 실행기를 띄우니 등록 실패 뒤 상태 알림 주기(10초)마다 7번 다시 시도했고, api 가 23:43:27 에 뜬 뒤 23:43:31 에 등록됐다. 등록 행을 지우니 다음 상태 알림이 404 를 받고 같은 순간 새 id 로 다시 등록됐다. 다른 테넌트 키(flowguard_dev)는 그 테넌트로 넘어가는 것까지 기록으로 봤으나, 로컬 flowguard_dev DB 에 agent_registry.turn_relay_address 칸이 없어 등록이 끝나지 않았다(로컬 테넌트 DB 가운데 이 칸이 있는 곳은 tenant_dev 하나). 이때 오류가 400 으로 바뀌어 나온 원인은 후보 12
+- **상태**: 구현, 로컬 확인. 운영 반영 대기
 
 ## CR 후보 (발번 전)
 
@@ -2644,6 +2646,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 | 6 | 화면 시험 도구가 없다. 이 저장소 CLAUDE.md 는 FE 훅 시험(use*.test.ts)을 필수로 두지만 frontend/package.json 에 시험 명령과 도구가 없고 훅 시험 파일도 없다 | CR-149 (2026-10-13) | frontend/package.json scripts, frontend/src/hooks | 확인 |
 | 10 | 옛 서버(59.8.160.12) Postgres 의 platform 비밀번호가 저장소 backend/.env.example 의 값과 같고, 5432 포트가 0.0.0.0 에 열려 이 맥(다른 공인 IP)에서 접속된다. 같은 Postgres 를 WES, 3PL 게이트웨이 등 다른 앱도 쓴다 | CR-155 (2026-10-25) | 서버 .env 해시 대조, ss -ltn, nc | 해시와 포트로 확인. 방화벽 규칙은 권한이 없어 못 봤다 |
 | 11 | 끈 API 키로 /mcp 를 부르면 403 은 맞게 나오지만 api 기록에 ERROR "relation users does not exist" 가 한 줄씩 남는다. 두 서버 같음 | CR-155 (2026-10-25) | 운영 확인 중 api 기록 | 기록으로 확인. 어느 코드가 users 를 찾는지는 안 봤다 |
+| 12 | API 키 인증 필터가 다음 단계 호출(filterChain.doFilter)을 try 안에 두어, 컨트롤러에서 난 예외를 debug 기록 한 줄로 삼키고 같은 요청을 한 번 더 흘린다. 같은 요청이 두 번 처리되고, 본문이 있는 요청은 두 번째에 본문이 없어 진짜 오류 대신 400 "Required request body is missing" 이 나간다 | CR-156 (2026-10-25) | ApiKeyAuthenticationFilter.java:112, 137-141 | 로컬 기록으로 확인. 다른 테넌트 키 등록 한 요청이 같은 스레드에서 SQL 오류, 필터의 인증 실패 기록, 본문 없음 400 을 차례로 남겼다. 쓰기 요청이 두 번 반영되는지는 재현하지 않음 |
 
 ---
 

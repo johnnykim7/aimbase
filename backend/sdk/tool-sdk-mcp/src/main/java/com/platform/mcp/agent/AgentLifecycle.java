@@ -39,7 +39,10 @@ public class AgentLifecycle implements AutoCloseable {
     private final AgentMcpServer mcpServer;
     private final AimbaseRegistrationClient registrationClient;
     private ScheduledExecutorService heartbeatScheduler;
-    private String agentId;
+    // 하트비트 스레드와 TURN 재할당 스레드가 함께 읽고 쓴다.
+    private volatile String agentId;
+    /** CR-156: 다시 등록할 때 보낼 metadata. 시작 때와 TURN 재할당 뒤에 바뀐다. */
+    private volatile Map<String, Object> registrationMetadata = Map.of();
     private String publicAddress;
     private String turnRelayAddress;
 
@@ -136,16 +139,9 @@ public class AgentLifecycle implements AutoCloseable {
         }
 
         // 4. Aimbase 등록 — CR-074: 실패해도 agent 자체는 계속 동작 (TURN-TCP 도달 경로 유지)
-        List<String> toolNames = mcpServer.getToolNames();
-        try {
-            agentId = registrationClient.register(
-                    config.agentName(), config.userId(), publicAddress, config.mcpPort(),
-                    toolNames, metadata);
-            log.info("Registered with Aimbase: agentId={}", agentId);
-        } catch (Exception e) {
-            log.warn("Aimbase registration failed — agent continues without registration: {}", e.getMessage());
-            agentId = null;
-        }
+        // CR-156: 실패하면 하트비트 주기마다 다시 등록한다(heartbeatTick).
+        registrationMetadata = metadata;
+        registerWithAimbase();
 
         // 5. 하트비트
         heartbeatScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -156,7 +152,7 @@ public class AgentLifecycle implements AutoCloseable {
         heartbeatScheduler.scheduleAtFixedRate(
                 () -> {
                     try {
-                        registrationClient.heartbeat(agentId);
+                        heartbeatTick();
                     } catch (Exception e) {
                         log.warn("Heartbeat failed: {}", e.getMessage());
                     }
@@ -167,7 +163,35 @@ public class AgentLifecycle implements AutoCloseable {
         );
 
         log.info("Agent '{}' started successfully — {} tools exposed via MCP",
-                config.agentName(), toolNames.size());
+                config.agentName(), mcpServer.getToolNames().size());
+    }
+
+    /**
+     * CR-156: 하트비트 한 주기. 등록이 없거나 Aimbase 가 이 등록을 모르면(404) 다시 등록한다.
+     * api 보다 먼저 떠서 시작 때 등록에 실패한 agent 가 id 없이 하트비트만 보내며 남지 않게 한다.
+     * 연결 실패나 5xx 는 Aimbase 가 잠시 내려간 것이라 등록을 그대로 두고 다음 주기에 다시 알린다.
+     */
+    void heartbeatTick() {
+        if (agentId == null) {
+            registerWithAimbase();
+            return;
+        }
+        if (registrationClient.heartbeat(agentId) == 404) {
+            log.warn("Aimbase does not know agent {}, registering again", agentId);
+            agentId = null;
+            registerWithAimbase();
+        }
+    }
+
+    private void registerWithAimbase() {
+        try {
+            agentId = registrationClient.register(
+                    config.agentName(), config.userId(), publicAddress, config.mcpPort(),
+                    mcpServer.getToolNames(), registrationMetadata);
+            log.info("Registered with Aimbase: agentId={}", agentId);
+        } catch (Exception e) {
+            log.warn("Aimbase registration failed, retrying at next heartbeat: {}", e.getMessage());
+        }
     }
 
     /**
@@ -333,6 +357,7 @@ public class AgentLifecycle implements AutoCloseable {
             Map<String, Object> metadata = new HashMap<>(Map.of("sdk_version", "1.0.0"));
             metadata.put("runnerEndpoint", runnerEndpoint);
             metadata.put("turnRelayAddress", fresh.relayAddress());
+            registrationMetadata = metadata;
 
             List<String> toolNames = mcpServer.getToolNames();
             String newAgentId = registrationClient.register(
