@@ -20,6 +20,7 @@ import java.util.HexFormat;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 /**
@@ -106,5 +107,39 @@ class ApiKeyAuthenticationFilterTest {
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         assertThat(TenantContext.getTenantId()).isEqualTo("tenant-a");
+    }
+
+    @Test
+    @DisplayName("TC-AK-017 다음_단계에서_난_예외는_그대로_올라가고_요청은_한_번만_흐른다")
+    void downstreamException_propagatesOnce() throws Exception {
+        stubTenantKey();
+        doThrow(new IllegalStateException("controller failed")).when(chain).doFilter(any(), any());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/agents/register");
+        request.addHeader("X-API-Key", RAW_KEY);
+
+        assertThatThrownBy(() -> filter.doFilterInternal(request, new MockHttpServletResponse(), chain))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("controller failed");
+        verify(chain, times(1)).doFilter(any(), any());
+    }
+
+    @Test
+    @DisplayName("TC-AK-018 테넌트가_없는_요청에서_모르는_키는_users_를_찾지_않는다")
+    void unknownKey_withoutTenant_skipsUserLookup() throws Exception {
+        runWith("X-API-Key", "plat-unknown");
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verifyNoInteractions(userRepository);
+    }
+
+    @Test
+    @DisplayName("TC-AK-019 테넌트가_정해진_요청에서_모르는_키는_users_키로_찾는다")
+    void unknownKey_withTenant_looksUpUsers() throws Exception {
+        TenantContext.setTenantId("tenant-a");
+
+        runWith("X-API-Key", "plat-unknown");
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(userRepository).findByApiKeyHash(anyString());
     }
 }

@@ -72,73 +72,79 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
+        // CR-157: 다음 단계 호출은 try 밖에 둔다. 안에 두면 컨트롤러에서 난 예외를 키 확인 실패로 삼키고
+        // 같은 요청을 한 번 더 흘려, 두 번 처리되거나 진짜 오류 대신 본문 없음 400 이 나간다.
+        UserPrincipal principal = null;
         try {
-            String hash = sha256(apiKey);
-
-            // 1) api_keys 테이블 우선 조회 (CR-025)
-            ApiKeyEntity apiKeyEntity = apiKeyRepository.findByKeyHashAndIsActiveTrue(hash).orElse(null);
-            if (apiKeyEntity != null) {
-                // 만료 검증
-                if (apiKeyEntity.getExpiresAt() != null
-                        && apiKeyEntity.getExpiresAt().isBefore(OffsetDateTime.now())) {
-                    log.debug("API Key expired: {}", apiKeyEntity.getKeyPrefix());
-                    filterChain.doFilter(request, response);
-                    return;
-                }
-
-                // last_used_at 비동기 갱신
-                apiKeyEntity.setLastUsedAt(OffsetDateTime.now());
-                apiKeyRepository.save(apiKeyEntity);
-
-                // API Key의 tenant_id로 TenantContext 자동 설정 (X-Tenant-Id 헤더 불필요)
-                // tenant_id가 null이면 도메인 전용 키 — 기존 TenantContext(헤더 기반) 유지
-                if (apiKeyEntity.getTenantId() != null) {
-                    TenantContext.setTenantId(apiKeyEntity.getTenantId());
-                } else {
-                    request.setAttribute(TENANTLESS_KEY_ATTR, Boolean.TRUE);
-                }
-
-                // 시스템 키 — ADMIN 권한 부여
-                String role = "admin";
-                Map<String, Object> permissions = Map.of();
-
-                String tenantId = apiKeyEntity.getTenantId() != null
-                        ? apiKeyEntity.getTenantId()
-                        : TenantContext.getTenantId();
-                String userId = "system-" + apiKeyEntity.getId();
-                String email = apiKeyEntity.getCreatedBy() != null ? apiKeyEntity.getCreatedBy() : "api-key@system";
-                UserPrincipal principal = new UserPrincipal(userId, email, tenantId, role, permissions);
-                setAuthentication(principal, request);
-                filterChain.doFilter(request, response);
-                return;
-            }
-
-            // 2) 기존 users.api_key_hash 폴백
-            UserEntity user = userRepository.findByApiKeyHash(hash).orElse(null);
-            if (user == null || !user.isActive()) {
-                filterChain.doFilter(request, response);
-                return;
-            }
-
-            String role = "viewer";
-            Map<String, Object> permissions = Map.of();
-            if (user.getRoleId() != null) {
-                RoleEntity roleEntity = roleRepository.findById(user.getRoleId()).orElse(null);
-                if (roleEntity != null) {
-                    role = roleEntity.getId();
-                    permissions = roleEntity.getPermissions();
-                }
-            }
-
-            String tenantId = TenantContext.getTenantId();
-            UserPrincipal principal = new UserPrincipal(user.getId(), user.getEmail(), tenantId, role, permissions);
-            setAuthentication(principal, request);
-
+            principal = authenticate(apiKey, request);
         } catch (Exception e) {
-            log.debug("API Key authentication failed: {}", e.getMessage());
+            log.warn("API Key authentication failed: {}", e.getMessage());
+        }
+        if (principal != null) {
+            setAuthentication(principal, request);
+        }
+        filterChain.doFilter(request, response);
+    }
+
+    /** 키에 맞는 주체. 맞는 키가 없거나 만료됐으면 null. */
+    private UserPrincipal authenticate(String apiKey, HttpServletRequest request) {
+        String hash = sha256(apiKey);
+
+        // 1) api_keys 테이블 우선 조회 (CR-025)
+        ApiKeyEntity apiKeyEntity = apiKeyRepository.findByKeyHashAndIsActiveTrue(hash).orElse(null);
+        if (apiKeyEntity != null) {
+            // 만료 검증
+            if (apiKeyEntity.getExpiresAt() != null
+                    && apiKeyEntity.getExpiresAt().isBefore(OffsetDateTime.now())) {
+                log.debug("API Key expired: {}", apiKeyEntity.getKeyPrefix());
+                return null;
+            }
+
+            // last_used_at 비동기 갱신
+            apiKeyEntity.setLastUsedAt(OffsetDateTime.now());
+            apiKeyRepository.save(apiKeyEntity);
+
+            // API Key의 tenant_id로 TenantContext 자동 설정 (X-Tenant-Id 헤더 불필요)
+            // tenant_id가 null이면 도메인 전용 키 — 기존 TenantContext(헤더 기반) 유지
+            if (apiKeyEntity.getTenantId() != null) {
+                TenantContext.setTenantId(apiKeyEntity.getTenantId());
+            } else {
+                request.setAttribute(TENANTLESS_KEY_ATTR, Boolean.TRUE);
+            }
+
+            // 시스템 키 — ADMIN 권한 부여
+            String role = "admin";
+            Map<String, Object> permissions = Map.of();
+
+            String tenantId = apiKeyEntity.getTenantId() != null
+                    ? apiKeyEntity.getTenantId()
+                    : TenantContext.getTenantId();
+            String userId = "system-" + apiKeyEntity.getId();
+            String email = apiKeyEntity.getCreatedBy() != null ? apiKeyEntity.getCreatedBy() : "api-key@system";
+            return new UserPrincipal(userId, email, tenantId, role, permissions);
         }
 
-        filterChain.doFilter(request, response);
+        // 2) 기존 users.api_key_hash 폴백
+        // CR-157: users 는 테넌트 DB 에만 있다. 테넌트가 정해지지 않은 요청은 master 로 가서 없는 표를 찾다 오류 기록만 남긴다.
+        if (TenantContext.getTenantId() == null) {
+            return null;
+        }
+        UserEntity user = userRepository.findByApiKeyHash(hash).orElse(null);
+        if (user == null || !user.isActive()) {
+            return null;
+        }
+
+        String role = "viewer";
+        Map<String, Object> permissions = Map.of();
+        if (user.getRoleId() != null) {
+            RoleEntity roleEntity = roleRepository.findById(user.getRoleId()).orElse(null);
+            if (roleEntity != null) {
+                role = roleEntity.getId();
+                permissions = roleEntity.getPermissions();
+            }
+        }
+
+        return new UserPrincipal(user.getId(), user.getEmail(), TenantContext.getTenantId(), role, permissions);
     }
 
     /** 요청에 실린 API 키. X-API-Key 가 우선이고, 없으면 Authorization: ApiKey 값이다. 둘 다 없으면 null. */
