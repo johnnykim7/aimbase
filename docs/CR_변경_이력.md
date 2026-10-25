@@ -108,6 +108,7 @@
 | CR-149 | 워크플로우 저장 API 와 스튜디오를 가이드 계약에 맞춤(결함). **발견 경위**: CR-147 화면 점검 중 스튜디오 저장 400. **원인**: 4월 통합 커밋에서 프로젝트 귀속, 내 것만 보기, 아이디 자동 생성이 빠졌고 설명, 실행 모드는 저장 API 에 없었으며 가이드의 오류 처리 칸 이름이 실제와 달랐다. **조치**: 저장 API 와 목록 필터를 가이드 계약대로 되살리고 스튜디오 저장 본문과 관리 도구(MCP) 저장을 맞춤 | 결함 | High | v3.x | 완료 |
 | CR-150 | 관리 도구(MCP) 접속에 인증이 없음(결함). **발견 경위**: CR-149 관리 도구 저장 검사 실측 중 키 없이 워크플로우가 만들어짐. **원인**: `/admin-mcp/**` 를 인증 없이 열어 두었고 테넌트는 연결 주소의 tenant_id 를 그대로 믿음. **조치**: 테넌트에 묶인 API 키나 그 테넌트 로그인 토큰만 받고, 주소와 세션의 테넌트를 키의 테넌트와 대조 (BIZ-124) | 결함 | High | v3.x | 완료 |
 | CR-151 | AWS 서버(우진비드) 배포 대상 추가. **배경**: 우진비드가 쓰는 Aimbase 는 AWS 서버에 따로 있는데 배포 스크립트가 없어 CR-146 은 jar 를 손으로 바꿨고, 스킬 실행 컨테이너도 없다. **조치**: AWS compose 를 저장소(`docker-compose.wjbid.yml`)로 옮기고 실행 컨테이너를 더했으며, `./deploy.sh wjbid-sandbox, wjbid-be, wjbid-agent, wjbid` 를 추가(나중에 생길 AXOPM AWS 와 구분해 wjbid 로 부름) | 변경 | Medium | v3.x | 완료 |
+| CR-152 | CLI 작업이 앱 도구 서버 연결 전에 시작해 도구 없이 끝나는 결함. **요청**: 입찰대행 플랫폼 CR-169(제안서 목차 단계가 도구를 못 불러 목차 0건). **원인**: CLI 2.1.197 은 MCP 서버 연결을 기다리지 않고 첫 턴을 시작한다. AWS 에서 연결에 약 0.3초가 걸리는 사이 턴이 먼저 나가 AIMBASE 모드 28회 모두 연결 중으로 시작했고, 모델이 도구 없이 설명문을 내도 단계는 COMPLETED 였다. **조치**: 러너가 MCP 서버를 넘길 때 CLI 가 연결을 기다리게 하고(상한은 러너 설정), 턴 시작 때 넘긴 서버가 하나라도 연결되지 않았으면 그 턴을 실패로 끝내 기존 재시도에 태운다 | 결함 | High | v3.x | 반영(확인 대기) |
 
 ---
 
@@ -2494,6 +2495,26 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **첫 실행 (2026-10-14 17:28)**: 서버 `backup/` 이 root 소유라 compose 교체가 실패했고, `wjbid` 대상(당시 이름 aws)이 단계를 && 로 이어 set -e 가 꺼진 탓에 다음 단계로 진행했다. 실행 컨테이너 기동 판정에서 멈춰 서버는 바뀌지 않았다. 백업 폴더를 `deploy-backup/` 으로 바꾸고 단계를 한 줄씩 부르게 고쳤다
 - **상태**: 완료. 우진비드 AWS 2026-10-14 17:35~17:47(./deploy.sh wjbid: skill-sandbox, api, aimbase-agent). 바꾸기 전 이미지는 `pre-20261014-173458` 태그로 남아 있다. 기동 ERROR 7건은 AWS 에 DB 가 없는 테넌트 7개의 DataSource 적재 실패로 CR-146 때와 같다. 러너 cli-runner-bidding 재등록, 입찰대행 MCP 자동 연결 확인
 
+
+### CR-152 | CLI 작업이 앱 도구 서버 연결 전에 시작해 도구 없이 끝나는 결함
+- **대상 기능 ID**: PRD-306(CLI 워커), CR-071 러너
+- **변경 타입**: 변경(결함)
+- **원본 요구사항**: [docs/origins/원본_요구사항_CLI_작업이_앱_도구_연결_전에_시작하는_결함_20261025.md](origins/원본_요구사항_CLI_작업이_앱_도구_연결_전에_시작하는_결함_20261025.md)
+- **요청**: 입찰대행 플랫폼 CR-169 창. proposal-design 의 design_structure(AGENT_CALL, 연결 cli-runner-bidding-tools-001, AIMBASE)가 앱 도구를 한 번도 부르지 못하고 10초 안에 COMPLETED 로 끝난다. 2026-10-25 00:33~01:56 UTC 12회 중 6회
+- **원인**: CLI 는 머리 없는 실행에서 MCP 서버 연결을 기다리지 않는 것이 기본값이다(2.1.197 바이너리: `nonBlocking: isMcpLadderNonblockingEnabled()`, 환경변수 `MCP_CONNECTION_NONBLOCKING` 이 거짓 값일 때만 끈다). 끄면 `MCP_CONNECT_TIMEOUT_MS`(기본 5000)까지 기다리고, 그래도 안 붙으면 기다림을 접고 시작한다. AWS 실행기에서 aimbase-server 연결은 284ms 걸리는데(CLI MCP 기록) 그 전에 턴이 시작되어, 최근 6시간 시작 기록 28회가 모두 `aimbase-server status=pending` 이었다. 모델은 도구를 찾지 못한 채 설명문을 내고, CLI 결과는 is_error 가 아니라 러너와 서버가 정상 완료로 받았다
+- **변경 내용**:
+  1. 러너 워커가 CLI 에 MCP 서버를 하나라도 넘기면 CLI 프로세스에 `MCP_CONNECTION_NONBLOCKING=false`, `MCP_CONNECT_TIMEOUT_MS=<러너 설정>` 을 준다. 설정은 `aimbase.runner.mcp-connect-timeout-seconds`(환경변수 `AIMBASE_RUNNER_MCP_CONNECT_TIMEOUT_SECONDS`), 기본 30초(CLI 의 서버 하나 연결 상한과 같음). 넘기는 서버가 없으면(NATIVE 스킬 지정 없음 등) 손대지 않는다
+  2. 턴마다 오는 시작 신호(system/init)의 mcp_servers 에서, 넘긴 서버가 하나라도 connected 가 아니면(pending, failed, 목록에 없음) 그 턴을 `MCP server not connected at turn start: [이름=상태]` 로 실패시킨다. 러너는 워커를 닫고, 서버는 단계를 실패로 받아 기존 재시도(새 워커)에 태운다. NATIVE 스킬 지정이면 aimbase-skills 만 본다
+- **결정 (2026-10-25 사용자)**: 12:14:55 이 방향으로 진행
+- **영향 모듈**: cli-runner(ClaudeCliWorker), aimbase-agent(RunnerProperties, RunnerAutoConfiguration)
+- **영향도**: High (같은 연결을 쓰는 상용 단계 전부: proposal-design, proposal-write-section, proposal-verify-fidelity, write_proposal)
+- **영향 범위**: CR-071(러너), CR-112(is_error 실패 승격과 같은 재시도 경로), CR-126(AIMBASE 봉인), CR-147(aimbase-skills 통로)
+- **영향 설계서**: T3-12 § 4.3(도구 호출 처리)에 연결 대기와 시작 확인을 적는다
+- **영향 없음 확인**: T1(기능 추가 없음), T3-1(DB 없음), T3-2(API 없음), T3-3, T3-4(화면 없음). 가이드 문서는 러너 설정을 다루지 않아 변경 없음
+- **CR-146 과의 구분**: CR-146 은 붙은 뒤 옛 실행기를 불러 호출이 실패하는 것이고, 이것은 호출 전에 연결이 안 된 것이다. 재기동 없는 10:13, 10:16 KST 에도 났다
+- **검증 (로컬)**: 단위시험 ClaudeCliWorkerTest 30건 통과(새 5건: 연결 중이면 실패, 목록에 없으면 실패, 연결되면 진행하고 환경변수 전달, 서버 없으면 손대지 않음, NATIVE 스킬 지정은 aimbase-skills 만 확인). 실제 CLI 2.1.197 과 로컬 러너 jar 로, 1.5초 늦게 답하는 가짜 MCP 서버에서 고치기 전 기본값은 pending 으로 시작, 고친 러너는 connected 로 시작해 답을 냈다. 8초 늦는 서버에 상한 4초면 7.5초 만에 실패(`/v1/chat` 500, `/v1/chat/stream` error 이벤트)하고 CLI 프로세스가 남지 않았다
+- **상태**: AWS 반영, 확인 대기. 우진비드 AWS 2026-10-25 13:19~13:23 KST(./deploy.sh wjbid-agent, 사용자 승인 13:18:52). 운영 실행기를 만든 작업 사본에서 그 뒤 바뀐 것이 이 변경뿐임을 확인하고 그 사본으로 빌드했다(compose, Dockerfile 은 서버 것과 같음). 바꾸기 전 이미지는 `aimbase-aimbase-agent:pre-20261025-131911`. CLI 2.1.197 그대로, 실행기 등록 정상. 연속 10회 확인과 IT-10-001 은 입찰대행 CR-169 창에 요청. 옛 서버(59.8.160.12)는 따로 승인요청
+
 ---
 
 ## CR 후보 (발번 전)
@@ -2508,6 +2529,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 | 4 | 테넌트 없이 발급한 API 키가 일반 API 에서 X-Tenant-Id 머리글로 어느 테넌트든 admin 으로 다룰 수 있다. CR-086 대조는 로그인 토큰에만 있다 | CR-150 (2026-10-14) | ApiKeyAuthenticationFilter.java:88-102, CR-150 카드 범위 밖 | 소스로 확인. 요청으로 재현하지 않음. 도메인 전용 키의 의도된 동작인지 먼저 정한다 |
 | 5 | 시험 설정이 docker info 를 시간 제한 없이 기다려, Docker 가 멈추면 bootRun, bootJar 를 포함한 모든 gradle 호출이 멈춘다 | CR-150 (2026-10-14) | backend/platform-core/build.gradle.kts:110-111 | 실제로 20분 넘게 멈춘 것을 확인. 배포 때는 멈춘 docker info 를 끊어 진행했다 |
 | 6 | 화면 시험 도구가 없다. 이 저장소 CLAUDE.md 는 FE 훅 시험(use*.test.ts)을 필수로 두지만 frontend/package.json 에 시험 명령과 도구가 없고 훅 시험 파일도 없다 | CR-149 (2026-10-13) | frontend/package.json scripts, frontend/src/hooks | 확인 |
+| 7 | 러너 안 CLI 가 MCP 연결 기록(`~/.cache/claude-cli-nodejs/-app/mcp-logs-aimbase-server/*.jsonl`)에 aimbase-server 머리글을 그대로 적어, 실행기 컨테이너 디스크에 서버 API 키가 남는다. AWS 에 37개 | CR-152 (2026-10-25) | AWS aimbase-agent 컨테이너 MCP 기록 파일, CR-152 카드 범위 밖 | 파일 하나를 열어 확인. 기록을 끄는 CLI 설정이 있는지, 키를 머리글 대신 다른 길로 넘길지 먼저 본다 |
 
 ---
 

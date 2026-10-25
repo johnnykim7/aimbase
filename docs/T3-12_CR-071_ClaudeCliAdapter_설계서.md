@@ -384,6 +384,8 @@ public final class RequestContext {
 
 → Runner는 `--strict-mcp-config`(AIMBASE 모드) 등을 CommandBuilder로 적용하고, MCP 서버 자체는 aimbase-agent의 기존 SDK 도구 노출 흐름(CR-042/044) 그대로 사용.
 
+CR-152: CLI 는 기본값으로 MCP 서버 연결을 기다리지 않고 첫 턴을 시작한다. 러너는 MCP 서버를 넘길 때 CLI 에 `MCP_CONNECTION_NONBLOCKING=false` 와 `MCP_CONNECT_TIMEOUT_MS`(러너 설정 `aimbase.runner.mcp-connect-timeout-seconds`, 기본 30초)를 주고, 턴 시작 신호(system/init)에서 넘긴 서버가 하나라도 connected 가 아니면 그 턴을 실패로 끝낸다(도구 없이 정상 완료로 나가지 않게).
+
 → `tool_use` 이벤트가 NDJSON으로 흘러들어오면 Adapter가 `LLMResponse.toolCalls`에 누적해서 호출자에게 반환 (CR-050 동작 유지).
 
 ---
