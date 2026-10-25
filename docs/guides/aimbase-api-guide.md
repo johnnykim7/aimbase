@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.19.0** | 2026-10-25 | Aimbase v8.18.0 기준
+> **v3.20.0** | 2026-10-25 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1162,10 +1162,13 @@ GET /api/v1/agents/active
 
 원격 에이전트(소비앱)가 MCP 서버로 도구를 노출하고, Aimbase에 자가 등록/해제하는 API.
 
+> **인증 필수 [v3.20.0, CR-156]**: 등록, 해제, 하트비트 모두 테넌트에 묶인 API 키(`X-API-Key` 또는 `Authorization: ApiKey <키>`)를 싣는다. 키가 없거나 꺼졌거나 틀리면 403. 등록은 키의 테넌트에 들어간다(`X-Tenant-Id` 가 달라도 키 쪽). 에이전트마다 자기 테넌트 키를 쓴다.
+
 ### 14-1. 에이전트 등록
 
 ```
 POST /api/v1/agents/register
+X-API-Key: <테넌트 API 키>
 Content-Type: application/json
 ```
 
@@ -1242,7 +1245,9 @@ POST /api/v1/agents/{id}/heartbeat
 {"status": "ok"}
 ```
 
-> BIZ-078: 하트비트 간격 60초 권장. BIZ-079: 5분 무응답 시 STALE 처리.
+**Response (404)**: 그 테넌트에 그런 등록 id 가 없다. 에이전트는 다시 등록한다(`POST /agents/register`). [CR-156]
+
+> BIZ-078: 하트비트 간격 60초 권장. BIZ-079: 5분 무응답 시 STALE 처리. BIZ-126: 등록에 실패했거나 하트비트가 404 이면 하트비트 주기마다 다시 등록한다.
 
 ---
 
@@ -2192,6 +2197,7 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.20.0 | 2026-10-25 | **CR-156 에이전트 등록 인증** (§ 14). 등록, 해제, 하트비트에 테넌트 API 키 필수(없으면 403), 키의 테넌트에 등록. 모르는 id 의 하트비트는 404 |
 | v3.19.0 | 2026-10-25 | **CR-154 API Key 를 Authorization 머리글로도 받음** (§ 인증). `Authorization: ApiKey <키>` 를 `X-API-Key` 와 같게 받는다. 위젯 토큰 발급도 같다. Claude CLI 처럼 머리글을 기록에 남기는 도구에서 키가 가려지게 하려는 것 |
 | v3.18.0 | 2026-10-13 | **CR-149 워크플로우 저장 계약 정합** (§ 4-1). `description` 추가. 그동안 400 이던 `projectId`, `graphMode` 를 받고 `id` 를 비우면 서버가 만든다. 생성 때 이미 있는 `id` 는 409(전에는 기존 워크플로우를 덮어씀). 목록은 `X-Project-Id` 가 있으면 그 프로젝트와 공유 워크플로우만, `my=true` 면 내가 만든 것만. `errorHandling` 칸 이름을 실제(`retryMaxAttempts`, `retryDelayMs`)로 바로잡음. 이전 문서의 `strategy`, `maxRetries` 는 실행 때 무시되고 있었고 이제 저장 때 400 |
 | v3.17.0 | 2026-10-13 | **CR-147 스킬 묶음** (§ 24). 스킬 묶음 올리기와 조회 API(테넌트 전용, 플랫폼 공용, 판), 워크플로우 단계 config `skills`, 모델 도구 skill_open, skill_read, skill_run, CLI 세 모드 스킬 통로(NATIVE 는 `/mcp-skills`). 헤더 버전을 변경 이력 최신에 맞춤 |

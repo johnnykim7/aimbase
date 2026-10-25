@@ -112,6 +112,7 @@
 | CR-153 | CLI 로 나가는 앱 도구 결과가 8,000자로 잘리는 결함. **발견**: CR-152 운영 확인 중 입찰대행 proposal-design 목차 단계가 목차 입력 81,881자 가운데 8,000자만 받아 요구사항 연결이 빠짐(10회 모두). **원인**: 서버 MCP 통로와 Tool SDK MCP 서버가 결과를 고정 8,000자(앞 70%, 뒤 30%)로 자르고, 가운데는 되찾을 길이 없음. **변경**: 자르기를 없애고, 도구 목록의 도구마다 결과 크기 상한(`anthropic/maxResultSizeChars`, 런타임 설정 `orchestrator.mcp-tool-result-max-chars` 기본 200,000자)을 적어 CLI 가 그만큼 그대로 받게 함 | 결함 | High | v3.x | 완료 |
 | CR-154 | 실행기 CLI 의 MCP 접속 기록에 서버 API 키가 그대로 남는 결함. **발견**: CR-152 운영 확인 중 AWS 실행기 컨테이너의 CLI 접속 기록 35개에 키 원문. **원인**: CLI 는 이름이 Authorization 으로 끝나는 머리글만 가리는데 실행기가 키를 X-API-Key 로 넘김. **변경**: 서버가 `Authorization: ApiKey <키>` 도 받고, 실행기가 그 형식으로 넘김 | 결함 | Medium | v3.x | 완료 |
 | CR-155 | 운영 키와 로그인 서명키가 저장소에 올라가 있음. **발견**: CR-154 작업 중(CR 후보 8). 해시 대조로 두 서버 실행기 키와 api, rag-pipeline 의 로그인 서명키(JWT_SECRET)가 저장소 파일 값과 같음을 확인. **조치**: 운영 compose 기본값 제거(값 없으면 멈춤), 두 서버의 서명키, 실행기 호출 키, 서버 MCP 키(실행기 전용 새 행), 등록 키를 서버에서 새로 만들어 교체 | 결함 | High | v3.x | 완료 |
+| CR-156 | 실행기 등록이 인증 없이 열려 있고, 등록에 실패하면 다시 시도하지 않음. **발견**: CR-155 후보 9(인증 없음), CR-155 재기동 뒤 옛 서버 실행기 6개 등록 빠짐(재시도 없음). **조치**: 등록, 상태 알림, 등록 해제를 테넌트 API 키로 인증. 실행기는 등록될 때까지 상태 알림 주기마다 다시 등록. 실행기마다 자기 테넌트 키로 등록과 서버 MCP 접속 | 결함 | High | v3.x | 설계 |
 
 ---
 
@@ -2599,11 +2600,35 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 없음 확인**: T1(기능, 업무 규칙 변경 없음), T2(새 기술 없음), T3(API, 테이블, 화면 변경 없음), 소스 코드 변경 없음
 - **시험항목 (2026-10-25)**: 영역 01 에 IT-01-011(운영 서버가 저장소에 적힌 키와 서명값을 쓰지 않음, 서버×2)
 - **배포 (2026-10-25, 사용자 22:57:49 승인)**: 서버에서 스크립트로 교체, 새 값은 찍지 않음. 옛 서버 22:58 KST(되돌림 백업 deploy-backup/*.20261025-225755), AWS 우진 22:59(deploy-backup/*.20261025-225916). 키 행 발급(옛 서버 3, AWS 1), CLI 연결 실행기 호출 키 교체(옛 서버 10, AWS 2, 옛 키로 남은 연결 0), 환경 파일 교체, 옛 서버는 새 compose 로 바꿈. api, rag-pipeline, 실행기(옛 서버 6, AWS 1) 다시 만듦. api 상태 200
-- **운영 확인 (2026-10-25 23:0x)**: 두 서버 api, rag-pipeline 서명키가 새 값. 실행기 7개 모두 호출 키 새 값, 새 키로 취소 요청 200, 새 서버 MCP 키로 /mcp initialize 200, 등록 ACTIVE. 끈 옛 키 행(옛 서버 9f95ff81, 83645c80, AWS 셋)으로 /mcp 403. 새 서명키로 발급한 60초 위젯 토큰으로 조회 200, 끝을 바꾼 토큰 403. 두 서버 전 컨테이너 환경값 대조에서 저장소 값과 같은 것은 ENCRYPTION_KEY(읽는 코드 없음)와 WES 앱의 AIMBASE_API_KEY(옛 서버 행 7225dd98, 아직 켜져 있음)만 남음
+- **운영 확인 (2026-10-25 23:0x)**: 두 서버 api, rag-pipeline 서명키가 새 값. 실행기 7개 모두 호출 키 새 값, 새 키로 취소 요청 200, 새 서버 MCP 키로 /mcp initialize 200, 등록 ACTIVE(AWS 만 맞다. 옛 서버는 아래 정정). 끈 옛 키 행(옛 서버 9f95ff81, 83645c80, AWS 셋)으로 /mcp 403. 새 서명키로 발급한 60초 위젯 토큰으로 조회 200, 끝을 바꾼 토큰 403. 두 서버 전 컨테이너 환경값 대조에서 저장소 값과 같은 것은 ENCRYPTION_KEY(읽는 코드 없음)와 WES 앱의 AIMBASE_API_KEY(옛 서버 행 7225dd98, 아직 켜져 있음)만 남음
 - **WES 앱 키 교체 (2026-10-25 23:05 KST, 사용자 23:04:49 권장안 위임)**: master 에 WES 앱 전용 새 행 "bp-wes-app (CR-155)" 발급, 옛 서버 /home/therecommerce/bp-wes/.env 의 AIMBASE_API_KEY 교체(바꾸기 전 파일 aimbase/deploy-backup/bp-wes.env.20261025-230536), bp-wes-api 만 다시 만듦(--no-deps). healthy, 새 키로 /mcp initialize 200, 옛 행 7225dd98 끈 뒤 옛 키 403, 2분간 오류 줄 0
 - **마감 확인**: 옛 서버 전 컨테이너 환경값 재대조에서 저장소 값과 같은 것은 ENCRYPTION_KEY(읽는 코드 없음)뿐. 옛 키 행 셋 꺼짐, CR-155 새 행 넷 켜짐. IT-01-011 기대 2 가 성립한다
 - **남은 것**: 없음. 실행기 등록 인증(후보 9), 옛 서버 DB 비밀번호와 5432 노출(후보 10)은 별건
+- **정정 (2026-10-25 23:12)**: 옛 서버 실행기 6개는 22:58 재기동 때 api 보다 먼저 떠 등록에 실패했고 다시 시도하지 않아 등록이 빠져 있었다. 위 운영 확인의 등록 ACTIVE 는 재기동 전 등록이 5분 STALE 처리 전이라 남아 있던 것을 본 것이다. 23:24:25 사용자 승인으로 실행기 6개만 재기동해 23:24 에 다시 등록됐고 23:25 상태 알림이 정상으로 들어왔다. 그동안 들어온 CLI 요청은 0건이다. 재시도 결함은 CR-156
 - **상태**: 완료
+
+### CR-156 | 실행기 등록이 인증 없이 열려 있고, 등록에 실패하면 다시 시도하지 않음
+- **대상 기능 ID**: CR-041(원격 에이전트 등록), CR-098(운영 실행기 상주), BIZ-078(상태 알림 60초), BIZ-126(신규)
+- **변경 타입**: 변경(결함, 운영)
+- **원본 요구사항**: [docs/origins/원본_요구사항_CR156_실행기_등록_인증과_재등록_20261025.md](origins/원본_요구사항_CR156_실행기_등록_인증과_재등록_20261025.md)
+- **발견**:
+  1. 인증 없음(CR-155 후보 9). 등록(`POST /api/v1/agents/register`), 상태 알림(`POST /api/v1/agents/{id}/heartbeat`), 등록 해제(`DELETE /api/v1/agents/{id}`)가 permitAll 이다(SecurityConfig.java:89-90). 실행기가 보내는 등록 키(AGENT_API_KEY)는 api_keys 에 없는 값이라 검사되지 않는다. api 에 닿는 누구나 같은 이름으로 등록해 CLI 요청을 자기 주소로 받거나 남의 등록을 지울 수 있다. SDK 연결 안내(claudecode-mcp-setup.md 2-3)는 이미 `X-API-Key: <테넌트 키>` 를 싣게 적고 있다
+  2. 재시도 없음. 2026-10-25 22:58 CR-155 배포에서 api 와 실행기를 함께 다시 만들었더니 옛 서버 실행기 6개가 api 보다 먼저 떠 등록에 실패했다. 실행기는 시작 때 한 번만 등록하고(AgentLifecycle.java:139-148), 실패하면 id 없이 `/agents/null/heartbeat` 를 1분마다 보내 400 을 받기만 했다. 23:24 까지 옛 서버 실행기 등록이 없었다(그동안 CLI 요청 0건). 서버는 모르는 id 의 상태 알림에도 200 을 준다(AgentRegistryService.heartbeat). 2026-06-13 CR-103 때도 같은 증상(id 없이 상태 알림, 5분 뒤 STALE)이 있었다
+  3. 테넌트 섞임. 옛 서버 AXOPM, WorkMap 실행기는 입찰(bidding_system) 테넌트 키로 서버 MCP(/mcp)에 붙는다(docker-compose.prod.yml). 서버 MCP 도구는 키의 테넌트에서 돈다(ApiKeyAuthenticationFilter.java:95-96, ServerMcpToolDispatcher.java:43). 그 두 실행기의 CLI 가 부르는 Aimbase 도구는 입찰 테넌트 자료를 본다. 등록을 키로 인증하면 같은 이유로 입찰 테넌트에 등록되므로 실행기마다 자기 테넌트 키가 있어야 한다
+- **변경 내용**:
+  1. 서버. 등록, 상태 알림, 등록 해제의 permitAll 을 지워 `/api/v1/**` 인증을 받게 한다. 테넌트에 묶인 키로 들어오면 키의 테넌트에 등록된다(기존 필터 동작). 키 없음, 꺼진 키, 틀린 키는 403
+  2. 서버. 상태 알림에 그런 등록이 없으면 404 를 준다(지금은 200). 해제된 등록(DEREGISTERED)은 지금처럼 200 이다. 같은 사용자의 두 PC 가 서로 해제하며 번갈아 등록하지 않게 하려는 것이다(CR-075 사용자당 활성 1개)
+  3. 실행기(tool-sdk-mcp AgentLifecycle). 등록 id 가 없거나 상태 알림이 404 이면 상태 알림 주기마다 다시 등록한다. TURN 재할당 뒤 바뀐 등록 정보를 기억해 다시 등록할 때도 쓴다. 상태 알림 응답 코드를 돌려준다(AimbaseRegistrationClient.heartbeat)
+  4. 운영 배선. 실행기마다 자기 테넌트 키 하나로 등록하고 서버 MCP 에도 붙는다. 옛 서버는 AXOPM, WorkMap 실행기 키 행을 새로 발급하고(`AXOPM_SERVER_MCP_API_KEY`, `WORKMAP_SERVER_MCP_API_KEY`), compose 에서 실행기 6개의 `AGENT_API_KEY` 를 그 실행기 서버 MCP 키와 같은 변수로 둔다. AWS 는 `agent.env` 의 `AGENT_API_KEY` 를 `AIMBASE_RUNNER_SERVER_MCP_API_KEY` 와 같은 값으로 둔다. 따로 있던 등록 키 값은 지운다
+  5. 배포 순서. 키 행과 환경 파일, 새 실행기 먼저(서버가 아직 인증을 안 해도 등록된다), 그다음 api. api 를 다시 띄우는 동안 실행기는 재시도로 붙는다
+- **결정 (2026-10-25 사용자)**: 23:04:49 "승인 받을일 있으면 권장으로 된승인은 위임할게요 자율로 가세요". 23:10:47 "권장" (CR-155 뒤 남은 후보 가운데 9번부터). 23:24:25 "재기동 승인" (옛 서버 실행기 6개 재기동으로 등록 복구)
+- **영향 모듈**: platform-core(SecurityConfig, AgentRegistryController, AgentRegistryService), tool-sdk-mcp(AgentLifecycle, AimbaseRegistrationClient), 운영 설정(docker-compose.prod.yml, .env.prod.template), 두 운영 서버 환경 파일, master api_keys
+- **영향도**: High (인증 없는 경로로 CLI 요청을 가로챌 수 있다. 재시도가 없어 api 와 함께 재기동하면 CLI 가 멈춘다)
+- **영향 범위**: CR-041, CR-075(사용자당 활성 1개), CR-098, CR-103(등록 STALE), CR-104(서버 MCP 키), CR-155
+- **영향 설계서**: T1-3(BIZ-126), T3-2(원격 에이전트 등록 인증), T3-5(TC-AGR-001~006), API 가이드 v3.20.0 § 14, SDK 가이드 v1.5.0 § 4.3, 운용 가이드 v3.13.0 § 2-9
+- **영향 없음 확인**: T1-1(원격 에이전트 등록 기능 항목 없음, CR-041 범위), T1-5 FSM(ACTIVE, STALE, DEREGISTERED 전이 그대로), T1-6 이벤트(AgentRegisteredEvent 그대로), T2-1(새 라이브러리 없음), T2-2(구현 규약 변경 없음), T3-1(테이블 변경 없음), T3-3, T3-4(화면 없음)
+- **시험항목 (2026-10-25)**: 영역 01 에 IT-01-012(실행기 등록은 테넌트 키로만 되고, api 보다 먼저 떠도 등록된다, 서버×2)
+- **상태**: 설계
 
 ## CR 후보 (발번 전)
 
@@ -2617,7 +2642,6 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 | 4 | 테넌트 없이 발급한 API 키가 일반 API 에서 X-Tenant-Id 머리글로 어느 테넌트든 admin 으로 다룰 수 있다. CR-086 대조는 로그인 토큰에만 있다 | CR-150 (2026-10-14) | ApiKeyAuthenticationFilter.java:88-102, CR-150 카드 범위 밖 | 소스로 확인. 요청으로 재현하지 않음. 도메인 전용 키의 의도된 동작인지 먼저 정한다 |
 | 5 | 시험 설정이 docker info 를 시간 제한 없이 기다려, Docker 가 멈추면 bootRun, bootJar 를 포함한 모든 gradle 호출이 멈춘다 | CR-150 (2026-10-14) | backend/platform-core/build.gradle.kts:110-111 | 실제로 20분 넘게 멈춘 것을 확인. 배포 때는 멈춘 docker info 를 끊어 진행했다 |
 | 6 | 화면 시험 도구가 없다. 이 저장소 CLAUDE.md 는 FE 훅 시험(use*.test.ts)을 필수로 두지만 frontend/package.json 에 시험 명령과 도구가 없고 훅 시험 파일도 없다 | CR-149 (2026-10-13) | frontend/package.json scripts, frontend/src/hooks | 확인 |
-| 9 | 실행기 등록(/api/v1/agents/register), 상태 알림(heartbeat), 등록 해제(DELETE /api/v1/agents/*)가 인증 없이 열려 있다. 실행기가 보내는 등록 키를 서버가 검사하지 않아, api 에 닿는 누구나 같은 이름의 실행기를 등록해 CLI 요청을 자기 주소로 받거나 등록을 지울 수 있다. 옛 서버 api 포트(8280)는 밖에서 닿는다 | CR-155 (2026-10-25) | SecurityConfig.java:89-90, AimbaseRegistrationClient.java:48, master api_keys 에 등록 키 행 없음 | 코드와 해시 대조로 확인. 실제로 남의 등록을 시도하지는 않았다 |
 | 10 | 옛 서버(59.8.160.12) Postgres 의 platform 비밀번호가 저장소 backend/.env.example 의 값과 같고, 5432 포트가 0.0.0.0 에 열려 이 맥(다른 공인 IP)에서 접속된다. 같은 Postgres 를 WES, 3PL 게이트웨이 등 다른 앱도 쓴다 | CR-155 (2026-10-25) | 서버 .env 해시 대조, ss -ltn, nc | 해시와 포트로 확인. 방화벽 규칙은 권한이 없어 못 봤다 |
 | 11 | 끈 API 키로 /mcp 를 부르면 403 은 맞게 나오지만 api 기록에 ERROR "relation users does not exist" 가 한 줄씩 남는다. 두 서버 같음 | CR-155 (2026-10-25) | 운영 확인 중 api 기록 | 기록으로 확인. 어느 코드가 users 를 찾는지는 안 봤다 |
 
