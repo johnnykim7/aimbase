@@ -112,7 +112,7 @@
 | CR-153 | CLI 로 나가는 앱 도구 결과가 8,000자로 잘리는 결함. **발견**: CR-152 운영 확인 중 입찰대행 proposal-design 목차 단계가 목차 입력 81,881자 가운데 8,000자만 받아 요구사항 연결이 빠짐(10회 모두). **원인**: 서버 MCP 통로와 Tool SDK MCP 서버가 결과를 고정 8,000자(앞 70%, 뒤 30%)로 자르고, 가운데는 되찾을 길이 없음. **변경**: 자르기를 없애고, 도구 목록의 도구마다 결과 크기 상한(`anthropic/maxResultSizeChars`, 런타임 설정 `orchestrator.mcp-tool-result-max-chars` 기본 200,000자)을 적어 CLI 가 그만큼 그대로 받게 함 | 결함 | High | v3.x | 완료 |
 | CR-154 | 실행기 CLI 의 MCP 접속 기록에 서버 API 키가 그대로 남는 결함. **발견**: CR-152 운영 확인 중 AWS 실행기 컨테이너의 CLI 접속 기록 35개에 키 원문. **원인**: CLI 는 이름이 Authorization 으로 끝나는 머리글만 가리는데 실행기가 키를 X-API-Key 로 넘김. **변경**: 서버가 `Authorization: ApiKey <키>` 도 받고, 실행기가 그 형식으로 넘김 | 결함 | Medium | v3.x | 완료 |
 | CR-155 | 운영 키와 로그인 서명키가 저장소에 올라가 있음. **발견**: CR-154 작업 중(CR 후보 8). 해시 대조로 두 서버 실행기 키와 api, rag-pipeline 의 로그인 서명키(JWT_SECRET)가 저장소 파일 값과 같음을 확인. **조치**: 운영 compose 기본값 제거(값 없으면 멈춤), 두 서버의 서명키, 실행기 호출 키, 서버 MCP 키(실행기 전용 새 행), 등록 키를 서버에서 새로 만들어 교체 | 결함 | High | v3.x | 완료 |
-| CR-156 | 실행기 등록이 인증 없이 열려 있고, 등록에 실패하면 다시 시도하지 않음. **발견**: CR-155 후보 9(인증 없음), CR-155 재기동 뒤 옛 서버 실행기 6개 등록 빠짐(재시도 없음). **조치**: 등록, 상태 알림, 등록 해제를 테넌트 API 키로 인증. 실행기는 등록될 때까지 상태 알림 주기마다 다시 등록. 실행기마다 자기 테넌트 키로 등록과 서버 MCP 접속 | 결함 | High | v3.x | 구현, 로컬 확인 |
+| CR-156 | 실행기 등록이 인증 없이 열려 있고, 등록에 실패하면 다시 시도하지 않음. **발견**: CR-155 후보 9(인증 없음), CR-155 재기동 뒤 옛 서버 실행기 6개 등록 빠짐(재시도 없음). **조치**: 등록, 상태 알림, 등록 해제를 테넌트 API 키로 인증. 실행기는 등록될 때까지 상태 알림 주기마다 다시 등록. 실행기마다 자기 테넌트 키로 등록과 서버 MCP 접속 | 결함 | High | v3.x | 완료 |
 
 ---
 
@@ -2630,7 +2630,9 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **시험항목 (2026-10-25)**: 영역 01 에 IT-01-012(실행기 등록은 테넌트 키로만 되고, api 보다 먼저 떠도 등록된다, 서버×2)
 - **구현 (2026-10-25)**: SecurityConfig 에서 등록 경로 permitAll 삭제. AgentRegistryService.heartbeat 가 등록 유무를 돌려주고 AgentRegistryController 가 없으면 404. AgentLifecycle 이 상태 알림 주기마다 등록 id 가 없거나 404 면 다시 등록(heartbeatTick). docker-compose.prod.yml 실행기 6개의 AGENT_API_KEY 를 각 서버 MCP 키 변수로, .env.prod.template 에 AXOPM_, WORKMAP_SERVER_MCP_API_KEY 추가, AGENT_API_KEY 삭제. 단위시험 TC-AGR-001~006 통과(AgentRegistryHeartbeatTest, AgentLifecycleReregisterTest), tool-sdk-mcp 전체 35건 통과. IT-01-011 기대결과 1 을 고침(compose 가 빠진 변수 가운데 어느 것을 들어 멈출지는 정해져 있지 않다)
 - **로컬 확인 (2026-10-25)**: api 8181, tenant_dev 키. 키 없음, 틀린 키로 등록 403. 맞는 키로 등록 201, 상태 알림 200, 모르는 id 상태 알림 404, 해제 204. 키 없는 상태 알림, 해제 403. api 를 끈 채 실행기를 띄우니 등록 실패 뒤 상태 알림 주기(10초)마다 7번 다시 시도했고, api 가 23:43:27 에 뜬 뒤 23:43:31 에 등록됐다. 등록 행을 지우니 다음 상태 알림이 404 를 받고 같은 순간 새 id 로 다시 등록됐다. 다른 테넌트 키(flowguard_dev)는 그 테넌트로 넘어가는 것까지 기록으로 봤으나, 로컬 flowguard_dev DB 에 agent_registry.turn_relay_address 칸이 없어 등록이 끝나지 않았다(로컬 테넌트 DB 가운데 이 칸이 있는 곳은 tenant_dev 하나). 이때 오류가 400 으로 바뀌어 나온 원인은 후보 12
-- **상태**: 구현, 로컬 확인. 운영 반영 대기
+- **운영 반영 (2026-10-25 23:58 사용자 "승인")**: 옛 서버 master api_keys 에 "AXOPM 실행기 MCP 키 (CR-156)"(axopm_companyA, 8fd50f29), "WorkMap 실행기 MCP 키 (CR-156)"(workmap, 5be7f2be) 추가, .env 에 두 변수 기록. AWS agent.env 의 AGENT_API_KEY 를 서버 MCP 키와 같은 값(8f4d3180)으로. 실행기 배포(`./deploy.sh agents`, `wjbid-agent`), api 배포(`./deploy.sh be`, `wjbid-be`). 옛 서버 .env 의 AGENT_API_KEY 줄 삭제(2026-10-26 00:07). 백업 deploy-backup/.env.20261025-2358, .env.20261026-0007, AWS deploy-backup/agent.env.20261025-2358
+- **운영 확인 (2026-10-26 00:05, 두 서버)**: 키 없이 등록, 틀린 키로 등록, 키 없이 상태 알림, 키 없이 해제 모두 403, 등록 목록에 새 줄 없음. 실행기 키로 모르는 id 상태 알림 404. 실행기 7개(옛 서버 6, AWS 1) 모두 자기 테넌트에만 ACTIVE 로 있고 상태 알림 오류 0. AXOPM, WorkMap 실행기가 새 키로 서버 MCP 도구 목록 94개를 받았다. `./deploy.sh agents` 는 compose 의존 때문에 api 도 함께 다시 만든다. 이번에도 실행기 6개가 api 보다 먼저 떠 한 번씩 등록에 실패했고 다음 상태 알림에 스스로 등록됐다(IT-01-012 기대결과 2 와 같은 상황). 2026-10-25 22:58 장애도 같은 경로였다
+- **상태**: 완료
 
 ## CR 후보 (발번 전)
 
