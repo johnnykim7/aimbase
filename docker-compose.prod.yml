@@ -115,9 +115,10 @@ services:
       # 작업장 파일(/data/workspace/...)을 직접 읽고, Worker 가 cwd 를 작업장으로 설정한다.
       - ./workspace:/data/workspace
     environment:
+      # 실행기 키는 서버 .env 에만 둔다. 저장소에 기본값을 적지 않고, 값이 없으면 compose 가 멈춘다(CR-155)
       # ── Runner HTTP 서비스 (RunnerProperties: aimbase.runner.*) ──
       AIMBASE_RUNNER_ENABLED: "true"
-      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
       # CR-111 후속: turn timeout 300→600s. agent async(600s)와 마개-그릇 정렬 — 이전엔 async 만 600s 라
@@ -127,13 +128,13 @@ services:
       # local stdio MCP(AIMBASE_MCP_JAR)는 제거 — server 와 도구 중복 + allowedTools(mcp__aimbase-server__*)
       # prefix 정합성 깨짐 방지. 정공 A 의 도구는 모두 서버 MCP endpoint 를 거친다.
       AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
-      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:-plat-77111309dc1043758c474444b4a36605}"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:?SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bidding"
       SERVER_PORT: "8290"
       # ── Agent 등록 (AgentProperties: agent.*) ──
       AGENT_NAME: "cli-runner-bidding"
       AGENT_AIMBASE_URL: "http://api:8080"
-      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"
+      AGENT_API_KEY: "${AGENT_API_KEY:?AGENT_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "bidding_system"
       AGENT_MCP_PORT: "8291"
       AGENT_TURN_ENABLED: "false"
@@ -164,17 +165,17 @@ services:
       - ./workspace:/data/workspace
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
-      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"   # 키 공유
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"   # 키 공유
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
       AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
-      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:-plat-77111309dc1043758c474444b4a36605}"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:?SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-axopm"
       SERVER_PORT: "8292"   # 8290 → 8292 (bidding agent 와 충돌 회피)
       AGENT_NAME: "cli-runner-axopm"   # 이름 분리
       AGENT_AIMBASE_URL: "http://api:8080"
-      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"   # 등록키 공유
+      AGENT_API_KEY: "${AGENT_API_KEY:?AGENT_API_KEY 값이 .env 에 없습니다}"   # 등록키 공유
       AGENT_TENANT_ID: "axopm_companyA"   # ★ axopm_companyA DB 에 등록 — 라우팅 핵심
       AGENT_MCP_PORT: "8293"   # 8291 → 8293 (충돌 회피)
       AGENT_TURN_ENABLED: "false"
@@ -204,17 +205,17 @@ services:
       - ./workspace:/data/workspace
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
-      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"   # 키 공유
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"   # 키 공유
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
       AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
-      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:-plat-77111309dc1043758c474444b4a36605}"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:?SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-workmap"
       SERVER_PORT: "8294"   # 8292 → 8294 (기존 agent 와 충돌 회피)
       AGENT_NAME: "cli-runner-workmap"   # 이름 분리
       AGENT_AIMBASE_URL: "http://api:8080"
-      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"   # 등록키 공유
+      AGENT_API_KEY: "${AGENT_API_KEY:?AGENT_API_KEY 값이 .env 에 없습니다}"   # 등록키 공유
       AGENT_TENANT_ID: "workmap"   # ★ workmap DB 에 등록 — 라우팅 핵심
       AGENT_MCP_PORT: "8295"   # 8293 → 8295 (충돌 회피)
       AGENT_TURN_ENABLED: "false"
@@ -244,7 +245,7 @@ services:
       - ./workspace:/data/workspace
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
-      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"   # 키 공유
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"   # 키 공유
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
@@ -252,12 +253,12 @@ services:
       # ★ MCP 인증키는 AGENT_TENANT_ID 와 같은 테넌트 것이어야 한다 (CR-123 실측).
       # bidding 키를 공유하면 /mcp/sse 가 bidding_system 으로 인증돼 bp_wes 원격도구가 안 보이고
       # MCP 핸드셰이크가 status=pending 에서 멈춘다.
-      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WES_SERVER_MCP_API_KEY:-plat-d66bccfc4b954dbc907b31e7ef7a7131}"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WES_SERVER_MCP_API_KEY:?WES_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes"
       SERVER_PORT: "8296"   # 8294 → 8296 (기존 agent 와 충돌 회피)
       AGENT_NAME: "cli-runner-bp-wes"   # 이름 분리
       AGENT_AIMBASE_URL: "http://api:8080"
-      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"   # 등록키 공유
+      AGENT_API_KEY: "${AGENT_API_KEY:?AGENT_API_KEY 값이 .env 에 없습니다}"   # 등록키 공유
       AGENT_TENANT_ID: "bp_wes"   # ★ bp_wes DB 에 등록 — 라우팅 핵심
       AGENT_MCP_PORT: "8297"   # 8295 → 8297 (충돌 회피)
       AGENT_TURN_ENABLED: "false"
@@ -297,17 +298,17 @@ services:
       - ./workspace-wes-cs:/data/workspace
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
-      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "2"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
       AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
-      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WES_SERVER_MCP_API_KEY:-plat-d66bccfc4b954dbc907b31e7ef7a7131}"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WES_SERVER_MCP_API_KEY:?WES_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes-cs"
       SERVER_PORT: "8298"
       AGENT_NAME: "cli-runner-bp-wes-cs"
       AGENT_AIMBASE_URL: "http://api:8080"
-      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"
+      AGENT_API_KEY: "${AGENT_API_KEY:?AGENT_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "bp_wes"
       AGENT_MCP_PORT: "8299"
       AGENT_TURN_ENABLED: "false"
@@ -343,17 +344,17 @@ services:
       - ./workspace:/data/workspace
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
-      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:-cli-runner-key-bidding-2026}"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "3"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
       AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
-      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "plat-a7e4247b82e246fa8b6bd3e50f10409c"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${LEXFLOW_SERVER_MCP_API_KEY:?LEXFLOW_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-lexflow"
       SERVER_PORT: "8300"
       AGENT_NAME: "cli-runner-lexflow"
       AGENT_AIMBASE_URL: "http://api:8080"
-      AGENT_API_KEY: "${AGENT_API_KEY:-cli-runner-bidding-register-2026}"
+      AGENT_API_KEY: "${AGENT_API_KEY:?AGENT_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "lexflow"
       AGENT_MCP_PORT: "8301"
       AGENT_TURN_ENABLED: "false"

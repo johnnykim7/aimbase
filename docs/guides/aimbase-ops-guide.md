@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.11.0** | 2026-10-25 | Aimbase v8.18.0 기준
+> **v3.12.0** | 2026-10-25 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -428,6 +428,27 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 - [ ] sandbox, be, fe(, agents) 순서로 올렸다
 - [ ] 공용 스킬 화면에서 묶음 하나를 올리고 상세가 열린다
 - [ ] 스킬을 지정한 AGENT_CALL 단계 하나를 돌려 실행 내역의 단계 시작 이벤트에 스킬과 판이 남는다
+
+### 2-9. 운영 서버 비밀값 [CR-155]
+
+운영 서버의 키와 서명값은 서버 환경 파일에만 둡니다. 저장소 파일(compose, .env 견본, 문서)에 원문을 적지 않습니다. 운영 compose(`docker-compose.prod.yml`)는 실행기 키에 기본값이 없어, 서버 `.env` 에 값이 없으면 `docker compose` 가 멈춥니다.
+
+| 값 | 옛 서버 `/home/therecommerce/aimbase` | 우진비드 AWS `/opt/wjbid/aimbase` | 짝이 되는 곳 |
+|---|---|---|---|
+| 로그인 서명키 `JWT_SECRET` | `.env` | `api.env`, `rag.env` | api 와 rag-pipeline 이 같은 값을 읽는다 |
+| 실행기 호출 키 `RUNNER_API_KEY` | `.env` | `agent.env` 의 `AIMBASE_RUNNER_API_KEY` | 그 서버 테넌트의 CLI 연결 `config.runner_api_key` |
+| 실행기 서버 MCP 키 `SERVER_MCP_API_KEY`, `WES_SERVER_MCP_API_KEY`, `LEXFLOW_SERVER_MCP_API_KEY` | `.env` | `agent.env` 의 `AIMBASE_RUNNER_SERVER_MCP_API_KEY` | master `api_keys` 의 그 테넌트 키 행 |
+| 실행기 등록 키 `AGENT_API_KEY` | `.env` | `agent.env` | 서버가 검사하지 않는다 |
+
+**바꾸는 순서** (키가 새었거나 담당자가 바뀌었을 때):
+1. 서버 환경 파일을 `deploy-backup/` 에 복사해 둔다
+2. 새 값을 서버에서 만든다. 화면과 기록에 찍지 않는다. 서명키와 실행기 호출 키는 `openssl rand -hex 32`, 시스템 API 키는 `plat-` 뒤에 16진수 32자리
+3. 시스템 API 키는 옛 행과 같은 테넌트, 범위로 새 행을 넣는다. 옛 행은 아직 끄지 않는다
+4. 실행기 호출 키를 바꾸면 그 서버 테넌트의 CLI 연결 `config.runner_api_key` 를 모두 같은 값으로 바꾼다
+5. api, rag-pipeline, 실행기를 다시 만든다(`docker compose up -d --force-recreate <서비스>`). 서명키를 바꾸면 관리자 화면과 위젯 로그인이 한 번 풀린다
+6. 실행기가 다시 등록되고 CLI 작업이 앱 도구 서버에 붙는 것을 본 뒤 옛 키 행을 끈다(`is_active=false`)
+
+소비앱과 실행기가 API 키 하나를 같이 쓰면 한쪽만 바꿀 수 없습니다. 실행기 키는 실행기 전용으로 발급합니다.
 
 ---
 
@@ -1569,6 +1590,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.12.0 | 2026-10-25 | **CR-155 운영 서버 비밀값** (§ 2-9). 키와 서명값을 둘 곳, 짝이 되는 곳, 바꾸는 순서. 운영 compose 의 실행기 키 기본값 제거 |
 | v3.11.0 | 2026-10-25 | **CR-153 CLI 로 나가는 도구 결과 크기** (§ 3-7). 8,000자 고정 자르기를 없애고 런타임 설정 `orchestrator.mcp-tool-result-max-chars`(기본 200000) 추가 |
 | v3.10.0 | 2026-10-14 | **CR-151 AWS 서버 배포** (§ 2-8). 우진비드 AWS 서버 순서: `sandbox.env` 열쇠, `./deploy.sh wjbid`, 되돌리기. § 2-8 증상 표의 어긋난 두 줄 바로잡음 |
 | v3.9.0 | 2026-10-13 | **CR-147 스킬 묶음** (§ 2-8, § 3-17). 플랫폼 공용 스킬 화면과 런타임 설정 Skills 카드, 스크립트 실행 컨테이너 첫 배포 순서(서버 `.env` 의 SKILL_SANDBOX_API_KEY, sandbox, be, fe, agents)와 패키지 추가 절차, 테넌트 스킬 화면 묶음형 탭, 워크플로우 단계 스킬 지정 |
