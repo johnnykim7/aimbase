@@ -1,0 +1,20 @@
+{
+  "project": "AIMBASE",
+  "areas": {
+    "01": "CLI 작업과 앱 도구"
+  },
+  "unit": {
+    "cli-runner": {
+      "dir": "backend/cli-runner",
+      "run": ["../gradlew", "test", "--rerun"]
+    },
+    "platform-core": {
+      "dir": "backend/platform-core",
+      "run": ["../gradlew", "test", "--rerun"]
+    },
+    "tool-sdk-mcp": {
+      "dir": "backend/sdk/tool-sdk-mcp",
+      "run": ["../../gradlew", "test", "--rerun"]
+    }
+  }
+}

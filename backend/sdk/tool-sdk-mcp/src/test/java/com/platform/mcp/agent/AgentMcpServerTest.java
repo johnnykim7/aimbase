@@ -119,7 +119,7 @@ class AgentMcpServerTest {
     }
 
     @Test
-    @DisplayName("CR-153: 긴 본문을 자르지 않음 (TC-MCP-RES-005)")
+    @DisplayName("IT-01-008 2 CR-153: 긴 본문을 자르지 않음 (TC-MCP-RES-005)")
     void long_body_is_not_truncated() {
         String longText = "x".repeat(81_881);
         EnhancedToolExecutor bigTool = new EnhancedToolExecutor() {

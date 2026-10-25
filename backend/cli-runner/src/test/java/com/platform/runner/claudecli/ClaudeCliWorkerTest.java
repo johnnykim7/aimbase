@@ -7,6 +7,7 @@ import com.platform.skill.SkillSetHeader;
 import com.platform.tool.SkillRef;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -596,6 +597,7 @@ class ClaudeCliWorkerTest {
     }
 
     @Test
+    @DisplayName("IT-01-003 1 연결중이면_턴이_실패한다")
     void cr152_turn_fails_when_the_server_is_still_pending() throws IOException {
         Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
         startWithInit("[{\"name\":\"aimbase-server\",\"status\":\"pending\"}]", SERVER_MCP, env);
@@ -606,6 +608,7 @@ class ClaudeCliWorkerTest {
     }
 
     @Test
+    @DisplayName("IT-01-003 2 목록에_없으면_턴이_실패한다")
     void cr152_turn_fails_when_the_server_is_not_listed() throws IOException {
         Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
         startWithInit("[]", SERVER_MCP, env);
@@ -616,6 +619,7 @@ class ClaudeCliWorkerTest {
     }
 
     @Test
+    @DisplayName("IT-01-002 1,2 연결되면_대기설정을_넘기고_답을_낸다")
     void cr152_turn_runs_when_the_server_is_connected() throws IOException {
         Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
         startWithInit("[{\"name\":\"aimbase-server\",\"status\":\"connected\"}]", SERVER_MCP, env);
@@ -627,6 +631,7 @@ class ClaudeCliWorkerTest {
     }
 
     @Test
+    @DisplayName("IT-01-002 3 넘기는_서버가_없으면_CLI_값을_바꾸지_않는다")
     void cr152_without_mcp_servers_the_cli_keeps_its_defaults() throws IOException {
         Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
         startWithInit("[]", null, env);
@@ -645,6 +650,7 @@ class ClaudeCliWorkerTest {
     }
 
     @Test
+    @DisplayName("IT-01-003 3 NATIVE_스킬지정은_스킬통로만_본다")
     void cr152_native_mode_with_pins_waits_for_the_skill_route_only() throws IOException {
         Path env = tempDir.resolve("env-" + System.nanoTime() + ".txt");
         worker = new ClaudeCliWorker(initStub("[{\"name\":\"aimbase-skills\",\"status\":\"pending\"}]", env).toString(),

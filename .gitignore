@@ -19,6 +19,10 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 
+# 통합시험 출력물. 정본은 tools/testbook/items 이고 아래는 build.py, build_console.py 가 다시 만든다
+tools/testbook/console/
+docs/테스트/*.xlsx
+
 # Python
 __pycache__/
 *.pyc

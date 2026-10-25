@@ -7,6 +7,7 @@ import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationContext;
@@ -98,6 +99,7 @@ class ServerMcpConfigTest {
     }
 
     @Test
+    @DisplayName("IT-01-007 1 설정이_없거나_0_이하면_기본값을_싣는다")
     void cr153_설정이_없거나_0_이하면_기본값을_싣는다() {
         // TC-MCP-RES-003: 숫자가 아닌 값은 PlatformSettingsService.getInt 가 기본값으로 돌려준다.
         for (Integer configured : new Integer[] {null, 0, -1}) {

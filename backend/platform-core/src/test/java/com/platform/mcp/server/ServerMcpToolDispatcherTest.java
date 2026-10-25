@@ -19,6 +19,7 @@ import com.platform.mcp.MCPToolErrorException;
 import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -92,6 +93,7 @@ class ServerMcpToolDispatcherTest {
     }
 
     @Test
+    @DisplayName("IT-01-008 1 큰_결과를_자르지_않고_돌려준다")
     void cr153_large_result_is_passed_through_untruncated() {
         // TC-MCP-RES-001: 8,000자로 자르면 가운데를 되찾을 길이 없다. 크기는 도구 목록의 상한으로 CLI 가 정한다.
         String big = "x".repeat(81_881);
