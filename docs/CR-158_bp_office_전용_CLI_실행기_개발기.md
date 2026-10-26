@@ -51,6 +51,7 @@
 | `transcribe-sidecar/deploy/com.aimbase.transcribe.plist` | 경로를 설치 스크립트가 채우는 견본으로, 기록 파일은 실행본 `logs/` |
 | `transcribe-sidecar/run.sh` | PATH 에 homebrew 경로를 더한다(ffmpeg) |
 | `transcribe-sidecar/requirements.lock.txt` | 동작이 확인된 패키지 판(기존 맥 venv 의 pip freeze). 설치 스크립트가 이것으로 설치한다 |
+| `tools/testbook/items/items_02.py` 외 2개 | 시험 절차서 영역 02 「음성 변환」과 IT-02-001(사이드카가 끝나도 저절로 다시 떠서 변환이 끝난다). 실행기 추가는 기존 IT-01-011(키 없으면 compose 가 멈춤), IT-01-012(그 테넌트 키로 등록)가 실행기마다 보는 항목이라 고치지 않음 |
 
 CLI 사용 테넌트 목록(`global_config` 의 `llm.anthropic-cli.enabled-tenants`)은 레포가 아니라 개발기 master DB 값이라 5절에서 바꾼다. 이 목록은 CLI 연결 시험과 연결을 고르지 않은 채팅이 본다(`ConnectionAdapterFactory.isCliEnabledForCurrentTenant`).
 
@@ -146,3 +147,4 @@ bp_office 테넌트 관리자(`~/.claude-secrets/bp-office-aimbase.env` 의 관�
 | 2026-10-26 20:48 | 컨타 [승인] ① 원인을 찾아 고친 뒤 시험 |
 | 2026-10-26 20:51 | 5.8: 사이드카를 `~/Server/transcribe-sidecar` 로 설치, launchd 첫 기동 성공(runs 1). 첫 변환이 ffmpeg 를 못 찾아 실패해 `run.sh` 에 PATH 를 더하고 다시 설치 |
 | 2026-10-26 20:53 | 5.5-7: bp_office 변환 작업 d0c03cb9 COMPLETED. 5.5초 녹음, 처리 8.6초, 받아쓴 글이 읽은 문장과 같음 |
+| 2026-10-26 21:00 | IT-02-001 손으로 1회: 사이드카 프로세스를 끝내자 launchd 가 1초 안에 다시 띄움(runs 2, 부모 launchd), 건강 확인 200. bp_office 변환 작업 658f6c97 COMPLETED, 받아쓴 글이 읽은 문장과 같음. 판정 조회(probe)는 영역 01 과 같이 아직 비어 있음 |

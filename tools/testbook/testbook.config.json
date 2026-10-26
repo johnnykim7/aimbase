@@ -1,7 +1,8 @@
 {
   "project": "AIMBASE",
   "areas": {
-    "01": "CLI 작업과 앱 도구"
+    "01": "CLI 작업과 앱 도구",
+    "02": "음성 변환"
   },
   "unit": {
     "cli-runner": {
