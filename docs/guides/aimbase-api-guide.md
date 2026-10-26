@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.20.0** | 2026-10-25 | Aimbase v8.18.0 기준
+> **v3.21.0** | 2026-10-26 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -334,7 +334,7 @@ curl -X POST /api/v1/workflows \
 
 | type | config 키 | 설명 |
 |------|----------|------|
-| `LLM_CALL` | `connection_id`, `system`, `prompt`, `response_schema`, `max_tokens`, `stream_tokens`(CR-085), `output_channel`/`reduce`(CR-085) | LLM 호출 (토큰 초과 시 자동 에스컬레이션+분할, CR-028) |
+| `LLM_CALL` | `connection_id`, `system`, `prompt`, `response_schema`, `max_tokens`, `stream_tokens`(CR-085), `output_channel`/`reduce`(CR-085), `attachments`(CR-159) | LLM 호출 (토큰 초과 시 자동 에스컬레이션+분할, CR-028). `attachments` 는 § 4-4 의 첨부 번호 목록 참조(예: `{{input.files}}`) |
 | `TOOL_CALL` | `tool`, `input` | 도구 호출 (ToolRegistry 등록 도구) |
 | `ACTION` | `actionType`, `config` | 액션 실행 (write, notify) |
 | `CONDITION` | `expression`, `true_step`, `false_step` | 2갈래 조건 분기 |
@@ -501,6 +501,22 @@ curl -X POST /api/v1/workflows/{id}/run \
 ```
 
 > 실행 시 body는 `inputSchema`에 정의된 필드를 직접 전달합니다 (래핑 없이 flat).
+
+**사진, PDF 를 모델이 그림으로 읽게 하기 (CR-159)**
+
+1. 파일마다 `POST /api/v1/chat/attachments` (multipart, `session_id`, `file`) 로 올리고 응답의 `attachment_id` 를 받는다. 받는 형식 jpg, png, gif, webp, pdf. 한도 사진 10MB, PDF 32MB, 세션당 10개, 24시간 보관
+2. 같은 `session_id` 로 실행한다: `POST /api/v1/workflows/{id}/run?session_id=<올릴 때 값>`, 본문에 첨부 번호 목록(예: `"files": ["<attachment_id>"]`)
+3. 워크플로우의 LLM_CALL config 에 `"attachments": "{{input.files}}"`. 그 입력이 없거나 비면 글만 보낸다
+
+```bash
+curl -X POST "/api/v1/workflows/{id}/run?session_id=bp-office-work-7" \
+  -d '{"workId": "7", "text": "", "files": ["8a6e0f6e-4a39-4e43-9a3b-1f0c2d9c1b11"]}'
+```
+
+- 실행 세션이 올린 첨부만 읽는다. `session_id` 없이 실행하면 세션이 `workflow-run-{uuid}` 라 첨부를 못 읽고 단계가 실패한다
+- 사진은 긴 변 1568px 보다 크면 줄여 보낸다(`aimbase.workflow.attachment.image-max-edge`). PDF 는 3MB 이하면 통째, 넘으면 앞 20쪽을 쪽 그림으로 보낸다
+- 연결이 그림을 받지 않거나, PDF 를 그림으로도 글로도 읽지 못하면 단계가 실패한다
+- 재실행(`/runs/{runId}/rerun`)은 새 세션으로 돌아 첨부를 쓴 실행에는 쓸 수 없다. 새로 실행한다
 
 ### 4-5. 결과 폴링
 
@@ -2197,6 +2213,7 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.21.0 | 2026-10-26 | **CR-159 워크플로우 첨부** (§ 4-4, 스텝 타입 표). 실행 API 에 `session_id` 선택 인자, LLM_CALL config `attachments`. 그 세션으로 올린 사진, PDF 를 모델이 그림으로 읽는다. 둘 다 안 쓰면 기존과 같다 |
 | v3.20.0 | 2026-10-25 | **CR-156 에이전트 등록 인증** (§ 14). 등록, 해제, 하트비트에 테넌트 API 키 필수(없으면 403), 키의 테넌트에 등록. 모르는 id 의 하트비트는 404 |
 | v3.19.0 | 2026-10-25 | **CR-154 API Key 를 Authorization 머리글로도 받음** (§ 인증). `Authorization: ApiKey <키>` 를 `X-API-Key` 와 같게 받는다. 위젯 토큰 발급도 같다. Claude CLI 처럼 머리글을 기록에 남기는 도구에서 키가 가려지게 하려는 것 |
 | v3.18.0 | 2026-10-13 | **CR-149 워크플로우 저장 계약 정합** (§ 4-1). `description` 추가. 그동안 400 이던 `projectId`, `graphMode` 를 받고 `id` 를 비우면 서버가 만든다. 생성 때 이미 있는 `id` 는 409(전에는 기존 워크플로우를 덮어씀). 목록은 `X-Project-Id` 가 있으면 그 프로젝트와 공유 워크플로우만, `my=true` 면 내가 만든 것만. `errorHandling` 칸 이름을 실제(`retryMaxAttempts`, `retryDelayMs`)로 바로잡음. 이전 문서의 `strategy`, `maxRetries` 는 실행 때 무시되고 있었고 이제 저장 때 400 |

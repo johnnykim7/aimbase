@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.14.0** | 2026-10-26 | Aimbase v8.18.0 기준
+> **v3.15.0** | 2026-10-26 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -653,6 +653,7 @@ DAG 기반 워크플로우를 설계하고 실행합니다. Workflow Studio(비�
 |------|----------|----------|
 | 중첩 경로 참조 (`{{s.a[0].b}}`) | 자동 (표현력 확장) | 경로가 끊기면 빈 문자열 — 워크플로우 결과가 비면 참조 경로/실제 결과 구조 대조 |
 | 채널 reducer (`output_channel`+`reduce`) | 스텝 config 명시 시 | `append` 채널은 cyclic에서 무한 누적 가능 — step budget과 함께 메모리/`stepResults` 크기 모니터링. `workflow_runs.step_results` JSONB 비대 주의 |
+| 단계 첨부 (`attachments`, CR-159) | `LLM_CALL` config 명시 + 실행에 `session_id` | 첨부를 못 읽으면(세션 다름, 24시간 지남) 단계 실패. 실행 상세의 LLM 요청 본문 끝 `[첨부]` 줄에 파일 이름, 형식, 크기, 보낸 방식(그림, 줄임, PDF 통째, 쪽 그림 N장, 뽑은 글)이 남는다. 사진 축소 상한 `aimbase.workflow.attachment.image-max-edge`(기본 1568) |
 | 노드 토큰 스트리밍 (`stream_tokens:true`) | `LLM_CALL` config 명시 + `response_schema` 없을 때만 | SSE `step_token` 이벤트량 증가 — 구독자 없는 run은 fire-and-forget으로 유실(정상). `response_schema` 지정 스텝은 자동 비활성(구조화 출력 우선) |
 
 - **append 채널 비대 방어**: cyclic + `reduce:append` 조합은 회차마다 채널 List가 늘어난다. step budget(기본 50)이 1차 방어선이지만, `workflow_runs.step_results` JSONB가 커지면 조회/저장 지연 — 장기 루프 워크플로우는 채널 누적 대신 요약 스텝을 중간에 두도록 설계 검토
@@ -1598,6 +1599,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.15.0 | 2026-10-26 | **CR-159 워크플로우 단계 첨부**. LLM_CALL `attachments` 의 운영 점검(실패 조건, 실행 기록의 `[첨부]` 줄, 사진 축소 설정) |
 | v3.14.0 | 2026-10-26 | **CR-158 bp-office 실행기** (§ 2-9). bp-office 실행기 키 `BP_OFFICE_SERVER_MCP_API_KEY` 추가. 테넌트 실행기를 새로 붙이는 순서 |
 | v3.13.0 | 2026-10-25 | **CR-156 실행기 등록 인증** (§ 2-9). 실행기 등록 키를 따로 두지 않고 실행기 테넌트 키 하나로 등록과 서버 MCP 접속. AXOPM, WorkMap 실행기 키 추가. 실행기 재등록과 등록 실패 확인법 |
 | v3.12.0 | 2026-10-25 | **CR-155 운영 서버 비밀값** (§ 2-9). 키와 서명값을 둘 곳, 짝이 되는 곳, 바꾸는 순서. 운영 compose 의 실행기 키 기본값 제거 |
