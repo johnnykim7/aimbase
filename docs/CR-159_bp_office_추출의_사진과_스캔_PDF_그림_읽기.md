@@ -62,6 +62,7 @@
 | `application.yml` | `aimbase.workflow.attachment.image-max-edge` |
 | `application-local.yml` | 로컬 저장 폴더(`storage.local.base-path`). 맥에는 쓸 수 있는 `/data` 가 없어 로컬에서 첨부 올리기가 저장에서 실패하던 것 |
 | API 가이드 § 4-4, 운용 가이드 LLM_CALL 표 | `session_id`, `attachments` |
+| `tools/testbook/items/items_03.py` 외 2개 | 시험 절차서 영역 03 「워크플로우 첨부 읽기」와 IT-03-001(사진과 그림만 있는 스캔 PDF 의 글을 읽는다), IT-03-002(3MB 초과 스캔 PDF 는 쪽 그림으로 읽는다) |
 
 ## 5. 시험
 
