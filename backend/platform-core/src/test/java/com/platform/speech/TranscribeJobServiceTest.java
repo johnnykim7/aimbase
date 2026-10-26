@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -30,6 +31,7 @@ class TranscribeJobServiceTest {
 
     private TranscribeJobStore store;
     private LocalWhisperSpeechService sidecar;
+    private TranscriptSuspectMarker marker;
     private TranscribeJobService service;
 
     @BeforeEach
@@ -38,7 +40,10 @@ class TranscribeJobServiceTest {
         sidecar = mock(LocalWhisperSpeechService.class);
         // save 는 전달받은 엔티티를 그대로 돌려준다.
         when(store.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        service = new TranscribeJobService(store, sidecar);
+        marker = mock(TranscriptSuspectMarker.class);
+        // 표시 규칙은 TranscriptSuspectMarkerTest 가 본다. 여기서는 받은 구간을 그대로 돌려준다.
+        when(marker.mark(any())).thenAnswer(inv -> inv.getArgument(0));
+        service = new TranscribeJobService(store, sidecar, marker);
     }
 
     @AfterEach
@@ -103,6 +108,26 @@ class TranscribeJobServiceTest {
         verify(store, timeout(5000)).markRunning(eq(jobId));
         verify(store, timeout(5000)).markCompleted(eq(jobId), eq(result));
         verify(store, never()).markFailed(any(), any());
+    }
+
+    @Test
+    @DisplayName("TC-CR160-012: 변환 작업은 표시를 붙인 구간으로 완료를 기록한다")
+    void worker_savesMarkedSegments() throws Exception {
+        TenantContext.setTenantId("bp_office");
+        List<Map<String, Object>> raw = List.of(Map.of("start", 0.0, "end", 4.3, "text", "자막제공자"));
+        List<Map<String, Object>> marked = List.of(
+                Map.of("start", 0.0, "end", 4.3, "text", "자막제공자", "suspect_reason", "KNOWN_PHRASE"));
+        when(marker.mark(raw)).thenReturn(marked);
+        when(sidecar.transcribe(any(), any(), any(), any(), any())).thenReturn(
+                new LocalWhisperSpeechService.BatchTranscribeResult("자막제공자", "ko", 4.3, 1.0, raw));
+
+        TranscribeJobEntity job = service.submit("a".getBytes(StandardCharsets.UTF_8),
+                "audio/wav", "short.wav", "ko", null, "tester");
+
+        var saved = ArgumentCaptor.forClass(LocalWhisperSpeechService.BatchTranscribeResult.class);
+        verify(store, timeout(5000)).markCompleted(eq(job.getJobId()), saved.capture());
+        assertEquals(marked, saved.getValue().segments());
+        assertEquals("자막제공자", saved.getValue().text());
     }
 
     @Test

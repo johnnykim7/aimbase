@@ -114,6 +114,10 @@ class Segment(BaseModel):
     start: float
     end: float
     text: str
+    # 지어낸 글을 거르는 판단은 BE 가 설정값으로 한다(CR-160). 여기서는 모델 값만 옮긴다.
+    no_speech_prob: float | None = None
+    avg_logprob: float | None = None
+    compression_ratio: float | None = None
 
 
 class TranscribeResponse(BaseModel):
@@ -126,14 +130,25 @@ class TranscribeResponse(BaseModel):
 
 
 def _transcribe_mlx(model, path: str, language: str | None):
-    """lightning-whisper-mlx: segments 는 [start, end, text] 리스트로 나온다."""
-    kwargs = {"language": language} if language else {}
-    result = model.transcribe(audio_path=path, **kwargs)
+    """lightning-whisper-mlx: segments 는 [start, end, text, 창의 값] 리스트로 나온다.
+
+    model.transcribe 는 창의 값을 버리므로 같은 인자로 사본(vendor/lightning_transcribe.py)을 부른다.
+    """
+    from vendor.lightning_transcribe import transcribe_audio
+
+    result = transcribe_audio(
+        path,
+        path_or_hf_repo=f"./mlx_models/{model.name}",
+        language=language,
+        batch_size=model.batch_size,
+    )
     segments = []
     for seg in result.get("segments", []):
         if isinstance(seg, (list, tuple)) and len(seg) >= 3:
+            scores = seg[3] if len(seg) >= 4 and isinstance(seg[3], dict) else {}
             # MLX 는 시간을 1/100 초 단위 정수로 준다.
-            segments.append(Segment(start=seg[0] / 100.0, end=seg[1] / 100.0, text=str(seg[2]).strip()))
+            segments.append(Segment(start=seg[0] / 100.0, end=seg[1] / 100.0, text=str(seg[2]).strip(),
+                                    **_scores(scores)))
         elif isinstance(seg, dict):
             segments.append(Segment(start=seg["start"], end=seg["end"], text=seg["text"].strip()))
         else:
@@ -149,8 +164,23 @@ def _transcribe_faster(model, path: str, language: str | None, beam_size: int):
         beam_size=beam_size,
         vad_filter=True,
     )
-    segments = [Segment(start=s.start, end=s.end, text=s.text.strip()) for s in segments_iter]
+    segments = [
+        Segment(start=s.start, end=s.end, text=s.text.strip(), **_scores({
+            "no_speech_prob": s.no_speech_prob,
+            "avg_logprob": s.avg_logprob,
+            "compression_ratio": s.compression_ratio,
+        }))
+        for s in segments_iter
+    ]
     return segments, info.language
+
+
+def _scores(values: dict) -> dict:
+    """모델 값은 numpy 수일 수 있어 float 로 바꾼다. 없는 값은 None 으로 둔다."""
+    return {
+        key: (float(values[key]) if values.get(key) is not None else None)
+        for key in ("no_speech_prob", "avg_logprob", "compression_ratio")
+    }
 
 
 @app.get("/health")

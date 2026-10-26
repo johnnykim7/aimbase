@@ -104,6 +104,29 @@ class LocalWhisperSpeechServiceTest {
     }
 
     @Test
+    @DisplayName("TC-CR160-011: 구간의 소리 없음 확률, 평균 로그확률, 압축비를 옮기고 없으면 null 로 둔다")
+    void transcribe_keepsSegmentScores() {
+        when(connectionRepository.findAll()).thenReturn(List.of(sidecarConnection("secret-key")));
+        responseBody = """
+                {"text":"자막제공자 회의","language":"ko",
+                 "segments":[{"start":0.0,"end":4.33,"text":"자막제공자",
+                              "no_speech_prob":0.495,"avg_logprob":-0.70,"compression_ratio":0.625},
+                             {"start":4.33,"end":9.0,"text":"회의"}]}
+                """;
+
+        var r = service.transcribe("audio-bytes".getBytes(StandardCharsets.UTF_8),
+                "audio/wav", "short.wav", "ko", null);
+
+        assertEquals(0.495, (Double) r.segments().get(0).get("no_speech_prob"), 1e-9);
+        assertEquals(-0.70, (Double) r.segments().get(0).get("avg_logprob"), 1e-9);
+        assertEquals(0.625, (Double) r.segments().get(0).get("compression_ratio"), 1e-9);
+        assertTrue(r.segments().get(1).containsKey("no_speech_prob"));
+        assertNull(r.segments().get(1).get("no_speech_prob"));
+        assertNull(r.segments().get(1).get("avg_logprob"));
+        assertNull(r.segments().get(1).get("compression_ratio"));
+    }
+
+    @Test
     @DisplayName("language=auto 이면 language 파트를 보내지 않는다(사이드카 자동 감지)")
     void transcribe_autoLanguage_omitsField() {
         when(connectionRepository.findAll()).thenReturn(List.of(sidecarConnection("k")));

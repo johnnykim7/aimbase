@@ -73,7 +73,12 @@ public class LocalWhisperSpeechService implements SpeechService {
             String language,
             Double durationSec,
             Double elapsedSec,
-            List<Map<String, Object>> segments) {}
+            List<Map<String, Object>> segments) {
+
+        public BatchTranscribeResult withSegments(List<Map<String, Object>> newSegments) {
+            return new BatchTranscribeResult(text, language, durationSec, elapsedSec, newSegments);
+        }
+    }
 
     /**
      * 사이드카에 오디오를 보내 전사한다. 회의녹음은 수 분이 걸리므로 호출자는 비동기 경로에서 부른다.
@@ -158,6 +163,10 @@ public class LocalWhisperSpeechService implements SpeechService {
                 seg.put("start", s.path("start").asDouble());
                 seg.put("end", s.path("end").asDouble());
                 seg.put("text", s.path("text").asText(""));
+                // CR-160: 지어낸 글을 거르는 근거. 옛 사이드카는 보내지 않아 null 로 둔다.
+                seg.put("no_speech_prob", numberOrNull(s, "no_speech_prob"));
+                seg.put("avg_logprob", numberOrNull(s, "avg_logprob"));
+                seg.put("compression_ratio", numberOrNull(s, "compression_ratio"));
                 segments.add(seg);
             }
             return new BatchTranscribeResult(
@@ -197,6 +206,11 @@ public class LocalWhisperSpeechService implements SpeechService {
         out.writeBytes(fileBytes);
         out.writeBytes(footerBytes);
         return out.toByteArray();
+    }
+
+    private static Double numberOrNull(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        return v != null && v.isNumber() ? v.asDouble() : null;
     }
 
     private static String str(Object v) {

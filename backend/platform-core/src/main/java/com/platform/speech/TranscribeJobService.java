@@ -31,12 +31,15 @@ public class TranscribeJobService {
 
     private final TranscribeJobStore store;
     private final LocalWhisperSpeechService sidecar;
+    private final TranscriptSuspectMarker suspectMarker;
     private final ExecutorService executor;
 
     public TranscribeJobService(TranscribeJobStore store,
-                                LocalWhisperSpeechService sidecar) {
+                                LocalWhisperSpeechService sidecar,
+                                TranscriptSuspectMarker suspectMarker) {
         this.store = store;
         this.sidecar = sidecar;
+        this.suspectMarker = suspectMarker;
         // 전사는 사이드카가 직렬 처리하므로 BE 가 무한정 밀어넣어도 이득이 없다.
         this.executor = Executors.newFixedThreadPool(2, r -> {
             Thread t = new Thread(r, "transcribe-job");
@@ -77,11 +80,15 @@ public class TranscribeJobService {
         }
         try {
             store.markRunning(jobId);
-            LocalWhisperSpeechService.BatchTranscribeResult r =
+            LocalWhisperSpeechService.BatchTranscribeResult raw =
                     sidecar.transcribe(audio, mimeType, filename, language, connectionId);
+            // CR-160: 짧은 변환(위젯)은 글만 돌려줘 표시를 받을 곳이 없으므로 변환 작업에서만 붙인다.
+            LocalWhisperSpeechService.BatchTranscribeResult r = raw.withSegments(suspectMarker.mark(raw.segments()));
             store.markCompleted(jobId, r);
-            log.info("[CR-133] 전사 완료: job_id={} {}초 오디오 / {}초 소요",
-                    jobId, r.durationSec(), r.elapsedSec());
+            long suspects = r.segments() == null ? 0
+                    : r.segments().stream().filter(s -> s.get(TranscriptSuspectMarker.FIELD) != null).count();
+            log.info("[CR-133] 전사 완료: job_id={} {}초 오디오 / {}초 소요 / 의심 구간 {}개",
+                    jobId, r.durationSec(), r.elapsedSec(), suspects);
         } catch (Exception e) {
             log.warn("[CR-133] 전사 실패: job_id={} — {}", jobId, e.getMessage(), e);
             try {
