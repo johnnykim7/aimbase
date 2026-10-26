@@ -166,12 +166,14 @@ public class WorkflowController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(summary = "워크플로우 실행 — WorkflowEngine이 DAG를 비동기로 실행")
     public ApiResponse<WorkflowRunEntity> run(@PathVariable String id,
-                                               @RequestBody(required = false) Map<String, Object> input) {
+                                               @RequestBody(required = false) Map<String, Object> input,
+                                               // CR-159: 바깥 앱이 이 세션으로 올린 첨부를 단계가 읽게 한다. 없으면 workflow-run-{uuid}
+                                               @RequestParam(name = "session_id", required = false) String sessionId) {
         // 존재 여부 확인 (404 반환)
         if (!workflowRepository.existsByIdAndIsActiveTrue(id)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Workflow not found: " + id);
         }
-        WorkflowRunEntity run = workflowEngine.execute(id, input, null);
+        WorkflowRunEntity run = workflowEngine.execute(id, input, sessionId);
         return ApiResponse.ok(run);
     }
 

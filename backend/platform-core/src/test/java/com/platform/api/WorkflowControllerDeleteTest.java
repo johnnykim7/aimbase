@@ -102,7 +102,7 @@ class WorkflowControllerDeleteTest {
         source.setWorkflowId("gone");
         when(runRepository.findById(sourceRunId)).thenReturn(Optional.of(source));
 
-        assertNotFound(() -> controller.run("gone", Map.of()));
+        assertNotFound(() -> controller.run("gone", Map.of(), null));
         assertNotFound(() -> controller.rerun(sourceRunId));
         verify(engine, never()).execute(any(), any(), any());
     }

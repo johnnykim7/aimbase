@@ -85,6 +85,12 @@ public class ClaudeCliAdapter implements LLMAdapter {
         return PROVIDER;
     }
 
+    /** CR-159: Runner 가 그림, 문서 블록을 CLI stream-json 에 그대로 싣는다(CR-098, CR-099 실측). */
+    @Override
+    public AdapterCapability capabilities() {
+        return AdapterCapability.IMAGE_AND_PDF;
+    }
+
     @Override
     public List<String> getSupportedModels() {
         // CLI 가 지원하는 모델은 계정 플랜에 따라 달라진다 — 공식 목록 없음.

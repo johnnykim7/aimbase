@@ -61,6 +61,8 @@ public class LlmCallStepExecutor implements StepExecutor {
     private final SchemaValidator schemaValidator;
     /** CR-147: 단계 지정 스킬. null 이면 config.skills 를 무시한다(테스트 편의 3-arg 생성자). */
     private final StepSkillService stepSkills;
+    /** CR-159: config.attachments 해석. null 이면 attachments 를 준 단계는 실패한다(테스트 편의 3-arg 생성자). */
+    private final StepAttachmentResolver attachmentResolver;
 
     @org.springframework.beans.factory.annotation.Autowired
     public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
@@ -68,7 +70,8 @@ public class LlmCallStepExecutor implements StepExecutor {
                                 org.springframework.beans.factory.ObjectProvider<WorkflowEventPublisher> eventPublisherProvider,
                                 org.springframework.beans.factory.ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider,
                                 SchemaValidator schemaValidator,
-                                org.springframework.beans.factory.ObjectProvider<StepSkillService> stepSkillsProvider) {
+                                org.springframework.beans.factory.ObjectProvider<StepSkillService> stepSkillsProvider,
+                                org.springframework.beans.factory.ObjectProvider<StepAttachmentResolver> attachmentResolverProvider) {
         this.modelRouter = modelRouter;
         this.promptTemplateService = promptTemplateService;
         this.connectionAdapterFactory = connectionAdapterFactory;
@@ -77,6 +80,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         this.eventRecorder = eventRecorderProvider != null ? eventRecorderProvider.getIfAvailable() : null;
         this.schemaValidator = schemaValidator;
         this.stepSkills = stepSkillsProvider != null ? stepSkillsProvider.getIfAvailable() : null;
+        this.attachmentResolver = attachmentResolverProvider != null ? attachmentResolverProvider.getIfAvailable() : null;
     }
 
     /** 하위 호환: eventPublisher/eventRecorder 없는 3-arg 생성자 (기존 테스트/비스트리밍 사용처). */
@@ -89,6 +93,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         this.eventRecorder = null;
         this.schemaValidator = new SchemaValidator(MAPPER);
         this.stepSkills = null;
+        this.attachmentResolver = null;
     }
 
     @Override
@@ -135,6 +140,11 @@ public class LlmCallStepExecutor implements StepExecutor {
             adapter = modelRouter.route(new LLMRequest(resolvedModel, List.of()));
         }
 
+        // CR-159: 단계에 붙인 사진, PDF 를 프롬프트와 같은 사용자 메시지의 그림, 문서 블록으로 보낸다.
+        StepAttachmentResolver.Resolved resolvedAttachments = resolveAttachments(step, context, adapter);
+        List<ContentBlock> attachments = resolvedAttachments.blocks();
+        String recordedPrompt = resolvedAttachments.isEmpty() ? prompt : prompt + "\n\n" + resolvedAttachments.summary();
+
         // CR-007: response_schema
         @SuppressWarnings("unchecked")
         Map<String, Object> responseSchema = config.containsKey("response_schema")
@@ -158,18 +168,18 @@ public class LlmCallStepExecutor implements StepExecutor {
         // 미지정 = 크기 미상 → 4096 부터 시작해 잘릴 때만 Phase 2/3 로 올림(비용 절감).
         int phase1Tokens = configCeiling != null ? configCeiling : INITIAL_MAX_TOKENS;
         // 입력은 호출 전에 확정된 값 → 응답을 기다리지 않고 즉시 적재 (응답 생성 중에도 화면에 입력 표시).
-        recordLlmRequest(context, step.id(), resolvedModel, system, prompt, connectionId);
+        recordLlmRequest(context, step.id(), resolvedModel, system, recordedPrompt, connectionId);
         long phase1Start = System.currentTimeMillis();
         LLMResponse response = streamTokens
-                ? callLlmStreaming(adapter, resolvedModel, system, prompt, phase1Tokens, context,
+                ? callLlmStreaming(adapter, resolvedModel, system, prompt, attachments, phase1Tokens, context,
                         extThinking, thinkingBudget, step.id())
-                : callLlm(adapter, resolvedModel, system, prompt, responseSchema,
+                : callLlm(adapter, resolvedModel, system, prompt, attachments, responseSchema,
                         phase1Tokens, context, extThinking, thinkingBudget);
         // CR-090: LLM_RESPONSE (Phase 1) / CR-102: prompt·response 본문 + connection 메타
-        recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase1Start, system, prompt, connectionId);
+        recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase1Start, system, recordedPrompt, connectionId);
 
         if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
-            response = ensureStructuredOutput(step.id(), adapter, resolvedModel, system, prompt, responseSchema,
+            response = ensureStructuredOutput(step.id(), adapter, resolvedModel, system, prompt, attachments, responseSchema,
                     phase1Tokens, context, extThinking, thinkingBudget, connectionId, response);
             return buildResult(response, resolvedModel);
         }
@@ -181,13 +191,14 @@ public class LlmCallStepExecutor implements StepExecutor {
         int phase2Tokens = configCeiling != null ? Math.min(ESCALATION_MAX_TOKENS, configCeiling) : ESCALATION_MAX_TOKENS;
         if (phase2Tokens > phase1Tokens) {
             long phase2Start = System.currentTimeMillis();
-            response = callLlm(adapter, resolvedModel, system, prompt, responseSchema, phase2Tokens, context);
+            response = callLlm(adapter, resolvedModel, system, prompt, attachments, responseSchema, phase2Tokens, context,
+                    null, null);
             // CR-090: LLM_RESPONSE (Phase 2) / CR-102: prompt·response 본문 + connection 메타
-            recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase2Start, system, prompt, connectionId);
+            recordLlmResponse(context, step.id(), response, resolvedModel, System.currentTimeMillis() - phase2Start, system, recordedPrompt, connectionId);
 
             if (response.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
                 log.info("LLM_CALL step '{}': 에스컬레이션 성공 (max_tokens={})", step.id(), phase2Tokens);
-                response = ensureStructuredOutput(step.id(), adapter, resolvedModel, system, prompt, responseSchema,
+                response = ensureStructuredOutput(step.id(), adapter, resolvedModel, system, prompt, attachments, responseSchema,
                         phase2Tokens, context, null, null, connectionId, response);
                 return buildResult(response, resolvedModel);
             }
@@ -205,7 +216,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         }
 
         log.info("LLM_CALL step '{}': 자동분할 모드 진입", step.id());
-        return executeAutoSplit(step.id(), adapter, resolvedModel, system, prompt, responseSchema, context);
+        return executeAutoSplit(step.id(), adapter, resolvedModel, system, prompt, attachments, responseSchema, context);
     }
 
     // ═══════════════════════════════════════════════
@@ -214,7 +225,8 @@ public class LlmCallStepExecutor implements StepExecutor {
 
     private Map<String, Object> executeAutoSplit(
             String stepId, LLMAdapter adapter, String resolvedModel,
-            String system, String prompt, Map<String, Object> responseSchema, StepContext context) {
+            String system, String prompt, List<ContentBlock> attachments,
+            Map<String, Object> responseSchema, StepContext context) {
 
         // 3-a. 분할 계획 호출
         int[] planTokenUsage = new int[2]; // [inputTokens, outputTokens]
@@ -231,7 +243,7 @@ public class LlmCallStepExecutor implements StepExecutor {
             Map<String, Object> part = parts.get(i);
             String scope = (String) part.getOrDefault("scope", part.getOrDefault("description", "파트 " + (i + 1)));
 
-            LLMResponse partResponse = executePart(stepId, adapter, resolvedModel, system, prompt,
+            LLMResponse partResponse = executePart(stepId, adapter, resolvedModel, system, prompt, attachments,
                     scope, i, parts.size(), context);
 
             String partOutput = partResponse.textContent();
@@ -273,7 +285,7 @@ public class LlmCallStepExecutor implements StepExecutor {
      */
     private LLMResponse executePart(
             String stepId, LLMAdapter adapter, String resolvedModel,
-            String system, String prompt, String scope,
+            String system, String prompt, List<ContentBlock> attachments, String scope,
             int partIndex, int totalParts, StepContext context) {
 
         // CR-036: DB 외부화
@@ -282,8 +294,8 @@ public class LlmCallStepExecutor implements StepExecutor {
         String partPrompt = promptTemplateService.renderTemplate(partTemplate, Map.of("scope", scope, "prompt", prompt));
 
         for (int attempt = 1; attempt <= 2; attempt++) {
-            LLMResponse partResponse = callLlm(adapter, resolvedModel, system, partPrompt,
-                    null, SPLIT_PART_MAX_TOKENS, context);
+            LLMResponse partResponse = callLlm(adapter, resolvedModel, system, partPrompt, attachments,
+                    null, SPLIT_PART_MAX_TOKENS, context, null, null);
 
             if (partResponse.finishReason() != LLMResponse.FinishReason.MAX_TOKENS) {
                 return partResponse;
@@ -453,7 +465,7 @@ public class LlmCallStepExecutor implements StepExecutor {
                                  String system, String prompt,
                                  Map<String, Object> responseSchema,
                                  int maxTokens, StepContext context) {
-        return callLlm(adapter, resolvedModel, system, prompt, responseSchema,
+        return callLlm(adapter, resolvedModel, system, prompt, List.of(), responseSchema,
                 maxTokens, context, null, null);
     }
 
@@ -469,15 +481,11 @@ public class LlmCallStepExecutor implements StepExecutor {
      * (설계의 DAG/기존=null 계약과 호환). cyclic 회차 정밀 매핑은 알려진 한계.
      */
     private LLMResponse callLlmStreaming(LLMAdapter adapter, String resolvedModel,
-                                         String system, String prompt,
+                                         String system, String prompt, List<ContentBlock> attachments,
                                          int maxTokens, StepContext context,
                                          Boolean extendedThinking, Integer thinkingBudgetTokens,
                                          String stepId) {
-        List<UnifiedMessage> messages = new ArrayList<>();
-        if (system != null && !system.isBlank()) {
-            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, system));
-        }
-        messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt));
+        List<UnifiedMessage> messages = baseMessages(system, prompt, attachments);
 
         ModelConfig modelConfig = new ModelConfig(null, maxTokens, null, null,
                 extendedThinking, thinkingBudgetTokens);
@@ -606,21 +614,37 @@ public class LlmCallStepExecutor implements StepExecutor {
     }
 
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,
-                                 String system, String prompt,
+                                 String system, String prompt, List<ContentBlock> attachments,
                                  Map<String, Object> responseSchema,
                                  int maxTokens, StepContext context,
                                  Boolean extendedThinking, Integer thinkingBudgetTokens) {
-        return callLlm(adapter, resolvedModel, baseMessages(system, prompt), responseSchema,
+        return callLlm(adapter, resolvedModel, baseMessages(system, prompt, attachments), responseSchema,
                 maxTokens, context, extendedThinking, thinkingBudgetTokens);
     }
 
-    private static List<UnifiedMessage> baseMessages(String system, String prompt) {
+    private static List<UnifiedMessage> baseMessages(String system, String prompt, List<ContentBlock> attachments) {
         List<UnifiedMessage> messages = new ArrayList<>();
         if (system != null && !system.isBlank()) {
             messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, system));
         }
-        messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt));
+        if (attachments.isEmpty()) {
+            messages.add(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt));
+        } else {
+            // 그림을 글보다 앞에 둔다(Anthropic 권장 순서).
+            List<ContentBlock> content = new ArrayList<>(attachments);
+            content.add(new ContentBlock.Text(prompt));
+            messages.add(UnifiedMessage.ofUserContent(content));
+        }
         return messages;
+    }
+
+    private StepAttachmentResolver.Resolved resolveAttachments(WorkflowStep step, StepContext context, LLMAdapter adapter) {
+        Object ref = step.config().get("attachments");
+        if (ref == null) return StepAttachmentResolver.Resolved.EMPTY;
+        if (attachmentResolver == null) {
+            throw new IllegalStateException("LLM_CALL step '" + step.id() + "': attachments 를 읽을 수 없다(첨부 해석기 없음)");
+        }
+        return attachmentResolver.resolve(step.id(), ref, context, adapter.capabilities());
     }
 
     private LLMResponse callLlm(LLMAdapter adapter, String resolvedModel,
@@ -649,14 +673,15 @@ public class LlmCallStepExecutor implements StepExecutor {
      * 같은 run 의 CLI 세션이 앞 대화를 가지고 있어 교정 지시만으로 맥락이 이어진다.
      */
     private LLMResponse ensureStructuredOutput(String stepId, LLMAdapter adapter, String resolvedModel,
-                                               String system, String prompt, Map<String, Object> responseSchema,
+                                               String system, String prompt, List<ContentBlock> attachments,
+                                               Map<String, Object> responseSchema,
                                                int maxTokens, StepContext context,
                                                Boolean extendedThinking, Integer thinkingBudgetTokens,
                                                String connectionId, LLMResponse response) {
         if (responseSchema == null || responseSchema.isEmpty()) {
             return response;
         }
-        List<UnifiedMessage> messages = baseMessages(system, prompt);
+        List<UnifiedMessage> messages = baseMessages(system, prompt, attachments);
         LLMResponse current = response;
         String problem = structuredOutputProblem(current, responseSchema);
         for (int retry = 1; problem != null && retry <= STRUCTURED_OUTPUT_MAX_RETRIES; retry++) {

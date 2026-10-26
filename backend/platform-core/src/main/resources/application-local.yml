@@ -41,6 +41,11 @@ evaluation:
     url: ${EVALUATION_MCP_URL:http://localhost:8004}
     enabled: ${EVALUATION_MCP_ENABLED:false}
 
+# 맥에는 쓸 수 있는 /data 가 없어 기본값으로는 첨부, 문서 올리기가 저장에서 실패한다
+storage:
+  local:
+    base-path: ${STORAGE_BASE_PATH:${user.home}/aimbase-storage}
+
 logging:
   level:
     com.platform: DEBUG

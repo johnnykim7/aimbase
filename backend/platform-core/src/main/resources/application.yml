@@ -239,6 +239,11 @@ aimbase:
     # 페이지 분할 가드 임계 (도구 경로) — 초과 시 통째 처리 대신 모델에게 pages 분할 호출 안내
     # openclaude PDF_AT_MENTION_INLINE_THRESHOLD=10 대응 (CR-095 후속)
     inline-page-threshold: ${AIMBASE_PDF_INLINE_PAGE_THRESHOLD:10}
+  # CR-159 워크플로우 LLM 단계 첨부(config.attachments)
+  workflow:
+    attachment:
+      # 사진 긴 변 상한(px). 모델이 이 크기로 줄여 읽으므로 더 큰 사진은 줄여서 보낸다. 0 이하면 줄이지 않는다
+      image-max-edge: ${AIMBASE_WORKFLOW_IMAGE_MAX_EDGE:1568}
 
 logging:
   level:

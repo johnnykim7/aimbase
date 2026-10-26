@@ -82,7 +82,8 @@ class LlmCallStreamingCr085IT {
         executor = new LlmCallStepExecutor(modelRouter, connectionAdapterFactory,
                 promptTemplateService, provider, null,  // CR-090: eventRecorderProvider — null 허용
                 new com.platform.schema.SchemaValidator(new com.fasterxml.jackson.databind.ObjectMapper()),
-                null);  // CR-147: stepSkillsProvider
+                null,   // CR-147: stepSkillsProvider
+                null);  // CR-159: attachmentResolverProvider
     }
 
     private StepContext ctx() {
