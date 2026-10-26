@@ -32,11 +32,11 @@
 | 실행기 서비스 | `aimbase-agent-bp-office` |
 | 실행기 이름(`AGENT_NAME`, CLI 연결 `config.agent_name`) | `cli-runner-bp-office` |
 | 실행기 키 이름(서버 `.env`) | `BP_OFFICE_SERVER_MCP_API_KEY` |
-| 실행기 키 master `api_keys` 행 이름 | `bp-office-runner (CR-158)`, 테넌트 `bp_office`, domainApp `bp-office` |
+| 실행기 키 master `api_keys` 행 | `bp-office 실행기 MCP 키 (CR-158)`, 테넌트 `bp_office`, domain_app `bp_office`(테넌트 행과 같게), id `e8b1f8ef` |
 | 실행기 키 사본 | `~/.claude-secrets/bp-office-aimbase-runner.env` (같은 이름의 한 줄) |
 | 컨테이너 안 포트 | 실행기 8302, MCP 8303 |
 | CLI 연결 | `cli-runner-bp-office-001` (`adapter=anthropic-cli`, `tool_mode=NATIVE`) |
-| 음성 변환 연결 | bp_office 테넌트의 `stt_local` 연결 한 개. 이름은 다른 테넌트 연결을 따른다 |
+| 음성 변환 연결 | `stt-local-mac-001` (`type=stt_local`, bp_wes 의 같은 이름 연결 설정을 옮김) |
 | Claude 계정 | 입찰 실행기와 같은 `./claude-accounts` |
 
 ## 4. 레포 변경
@@ -121,4 +121,10 @@ bp_office 테넌트 관리자(`~/.claude-secrets/bp-office-aimbase.env` 의 관�
 
 | 날짜 | 내용 |
 |---|---|
-| 2026-10-26 | 착수 20:32. 범위, 계정 결정(컨타 20:36). 레포 변경(4절)과 개발기 반영 순서(5절) |
+| 2026-10-26 | 착수 20:32. 범위, 계정 결정(컨타 20:36). 레포 변경(4절)과 개발기 반영 순서(5절), dev 4bca194 |
+| 2026-10-26 20:41 | 컨타 [승인] 개발기 반영 신호(사용자 위임 10/25 22:39) |
+| 2026-10-26 20:42 | 5.0 읽기: 서버 compose 가 이 CR 직전 레포와 같음. 서버 실행기 jar 10/25 23:59(CR-156 배포, 다른 실행기 기동 23:59:33 과 같음). `enabled-tenants` 는 `*` 라 5.2 는 하지 않음. 실행기 키 행은 scope 없음, domain_app 은 테넌트 값. lexflow CLI 연결 설정 키는 agent_name, config_dir, model, runner_api_key, tool_mode 이고 runner_api_key 는 서버 `RUNNER_API_KEY` 와 같음. 음성 변환 연결은 bp_wes 에만 있음 |
+| 2026-10-26 20:44 | 5.1, 5.4: 환경 파일과 compose 백업(`deploy-backup/*.20261026-204439`). 실행기 키 행 e8b1f8ef 를 서버에서 만들어 넣음(값은 찍지 않음, 사본 `~/.claude-secrets/bp-office-aimbase-runner.env`). 연결 두 개는 서버 안에서 lexflow, bp_wes 연결 설정을 옮겨 SQL 로 넣음(연결 생성 API 도 상태 disconnected 로 저장만 한다) |
+| 2026-10-26 20:45 | 5.3: compose 보냄, `aimbase-agent-bp-office` 만 build, `up -d --no-deps`. 5초 안에 healthy, 등록 성공(agent_registry ACTIVE, 실행기 가능). api 와 다른 실행기 6개 시작 시각 그대로 |
+| 2026-10-26 20:46 | 5.5-5 연결 시험 ok. 5.5-6 채팅 1회 200, 4.3초, 답 「확인」, 실행기 기록에 NATIVE 워커 기동 |
+| 2026-10-26 20:47 | 5.5-7 대기: 맥 전사 사이드카가 17:47 에 내려간 뒤 launchd 재기동이 종료코드 78 로 계속 실패. 컨타에 결재 요청 |
