@@ -7,7 +7,7 @@
   - 범위 ①: 실행기와 bp_office 음성 변환 연결(둘 다 개발기 설정)은 이 CR. 사진과 글 없는 스캔 PDF 의 그림 읽기는 소스 수정이라 새 CR 로 나눈다
   - 계정 ①: 실행기는 기존 테넌트 실행기들처럼 입찰 실행기의 Claude 계정 폴더(`./claude-accounts`)를 같이 쓴다
 - 규모: 소. 실행기 설정 한 벌과 개발기 설정. 새 API, 화면, 테이블, 소스 코드 변경이 없다
-- 상태: 진행(개발기 반영은 컨타 신호 뒤)
+- 상태: 개발기 반영과 실제 호출 시험 끝, 완료 승인 대기
 
 ---
 
@@ -47,6 +47,10 @@
 | `.env.prod.template` | `BP_OFFICE_SERVER_MCP_API_KEY=` (이름만) |
 | `deploy.sh` | `AGENT_SERVICES` 에 `aimbase-agent-bp-office`. 머리 주석의 「러너 전체 4개」를 그 목록 참조로 고침 |
 | 운용 가이드 v3.14.0 § 2-9 | 실행기 키 표에 `BP_OFFICE_SERVER_MCP_API_KEY`, 테넌트 실행기를 새로 붙이는 순서 |
+| `transcribe-sidecar/deploy/install-mac.sh` | 맥 전사 사이드카 상주 설치. 실행본을 저장소 밖 `~/Server/transcribe-sidecar` 에 두고 launchd 에 등록한다(5.8) |
+| `transcribe-sidecar/deploy/com.aimbase.transcribe.plist` | 경로를 설치 스크립트가 채우는 견본으로, 기록 파일은 실행본 `logs/` |
+| `transcribe-sidecar/run.sh` | PATH 에 homebrew 경로를 더한다(ffmpeg) |
+| `transcribe-sidecar/requirements.lock.txt` | 동작이 확인된 패키지 판(기존 맥 venv 의 pip freeze). 설치 스크립트가 이것으로 설치한다 |
 
 CLI 사용 테넌트 목록(`global_config` 의 `llm.anthropic-cli.enabled-tenants`)은 레포가 아니라 개발기 master DB 값이라 5절에서 바꾼다. 이 목록은 CLI 연결 시험과 연결을 고르지 않은 채팅이 본다(`ConnectionAdapterFactory.isCliEnabledForCurrentTenant`).
 
@@ -112,6 +116,17 @@ bp_office 테넌트 관리자(`~/.claude-secrets/bp-office-aimbase.env` 의 관�
 2. `deploy-backup/` 의 `.env`, `docker-compose.yml` 을 되돌린다
 3. 발급한 키 행을 끈다(`is_active=false`), 만든 연결 두 개를 지운다, `enabled-tenants` 를 5.0-3 값으로 되돌린다
 
+### 5.8 맥 전사 사이드카(컨타 [승인] 20:48 ①)
+
+음성 변환 연결이 부르는 맥 사이드카(8291)가 17:47 에 내려간 뒤 launchd 재기동이 종료코드 78 로 계속 실패했다(CR-134 때부터 같은 증상, 그동안은 손으로 기동해 왔다).
+
+| 항목 | 내용 |
+|---|---|
+| 원인 | launchd 가 띄운 프로세스는 `~/Documents` 를 읽지 못한다. 시험용 launchd 작업에서 `ls ~/Documents` 가 「Operation not permitted」. 사이드카 실행본, 기록 파일이 모두 저장소(`~/Documents/...`) 안에 있었다 |
+| 고침 | `deploy/install-mac.sh` 로 실행본(소스, 기동 스크립트, `.env`, 모델, venv)을 `~/Server/transcribe-sidecar` 에 두고 launchd 에 다시 등록. venv 는 옮길 수 없어(스크립트 첫 줄에 경로가 박힘) 잠근 판으로 새로 만든다 |
+| 이어 나온 것 | launchd 로 뜨면 PATH 에 homebrew 가 없어 ffmpeg 를 못 찾았다(변환 실패 「No such file or directory: 'ffmpeg'」). `run.sh` 에서 PATH 를 더한다 |
+| 소스를 고친 뒤 | `transcribe-sidecar/deploy/install-mac.sh` 를 다시 돌린다 |
+
 ## 6. 이 CR 밖
 
 - 사진과 글 없는 스캔 PDF 의 그림 읽기(워크플로우 도구 단계가 그림 블록을 넘기게): 새 aimbase CR(컨타 20:36 범위 ①)
@@ -128,3 +143,6 @@ bp_office 테넌트 관리자(`~/.claude-secrets/bp-office-aimbase.env` 의 관�
 | 2026-10-26 20:45 | 5.3: compose 보냄, `aimbase-agent-bp-office` 만 build, `up -d --no-deps`. 5초 안에 healthy, 등록 성공(agent_registry ACTIVE, 실행기 가능). api 와 다른 실행기 6개 시작 시각 그대로 |
 | 2026-10-26 20:46 | 5.5-5 연결 시험 ok. 5.5-6 채팅 1회 200, 4.3초, 답 「확인」, 실행기 기록에 NATIVE 워커 기동 |
 | 2026-10-26 20:47 | 5.5-7 대기: 맥 전사 사이드카가 17:47 에 내려간 뒤 launchd 재기동이 종료코드 78 로 계속 실패. 컨타에 결재 요청 |
+| 2026-10-26 20:48 | 컨타 [승인] ① 원인을 찾아 고친 뒤 시험 |
+| 2026-10-26 20:51 | 5.8: 사이드카를 `~/Server/transcribe-sidecar` 로 설치, launchd 첫 기동 성공(runs 1). 첫 변환이 ffmpeg 를 못 찾아 실패해 `run.sh` 에 PATH 를 더하고 다시 설치 |
+| 2026-10-26 20:53 | 5.5-7: bp_office 변환 작업 d0c03cb9 COMPLETED. 5.5초 녹음, 처리 8.6초, 받아쓴 글이 읽은 문장과 같음 |

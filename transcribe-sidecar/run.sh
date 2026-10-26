@@ -19,6 +19,9 @@ PORT="${TRANSCRIBE_PORT:-8291}"
 # 공유기 포트포워딩(8291)으로 서버가 직접 호출하므로 전체 인터페이스에 바인딩한다.
 HOST="${TRANSCRIBE_HOST:-0.0.0.0}"
 
+# launchd 로 뜨면 PATH 가 /usr/bin:/bin 뿐이라 음성 디코딩에 쓰는 ffmpeg(homebrew)를 못 찾는다.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 export WHISPER_BACKEND="${WHISPER_BACKEND:-auto}"
 export WHISPER_MODEL="${WHISPER_MODEL:-large-v3}"
 export WHISPER_BATCH_SIZE="${WHISPER_BATCH_SIZE:-12}"
