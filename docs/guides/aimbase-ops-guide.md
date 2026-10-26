@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.13.0** | 2026-10-25 | Aimbase v8.18.0 기준
+> **v3.14.0** | 2026-10-26 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -437,7 +437,7 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 |---|---|---|---|
 | 로그인 서명키 `JWT_SECRET` | `.env` | `api.env`, `rag.env` | api 와 rag-pipeline 이 같은 값을 읽는다 |
 | 실행기 호출 키 `RUNNER_API_KEY` | `.env` | `agent.env` 의 `AIMBASE_RUNNER_API_KEY` | 그 서버 테넌트의 CLI 연결 `config.runner_api_key` |
-| 실행기 키 `SERVER_MCP_API_KEY`(입찰), `AXOPM_SERVER_MCP_API_KEY`, `WORKMAP_SERVER_MCP_API_KEY`, `WES_SERVER_MCP_API_KEY`, `LEXFLOW_SERVER_MCP_API_KEY` | `.env` | `agent.env` 의 `AIMBASE_RUNNER_SERVER_MCP_API_KEY` 와 `AGENT_API_KEY`(같은 값) | master `api_keys` 의 그 실행기 테넌트 키 행. 실행기는 이 키 하나로 서버 MCP 에 붙고 스스로 등록한다(CR-156) |
+| 실행기 키 `SERVER_MCP_API_KEY`(입찰), `AXOPM_SERVER_MCP_API_KEY`, `WORKMAP_SERVER_MCP_API_KEY`, `WES_SERVER_MCP_API_KEY`, `LEXFLOW_SERVER_MCP_API_KEY`, `BP_OFFICE_SERVER_MCP_API_KEY` | `.env` | `agent.env` 의 `AIMBASE_RUNNER_SERVER_MCP_API_KEY` 와 `AGENT_API_KEY`(같은 값) | master `api_keys` 의 그 실행기 테넌트 키 행. 실행기는 이 키 하나로 서버 MCP 에 붙고 스스로 등록한다(CR-156) |
 
 **바꾸는 순서** (키가 새었거나 담당자가 바뀌었을 때):
 1. 서버 환경 파일을 `deploy-backup/` 에 복사해 둔다
@@ -450,6 +450,13 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 소비앱과 실행기가 API 키 하나를 같이 쓰면 한쪽만 바꿀 수 없습니다. 실행기 키는 실행기 전용으로 발급합니다.
 
 실행기 키는 그 실행기 테넌트의 키여야 합니다. 다른 테넌트 키를 쓰면 실행기가 그 테넌트에 등록되고, CLI 가 부르는 Aimbase 도구도 그 테넌트 자료를 봅니다. 실행기는 api 보다 먼저 떠도 1분 안에 다시 등록합니다(CR-156). 등록이 안 되면 실행기 기록의 `Aimbase registration failed` 줄에서 응답 코드를 봅니다. 403 이면 키가 꺼졌거나 그 서버 master 에 없는 것입니다.
+
+**테넌트 실행기를 새로 붙일 때** (CR-158):
+1. 그 테넌트에 실행기 전용 시스템 API 키를 발급한다(`POST /api/v1/platform/api-keys`). 소비앱 키와 나눈다. 값은 서버 `.env` 의 `<테넌트>_SERVER_MCP_API_KEY` 에만 둔다
+2. 운영 compose 에 `aimbase-agent-<테넌트>` 서비스를 더한다. 이름(`AGENT_NAME`), 테넌트(`AGENT_TENANT_ID`), 포트만 바꾸고, `.env.prod.template` 에 키 이름을, `deploy.sh` 의 `AGENT_SERVICES` 에 서비스 이름을 더한다
+3. master `global_config` 의 `llm.anthropic-cli.enabled-tenants` 에 그 테넌트를 더한다(`*` 이면 그대로). CLI 연결 시험과 연결을 고르지 않은 채팅이 이 목록을 본다
+4. 그 테넌트에 CLI 연결을 만든다(`adapter=anthropic-cli`, `config.agent_name` 은 실행기 이름, `config.runner_api_key` 는 `RUNNER_API_KEY` 와 같은 값)
+5. 그 서비스만 올린다(`docker compose build <서비스>` 뒤 `docker compose up -d --no-deps <서비스>`). `./deploy.sh agents` 는 다른 실행기와 api 까지 다시 만든다
 
 ---
 
@@ -1591,6 +1598,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.14.0 | 2026-10-26 | **CR-158 bp-office 실행기** (§ 2-9). bp-office 실행기 키 `BP_OFFICE_SERVER_MCP_API_KEY` 추가. 테넌트 실행기를 새로 붙이는 순서 |
 | v3.13.0 | 2026-10-25 | **CR-156 실행기 등록 인증** (§ 2-9). 실행기 등록 키를 따로 두지 않고 실행기 테넌트 키 하나로 등록과 서버 MCP 접속. AXOPM, WorkMap 실행기 키 추가. 실행기 재등록과 등록 실패 확인법 |
 | v3.12.0 | 2026-10-25 | **CR-155 운영 서버 비밀값** (§ 2-9). 키와 서명값을 둘 곳, 짝이 되는 곳, 바꾸는 순서. 운영 compose 의 실행기 키 기본값 제거 |
 | v3.11.0 | 2026-10-25 | **CR-153 CLI 로 나가는 도구 결과 크기** (§ 3-7). 8,000자 고정 자르기를 없애고 런타임 설정 `orchestrator.mcp-tool-result-max-chars`(기본 200000) 추가 |

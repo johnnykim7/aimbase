@@ -12,7 +12,7 @@
 #         ./deploy.sh be      (BE만 — jar 교체 + api 재기동)
 #         ./deploy.sh rag     (RAG 소스 동기화 + 이미지 재빌드 + 재기동)
 #         ./deploy.sh agent   (러너 1개 — aimbase-agent 만)
-#         ./deploy.sh agents  (러너 전체 4개 — bidding/axopm/workmap/wes)
+#         ./deploy.sh agents  (러너 전체, 아래 AGENT_SERVICES)
 #         ./deploy.sh mcp     (BE + 러너 전체 — MCP 프로토콜 변경 시 필수)
 #         ./deploy.sh sandbox (스킬 실행 컨테이너 소스 동기화 + 이미지 재빌드 + 재기동)
 #
@@ -113,7 +113,7 @@ deploy_agent() {
 }
 
 # 운영 러너 전체 — docker-compose.prod.yml 의 aimbase-agent* 서비스 목록과 일치해야 한다.
-AGENT_SERVICES="aimbase-agent aimbase-agent-axopm aimbase-agent-workmap aimbase-agent-wes aimbase-agent-wes-cs aimbase-agent-lexflow"
+AGENT_SERVICES="aimbase-agent aimbase-agent-axopm aimbase-agent-workmap aimbase-agent-wes aimbase-agent-wes-cs aimbase-agent-lexflow aimbase-agent-bp-office"
 
 deploy_agents() {
   echo "━━━ Agent(Runner) 빌드 ━━━"

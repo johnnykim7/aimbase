@@ -367,6 +367,45 @@ services:
       retries: 10
       start_period: 40s
 
+  # bp-office 결정 추출 워크플로우 전용 러너(CR-158). 커넥션 cli-runner-bp-office-001 이 이리로 보낸다.
+  # 러너 등록은 테넌트 DB 단위라 다른 테넌트 러너를 빌려 쓸 수 없어 따로 둔다.
+  # OAuth 계정, 러너 키는 bidding 과 공유하고 이름, 테넌트, 포트(8302/8303)만 나눈다.
+  aimbase-agent-bp-office:
+    build:
+      context: ./backend
+      dockerfile: aimbase-agent/Dockerfile
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - api
+    volumes:
+      - ./claude-accounts:/home/appuser/.claude-accounts
+      - ./workspace:/data/workspace
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "3"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${BP_OFFICE_SERVER_MCP_API_KEY:?BP_OFFICE_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-office"
+      SERVER_PORT: "8302"
+      AGENT_NAME: "cli-runner-bp-office"
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_API_KEY: "${BP_OFFICE_SERVER_MCP_API_KEY:?BP_OFFICE_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
+      AGENT_TENANT_ID: "bp_office"
+      AGENT_MCP_PORT: "8303"
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-bp-office:8302"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8302/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
   # ── CR-147 스킬 스크립트 실행 컨테이너 ──
   # 스킬 묶음 스크립트와 모델이 작업장에 쓴 스크립트를 api 대신 여기서 돌린다(T3-17 2.4, 3.7).
   # 인터넷이 없는 내부 망에만 붙고 작업장 볼륨 하나만 받는다.
