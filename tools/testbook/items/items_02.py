@@ -1,4 +1,5 @@
-# 영역 02 음성 변환 시험항목. 근거는 CR-158(STT 연동 가이드 § 3, § 5 가용성, § 7 job 이 PENDING 에서 안 변함)이다.
+# 영역 02 음성 변환 시험항목. 근거는 CR-158(STT 연동 가이드 § 3, § 5 가용성, § 7 job 이 PENDING 에서 안 변함)과
+# CR-160(API 가이드 § 22-2 구간의 suspect_reason)이다.
 # 긴 녹음 변환(transcribe-jobs)은 T1-1 에 행이 없어 req·fc 를 비워 두고 src 에 CR 번호를 적는다.
 
 ITEMS = [
@@ -13,5 +14,16 @@ dict(id='IT-02-001', flow='전사 사이드카 상주', kind='예외', title='�
      judge=['서버', '서버', '서버'],
      pair={1: [1], 2: [2, 3]},
      src=['CR-158'], pri='High'),
+
+dict(id='IT-02-002', flow='지어낸 글 표시', kind='정상', title='알아듣지 못한 짧은 녹음의 지어낸 글은 의심 구간으로 표시되고 정상 녹음은 표시되지 않는다',
+     pre='개발기(옛 서버)에서 맥 사이드카를 쓰는 stt_local 연결이 있는 테넌트의 API 키, 플랫폼 설정 stt.suspect-no-speech-prob 와 stt.suspect-phrases 가 처음 값인 상태, '
+         '흔한 지어낸 문구로 받아써지는 짧은 녹음(bp-office 원문 45 「자막제공자」)과 말한 문장을 아는 정상 녹음(bp-office 원문 42)',
+     steps='1. 그 테넌트 키로 짧은 녹음 변환을 요청(POST /api/v1/transcribe-jobs)하고 끝나면 구간을 함께 조회(GET /api/v1/transcribe-jobs/{jobId}?include_segments=true)한다\n'
+           '2. 정상 녹음으로 1 을 되풀이한다',
+     expect='1. 짧은 녹음의 받아쓴 글은 바뀌지 않고, 그 구간에 no_speech_prob, avg_logprob, compression_ratio 수와 suspect_reason KNOWN_PHRASE 가 있다\n'
+            '2. 정상 녹음의 받아쓴 글이 말한 문장과 같고, 구간의 suspect_reason 이 null 이다',
+     judge=['서버', '서버'],
+     pair={1: [1], 2: [2]},
+     src=['CR-160'], pri='High'),
 
 ]
