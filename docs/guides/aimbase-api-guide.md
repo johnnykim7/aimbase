@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.21.0** | 2026-10-26 | Aimbase v8.18.0 기준
+> **v3.22.0** | 2026-10-26 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2013,7 +2013,7 @@ multipart/form-data. 즉시 **202** 와 `job_id` 를 반환하고 전사는 백�
 
 | 파라미터 | 설명 |
 |---|---|
-| `include_segments` | `true` 면 `segments[{start,end,text}]` 포함. 1시간 회의면 수백 건이라 기본 제외 |
+| `include_segments` | `true` 면 `segments[{start,end,text,no_speech_prob,avg_logprob,compression_ratio,suspect_reason}]` 포함. 1시간 회의면 수백 건이라 기본 제외 |
 
 ```json
 { "success": true,
@@ -2023,6 +2023,16 @@ multipart/form-data. 즉시 **202** 와 `job_id` 를 반환하고 전사는 백�
 ```
 
 `status`: `PENDING` → `RUNNING` → `COMPLETED`, 실패 시 `FAILED`(+`error`).
+
+구간의 `suspect_reason`(CR-160)은 음성 변환이 지어낸 글로 보이는 구간을 가리킨다. 받아쓴 글은 지우지 않으므로 소비앱이 사람 확인으로 올린다.
+
+| 값 | 뜻 |
+|---|---|
+| `NO_SPEECH` | 소리 없음 확률(`no_speech_prob`)이 플랫폼 설정 `stt.suspect-no-speech-prob` 이상인데 글이 있다. 소리 없는 녹음에서 지어낸 글 |
+| `KNOWN_PHRASE` | 플랫폼 설정 `stt.suspect-phrases` 의 문구를 담았다(띄어쓰기, 문장부호, 영문 대소문자 무시). 알아듣지 못할 때 흔히 지어내는 글 |
+| `null` | 해당 없음. 글이 빈 구간도 `null` |
+
+`no_speech_prob`, `avg_logprob`, `compression_ratio` 는 모델 값이며 이 칸이 없던 사이드카로 전사한 구간은 `null` 이다.
 
 전사 소요는 대략 **오디오 길이 ÷ 14**(1시간 → 약 4분). 폴링은 5~10초 간격이면 충분하다.
 
@@ -2213,6 +2223,7 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.22.0 | 2026-10-26 | **CR-160 변환 구간 의심 표시** (§ 22-2). `include_segments=true` 구간에 `no_speech_prob`, `avg_logprob`, `compression_ratio`, `suspect_reason`(`NO_SPEECH`, `KNOWN_PHRASE`, null)을 더함. 기존 칸과 받아쓴 글은 그대로 |
 | v3.21.0 | 2026-10-26 | **CR-159 워크플로우 첨부** (§ 4-4, 스텝 타입 표). 실행 API 에 `session_id` 선택 인자, LLM_CALL config `attachments`. 그 세션으로 올린 사진, PDF 를 모델이 그림으로 읽는다. 둘 다 안 쓰면 기존과 같다 |
 | v3.20.0 | 2026-10-25 | **CR-156 에이전트 등록 인증** (§ 14). 등록, 해제, 하트비트에 테넌트 API 키 필수(없으면 403), 키의 테넌트에 등록. 모르는 id 의 하트비트는 404 |
 | v3.19.0 | 2026-10-25 | **CR-154 API Key 를 Authorization 머리글로도 받음** (§ 인증). `Authorization: ApiKey <키>` 를 `X-API-Key` 와 같게 받는다. 위젯 토큰 발급도 같다. Claude CLI 처럼 머리글을 기록에 남기는 도구에서 키가 가려지게 하려는 것 |
