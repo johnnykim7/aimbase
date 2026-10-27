@@ -155,9 +155,30 @@ BIZ-131: 개발 작업 상태가 바뀌면(4.1 의 변경 한 줄이 생기면) 
 
 단위시험 T3-5 TC-DW-101 ~ 118. 다른 소비처 워크플로우와 연결이 지금처럼 도는 것은 기존 워크플로우 엔진, `http_request` 시험을 다시 돌려 지킨다.
 
+결과(10/28): `com.platform.workflow.*`, `com.platform.tool.*` 432건 통과, 실패 0. 머리값 가림은 TC-DW-116 ~ 118 이 지킨다.
+
+로컬 실서버에서 `http_request` 가 연결을 읽지 못해 모든 호출이 실패하는 것을 찾았다. 생성자가 둘인데 표시가 없어 Spring 이 기본 생성자를 골랐고 연결 저장소가 비어 있었다. 기본 생성자는 2026-04-24 커밋 835d8d5 가 "프록시/스파이 지원" 으로 더했고 그때부터다. 같은 코드라 개발기와 운영의 `http_request` 도 같을 것으로 보지만 그쪽에서는 확인하지 않았다. 쓰일 생성자에 `@Autowired` 를 달았고, Spring 이 실제로 연결 저장소를 넣는지 보는 시험 `spring_context_wires_connection_repository` 를 더했다. 이 시험은 고치기 전 코드에서 실패한다.
+
 ## 7. 로컬 확인과 실제 보내 보기
 
 받는 곳: 맥 bp-office 로컬 서버 `localhost:8253`(bp-office feat/SPR-10-dev, CR-037 이 기동). 토큰은 맥 비밀 파일의 `OFFICE_INBOUND_TOKEN_DEV_AGENT` 를 로컬 Aimbase 기동 환경변수로만 싣는다. 개발기 Aimbase 는 맥에 닿지 않아 로컬 Aimbase 에서 보낸다.
+
+로컬 환경
+
+| 항목 | 값 |
+|---|---|
+| Aimbase | 작업 사본 bootRun, 포트 8251(포트 레지스트리 등록), Redis 16164 |
+| 시험 테넌트 | `cr164_local`(테넌트 마이그레이션 V74까지) |
+| 연결 | `bp-office-inbound`(localhost:8253), `cr164-self`(localhost:8251, 가림 확인용). 둘 다 `auth` 는 `API_KEY`, 머리값 `X-Service-Token`, `value_env=OFFICE_INBOUND_TOKEN_DEV_AGENT` |
+| 워크플로우 | `wf-cr164-dev-status`(트리거 `event`/`DEV_WORK_ITEM_STATUS_CHANGED`, 재시도 3회 5초), `wf-cr164-fail-demo`(없는 주소를 불러 실패하는 수동 실행) |
+| 로컬 Postgres | 접속 한도 100 에서 200 으로 올림(`postgresql.conf` 65행, 컨타 승인 10/28 06:25). Aimbase 한 대가 테넌트마다 쉬는 접속 2개를 잡아 두 대가 뜨면 100 을 넘는다 |
+
+로컬 확인
+
+| 항목 | 결과 |
+|---|---|
+| `http_request` 연결 읽기 | 고친 뒤 `cr164-self` 로 `GET /actuator/health` 200, 도구 성공 |
+| 머리값 가림 | 감사 기록 `requestHeaders` 에 연결 머리값 `X-Service-Token` 과 입력 머리값 `x-service-token` 이 모두 `***`. 다른 머리값은 그대로. 토큰 값과 입력한 평문은 응답 어디에도 없다 |
 
 ## 8. 개발기 반영
 
