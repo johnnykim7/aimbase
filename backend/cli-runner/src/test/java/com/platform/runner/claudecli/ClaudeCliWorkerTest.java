@@ -683,6 +683,7 @@ class ClaudeCliWorkerTest {
     }
 
     @Test
+    @DisplayName("IT-01-013 1 출력_읽기_둘은_가상_스레드가_아닌_데몬_스레드다")
     void cr163_output_readers_do_not_take_virtual_thread_carriers() throws IOException {
         worker = new ClaudeCliWorker(
                 binary.toString(), null, null, false, null, Duration.ofSeconds(10));
