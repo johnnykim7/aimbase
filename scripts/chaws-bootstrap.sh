@@ -5,9 +5,10 @@
 # 비밀값은 secrets/ 와 agent.env 에만 쓰고 화면과 명령 인자에 싣지 않는다. 이미 된 일은 건너뛴다.
 #   admin        첫 관리자(tenant_admins)와 CLI 허용 테넌트
 #   tenant       테넌트 bp_wms, 실행기 전용 키(agent.env), bp-wms 키(secrets/bp-wms-api-key)
-#   connections  연결 셋과 ROUND_ROBIN 묶음
+#   connections  계정마다 연결 하나와 ROUND_ROBIN 묶음. 로그인 전 계정은 ACCOUNTS 에서 빼고 돌리고,
+#                로그인 뒤 같은 단계를 다시 돌리면 연결을 더하고 묶음 구성원을 ACCOUNTS 대로 맞춘다
 #   workflow     워크플로우 정의(표준 입력)를 등록한다. 단계 opinion 의 연결은 work01
-#   smoke        bp-wms 가 부르는 길로 워크플로우를 한 번 돌린다. 계정 셋 로그인 뒤에 한다
+#   smoke        bp-wms 가 부르는 길로 워크플로우를 한 번 돌린다. work01 로그인 뒤에 한다
 set -euo pipefail
 umask 077
 
@@ -16,7 +17,7 @@ API="http://127.0.0.1:8280/api/v1"
 TENANT="bp_wms"
 ADMIN_EMAIL="platform-admin@aimbase.local"
 RUNNER="cli-runner-bp-wms"
-ACCOUNTS="work01 work02 work03"
+ACCOUNTS="${ACCOUNTS:-work01 work02 work03}"
 GROUP="$RUNNER-rr"
 WORKFLOW_CONNECTION="$RUNNER-work01"
 HDR="secrets/.auth-header"
@@ -125,17 +126,19 @@ PY
 )
     echo "[connections] $id 만들기 응답 $code"
   done
-  if [ "$(status "$API/connection-groups/$GROUP")" = 200 ]; then
-    echo "[connections] 묶음 $GROUP 있음"
-  else
-    code=$(python3 - "$GROUP" "$RUNNER" $ACCOUNTS <<'PY' | call -X POST -d @- "$API/connection-groups"
+  body=$(python3 - "$GROUP" "$RUNNER" $ACCOUNTS <<'PY'
 import json, sys
 gid, runner, accts = sys.argv[1], sys.argv[2], sys.argv[3:]
-print(json.dumps({"id": gid, "name": "bp-wms CLI 계정 셋", "adapter": "anthropic-cli", "strategy": "ROUND_ROBIN",
+print(json.dumps({"id": gid, "name": "bp-wms CLI 계정 묶음", "adapter": "anthropic-cli", "strategy": "ROUND_ROBIN",
                   "members": [{"connection_id": f"{runner}-{a}", "priority": i + 1} for i, a in enumerate(accts)],
                   "isDefault": False}))
 PY
 )
+  if [ "$(status "$API/connection-groups/$GROUP")" = 200 ]; then
+    code=$(printf '%s' "$body" | call -X PUT -d @- "$API/connection-groups/$GROUP")
+    echo "[connections] 묶음 $GROUP 구성원을 $ACCOUNTS 로 맞춤 응답 $code"
+  else
+    code=$(printf '%s' "$body" | call -X POST -d @- "$API/connection-groups")
     echo "[connections] 묶음 $GROUP 만들기 응답 $code"
   fi
 }
