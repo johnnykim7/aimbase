@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.17.0** | 2026-10-27 | Aimbase v8.18.0 기준
+> **v3.17.1** | 2026-10-27 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -482,7 +482,7 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 4. `bootstrap tenant`: 테넌트 `bp_wms`, 실행기 전용 키(`agent.env` 에 덧붙임), 소비앱 키(`secrets/bp-wms-api-key`)
 5. `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent`: 실행기. 실행기 기록에 `Agent registered successfully: name=cli-runner-bp-wms` 가 나오면 된 것
 6. 계정 로그인(아래)
-7. `bootstrap connections`: 계정마다 CLI 커넥션(`cli-runner-bp-wms-work01` 부터 `work03`, `config_dir` 만 다름)과 묶음 `cli-runner-bp-wms-rr`(`ROUND_ROBIN`)
+7. `bootstrap connections`: 로그인된 계정(실행기의 `claude-accounts` 아래 로그인 파일이 있는 폴더)마다 CLI 커넥션(`cli-runner-bp-wms-<계정>`, `config_dir` 만 다름)과 묶음 `cli-runner-bp-wms-rr`(`ROUND_ROBIN`). 목록을 손으로 줄 때는 `ACCOUNTS="work01 work02"`
 8. `bootstrap workflow < <워크플로우 JSON>`: 등록하거나 고친다. 단계 `opinion` 의 커넥션은 `cli-runner-bp-wms-work01`
 9. `bootstrap smoke`: bp-wms 가 부르는 길(망 `aimbase-apps`, 소비앱 키)로 워크플로우를 한 번 돌려 상태와 결과를 찍는다
 
@@ -492,7 +492,12 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 ```bash
 ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent claude'
 ```
-CLI 가 뜨면 `/login` 을 치고, 나온 주소를 맥 브라우저에서 그 계정으로 승인한 뒤 받은 코드를 붙여 넣습니다. `/exit` 로 나와 `work02`, `work03` 도 같이 합니다. 로그인 정보는 서버 `claude-accounts/<계정>` 에만 남습니다.
+CLI 가 뜨면 `/login` 을 치고, 나온 주소를 맥 브라우저에서 그 계정으로 승인한 뒤 받은 코드를 붙여 넣습니다. `/exit` 로 나와 다른 계정도 같이 합니다(지금은 `work01`, `work02`). 로그인 정보는 서버 `claude-accounts/<계정>` 에만 남습니다.
+
+**계정 늘리기**: 새 계정(예: `work04`)은 폴더를 만들며 로그인하고 `bootstrap connections` 를 한 번 돌립니다. 커넥션을 더하고 묶음 구성원을 로그인된 계정으로 맞춥니다. api 와 실행기는 계정 폴더의 부모를 통째로 붙여 두어 다시 만들지 않습니다. 실행기의 동시 CLI 는 계정 수와 상관없이 3개입니다.
+```bash
+ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work04 aimbase-agent sh -c "mkdir -p \$CLAUDE_CONFIG_DIR && claude"'
+```
 
 **고치기**: `./deploy.sh chaws-be` 는 api 만, `./deploy.sh chaws-agent` 는 실행기만 다시 만듭니다(`--no-deps`). 올릴 커밋은 `CHAWS_COMMIT` 으로 줍니다. 맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있어, 그 커밋만 받은 별도 worktree(`~/.cache/aimbase-chaws-build`)에서 jar 를 빌드하고 Dockerfile, compose, 설치 스크립트도 거기서 보냅니다. 무엇이 도는지는 서버 `deploy-backup/deployed.log` 에 서비스별 커밋으로 남습니다. db, redis 와 운영 3PL 컨테이너는 다시 만들지 않습니다. 운영 3PL 의 자동 배포는 자기 서비스만 다시 만들고 꼬리표 없는 이미지만 지워 Aimbase 와 겹치지 않습니다.
 
@@ -1641,6 +1646,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.17.1 | 2026-10-27 | **CR-162 계정 늘리기** (§ 2-10). 설치 스크립트가 로그인된 계정 폴더를 세어 커넥션과 묶음 구성원을 맞춘다. 계정 늘리는 순서 |
 | v3.17.0 | 2026-10-27 | **CR-162 운영 3PL 서버의 회사용 Aimbase** (§ 2-10). chaws 의 컨테이너와 메모리 한도, 관리 API 는 SSH 터널, 소비앱은 망 `aimbase-apps`, 처음 세우는 순서와 계정 로그인, 고치기와 되돌리기 |
 | v3.15.0 | 2026-10-26 | **CR-159 워크플로우 단계 첨부**. LLM_CALL `attachments` 의 운영 점검(실패 조건, 실행 기록의 `[첨부]` 줄, 사진 축소 설정) |
 | v3.14.0 | 2026-10-26 | **CR-158 bp-office 실행기** (§ 2-9). bp-office 실행기 키 `BP_OFFICE_SERVER_MCP_API_KEY` 추가. 테넌트 실행기를 새로 붙이는 순서 |

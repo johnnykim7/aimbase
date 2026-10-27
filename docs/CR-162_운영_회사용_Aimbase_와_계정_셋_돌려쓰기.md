@@ -8,6 +8,7 @@
   - 09:49 Aimbase 는 운영 서버 chaws 에 같이 올린다
   - 09:57 서버는 m6i.2xlarge(CPU 8, 메모리 32GB)로 시작하고 모자라면 늘린다
   - 11:58 설계 3절 ① 승인(컨타 위임). 운영 서버 작업은 4절 1번에서 5번, 7번과 8번을 묶어 사용자 승인을 받는다
+  - 23:33 work03 은 없는 계정으로 보고 완료 조건에서 뺀다. 계정은 work04, work05 처럼 늘 수 있다는 전제로, 로그인과 명령 한 번으로 묶음에 들어가게 한다
 - 규모: 중. 앱 소스 변경은 없다. 운영 설치 구성(DB, 메모리 한도, 망, 배포 대상)을 새로 정한다. 새 API, 화면, 테이블 없음
 - 함께 도는 건: bp-wms CR-WMS-798(차수 편성 추천 AI 의견 운영 연결, 설계 주인 bp-wms), aimbase CR-161(워크플로우 단계의 연결 묶음, 다른 컨타 팀)
 - 상태: 설계 확정, 구현 중
@@ -109,9 +110,9 @@
 |---|---|---|---|
 | 1 | 테넌트 | `bp_wms` | 59 는 bp_wes 테넌트를 빌려 쓴다. 운영은 앱마다 테넌트를 두는 59 의 다른 앱 방식을 따른다 |
 | 2 | 실행기 | `cli-runner-bp-wms` 하나 | bp_wms 테넌트 실행기 전용 키로 스스로 등록한다(CR-156, CR-158) |
-| 3 | 계정 폴더 | 서버 `claude-accounts/work01`, `work02`, `work03` | api 와 실행기가 같은 폴더를 붙인다 |
-| 4 | 연결 | `cli-runner-bp-wms-work01`, `-work02`, `-work03` | `adapter=anthropic-cli`, `config.agent_name=cli-runner-bp-wms`, `config.config_dir` 은 각 계정 폴더 |
-| 5 | 묶음 | `cli-runner-bp-wms-rr`, ROUND_ROBIN, 위 연결 셋 | CR-015 |
+| 3 | 계정 폴더 | 서버 `claude-accounts/<계정>`. 지금 `work01`, `work02` | api 와 실행기가 부모 폴더 `claude-accounts` 를 통째로 붙여, 계정을 늘려도 다시 만들지 않는다 |
+| 4 | 연결 | 로그인된 계정마다 `cli-runner-bp-wms-<계정>` | `adapter=anthropic-cli`, `config.agent_name=cli-runner-bp-wms`, `config.config_dir` 은 각 계정 폴더 |
+| 5 | 묶음 | `cli-runner-bp-wms-rr`, ROUND_ROBIN, 로그인된 계정의 연결 전부 | CR-015. 설치 스크립트가 실행기 안에서 로그인 파일이 있는 계정 폴더를 세어 구성원을 맞춘다 |
 | 6 | CLI 허용 | master `llm.anthropic-cli.enabled-tenants` 에 `bp_wms` | BIZ-099. 사내 테넌트 |
 
 ### 3.7 CR-161 과의 순서
@@ -134,8 +135,8 @@
 | 3 | 첫 관리자 한 줄 넣기(비밀번호는 `secrets/admin-password` 에만), CLI 허용 테넌트 설정 | Aimbase DB 쓰기 |
 | 4 | 테넌트 `bp_wms` 만들기, 실행기 키와 bp-wms 키 발급(값은 `secrets/` 파일로) | Aimbase DB 쓰기 |
 | 5 | `./deploy.sh chaws-agent` 로 실행기 기동, 등록 확인 | 있음 |
-| 6 | 계정 셋 로그인(사용자) | 계정 폴더 |
-| 7 | 연결 셋, 묶음 만들기, 연결마다 시험 호출 | Aimbase DB 쓰기 |
+| 6 | 계정 로그인(사용자) | 계정 폴더 |
+| 7 | 로그인된 계정마다 연결, 묶음 만들기 | Aimbase DB 쓰기 |
 | 8 | 워크플로우 `wms-wave-plan-opinion` 등록(단계 연결 work01), `aimbase-apps` 망 안에서 시험 실행 | Aimbase DB 쓰기 |
 | 9 | bp-wms 창에 운영 값 회신 | 없음 |
 
@@ -206,4 +207,5 @@
 - 실행기 대상 배포는 설치 스크립트를 서버에 올리지 않는다(api 대상만 올린다). 그래서 6889aed worktree 의 `scripts/chaws-bootstrap.sh` 한 파일을 배포 스크립트와 같은 scp 로 서버 `build/` 에 올렸다(sha256 이 맥 것과 같다)
 - Aimbase DB 기록에 재시작 줄이 없다(첫 기동의 초기화 안내문뿐). 7.1 본 것 2 는 운영에서 나오지 않았고, 본 것 1 의 600초 멈춤도 나오지 않았다. api 기록에 ERROR 줄 없음
 - 메모리 api 676MiB, 실행기 464MiB, DB 74MiB, Redis 15MiB. 서버 남은 메모리 약 14GB
-- 남은 일: work03 로그인 뒤 계정 목록 없이 `chaws-bootstrap.sh connections` 를 한 번 더 돌려 연결 work03 을 더하고 묶음 구성원을 셋으로 맞춘다(운영 Aimbase DB 쓰기라 그때 승인요청). CR-161 이 들어오면 단계 연결을 묶음 `cli-runner-bp-wms-rr` 로 바꾼다
+- 계정 늘리기(사용자 23:33 방향): work03 은 없는 계정으로 보고 완료 조건에서 뺐다. 설치 스크립트가 계정 목록을 고정값 대신 실행기 안의 로그인 파일이 있는 계정 폴더에서 센다. 맥 연습 설치에서 실행기를 다시 띄우지 않고 `work04` 폴더를 만들어 연결 201, 묶음 구성원 셋 200 을 봤고, 묶음으로 채팅을 세 번 부르니 실행기가 CLI 를 work01, work02, work04 로 시작점을 돌려 띄웠다. 세기는 세 경우를 봤다. 목록을 주면 그 목록(둘), 목록 없이 돌리면 로그인 파일이 있는 work01, work02, work04 만(로그인 없는 work03 은 빠짐), 로그인된 계정이 없으면 멈추고 묶음을 건드리지 않는다
+- 남은 일: 새 설치 스크립트를 운영 서버 `build/` 에 올린다(승인 뒤). CR-161 이 들어오면 단계 연결을 묶음 `cli-runner-bp-wms-rr` 로 바꾼다
