@@ -83,7 +83,8 @@ class LlmCallStreamingCr085IT {
                 promptTemplateService, provider, null,  // CR-090: eventRecorderProvider — null 허용
                 new com.platform.schema.SchemaValidator(new com.fasterxml.jackson.databind.ObjectMapper()),
                 null,   // CR-147: stepSkillsProvider
-                null);  // CR-159: attachmentResolverProvider
+                null,   // CR-159: attachmentResolverProvider
+                null);  // CR-161: groupSelectorProvider
     }
 
     private StepContext ctx() {

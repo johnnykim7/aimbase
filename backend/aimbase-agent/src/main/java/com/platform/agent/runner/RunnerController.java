@@ -10,12 +10,14 @@ import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.ModelConfig;
 import com.platform.llm.model.UnifiedMessage;
 import com.platform.runner.claudecli.ClaudeCliCommandBuilder;
+import com.platform.runner.claudecli.ClaudeCliException;
 import com.platform.tool.SkillRef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -225,6 +227,19 @@ public class RunnerController {
             skills.add(new SkillRef(name, scope, version));
         }
         return skills;
+    }
+
+    /**
+     * CR-161: /v1/chat 의 CLI 실패를 {@code {"error": 메시지}} 로 돌려준다. 기본 오류 본문은 메시지를 빼서
+     * api 가 계정 한도({@code cli_account_limited:})를 알아보지 못하고 다음 계정으로 넘기지 못했다.
+     * /v1/chat/stream 은 스트림 안에서 error 이벤트로 이미 메시지를 싣는다.
+     */
+    @ExceptionHandler(ClaudeCliException.class)
+    public ResponseEntity<Map<String, String>> cliFailure(ClaudeCliException e) {
+        log.warn("Runner /v1/chat CLI 실패: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("error", String.valueOf(e.getMessage())));
     }
 
     private static ClaudeCliCommandBuilder.ToolMode parseToolMode(String raw) {

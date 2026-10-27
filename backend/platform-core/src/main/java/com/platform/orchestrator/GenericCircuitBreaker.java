@@ -72,6 +72,19 @@ public class GenericCircuitBreaker {
         }
     }
 
+    /**
+     * CR-161: 지정 시각까지 연다. 계정 한도처럼 풀리는 시각을 아는 실패는 연속 실패 수를 기다리지 않는다.
+     * 이미 더 늦게까지 열려 있으면 그대로 둔다.
+     */
+    public void openUntil(Instant until) {
+        lastFailureAt = Instant.now();
+        Instant current = openUntil;
+        if (state.get() == State.OPEN && current != null && current.isAfter(until)) return;
+        openUntil = until;
+        state.set(State.OPEN);
+        log.warn("[{}] OPEN: until={}", name, until);
+    }
+
     /** 수동 리셋 */
     public void reset() {
         state.set(State.CLOSED);

@@ -53,7 +53,7 @@ class LlmCallStepExecutorAttachmentTest {
         ObjectProvider<StepAttachmentResolver> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(attachmentResolver);
         executor = new LlmCallStepExecutor(mock(ModelRouter.class), factory, mock(PromptTemplateService.class),
-                null, null, new SchemaValidator(new ObjectMapper()), null, provider);
+                null, null, new SchemaValidator(new ObjectMapper()), null, provider, null);
     }
 
     private static StepContext context() {

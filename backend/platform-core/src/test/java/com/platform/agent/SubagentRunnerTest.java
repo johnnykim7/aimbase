@@ -47,7 +47,7 @@ class SubagentRunnerTest {
     void setUp() {
         runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
                 worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory,
-                new com.platform.agent.ActiveCliWorkerRegistry());
+                new com.platform.agent.ActiveCliWorkerRegistry(), null);
 
         lenient().when(hookDispatcher.dispatch(any(), any()))
                 .thenReturn(HookOutput.PASSTHROUGH);

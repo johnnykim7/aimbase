@@ -56,6 +56,11 @@ public class ClaudeCliWorker implements AutoCloseable {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
     private static final String REDACTED = "[REDACTED]";
+    /**
+     * CR-161: 계정 한도 실패 메시지의 머리. platform-core {@code ConnectionGroupSelector.ACCOUNT_LIMITED_PREFIX}
+     * 와 같은 값이다. 두 모듈이 서로 의존하지 않아 한쪽을 바꾸면 다른 쪽도 바꾼다.
+     */
+    public static final String ACCOUNT_LIMITED_PREFIX = "cli_account_limited:";
 
     /** stdout 파싱 스레드가 라인별로 적재하는 이벤트 큐. consumer 측은 {@code type=result} 이벤트까지 polling. */
     private final BlockingQueue<StreamEvent> eventQueue = new LinkedBlockingQueue<>();
@@ -327,6 +332,10 @@ public class ClaudeCliWorker implements AutoCloseable {
 
     public String getSessionId() {
         return sessionId;
+    }
+
+    public String getConfigDir() {
+        return configDir;
     }
 
     public boolean isAlive() {
@@ -613,6 +622,10 @@ public class ClaudeCliWorker implements AutoCloseable {
         // tool_use_id 로 페어링해 LLMResponse.observedToolEvents 로 운반 (가시화 전용, 루프 재진입 아님)
         Map<String, PendingToolObservation> pendingTools = new java.util.LinkedHashMap<>();
         List<com.platform.llm.model.ObservedToolEvent> observedTools = new ArrayList<>();
+        // CR-161: 계정 한도 거절 신호 뒤의 글자는 잡아 둔다. 한도 안내문이 실시간으로 먼저 나가면
+        // api 의 연결 묶음이 이미 응답을 내보낸 것으로 보고 다음 계정으로 넘기지 못한다.
+        RateLimitRejection rejection = null;
+        List<String> heldDeltas = new ArrayList<>();
 
         while (true) {
             long remaining = deadline - System.currentTimeMillis();
@@ -665,7 +678,10 @@ public class ClaudeCliWorker implements AutoCloseable {
                     String delta = extractAssistantText(json);
                     if (delta != null && !delta.isEmpty()) {
                         assistantBuffer.append(delta);
-                        if (deltaConsumer != null) deltaConsumer.accept(delta);
+                        if (deltaConsumer != null) {
+                            if (rejection != null) heldDeltas.add(delta);
+                            else deltaConsumer.accept(delta);
+                        }
                     }
                     // CR-050 Phase 9: CLI 의 tool_use/tool_result 흐름은 CLI 내부에서 완결된다 (실측됨).
                     // 외부(우리 어댑터)는 관찰만 하고 OrchestratorEngine 도구 루프에 포함시키지 않는다 —
@@ -736,9 +752,16 @@ public class ClaudeCliWorker implements AutoCloseable {
                         log.warn("[CLI-RESULT] is_error=true (subtype={}, latency={}ms): {}",
                                 subtype, latency,
                                 errText.length() > 300 ? errText.substring(0, 300) + "..." : errText);
-                        throw new ClaudeCliException(
-                                "CLI result reported is_error=true (subtype=" + subtype + "): " + errText);
+                        String failure = "CLI result reported is_error=true (subtype=" + subtype + "): " + errText;
+                        if (rejection != null) {
+                            throw new ClaudeCliException(ACCOUNT_LIMITED_PREFIX + "resets_at=" + rejection.resetsAt()
+                                    + ":type=" + rejection.type() + ":" + failure);
+                        }
+                        throw new ClaudeCliException(failure);
                     }
+
+                    // CR-161: 거절 신호가 왔어도 턴이 성공했으면 잡아 둔 글자를 받은 순서대로 내보낸다.
+                    if (deltaConsumer != null) heldDeltas.forEach(deltaConsumer);
 
                     // CR-050 Phase 9: CLI 가 도구 루프를 자체적으로 완결하므로 외부에는 항상
                     // 최종 텍스트 + finishReason=END 만 노출. tool_use 는 toolCalls 에 싣지 않는다
@@ -765,7 +788,11 @@ public class ClaudeCliWorker implements AutoCloseable {
                             observedTools.isEmpty() ? null : java.util.List.copyOf(observedTools)
                     );
                 }
-                case "rate_limit_event" -> log.warn("CLI rate_limit_event: {}", json);
+                case "rate_limit_event" -> {
+                    log.warn("CLI rate_limit_event: {}", json);
+                    RateLimitRejection r = rateLimitRejection(json);
+                    if (r != null) rejection = r;
+                }
                 default -> log.trace("CLI event ignored: type={}", type);
             }
         }
@@ -822,6 +849,23 @@ public class ClaudeCliWorker implements AutoCloseable {
 
     /** CR-102: user 이벤트에서 추출한 tool_result 관찰 */
     private record ToolResultObservation(String toolUseId, String output) {}
+
+    /** CR-161: 계정 한도 거절. 값이 없으면 빈 문자열이고, api 는 resets_at 이 비면 5분 뒤로 본다. */
+    private record RateLimitRejection(String resetsAt, String type) {}
+
+    /**
+     * CR-161: {@code rate_limit_info.status=rejected} 일 때만 돌려준다.
+     * {@code overageStatus} 는 추가 사용분 상태라 평소에도 rejected 로 와서 보지 않는다.
+     */
+    private static RateLimitRejection rateLimitRejection(Map<String, Object> event) {
+        if (!(event.get("rate_limit_info") instanceof Map<?, ?> info)) return null;
+        if (!"rejected".equals(info.get("status"))) return null;
+        Object resetsAt = info.get("resetsAt");
+        Object type = info.get("rateLimitType");
+        return new RateLimitRejection(
+                resetsAt instanceof Number n ? String.valueOf(n.longValue()) : "",
+                type != null ? type.toString() : "");
+    }
 
     /**
      * CR-102: user 이벤트의 content[] 에서 type=tool_result 블록 추출.

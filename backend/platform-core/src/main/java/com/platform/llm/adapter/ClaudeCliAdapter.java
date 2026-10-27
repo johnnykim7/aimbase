@@ -146,6 +146,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
                         subagentEnabled, exposedTools); // CR-117 + CR-129
                 return CompletableFuture.completedFuture(resp);
             } catch (RuntimeException re) {
+                CliAccountLimitedException limited = CliAccountLimitedException.from(re);
+                if (limited != null) throw limited; // CR-161
                 // CR-082: runner 호출 자체 실패 — 사유를 식별 가능한 prefix 로 감싸 RuntimeException 전파.
                 // ResponseStatusException 을 던지면 Spring 이 ASYNC dispatch 를 통해 SecurityContext 재검사를 일으켜
                 // 위젯에 "network error" 로 보이는 부수효과 발생 (운영 검증). 따라서 단순 RuntimeException 으로.
@@ -170,6 +172,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
                     endpoint, effective, effectiveToolMode(request), configDir, effectiveSystemPrompt(request), runnerApiKey,
                     chunkConsumer, subagentEnabled, exposedTools); // CR-117 + CR-129
         } catch (RuntimeException re) {
+            CliAccountLimitedException limited = CliAccountLimitedException.from(re);
+            if (limited != null) throw limited; // CR-161
             // CR-082: stream 경로도 동일 — RuntimeException 으로 일관.
             String classified = classifyRunnerFailure(re);
             log.warn("CLI runner unreachable (stream): {} ({})", classified, re.getMessage());

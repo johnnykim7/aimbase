@@ -63,6 +63,8 @@ public class LlmCallStepExecutor implements StepExecutor {
     private final StepSkillService stepSkills;
     /** CR-159: config.attachments 해석. null 이면 attachments 를 준 단계는 실패한다(테스트 편의 3-arg 생성자). */
     private final StepAttachmentResolver attachmentResolver;
+    /** CR-161: config.connection_group_id 실행. null 이면 그룹을 준 단계는 실패한다(테스트 편의 3-arg 생성자). */
+    private final com.platform.llm.ConnectionGroupSelector groupSelector;
 
     @org.springframework.beans.factory.annotation.Autowired
     public LlmCallStepExecutor(ModelRouter modelRouter, ConnectionAdapterFactory connectionAdapterFactory,
@@ -71,7 +73,8 @@ public class LlmCallStepExecutor implements StepExecutor {
                                 org.springframework.beans.factory.ObjectProvider<WorkflowRunEventRecorder> eventRecorderProvider,
                                 SchemaValidator schemaValidator,
                                 org.springframework.beans.factory.ObjectProvider<StepSkillService> stepSkillsProvider,
-                                org.springframework.beans.factory.ObjectProvider<StepAttachmentResolver> attachmentResolverProvider) {
+                                org.springframework.beans.factory.ObjectProvider<StepAttachmentResolver> attachmentResolverProvider,
+                                org.springframework.beans.factory.ObjectProvider<com.platform.llm.ConnectionGroupSelector> groupSelectorProvider) {
         this.modelRouter = modelRouter;
         this.promptTemplateService = promptTemplateService;
         this.connectionAdapterFactory = connectionAdapterFactory;
@@ -81,6 +84,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         this.schemaValidator = schemaValidator;
         this.stepSkills = stepSkillsProvider != null ? stepSkillsProvider.getIfAvailable() : null;
         this.attachmentResolver = attachmentResolverProvider != null ? attachmentResolverProvider.getIfAvailable() : null;
+        this.groupSelector = groupSelectorProvider != null ? groupSelectorProvider.getIfAvailable() : null;
     }
 
     /** 하위 호환: eventPublisher/eventRecorder 없는 3-arg 생성자 (기존 테스트/비스트리밍 사용처). */
@@ -94,6 +98,7 @@ public class LlmCallStepExecutor implements StepExecutor {
         this.schemaValidator = new SchemaValidator(MAPPER);
         this.stepSkills = null;
         this.attachmentResolver = null;
+        this.groupSelector = null;
     }
 
     @Override
@@ -109,12 +114,26 @@ public class LlmCallStepExecutor implements StepExecutor {
         return system == null || system.isBlank() ? skillText : system + "\n\n" + skillText;
     }
 
+    /**
+     * CR-161: connection_group_id 가 있으면 그룹이 고른 멤버로 단계를 실행하고, 넘길 실패(BIZ-128)면 다음 멤버로
+     * 단계를 처음부터 다시 실행한다. 실행기 CLI 프로세스가 run 단위로 이어지므로 같은 run 은 같은 멤버로 보낸다.
+     */
     @Override
     public Map<String, Object> execute(WorkflowStep step, StepContext context) {
+        Object groupId = step.config().get("connection_group_id");
+        if (groupId instanceof String g && !g.isBlank()) {
+            if (groupSelector == null) {
+                throw new IllegalStateException("LLM_CALL step '" + step.id() + "': connection_group_id 를 실행할 수 없다(그룹 선택기 없음)");
+            }
+            return groupSelector.execute(g, context.workflowRunId(), connId -> executeWith(step, context, connId));
+        }
+        return executeWith(step, context, (String) step.config().get("connection_id"));
+    }
+
+    private Map<String, Object> executeWith(WorkflowStep step, StepContext context, String connectionId) {
         Map<String, Object> config = step.config();
 
         String model = config.containsKey("model") ? (String) config.get("model") : "auto";
-        String connectionId = (String) config.get("connection_id");
 
         // CR-029: workflow step runtime 필드 (향후 RuntimeAdapter 분기 지점)
         String runtime = (String) config.getOrDefault("runtime", "llm_api");

@@ -56,7 +56,7 @@ class LlmCallStepExecutorSkillTest {
         ObjectProvider<StepSkillService> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(stepSkills);
         executor = new LlmCallStepExecutor(mock(ModelRouter.class), factory, mock(PromptTemplateService.class),
-                null, null, new SchemaValidator(new ObjectMapper()), provider, null);
+                null, null, new SchemaValidator(new ObjectMapper()), provider, null, null);
     }
 
     private WorkflowStep step() {

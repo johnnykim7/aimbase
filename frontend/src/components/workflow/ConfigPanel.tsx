@@ -7,6 +7,7 @@ import { useMCPServers } from "../../hooks/useMCPServers";
 import { useTools } from "../../hooks/useTools";
 import { usePlatformWorkflows } from "../../hooks/usePlatformWorkflows";
 import { SkillPinsField } from "./SkillPinsField";
+import { ConnectionGroupField } from "./ConnectionGroupField";
 import type { Connection } from "../../types/connection";
 import type { Prompt } from "../../types/prompt";
 import type { MCPServer, MCPToolDef } from "../../types/mcp";
@@ -32,7 +33,7 @@ interface ConfigField {
   label: string;
   placeholder?: string;
   multiline?: boolean;
-  type?: "text" | "select" | "multiselect" | "skills";
+  type?: "text" | "select" | "multiselect" | "skills" | "connectionGroup";
   options?: SelectOption[];
   fetchOptions?: string;
   onSelectFill?: (value: string, allData: unknown[]) => Record<string, string>;
@@ -52,7 +53,7 @@ const TAB_LABELS: Record<TabKey, string> = {
 };
 
 const LLM_TAB_KEYS: Record<TabKey, string[]> = {
-  basic: ["connection_id", "model", "temperature"],
+  basic: ["connection_group_id", "connection_id", "model", "temperature"],
   prompt: ["prompt", "system", "skills"],
   tool: ["tool_choice", "allowed_tools", "blocked_tools"],
   schema: ["response_schema"],
@@ -171,6 +172,9 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
     });
     // CR-147: 빈 글로 남기면 서버가 배열이 아니라고 거부한다(BIZ-121)
     if (typeof parsed.skills === "string" && !parsed.skills.trim()) delete parsed.skills;
+    // CR-161: 그룹이 있으면 연결은 그룹이 고르고(BIZ-127), 고르지 않은 그룹은 빈 글로 남기지 않는다
+    if (parsed.connection_group_id) delete parsed.connection_id;
+    else delete parsed.connection_group_id;
     onUpdate(node.id, { ...node.data, label, config: parsed });
     setShowSaved(true);
     setTimeout(() => setShowSaved(false), 1500);
@@ -208,6 +212,23 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
           onChange={(v) => setConfig((c) => ({ ...c, [field.key]: v }))}
           stepKind={isLlmType ? "LLM_CALL" : "AGENT_CALL"}
         />
+      );
+    }
+
+    if (field.type === "connectionGroup") {
+      return (
+        <ConnectionGroupField
+          value={config[field.key] ?? ""}
+          onChange={(v) => setConfig((c) => ({ ...c, [field.key]: v, ...(v ? { connection_id: "" } : {}) }))}
+        />
+      );
+    }
+
+    if (field.key === "connection_id" && config.connection_group_id) {
+      return (
+        <div className="py-2 px-2.5 rounded-lg bg-background text-xs text-muted-foreground">
+          커넥션 그룹이 연결을 고릅니다
+        </div>
       );
     }
 
@@ -458,6 +479,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
     case "LLM_CALL":
     case "llm":
       return [
+        { key: "connection_group_id", label: "커넥션 그룹", type: "connectionGroup" },
         {
           key: "connection_id",
           label: "LLM 연결",
@@ -568,6 +590,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
         { key: "description", label: "에이전트 설명", placeholder: "코드 리뷰 에이전트 (3-5 단어)" },
         { key: "prompt", label: "프롬프트", placeholder: "{{input.code}}를 리뷰해줘", multiline: true },
         { key: "model", label: "모델", placeholder: "예: claude-sonnet (비우면 기본값)" },
+        { key: "connection_group_id", label: "커넥션 그룹", type: "connectionGroup" },
         {
           key: "connection_id",
           label: "LLM 연결",
@@ -674,6 +697,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
         },
         { key: "source_file", label: "소스 파일", placeholder: "attachment_id(UUID) 또는 작업장 경로 — {{item.targetPath}}" },
         { key: "input", label: "또는 인라인 텍스트", placeholder: "source_file 대신 직접 텍스트", multiline: true },
+        { key: "connection_group_id", label: "커넥션 그룹", type: "connectionGroup" },
         {
           key: "connection_id",
           label: "LLM 연결",

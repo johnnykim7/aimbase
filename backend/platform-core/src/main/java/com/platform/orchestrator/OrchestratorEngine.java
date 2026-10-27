@@ -170,9 +170,19 @@ public class OrchestratorEngine {
     }
 
     /**
-     * 동기 채팅 요청 처리
+     * 동기 채팅 요청 처리.
+     * CR-161: 그룹 요청은 멤버 하나를 골라 그 커넥션을 지정한 요청과 같은 처리로 실행하고,
+     * 넘길 실패(BIZ-128)면 다음 멤버로 다시 실행한다. 세션 저장은 성공 뒤라 실패한 시도는 세션에 남지 않는다.
      */
     public ChatResponse chat(ChatRequest request) {
+        if (request.hasConnectionGroup()) {
+            return connectionGroupSelector.execute(request.connectionGroupId(), request.sessionId(),
+                    connId -> chatSingle(request.withConnection(connId)));
+        }
+        return chatSingle(request);
+    }
+
+    private ChatResponse chatSingle(ChatRequest request) {
         String sessionId = request.sessionId() != null
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
@@ -284,17 +294,15 @@ public class OrchestratorEngine {
             }
         }
 
-        // 4. LLM 어댑터 선택 (connectionGroupId > connectionId > modelRouter)
-        //    CR-015: connectionGroupId 지정 시 그룹 전략에 따라 커넥션 선택 + 자동 폴백
+        // 4. LLM 어댑터 선택 (connectionId > modelRouter). 그룹은 chat() 입구에서 멤버 connectionId 로 바뀌어 온다(CR-161)
         //    CR-029: runtimeRegistry 로깅 (향후 selectBest 연결 지점)
         log.debug("Available runtimes: {}", runtimeRegistry.listCapabilities().size());
-        LLMAdapter adapter = null;
-        String resolvedModel = null;
-        boolean useConnectionGroup = request.connectionGroupId() != null && !request.connectionGroupId().isBlank();
-        if (!useConnectionGroup && request.connectionId() != null && !request.connectionId().isBlank()) {
+        LLMAdapter adapter;
+        String resolvedModel;
+        if (request.connectionId() != null && !request.connectionId().isBlank()) {
             adapter = connectionAdapterFactory.getAdapter(request.connectionId());
             resolvedModel = connectionAdapterFactory.resolveModel(request.connectionId(), request.model());
-        } else if (!useConnectionGroup) {
+        } else {
             // CR-075: connection_id 미지정 + 테넌트 CLI 활성 + anthropic-cli connection 존재 → 자동 선택.
             // 소비앱이 인프라 식별자(connection_id, agent_id) 모두 모르고도 CLI 라우팅되도록.
             String defaultCliConn = connectionAdapterFactory.findDefaultCliConnectionForCurrentTenant();
@@ -305,9 +313,6 @@ public class OrchestratorEngine {
                 adapter = modelRouter.route(new LLMRequest(request.model(), trimmedMessages));
                 resolvedModel = modelRouter.resolveModelId(request.model());
             }
-        } else {
-            // connectionGroupId 사용 시: resolvedModel은 그룹 내부에서 결정되므로 요청 모델 기준
-            resolvedModel = request.model() != null ? request.model() : "auto";
         }
 
         // 4-1. CR-007: 구조화 출력 — 스키마 해석
@@ -368,11 +373,7 @@ public class OrchestratorEngine {
                         // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (CLI 어댑터만 사용, 그 외 무시)
                         .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride());
                 try {
-                    if (useConnectionGroup) {
-                        // CR-015: 커넥션 그룹 기반 호출 — 그룹 전략 + 커넥션 레벨 폴백
-                        llmResponse = connectionGroupSelector.executeWithGroup(
-                                request.connectionGroupId(), llmRequest);
-                    } else if (request.connectionId() == null || request.connectionId().isBlank()) {
+                    if (request.connectionId() == null || request.connectionId().isBlank()) {
                         // CR-082: CLI adapter 는 fallback chain 우회 — 다른 provider 로 떨어지면
                         // 소비앱이 401/403 같은 정체불명 에러를 받게 되어 진단 불가.
                         // 실패 사유는 ClaudeCliAdapter 가 명확히 전달한다 (AGENT_OFFLINE / RUNNER_UNREACHABLE 등).
@@ -516,9 +517,31 @@ public class OrchestratorEngine {
      * 스트리밍 채팅 요청 처리.
      * CR-045 Phase 2-B: StreamEvent 5종(TextDelta/ThinkingDelta/ToolUseStart/ToolResultEvent/Done)
      * 을 streamSink로 흘린다. 도구 루프는 ToolCallHandler.executeLoopStream()에 위임.
+     *
+     * <p>CR-161: 그룹 요청은 chat() 과 같게 멤버를 골라 실행한다. 다만 사용자에게 이벤트를 하나라도 보낸 뒤면
+     * 다음 멤버로 넘기지 않는다(같은 답이 두 번 이어 붙는다).
      */
     public void chatStream(ChatRequest request,
                             Consumer<com.platform.orchestrator.stream.StreamEvent> streamSink) {
+        if (request.hasConnectionGroup()) {
+            AtomicBoolean emitted = new AtomicBoolean(false);
+            Consumer<com.platform.orchestrator.stream.StreamEvent> watched = ev -> {
+                emitted.set(true);
+                streamSink.accept(ev);
+            };
+            connectionGroupSelector.execute(request.connectionGroupId(), request.sessionId(),
+                    connId -> {
+                        chatStreamSingle(request.withConnection(connId), watched);
+                        return null;
+                    },
+                    () -> !emitted.get());
+            return;
+        }
+        chatStreamSingle(request, streamSink);
+    }
+
+    private void chatStreamSingle(ChatRequest request,
+                                  Consumer<com.platform.orchestrator.stream.StreamEvent> streamSink) {
         String sessionId = request.sessionId() != null
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
@@ -611,11 +634,7 @@ public class OrchestratorEngine {
 
         LLMAdapter adapter;
         String resolvedModel;
-        if (request.connectionGroupId() != null && !request.connectionGroupId().isBlank()) {
-            var selectedConn = connectionGroupSelector.selectConnection(request.connectionGroupId());
-            adapter = connectionAdapterFactory.getAdapter(selectedConn);
-            resolvedModel = connectionAdapterFactory.resolveModel(selectedConn, request.model());
-        } else if (request.connectionId() != null && !request.connectionId().isBlank()) {
+        if (request.connectionId() != null && !request.connectionId().isBlank()) {
             adapter = connectionAdapterFactory.getAdapter(request.connectionId());
             resolvedModel = connectionAdapterFactory.resolveModel(request.connectionId(), request.model());
         } else {
@@ -636,6 +655,7 @@ public class OrchestratorEngine {
 
         // CR-045 Phase 2-B: 도구 루프 통합 스트리밍
         LLMResponse finalResponse;
+        boolean streamSuccess = false;
         try {
             if (request.actionsEnabled() && toolRegistry.hasTools()) {
                 finalResponse = toolCallHandler.executeLoopStream(
@@ -725,14 +745,18 @@ public class OrchestratorEngine {
             if (finalResponse.usage() != null) {
                 saveUsageLog(request.userId(), sessionId, resolvedModel, finalResponse);
             }
+            streamSuccess = true;
         } finally {
             // CR-130: 스트리밍 채팅 run 종료 — 예외·중단 포함 모든 경로에서 닫는다.
             // 중단(cancel)은 정상 완료와 구분되도록 FAILED 로 남긴다.
+            // CR-161: 예외로 끝난 시도도 FAILED. 그룹이 다음 멤버로 넘기면 실패한 멤버의 run 이 완료로 남았다.
             if (chatRunId != null) {
                 if (cancelled.get()) {
                     chatRunRecorder.fail(chatRunId, "사용자 중단");
-                } else {
+                } else if (streamSuccess) {
                     chatRunRecorder.complete(chatRunId);
+                } else {
+                    chatRunRecorder.fail(chatRunId, "LLM call failed");
                 }
             }
             cancellationRegistry.clear(sessionId);

@@ -1,5 +1,6 @@
 package com.platform.api;
 
+import com.platform.llm.adapter.CliAccountLimitedException;
 import com.platform.session.BlockingLimitException;
 import com.platform.skill.SkillNotFoundException;
 import com.platform.tenant.quota.QuotaExceededException;
@@ -19,6 +20,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
         log.warn("IllegalStateException: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * CR-161: 단일 커넥션의 CLI 계정 한도. 엔진이 RuntimeException 으로 감싸 던지지만 Spring 이 cause 사슬까지
+     * 찾아 이 처리기로 온다. 연결 묶음 요청은 다음 멤버로 넘기고, 다 막히면 connection_group_unavailable 이다.
+     */
+    @ExceptionHandler(CliAccountLimitedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCliAccountLimited(CliAccountLimitedException ex) {
+        log.warn("CLI account limited: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(ex.getMessage()));
     }

@@ -130,6 +130,17 @@ public record ChatRequest(
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet);
     }
 
+    /** CR-161: 그룹이 고른 멤버로 단일 커넥션 요청을 만든다. 그룹은 지워 안에서 다시 고르지 않게 한다. */
+    public ChatRequest withConnection(String memberConnectionId) {
+        return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, memberConnectionId,
+                toolFilter, toolChoice, responseFormat, null, workingDirectory,
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet);
+    }
+
+    public boolean hasConnectionGroup() {
+        return connectionGroupId != null && !connectionGroupId.isBlank();
+    }
+
     /**
      * 구조화된 출력 포맷 (CR-007).
      * @param type       "json_schema"

@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.22.0** | 2026-10-26 | Aimbase v8.18.0 기준
+> **v3.23.0** | 2026-10-27 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -334,7 +334,7 @@ curl -X POST /api/v1/workflows \
 
 | type | config 키 | 설명 |
 |------|----------|------|
-| `LLM_CALL` | `connection_id`, `system`, `prompt`, `response_schema`, `max_tokens`, `stream_tokens`(CR-085), `output_channel`/`reduce`(CR-085), `attachments`(CR-159) | LLM 호출 (토큰 초과 시 자동 에스컬레이션+분할, CR-028). `attachments` 는 § 4-4 의 첨부 번호 목록 참조(예: `{{input.files}}`) |
+| `LLM_CALL` | `connection_id`, `connection_group_id`(CR-161, § 25), `system`, `prompt`, `response_schema`, `max_tokens`, `stream_tokens`(CR-085), `output_channel`/`reduce`(CR-085), `attachments`(CR-159) | LLM 호출 (토큰 초과 시 자동 에스컬레이션+분할, CR-028). `attachments` 는 § 4-4 의 첨부 번호 목록 참조(예: `{{input.files}}`) |
 | `TOOL_CALL` | `tool`, `input` | 도구 호출 (ToolRegistry 등록 도구) |
 | `ACTION` | `actionType`, `config` | 액션 실행 (write, notify) |
 | `CONDITION` | `expression`, `true_step`, `false_step` | 2갈래 조건 분기 |
@@ -682,6 +682,7 @@ DELETE /api/v1/workflows/{id}
 | 403 | 권한 없음, `X-Tenant-Id` 누락, API Key 만료 | 인증 헤더 확인 |
 | 404 | 리소스 없음 | ID 확인 |
 | 503 | RAG 사이드카 미기동 | 사이드카 상태 확인 (port 8002) |
+| 503 | `connection_group_unavailable:retry_after=<시각>` 연결 묶음에 고를 커넥션이 없음 (CR-161) | `retry_after` 뒤에 다시 요청 (§ 25-3) |
 
 ---
 
@@ -2220,9 +2221,58 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 | 404 | 묶음 또는 판이 없음 |
 | 403 | 테넌트 경로로 플랫폼 경로를 부름, 또는 Super Admin 이 아님 |
 
+## 25. 연결 묶음 (`connection_group_id`) [CR-161]
+
+같은 종류의 커넥션 여러 개를 묶은 커넥션 그룹(CR-015, `/api/v1/connection-groups`)을 채팅과 워크플로우 단계에서 씁니다. 묶음 안의 커넥션 하나가 CLI 계정 한도에 걸리거나 실행기에 닿지 못하면 다음 커넥션이 이어받습니다.
+
+그룹 목록, 생성, 수정 응답의 필드 이름은 상세 응답과 같은 `is_active`, `is_default`, `created_at`, `updated_at` 입니다(전에는 목록, 생성, 수정만 `isActive` 처럼 왔습니다). 요청 본문의 `isDefault` 는 그대로입니다.
+
+### 25-1. 채팅
+
+`POST /api/v1/chat/completions` 본문에 `connection_group_id` 를 줍니다. 일반, 도구 사용(`actions_enabled`), 실시간(`stream=true`) 모두 같습니다.
+
+```json
+{
+  "session_id": "sess-1",
+  "messages": [...],
+  "connection_group_id": "cli-runner-bp-office-rr"
+}
+```
+
+| 순번 | 항목 | 동작 |
+|---|---|---|
+| 1 | 고르는 순서 | 같은 `session_id` 로 앞서 성공한 커넥션 먼저, 그다음 그룹 전략(PRIORITY, ROUND_ROBIN, LEAST_USED) 순서. `session_id` 가 없으면 전략 순서만 |
+| 2 | 다음 커넥션으로 넘기는 실패 | CLI 계정 한도, 요청이 실행기에 닿지 못한 실패(실행기 꺼짐, 라우팅 정보 없음, 중계 끊김). API 커넥션은 모든 실패 |
+| 3 | 넘기지 않는 실패 | 요청이 실행기에 간 뒤의 시간 초과, 구조화 출력 실패 등. 그 커넥션의 오류를 그대로 돌려준다 |
+| 4 | 실시간 | 답 글자나 도구 이벤트를 하나라도 보낸 뒤면 넘기지 않는다 |
+| 5 | `connection_id` 와 같이 줌 | `connection_group_id` 가 앞선다 |
+| 6 | 기록 | 채팅 실행 기록과 사용량의 `connection_id` 는 실제로 실행한 커넥션 |
+
+한도에 걸린 커넥션은 한도가 풀리는 시각(모르면 5분)까지 후보에서 빠집니다. 차례, 같은 세션의 고정, 빠짐 상태는 테넌트마다 따로 세고 서버 메모리에 있어 재기동하면 처음부터 셉니다. 고정은 마지막 사용 뒤 세션 TTL(런타임 설정 `session.session-ttl-hours`, 기본 24시간)이 지나면 풀립니다.
+
+### 25-2. 워크플로우 단계
+
+| 순번 | 단계 | config 키 | 같은 커넥션을 쓰는 단위 |
+|---|---|---|---|
+| 1 | `LLM_CALL` (EVALUATOR_LOOP generator 포함) | `connection_group_id` | 워크플로우 실행 1건 |
+| 2 | `AGENT_CALL` | `connection_group_id` | 단계의 자식 세션 (시간 초과 이어하기 포함) |
+| 3 | `LARGE_INPUT` | `connection_group_id` | 워크플로우 실행 1건. 조각 호출마다 그룹을 거쳐, 중간 조각에서 한도가 나면 그 조각부터 다음 커넥션 |
+
+`connection_id` 보다 앞섭니다. 단계 이벤트(`LLM_REQUEST` 등)의 `connection_id` 는 실제로 실행한 커넥션입니다. 워크플로우 저장 API 는 그대로이고 steps 의 config 키만 더해집니다.
+
+### 25-3. 오류
+
+| 순번 | 메시지 머리 | 뜻 | 비실시간 HTTP |
+|---|---|---|---|
+| 1 | `connection_group_unavailable:retry_after=<ISO-8601>` | 고를 수 있는 커넥션이 없다. 가장 먼저 풀리는 시각 | 503 |
+| 2 | `cli_account_limited:resets_at=<epoch 초>:type=<한도 종류>:` | CLI 계정 한도. 그룹이 아닌 단일 커넥션 요청이면 그대로 돌려준다 | 503 |
+
+실시간은 SSE `error` 이벤트로 끝납니다. 워크플로우 단계는 단계 실패로 남고 메시지는 위와 같습니다.
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.23.0 | 2026-10-27 | **CR-161 연결 묶음** (§ 25, § 5, 스텝 타입 표). 채팅 전 경로(일반, 도구 사용, 실시간)와 LLM_CALL, AGENT_CALL, LARGE_INPUT 단계 config 의 `connection_group_id`. CLI 계정 한도와 실행기에 닿지 못한 실패에서 다음 커넥션으로 넘김, 같은 세션과 실행 1건은 같은 커넥션. 오류 `connection_group_unavailable`, `cli_account_limited`. 그룹 목록, 생성, 수정 응답 필드 이름을 상세와 같게(`is_active` 등) |
 | v3.22.0 | 2026-10-26 | **CR-160 변환 구간 의심 표시** (§ 22-2). `include_segments=true` 구간에 `no_speech_prob`, `avg_logprob`, `compression_ratio`, `suspect_reason`(`NO_SPEECH`, `KNOWN_PHRASE`, null)을 더함. 기존 칸과 받아쓴 글은 그대로 |
 | v3.21.0 | 2026-10-26 | **CR-159 워크플로우 첨부** (§ 4-4, 스텝 타입 표). 실행 API 에 `session_id` 선택 인자, LLM_CALL config `attachments`. 그 세션으로 올린 사진, PDF 를 모델이 그림으로 읽는다. 둘 다 안 쓰면 기존과 같다 |
 | v3.20.0 | 2026-10-25 | **CR-156 에이전트 등록 인증** (§ 14). 등록, 해제, 하트비트에 테넌트 API 키 필수(없으면 403), 키의 테넌트에 등록. 모르는 id 의 하트비트는 404 |

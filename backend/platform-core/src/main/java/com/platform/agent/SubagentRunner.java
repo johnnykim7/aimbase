@@ -79,6 +79,8 @@ public class SubagentRunner {
     private final ConnectionAdapterFactory connectionAdapterFactory;
     /** CR-116: 강제 취소가 worker 를 역추적하도록 workflowRunId→childSessionId 매핑 등록. */
     private final ActiveCliWorkerRegistry activeCliWorkerRegistry;
+    /** CR-161: AGENT_CALL config.connection_group_id 의 멤버 조회. */
+    private final com.platform.llm.ConnectionGroupSelector connectionGroupSelector;
 
     public SubagentRunner(OrchestratorEngine orchestratorEngine,
                           SubagentRunRepository subagentRunRepository,
@@ -88,7 +90,8 @@ public class SubagentRunner {
                           AgentTypeRegistry agentTypeRegistry,
                           PlanService planService,
                           ConnectionAdapterFactory connectionAdapterFactory,
-                          ActiveCliWorkerRegistry activeCliWorkerRegistry) {
+                          ActiveCliWorkerRegistry activeCliWorkerRegistry,
+                          com.platform.llm.ConnectionGroupSelector connectionGroupSelector) {
         this.orchestratorEngine = orchestratorEngine;
         this.subagentRunRepository = subagentRunRepository;
         this.worktreeManager = worktreeManager;
@@ -98,6 +101,7 @@ public class SubagentRunner {
         this.planService = planService;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.activeCliWorkerRegistry = activeCliWorkerRegistry;
+        this.connectionGroupSelector = connectionGroupSelector;
     }
 
     /**
@@ -128,7 +132,14 @@ public class SubagentRunner {
 
         // CR-116: 이 AGENT_CALL 의 worker 를 워크플로우 run 에 연결 — 강제 취소가 역추적해 kill 할 수 있도록.
         // (workflowRunId/connectionId 가 없는 비워크플로우 경로면 register 가 무동작)
-        activeCliWorkerRegistry.register(request.workflowRunId(), childSessionId, request.connectionId());
+        // CR-161: 그룹이면 자식 채팅이 멤버를 고르므로 멤버 전부로 등록한다. 없는 세션 정리는 실행기가 무시한다.
+        List<String> workerConnIds = workerConnectionIds(request);
+        if (workerConnIds.isEmpty()) {
+            activeCliWorkerRegistry.register(request.workflowRunId(), childSessionId, null);
+        }
+        for (String connId : workerConnIds) {
+            activeCliWorkerRegistry.register(request.workflowRunId(), childSessionId, connId);
+        }
 
         // 1. Worktree 격리 설정
         WorktreeContext worktreeCtx = null;
@@ -352,7 +363,7 @@ public class SubagentRunner {
                 req.connectionId(),
                 toolFilter, null,
                 responseFormat,
-                null,                       // connectionGroupId
+                connectionGroupIdOf(req),   // CR-161: 자식 세션을 고정 키로 멤버를 고른다(CR-106 이어하기도 같은 계정)
                 req.workspacePath(),        // CR-107 후속: workingDirectory — 부모 run workspace 전파(없으면 null=기존 폴백)
                 req.workflowRunId(),
                 req.workflowStepId(),
@@ -422,14 +433,28 @@ public class SubagentRunner {
         if (req.resumeSessionId() != null && !req.resumeSessionId().isBlank()) {
             return; // resume 이어하기 대상 — 워커를 닫지 않는다.
         }
-        if (req.connectionId() == null || req.connectionId().isBlank()) {
-            return; // connectionId 없으면 modelRouter 라우팅(CLI 아님) — worker pool 자체가 없다.
+        // connectionId 와 그룹이 모두 없으면 modelRouter 라우팅(CLI 아님) — worker pool 자체가 없다.
+        for (String connId : workerConnectionIds(req)) {
+            try {
+                connectionAdapterFactory.getAdapter(connId).cleanupSession(childSessionId);
+            } catch (Exception e) {
+                log.warn("CR-114: 정상 완료 후 worker cleanup 실패 (childSession={}, conn={}): {}",
+                        childSessionId, connId, e.getMessage());
+            }
         }
-        try {
-            connectionAdapterFactory.getAdapter(req.connectionId()).cleanupSession(childSessionId);
-        } catch (Exception e) {
-            log.warn("CR-114: 정상 완료 후 worker cleanup 실패 (childSession={}): {}", childSessionId, e.getMessage());
-        }
+    }
+
+    private static String connectionGroupIdOf(SubagentRequest req) {
+        Object g = req.config() != null ? req.config().get("connection_group_id") : null;
+        return g instanceof String s && !s.isBlank() ? s : null;
+    }
+
+    /** CR-161: 그룹이 connection_id 보다 앞선다(BIZ-127). */
+    private List<String> workerConnectionIds(SubagentRequest req) {
+        String groupId = connectionGroupIdOf(req);
+        if (groupId != null) return connectionGroupSelector.memberConnectionIds(groupId);
+        if (req.connectionId() == null || req.connectionId().isBlank()) return List.of();
+        return List.of(req.connectionId());
     }
 
     // ── 훅 디스패치 ──

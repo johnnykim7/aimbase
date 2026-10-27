@@ -67,7 +67,7 @@ class AgentCallStepExecutorSkillTest {
         when(stepSkillsProvider.getIfAvailable()).thenReturn(stepSkills);
         SubagentRunner runner = new SubagentRunner(orchestratorEngine, subagentRunRepository,
                 worktreeManager, hookDispatcher, lifecycleManager, agentTypeRegistry, planService, connectionAdapterFactory,
-                new ActiveCliWorkerRegistry());
+                new ActiveCliWorkerRegistry(), null);
         executor = new AgentCallStepExecutor(new AgentOrchestrator(runner), stepSkillsProvider);
         when(orchestratorEngine.chat(any())).thenReturn(new ChatResponse("resp", "claude", "child",
                 List.of(new ContentBlock.Text("done")), List.of(), new TokenUsage(1, 1), 0.0));

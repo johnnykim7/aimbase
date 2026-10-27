@@ -231,7 +231,17 @@ public class ClaudeCliWorkerPool {
                                             List<SkillRef> skillSet) {
         RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
         synchronized (rw) {
-            if (rw.main != null && rw.main.isAlive()) return rw.main;
+            if (rw.main != null && rw.main.isAlive()) {
+                if (sameConfigDir(rw.main.getConfigDir(), configDir)) return rw.main;
+                // CR-161: 연결 묶음이 같은 run 을 다른 계정 커넥션으로 보냈다. 이전 계정 프로세스를 계속 쓰면
+                // api 기록의 커넥션과 실제로 쓴 계정이 어긋나고, 한도에 걸린 계정으로 다시 부른다.
+                ClaudeCliWorker previous = rw.main;
+                rw.main = null;
+                rw.forks.remove(previous);
+                rw.slots.release();
+                previous.close();
+                log.info("Run '{}': main worker closed because the account folder changed", runId);
+            }
 
             acquireSlot(rw, runId);
             try {
@@ -437,6 +447,13 @@ public class ClaudeCliWorkerPool {
 
     public int activeRunCount() {
         return runs.size();
+    }
+
+    /** 비어 있는 계정 폴더는 CLI 기본 폴더 하나로 본다. */
+    private static boolean sameConfigDir(String a, String b) {
+        String x = a == null || a.isBlank() ? null : a;
+        String y = b == null || b.isBlank() ? null : b;
+        return java.util.Objects.equals(x, y);
     }
 
     private void acquireSlot(RunWorkers rw, String runId) {

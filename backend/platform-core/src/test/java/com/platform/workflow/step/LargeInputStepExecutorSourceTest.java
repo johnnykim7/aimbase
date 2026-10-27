@@ -63,7 +63,8 @@ class LargeInputStepExecutorSourceTest {
                 workspaceProperties,
                 mock(com.platform.workflow.event.WorkflowRunEventRecorder.class),
                 new com.platform.agent.ActiveCliWorkerRegistry(),          // CR-121
-                new com.platform.workflow.WorkflowCancellationRegistry()); // CR-121
+                new com.platform.workflow.WorkflowCancellationRegistry(),  // CR-121
+                null);                                                     // CR-161
     }
 
     private LargeInputSource invokeLoadSource(Map<String, Object> config) throws Exception {

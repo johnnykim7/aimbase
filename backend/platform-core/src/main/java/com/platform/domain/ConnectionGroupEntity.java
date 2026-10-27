@@ -1,5 +1,6 @@
 package com.platform.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Type;
@@ -30,15 +31,20 @@ public class ConnectionGroupEntity {
     @Column(columnDefinition = "jsonb", nullable = false)
     private List<Map<String, Object>> members = new ArrayList<>();
 
+    // CR-161: 상세 응답(/connection-groups/{id})과 같은 이름. 목록, 생성, 수정이 이 엔티티를 그대로 내보낸다
+    @JsonProperty("is_default")
     @Column(name = "is_default", nullable = false)
     private Boolean isDefault = false;
 
+    @JsonProperty("is_active")
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
 
+    @JsonProperty("created_at")
     @Column(name = "created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
+    @JsonProperty("updated_at")
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt = OffsetDateTime.now();
 
