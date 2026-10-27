@@ -16,6 +16,7 @@ import com.platform.tool.ValidationResult;
 import com.platform.tool.model.UnifiedToolDef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -61,6 +62,8 @@ public class HttpRequestTool implements EnhancedToolExecutor {
         this.httpClient = null;
     }
 
+    /** CR-164: 생성자가 여럿이면 Spring 은 표시가 없을 때 기본 생성자를 골라 연결 조회가 비어 버린다. */
+    @Autowired
     public HttpRequestTool(ConnectionRepository connectionRepository, ObjectMapper objectMapper) {
         this(connectionRepository, objectMapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))

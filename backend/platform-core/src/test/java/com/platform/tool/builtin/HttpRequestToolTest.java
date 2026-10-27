@@ -311,6 +311,30 @@ class HttpRequestToolTest {
         assertThat(reqHeaders.get("X-Api-Key")).isEqualTo("***");
     }
 
+    // ── CR-164: 실제 Spring 이 만든 도구도 연결을 읽는다(기본 생성자를 고르면 연결 조회가 비어 모든 호출이 실패) ──
+    @Test
+    void spring_context_wires_connection_repository() {
+        stubConnection(noneAuthConnection("wired"));
+        wireMock.stubFor(get(urlEqualTo("/wired"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"ok\":true}")));
+        try (var ctx = new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
+            ctx.getBeanFactory().registerSingleton("connectionRepository", connectionRepository);
+            ctx.getBeanFactory().registerSingleton("objectMapper", new ObjectMapper());
+            ctx.register(HttpRequestTool.class);
+            ctx.refresh();
+
+            ToolResult result = ctx.getBean(HttpRequestTool.class).execute(Map.of(
+                    "connection_id", "wired",
+                    "method", "GET",
+                    "path", "/wired"
+            ), ToolContext.minimal(null, null));
+
+            assertThat(result.success()).isTrue();
+        }
+    }
+
     // ── T12: 입력 검증 — connection_id 누락 ──
     @Test
     void validateInput_missing_connection_id() {
