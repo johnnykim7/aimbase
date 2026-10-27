@@ -205,7 +205,7 @@ BIZ-131: 개발 작업 상태가 바뀌면(4.1 의 변경 한 줄이 생기면) 
 5. 테넌트 마이그레이션 V74(`dev_work_items`, `dev_work_item_changes` 새 표 2개). 기동 때 돌지 않으면 `POST /api/v1/platform/tenants/migrate` 로 활성 테넌트 전체
 6. 확인: api health, 테넌트별 V74 적용, 실행기 다시 붙음, 개발 작업 목록 API 200
 
-같이 실리는 것: dev 의 CR-161 api 변경(아직 개발기 미반영). CR-161 은 연결 묶음이 0건이라 지금 동작이 바뀌지 않는다고 적었다(CR-161 2.1).
+개발기 실행본과의 차이(10/28 07:10 대조): 개발기 jar 는 10/28 06:25 에 올라갔고 api 는 06:27 에 기동했다. 그 jar 의 클래스와 자원을 사본 빌드와 하나씩 대조하니 1036개가 같고, 다른 것은 CR-164 의 새 클래스와 V74(16개), 고친 4개(`WorkflowEngine`, `HttpRequestTool`, `WorkflowRepository`, `AimbaseAdminMcpConfig`)뿐이다. CR-161 api 와 작업 폴더의 미커밋분은 이미 개발기에 있어 이번 반영으로 새로 실리는 것은 CR-164 뿐이다. 실행기(`RunnerController` 등)는 `be` 배포에 실리지 않는다.
 
 되돌리기: 3의 jar 로 바꿔 api 를 다시 만든다. V74 표는 새 표뿐이라 남겨도 다른 기능에 닿지 않는다.
 
