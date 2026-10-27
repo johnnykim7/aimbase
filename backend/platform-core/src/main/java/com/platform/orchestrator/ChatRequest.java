@@ -16,6 +16,10 @@ import java.util.Map;
  * @param workflowRunId       CR-102: 워크플로우 run ID — AGENT_CALL 서브에이전트 도구 루프 이벤트를 run 타임라인에 연결. null이면 비워크플로우(채팅) 경로.
  * @param workflowStepId      CR-102: 워크플로우 스텝 ID (workflowRunId 와 함께 전파)
  * @param subagentRunId       CR-102: 서브에이전트 run ID — 멀티에이전트 병렬 시 이벤트 구분
+ * @param toolModeOverride    CR-128(갭B): 요청 단위 tool_mode 오버라이드(NATIVE/AIMBASE/HYBRID). CLI 어댑터 전용.
+ *                            null 이면 커넥션 config 값 사용(기존 동작).
+ * @param systemPromptOverride CR-128(갭B): 요청 단위 system_prompt_override. CLI 어댑터 전용.
+ *                            null 이면 커넥션 config 값 사용(기존 동작).
  * @param skillSet           CR-147: 워크플로우 단계에 지정한 스킬과 판(BIZ-121). 도구 호출의 ToolContext 로 넘긴다.
  *                            null 이면 지정 없음(기존 동작).
  */
@@ -36,13 +40,15 @@ public record ChatRequest(
         String workflowRunId,
         String workflowStepId,
         String subagentRunId,
+        String toolModeOverride,
+        String systemPromptOverride,
         List<SkillRef> skillSet
 ) {
     public ChatRequest(String model, List<UnifiedMessage> messages) {
-        this(model, null, messages, false, false, null, null, null, null, null, null, null, null, null, null, null, null);
+        this(model, null, messages, false, false, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
-    /** 기존 13-arg 호환 (CR-102 워크플로우 연결 키 없음) */
+    /** 기존 13-arg 호환 (CR-102 워크플로우 연결 키 없음, CR-128 override 없음) */
     public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
                        boolean stream, boolean actionsEnabled, String userId,
                        String ragSourceId, String connectionId,
@@ -51,7 +57,33 @@ public record ChatRequest(
                        String workingDirectory) {
         this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
-                null, null, null, null);
+                null, null, null, null, null, null);
+    }
+
+    /** CR-128(갭B): 13-arg + tool_mode/system_prompt override (ChatController 채팅 경로용) */
+    public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
+                       boolean stream, boolean actionsEnabled, String userId,
+                       String ragSourceId, String connectionId,
+                       ToolFilterContext toolFilter, String toolChoice,
+                       ResponseFormat responseFormat, String connectionGroupId,
+                       String workingDirectory,
+                       String toolModeOverride, String systemPromptOverride) {
+        this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                null, null, null, toolModeOverride, systemPromptOverride, null);
+    }
+
+    /** 기존 16-arg 호환 (CR-102 워크플로우 연결 키 포함, CR-128 override 없음 — SubagentRunner 등) */
+    public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
+                       boolean stream, boolean actionsEnabled, String userId,
+                       String ragSourceId, String connectionId,
+                       ToolFilterContext toolFilter, String toolChoice,
+                       ResponseFormat responseFormat, String connectionGroupId,
+                       String workingDirectory,
+                       String workflowRunId, String workflowStepId, String subagentRunId) {
+        this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                workflowRunId, workflowStepId, subagentRunId, null, null, null);
     }
 
     /** 기존 호환용 생성자 (toolFilter/toolChoice/responseFormat/connectionGroupId 없음) */
@@ -91,24 +123,11 @@ public record ChatRequest(
                 toolFilter, toolChoice, responseFormat, connectionGroupId, null);
     }
 
-    /** 기존 16-arg 호환 (CR-147 skillSet 없음, SubagentRunner 등) */
-    public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
-                       boolean stream, boolean actionsEnabled, String userId,
-                       String ragSourceId, String connectionId,
-                       ToolFilterContext toolFilter, String toolChoice,
-                       ResponseFormat responseFormat, String connectionGroupId,
-                       String workingDirectory,
-                       String workflowRunId, String workflowStepId, String subagentRunId) {
-        this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
-                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
-                workflowRunId, workflowStepId, subagentRunId, null);
-    }
-
     /** CR-147: 단계에 지정한 스킬과 판을 실은 사본. */
     public ChatRequest withSkillSet(List<SkillRef> skillSet) {
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
-                workflowRunId, workflowStepId, subagentRunId, skillSet);
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet);
     }
 
     /**
