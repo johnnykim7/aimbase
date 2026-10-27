@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.0 | 최종 수정: 2026-10-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161
+> 설계 버전: 7.1 | 최종 수정: 2026-10-28 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -2797,6 +2797,79 @@ cap 32000
 ```
 
 **제약**: total_length_bytes > 8192 시 `warning: "합산 길이 8KB 초과"` 반환.
+
+---
+
+## 개발 작업 API [v7.1, CR-164]
+
+응답은 `ApiResponse` 로 감싼다. 칸 이름은 snake_case.
+
+### POST `/api/v1/dev-work-items/{work_item_id}/status` [PRD-350]
+
+상태를 보고한다. 없는 작업이면 만든다.
+
+**Request Body**:
+```json
+{"feature_name": "주문 취소 화면", "stage": "기능", "status": "IN_PROGRESS", "evidence_url": "https://example.com/pr/1"}
+```
+
+- `feature_name`: 새 작업이면 필수, 있는 작업이면 생략 가능(생략하면 그대로)
+- `stage`, `status`: 필수. `status` 는 `IN_PROGRESS`, `COMPLETED`, `FAILED`, `CANCELLED`
+- `evidence_url`: 선택. 생략하거나 빈 글이면 없음
+
+**Response 200**:
+```json
+{"item": {"work_item_id": "W-1", "feature_name": "주문 취소 화면", "stage": "기능", "status": "IN_PROGRESS",
+          "evidence_url": "https://example.com/pr/1", "status_changed_at": "2026-10-28T06:30:00.123Z",
+          "last_workflow_run_id": null, "created_at": "...", "updated_at": "..."},
+ "change": {"id": "uuid", "work_item_id": "W-1", "stage": "기능", "status": "IN_PROGRESS",
+            "evidence_url": "https://example.com/pr/1", "changed_at": "2026-10-28T06:30:00.123Z",
+            "source": "API", "workflow_run_id": null}}
+```
+
+- 단계, 상태, 증빙 주소가 모두 지금과 같으면 `change` 는 null 이고 알림도 없다(BIZ-129)
+
+**Response 400**: `dev_work_item_invalid:<칸>` (칸 없음, 길이 초과, 모르는 상태, http, https 가 아닌 증빙 주소)
+
+### GET `/api/v1/dev-work-items` [PRD-350]
+
+최근 바뀐 순. 쿼리 `page`(0부터), `size`(기본 20, 최대 100). 응답은 `item` 모양의 배열과 `total`.
+
+### GET `/api/v1/dev-work-items/{work_item_id}` [PRD-350]
+
+`item` 과 `changes`(최근순, 최대 100줄). 없으면 404.
+
+### 워크플로우 실행 입력 `_dev_work_item` [PRD-351]
+
+`POST /api/v1/workflows/{id}/run` 등 모든 실행 입력에 실을 수 있다.
+
+```json
+{"_dev_work_item": {"work_item_id": "W-1", "feature_name": "주문 취소 화면", "stage": "실증", "evidence_url": "https://..."}}
+```
+
+- 칸이 틀리면 run 을 만들지 않고 400 `dev_work_item_invalid:<칸>`
+- 시작에 IN_PROGRESS, 끝에 COMPLETED, FAILED, CANCELLED(BIZ-130)
+
+### 워크플로우 trigger_config 이벤트 트리거 [PRD-352]
+
+```json
+{"type": "event", "event": "DEV_WORK_ITEM_STATUS_CHANGED"}
+```
+
+상태가 바뀔 때마다 실행되고 입력은 아래다(BIZ-131).
+
+| 칸 | 값 |
+|---|---|
+| work_item_id, feature_name, stage, status | 그 변경의 값 |
+| evidence_url | 증빙 주소. 없으면 빈 글 |
+| reported_at | 바뀐 시각. UTC 오프셋 붙은 ISO-8601 (`2026-10-28T06:30:00.123Z`) |
+| change_id | 변경 줄 id |
+| source | `API`, `WORKFLOW_RUN` |
+| source_run_id | 실행에서 났으면 그 run id, 아니면 빈 글 |
+
+### http_request 기록 머리값 [PRD-353]
+
+`auditPayload.requestHeaders` 에서 연결 auth(API_KEY, in=header)의 name 머리값을 `***` 로 가린다. 도구 직접 실행 API(`POST /api/v1/tools/http_request/execute`) 응답도 같다(BIZ-132).
 
 ---
 

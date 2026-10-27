@@ -1,6 +1,6 @@
 # T1-5. FSM 상태 정의서
 
-> 설계 버전: 1.0 | 최종 수정: 2026-03-10 | 관련 CR: CR-001
+> 설계 버전: 1.1 | 최종 수정: 2026-10-28 | 관련 CR: CR-001, CR-164
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -16,6 +16,7 @@
 | KnowledgeSource | `idle`, `syncing`, `completed`, `error` |
 | WorkflowRun | `running`, `pending_approval`, `completed`, `failed` |
 | PendingApproval | `pending`, `approved`, `rejected` |
+| DevWorkItem | `IN_PROGRESS`, `COMPLETED`, `FAILED`, `CANCELLED` |
 | Tenant | `provisioning`, `active`, `suspended`, `deleted` |
 | User | `active`, `inactive` |
 
@@ -160,6 +161,47 @@ stateDiagram-v2
 - **진입 조건**: 재시도 횟수 초과 / 승인 거부
 - **허용 다음 상태**: 없음 (종결 상태)
 - **관련 기능 ID**: PRD-044
+
+---
+
+## DevWorkItem (개발 작업) [CR-164]
+
+상태는 작업을 돌린 쪽이 보고하는 값이다. 엔진은 순서를 강제하지 않는다. 같은 상태를 다시 보고하는 것은 전이가 아니다(BIZ-129).
+
+```mermaid
+stateDiagram-v2
+    [*] --> IN_PROGRESS : 실행 시작 또는 API
+    [*] --> COMPLETED : API
+    [*] --> FAILED : API
+    IN_PROGRESS --> COMPLETED : 실행 completed 또는 API
+    IN_PROGRESS --> FAILED : 실행 failed 또는 API
+    IN_PROGRESS --> CANCELLED : 실행 cancelled 또는 API
+    COMPLETED --> IN_PROGRESS : 다음 단계 시작, 재실행
+    FAILED --> IN_PROGRESS : 재실행
+    CANCELLED --> IN_PROGRESS : 재실행
+```
+
+### IN_PROGRESS | 진행
+- **진입 조건**: `_dev_work_item` 을 실은 실행 시작, API 보고
+- **허용 다음 상태**: 모두
+- **관련 기능 ID**: PRD-350, PRD-351
+
+### COMPLETED | 완료
+- **진입 조건**: 실행 completed, API 보고
+- **허용 다음 상태**: 모두(다음 단계를 시작하면 IN_PROGRESS)
+- **관련 기능 ID**: PRD-350, PRD-351
+
+### FAILED | 실패
+- **진입 조건**: 실행 failed(단계 실패, 승인 거절, 예기치 못한 오류), API 보고
+- **허용 다음 상태**: 모두
+- **관련 기능 ID**: PRD-350, PRD-351
+
+### CANCELLED | 중지
+- **진입 조건**: 실행 cancelled, API 보고
+- **허용 다음 상태**: 모두
+- **관련 기능 ID**: PRD-350, PRD-351
+
+- **금지 전이**: 없음. 단, 단계, 상태, 증빙 주소가 모두 같은 보고는 변경으로 남기지 않는다
 
 ---
 
