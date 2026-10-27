@@ -201,6 +201,11 @@ vision:
     probe-timeout-seconds: ${VISION_PROBE_TIMEOUT:30}
     # JPEG 품질 2(고품질)~31(저품질). 판독 정확도와 base64 크기의 균형점.
     jpeg-quality: ${VISION_JPEG_QUALITY:2}
+    # 프레임 긴 변 상한(px). 원본 해상도를 그대로 넣으면 토큰만 폭증한다.
+    # 실측: 1080x1920 6장 = 16,227 토큰 → context 8192 초과로 400.
+    # 768px 로 줄이면 2,511 토큰(1/6.5)이 되고 판독은 정상.
+    # 축소만 하고 확대는 안 한다. 0 이하면 리사이즈를 꺼 원본 그대로 뽑는다.
+    frame-max-edge: ${VISION_FRAME_MAX_EDGE:768}
     # ffmpeg 는 CPU 바운드 — 과도한 병렬은 이득 없이 메모리만 먹는다.
     max-concurrent: ${VISION_MAX_CONCURRENT:2}
 

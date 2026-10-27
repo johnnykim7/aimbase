@@ -176,6 +176,25 @@ public class ConnectionAdapterFactory {
     }
 
     /**
+     * CR-130: 이 커넥션이 Claude CLI 어댑터인지 — 어댑터를 생성하지 않고 판정한다.
+     *
+     * <p>채팅 경로의 run 기록({@code ChatRunRecorder})을 CLI 커넥션에만 적용하기 위한 판정용.
+     * {@link #getAdapter}는 어댑터 생성·캐시 적재라는 부수효과가 있어 판정 목적에는 쓰지 않는다.
+     * connectionId 가 없거나 조회 실패면 false(기록 생략) — 판정 실패가 채팅을 막지 않는다.
+     */
+    public boolean isCliConnection(String connectionId) {
+        if (connectionId == null || connectionId.isBlank()) return false;
+        try {
+            return connectionRepository.findById(connectionId)
+                    .map(conn -> "anthropic-cli".equals(normalizeAdapterType(conn.getAdapter())))
+                    .orElse(false);
+        } catch (Exception e) {
+            log.debug("isCliConnection 판정 실패 (false 로 간주): {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * CR-075: connection_id 미지정 호출에 대해 현재 테넌트의 기본 anthropic-cli connection 을 반환.
      * 조건:
      *   1) {@link #isCliEnabledForCurrentTenant()} — 피처 플래그 통과
@@ -350,6 +369,10 @@ public class ConnectionAdapterFactory {
                 // CR-117: CLI 본체 Agent 서브에이전트 허용 여부. 키 없음/null = true(현행 유지).
                 // false 명시 시에만 차단. Boolean/String 둘 다 허용(FE 폼은 "true"/"false" 문자열).
                 boolean subagentEnabled = parseBooleanConfig(conn.getConfig().get("subagent_enabled"), true);
+                // CR-129(갭A): 이 커넥션이 CLI 에 노출할 도구 화이트리스트(CSV 또는 배열).
+                // 비면 기존 동작(서버 MCP endpoint 노출 전체 ~110개)을 그대로 유지한다.
+                // 채우면 그 도구만 --allowedTools 로 CLI 에 실려 소비앱과 무관한 builtin 노출을 없앤다.
+                java.util.List<String> exposedTools = parseStringListConfig(conn.getConfig().get("exposed_tools"));
                 yield new ClaudeCliAdapter(
                         claudeCliRunnerClient,
                         agentRegistryService,
@@ -359,7 +382,8 @@ public class ConnectionAdapterFactory {
                         systemPromptOverride,
                         runnerApiKey,
                         routingAgentName,
-                        subagentEnabled);
+                        subagentEnabled,
+                        exposedTools);
             }
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Unsupported adapter type: " + adapterType);
@@ -386,6 +410,35 @@ public class ConnectionAdapterFactory {
             return Boolean.parseBoolean(s.trim());
         }
         return defaultValue;
+    }
+
+    /**
+     * CR-129(갭A): connection.config 의 문자열 목록을 안전 파싱.
+     * JSONB 역직렬화 결과가 {@link java.util.List} 일 수도, FE 폼 저장으로 CSV {@link String} 일 수도 있다.
+     * null/빈 값이면 {@code null} 을 반환해 "미설정 = 기존 동작(전체 노출)" 을 유지한다.
+     */
+    private static java.util.List<String> parseStringListConfig(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof java.util.List<?> list) {
+            java.util.List<String> out = list.stream()
+                    .filter(java.util.Objects::nonNull)
+                    .map(Object::toString)
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .distinct()
+                    .toList();
+            return out.isEmpty() ? null : out;
+        }
+        if (raw instanceof String s) {
+            if (s.isBlank()) return null;
+            java.util.List<String> out = java.util.Arrays.stream(s.split(","))
+                    .map(String::trim)
+                    .filter(t -> !t.isEmpty())
+                    .distinct()
+                    .toList();
+            return out.isEmpty() ? null : out;
+        }
+        return null;
     }
 
     private boolean isCliEnabledForCurrentTenant() {

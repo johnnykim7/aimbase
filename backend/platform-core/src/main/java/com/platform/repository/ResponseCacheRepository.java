@@ -14,6 +14,13 @@ public interface ResponseCacheRepository extends JpaRepository<ResponseCacheEnti
 
     Optional<ResponseCacheEntity> findByCacheKeyAndExpiresAtAfter(String cacheKey, OffsetDateTime now);
 
+    /**
+     * 만료 여부와 무관하게 찾는다. cache_key 에 UNIQUE(idx_response_cache_key)가 걸려 있어
+     * 저장 시에는 만료된 행도 찾아 갱신해야 한다 — 조회(만료 제외)만 보고 새 행을 넣으면
+     * 중복키로 터진다.
+     */
+    Optional<ResponseCacheEntity> findByCacheKey(String cacheKey);
+
     @Modifying
     @Query("DELETE FROM ResponseCacheEntity e WHERE e.expiresAt < :now")
     int deleteExpired(OffsetDateTime now);

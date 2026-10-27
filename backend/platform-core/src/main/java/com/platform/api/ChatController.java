@@ -48,6 +48,7 @@ public class ChatController {
     private final PdfTextExtractor pdfTextExtractor;
     private final PdfVisionResolver pdfVisionResolver;
     private final LLMAdapterRegistry adapterRegistry;
+    private final com.platform.artifact.ArtifactService artifactService;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -55,7 +56,8 @@ public class ChatController {
                           AttachmentService attachmentService,
                           PdfTextExtractor pdfTextExtractor,
                           PdfVisionResolver pdfVisionResolver,
-                          LLMAdapterRegistry adapterRegistry) {
+                          LLMAdapterRegistry adapterRegistry,
+                          com.platform.artifact.ArtifactService artifactService) {
         this.orchestrator = orchestrator;
         this.workspaceProperties = workspaceProperties;
         this.cancellationRegistry = cancellationRegistry;
@@ -63,6 +65,24 @@ public class ChatController {
         this.pdfTextExtractor = pdfTextExtractor;
         this.pdfVisionResolver = pdfVisionResolver;
         this.adapterRegistry = adapterRegistry;
+        this.artifactService = artifactService;
+    }
+
+    /**
+     * CR-132: 세션 산출물(out/) 스캔 → done 페이로드/result 에 실을 artifacts 맵 목록.
+     * 산출물 없으면 빈 목록. 스캔 실패는 서비스에서 흡수(빈 목록) — 응답을 막지 않는다.
+     */
+    private List<Map<String, Object>> scanArtifacts(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return List.of();
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (com.platform.artifact.ArtifactService.ArtifactInfo a : artifactService.listArtifacts(sessionId)) {
+            Map<String, Object> m = new HashMap<>();
+            m.put("name", a.name());
+            m.put("size", a.size());
+            m.put("download_url", ArtifactController.downloadUrl(sessionId, a.name()));
+            out.add(m);
+        }
+        return out;
     }
 
     /**
@@ -124,7 +144,10 @@ public class ChatController {
                 request.toolChoice(),
                 responseFormat,
                 request.connectionGroupId(),
-                request.workingDirectory()
+                request.workingDirectory(),
+                // CR-128(갭B): 요청 단위 CLI override 전달
+                request.toolMode(),
+                request.systemPromptOverride()
         );
 
         if (request.stream()) {
@@ -196,6 +219,12 @@ public class ChatController {
                             }
                             if (Boolean.TRUE.equals(d.ragUsed())) {
                                 donePayload.put("rag_used", true);
+                            }
+                            // CR-132: CLI 가 out/ 에 만든 산출물을 done 에 실어 위젯이 다운로드 칩을 렌더한다.
+                            // VT 에 TenantContext 전파돼 있어 getWorkspaceRef 가 테넌트 DB 로 라우팅됨.
+                            List<Map<String, Object>> artifacts = scanArtifacts(chatRequest.sessionId());
+                            if (!artifacts.isEmpty()) {
+                                donePayload.put("artifacts", artifacts);
                             }
                             emitter.send(SseEmitter.event()
                                     .name("done")
@@ -285,6 +314,11 @@ public class ChatController {
             usageMap.put("cache_read_input_tokens", response.usage().cacheReadInputTokens());
         }
         result.put("usage", usageMap);
+        // CR-132: 비스트리밍 경로도 산출물 목록을 실어 소비앱/위젯이 다운로드할 수 있게 한다.
+        List<Map<String, Object>> artifacts = scanArtifacts(response.sessionId());
+        if (!artifacts.isEmpty()) {
+            result.put("artifacts", artifacts);
+        }
         return result;
     }
 
@@ -301,7 +335,10 @@ public class ChatController {
             @JsonProperty("tool_filter") ToolFilterDto toolFilter,
             @JsonProperty("tool_choice") String toolChoice,
             @JsonProperty("response_format") ResponseFormatDto responseFormat,
-            @JsonProperty("working_directory") String workingDirectory
+            @JsonProperty("working_directory") String workingDirectory,
+            // CR-128(갭B): CLI 어댑터 요청 단위 오버라이드. null 이면 커넥션 config 값 사용(기존 동작).
+            @JsonProperty("tool_mode") String toolMode,
+            @JsonProperty("system_prompt_override") String systemPromptOverride
     ) {}
 
     /** CR-006: 도구 필터링 DTO */

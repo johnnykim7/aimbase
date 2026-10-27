@@ -241,14 +241,17 @@ public class WorkflowController {
      */
     @GetMapping("/runs")
     @Operation(summary = "전체 워크플로우 실행 이력 조회 (횡단)",
-            description = "모든 워크플로우의 run 을 started_at DESC 로 반환. workflow_id / status 필터 옵션.")
+            description = "모든 워크플로우의 run 을 started_at DESC 로 반환. workflow_id / status / run_type 필터 옵션. "
+                    + "run_type=chat 이면 채팅(chat/completions) run 만, workflow 면 워크플로우 run 만 (CR-130).")
     public ApiResponse<?> allRuns(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(name = "workflow_id", required = false) String workflowId,
-            @RequestParam(required = false) String status
+            @RequestParam(required = false) String status,
+            @RequestParam(name = "run_type", required = false) String runType
     ) {
-        return ApiResponse.page(workflowRunRepository.searchRuns(workflowId, status, PageRequest.of(page, size)));
+        return ApiResponse.page(
+                workflowRunRepository.searchRuns(workflowId, status, runType, PageRequest.of(page, size)));
     }
 
     /** CR-102: run 단건 조회 (워크플로우 id 없이) — 횡단 실행 내역 화면에서 상세 진입용. */

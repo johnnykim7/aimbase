@@ -165,12 +165,12 @@ class WorkflowControllerGetEventsTest {
     @DisplayName("CR-102: 전체 run 횡단 목록 — workflow_id/status 필터가 searchRuns 로 위임")
     void allRunsDelegatesToSearch() {
         WorkflowRunEntity run = new WorkflowRunEntity();
-        when(runRepository.searchRuns(eq("wf-1"), eq("failed"), any()))
+        when(runRepository.searchRuns(eq("wf-1"), eq("failed"), any(), any()))
                 .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(run)));
 
-        ApiResponse<?> resp = controller.allRuns(0, 20, "wf-1", "failed");
+        ApiResponse<?> resp = controller.allRuns(0, 20, "wf-1", "failed", null);
         assertThat((List<?>) resp.data()).hasSize(1);
-        verify(runRepository).searchRuns(eq("wf-1"), eq("failed"), any());
+        verify(runRepository).searchRuns(eq("wf-1"), eq("failed"), any(), any());
     }
 
     @Test

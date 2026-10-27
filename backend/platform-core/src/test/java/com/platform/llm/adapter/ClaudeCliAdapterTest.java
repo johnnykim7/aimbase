@@ -106,12 +106,12 @@ class ClaudeCliAdapterTest {
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
         when(client.chat(eq(endpoint), any(), eq("AIMBASE"), eq("/path/.claude"),
-                any(), eq("runner-key-xyz"), anyBoolean())).thenReturn(expected);
+                any(), eq("runner-key-xyz"), anyBoolean(), any())).thenReturn(expected);
 
         LLMResponse resp = adapter.chat(sampleRequest()).get();
         assertThat(resp.textContent()).isEqualTo("ok");
         verify(client, times(1)).chat(eq(endpoint), any(), eq("AIMBASE"),
-                eq("/path/.claude"), any(), eq("runner-key-xyz"), anyBoolean());
+                eq("/path/.claude"), any(), eq("runner-key-xyz"), anyBoolean(), any());
     }
 
     @Test
@@ -131,12 +131,12 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 0L, 0.0);
-        when(client.chat(any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
+        when(client.chat(any(), any(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(expected);
 
         adapter.chat(noModel).get();
 
         org.mockito.ArgumentCaptor<LLMRequest> captor = org.mockito.ArgumentCaptor.forClass(LLMRequest.class);
-        verify(client).chat(any(), captor.capture(), any(), any(), any(), any(), anyBoolean());
+        verify(client).chat(any(), captor.capture(), any(), any(), any(), any(), anyBoolean(), any());
         assertThat(captor.getValue().model()).isEqualTo("claude-sonnet-4-5");
     }
 
@@ -162,7 +162,7 @@ class ClaudeCliAdapterTest {
 
         verify(client, times(1)).chatStream(
                 eq(endpoint), any(), eq("AIMBASE"), eq("/path/.claude"),
-                any(), eq("runner-key-xyz"), any(), anyBoolean());
+                any(), eq("runner-key-xyz"), any(), anyBoolean(), any());
     }
 
     // ─── CR-075: user_ref 자동 라우팅 폴백 ───
@@ -180,7 +180,7 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(expected);
 
         LLMResponse resp = adapter.chat(sampleRequest()).get();
         assertThat(resp.textContent()).isEqualTo("ok");
@@ -228,7 +228,7 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(expected);
 
         adapter.chat(sampleRequest()).get();
 
@@ -260,7 +260,7 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(expected);
 
         LLMResponse resp = wf.chat(sampleRequest()).get();
         assertThat(resp.textContent()).isEqualTo("ok");
@@ -283,7 +283,7 @@ class ClaudeCliAdapterTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(expected);
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(expected);
 
         wf.chat(sampleRequest()).get();
 
@@ -314,7 +314,7 @@ class ClaudeCliAdapterTest {
         AgentEndpoint endpoint = new AgentEndpoint("agent-1", "http://host:8290", "hash");
         when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
         // runner 호출이 HTTP timeout 으로 실패 → classifyRunnerFailure = AGENT_TIMEOUT
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean()))
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenThrow(new RuntimeException("call failed", new java.net.http.HttpTimeoutException("timed out")));
 
         var future = adapter.chat(sampleRequest());
@@ -333,7 +333,7 @@ class ClaudeCliAdapterTest {
         RequestContext.setAgentId("agent-1");
         AgentEndpoint endpoint = new AgentEndpoint("agent-1", "http://host:8290", "hash");
         when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
-        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean()))
+        when(client.chat(eq(endpoint), any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenThrow(new RuntimeException("connect failed", new java.net.ConnectException("refused")));
 
         var future = adapter.chat(sampleRequest());
@@ -352,7 +352,7 @@ class ClaudeCliAdapterTest {
         when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
         org.mockito.Mockito.doThrow(
                         new RuntimeException("stream failed", new java.net.http.HttpTimeoutException("timed out")))
-                .when(client).chatStream(eq(endpoint), any(), any(), any(), any(), any(), any(), anyBoolean());
+                .when(client).chatStream(eq(endpoint), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
 
         assertThatThrownBy(() -> adapter.chatStream(sampleRequest(), c -> {}))
                 .isInstanceOf(RuntimeException.class)

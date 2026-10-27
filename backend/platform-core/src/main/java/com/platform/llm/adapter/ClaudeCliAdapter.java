@@ -59,7 +59,15 @@ public class ClaudeCliAdapter implements LLMAdapter {
      * "spawn 자체 차단" 용도 — depth 가드/정책 적용이 아니라 도구 노출 제거다.
      */
     private final boolean subagentEnabled;
+    /**
+     * CR-129(갭A): 이 커넥션이 CLI 에 노출할 도구 화이트리스트 (connection.config.exposed_tools).
+     * null/빈 값이면 기존 동작 — 서버 MCP endpoint 노출 전체(CLI_EXPOSED ~110개)가 그대로 CLI 에 실린다.
+     * 값이 있으면 그 목록만 {@code allowed_tools} 로 Runner 에 전달되어 소비앱과 무관한 builtin 노출이 사라진다.
+     * 요청의 {@code tool_filter}(LLMRequest.tools)가 있으면 그쪽이 우선한다 — 더 좁은 쪽이 이긴다.
+     */
+    private final List<String> exposedTools;
 
+    /** CR-129 이전 호환 생성자 (exposed_tools 없음 = 전체 노출). */
     public ClaudeCliAdapter(ClaudeCliRunnerClient runnerClient,
                              AgentRegistryService agentRegistry,
                              String defaultModel,
@@ -69,6 +77,20 @@ public class ClaudeCliAdapter implements LLMAdapter {
                              String runnerApiKey,
                              String routingAgentName,
                              boolean subagentEnabled) {
+        this(runnerClient, agentRegistry, defaultModel, toolMode, configDir,
+                systemPromptOverride, runnerApiKey, routingAgentName, subagentEnabled, null);
+    }
+
+    public ClaudeCliAdapter(ClaudeCliRunnerClient runnerClient,
+                             AgentRegistryService agentRegistry,
+                             String defaultModel,
+                             String toolMode,
+                             String configDir,
+                             String systemPromptOverride,
+                             String runnerApiKey,
+                             String routingAgentName,
+                             boolean subagentEnabled,
+                             List<String> exposedTools) {
         this.runnerClient = runnerClient;
         this.agentRegistry = agentRegistry;
         this.defaultModel = defaultModel;
@@ -78,6 +100,7 @@ public class ClaudeCliAdapter implements LLMAdapter {
         this.runnerApiKey = runnerApiKey;
         this.routingAgentName = routingAgentName;
         this.subagentEnabled = subagentEnabled;
+        this.exposedTools = (exposedTools == null || exposedTools.isEmpty()) ? null : exposedTools;
     }
 
     @Override
@@ -97,6 +120,21 @@ public class ClaudeCliAdapter implements LLMAdapter {
         return List.of();
     }
 
+    /**
+     * CR-128(갭B): 요청 단위 override 를 커넥션 필드보다 우선 적용.
+     * request 에 값이 있으면 그것, 없으면(blank/null) 어댑터 필드(=커넥션 config)를 쓴다.
+     * 캐시된 어댑터를 깨지 않고 요청별로 tool_mode/system_prompt 를 바꾸는 지점.
+     */
+    private String effectiveToolMode(LLMRequest request) {
+        String req = request.toolModeOverride();
+        return (req != null && !req.isBlank()) ? req : toolMode;
+    }
+
+    private String effectiveSystemPrompt(LLMRequest request) {
+        String req = request.systemPromptOverrideReq();
+        return (req != null && !req.isBlank()) ? req : systemPromptOverride;
+    }
+
     @Override
     public CompletableFuture<LLMResponse> chat(LLMRequest request) {
         try {
@@ -104,8 +142,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
             LLMRequest effective = ensureModel(request);
             try {
                 LLMResponse resp = runnerClient.chat(
-                        endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey,
-                        subagentEnabled); // CR-117
+                        endpoint, effective, effectiveToolMode(request), configDir, effectiveSystemPrompt(request), runnerApiKey,
+                        subagentEnabled, exposedTools); // CR-117 + CR-129
                 return CompletableFuture.completedFuture(resp);
             } catch (RuntimeException re) {
                 // CR-082: runner 호출 자체 실패 — 사유를 식별 가능한 prefix 로 감싸 RuntimeException 전파.
@@ -129,8 +167,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
         LLMRequest effective = ensureModel(request);
         try {
             runnerClient.chatStream(
-                    endpoint, effective, toolMode, configDir, systemPromptOverride, runnerApiKey,
-                    chunkConsumer, subagentEnabled); // CR-117
+                    endpoint, effective, effectiveToolMode(request), configDir, effectiveSystemPrompt(request), runnerApiKey,
+                    chunkConsumer, subagentEnabled, exposedTools); // CR-117 + CR-129
         } catch (RuntimeException re) {
             // CR-082: stream 경로도 동일 — RuntimeException 으로 일관.
             String classified = classifyRunnerFailure(re);

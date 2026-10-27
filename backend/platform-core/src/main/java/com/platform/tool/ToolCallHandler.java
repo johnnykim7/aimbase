@@ -307,6 +307,27 @@ public class ToolCallHandler {
             String toolChoice,
             ToolContext toolContext,
             Map<String, Object> responseSchema) {
+        return executeLoop(adapter, resolvedModel, messages, config, sessionId,
+                toolRegistry, toolFilter, toolChoice, toolContext, responseSchema, null, null);
+    }
+
+    /**
+     * CR-128(갭B): responseSchema + CLI 요청 단위 tool_mode/system_prompt override 전달 버전.
+     * override 는 CLI 어댑터 경로(executeCliStreaming)에서만 의미가 있고, 그 외에는 무시된다.
+     */
+    public LLMResponse executeLoop(
+            LLMAdapter adapter,
+            String resolvedModel,
+            List<UnifiedMessage> messages,
+            ModelConfig config,
+            String sessionId,
+            ToolRegistry toolRegistry,
+            ToolFilterContext toolFilter,
+            String toolChoice,
+            ToolContext toolContext,
+            Map<String, Object> responseSchema,
+            String toolModeOverride,
+            String systemPromptOverride) {
 
         // CR-108: CLI 어댑터는 도구 루프를 자기 프로세스 안에서 완결한다 (CR-050 Phase 9).
         // 외부 도구 루프(아래 for) 를 돌 필요가 없고, 대신 chatStream 으로 호출해
@@ -314,7 +335,8 @@ public class ToolCallHandler {
         // AGENT_CALL 진행 중에도 도구 흐름이 실시간으로 차오르게 (turn 끝 batch 와 차이).
         if (com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider())) {
             return executeCliStreaming(adapter, resolvedModel, messages, config,
-                    sessionId, toolRegistry, toolFilter, toolContext, responseSchema);
+                    sessionId, toolRegistry, toolFilter, toolContext, responseSchema,
+                    toolModeOverride, systemPromptOverride);
         }
 
         List<UnifiedMessage> mutableMessages = new ArrayList<>(messages);
@@ -921,7 +943,8 @@ public class ToolCallHandler {
     private LLMResponse executeCliStreaming(
             LLMAdapter adapter, String resolvedModel, List<UnifiedMessage> messages,
             ModelConfig config, String sessionId, ToolRegistry toolRegistry,
-            ToolFilterContext toolFilter, ToolContext ctx, Map<String, Object> responseSchema) {
+            ToolFilterContext toolFilter, ToolContext ctx, Map<String, Object> responseSchema,
+            String toolModeOverride, String systemPromptOverride) {
 
         // CLI 는 도구를 자기 MCP 채널로 받지만, allowed_tools 산출을 위해 도구 목록은 그대로 전달.
         List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
@@ -933,6 +956,8 @@ public class ToolCallHandler {
                 resolvedModel, messages, filteredTools.isEmpty() ? null : filteredTools,
                 config, true, sessionId, null, responseSchema)
                 .withWorkingDirectory(cwd)
+                // CR-128(갭B): 요청 단위 tool_mode/system_prompt override 를 CLI 도구루프 경로에도 전파
+                .withCliOverrides(toolModeOverride, systemPromptOverride)
                 // CR-147: 러너가 MCP 머리글로 돌려줘 서버 쪽 스킬 도구가 단계가 고정한 판을 쓴다(BIZ-123)
                 .withSkillSet(ctx != null ? ctx.skillSet() : null);
 
