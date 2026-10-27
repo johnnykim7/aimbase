@@ -285,10 +285,12 @@ public class ClaudeCliWorker implements AutoCloseable {
         this.stdin = new BufferedWriter(new OutputStreamWriter(
                 process.getOutputStream(), StandardCharsets.UTF_8));
 
-        this.stdoutThread = Thread.ofVirtual()
+        // CR-163: 출력 읽기는 CLI 가 살아 있는 내내 파이프에서 기다린다. 가상 스레드로 두면 기다리는 읽기가
+        // CPU 수만큼 쌓인 뒤 새 가상 스레드가 실행 자리를 얻지 못해, 다른 실행의 출력까지 읽지 못하고 멈춘다.
+        this.stdoutThread = Thread.ofPlatform().daemon()
                 .name("cli-worker-stdout-" + process.pid())
                 .start(this::drainStdout);
-        this.stderrThread = Thread.ofVirtual()
+        this.stderrThread = Thread.ofPlatform().daemon()
                 .name("cli-worker-stderr-" + process.pid())
                 .start(this::drainStderr);
     }

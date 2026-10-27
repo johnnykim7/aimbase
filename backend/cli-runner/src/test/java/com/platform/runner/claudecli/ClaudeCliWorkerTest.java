@@ -682,6 +682,21 @@ class ClaudeCliWorkerTest {
                 .containsExactly("--mcp-config", "[REDACTED]");
     }
 
+    @Test
+    void cr163_output_readers_do_not_take_virtual_thread_carriers() throws IOException {
+        worker = new ClaudeCliWorker(
+                binary.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.start();
+
+        // getAllStackTraces 에는 가상 스레드가 나오지 않으므로, 두 읽기가 여기 보이면 플랫폼 스레드다.
+        List<Thread> readers = Thread.getAllStackTraces().keySet().stream()
+                .filter(t -> t.getName().equals("cli-worker-stdout-" + worker.pid())
+                        || t.getName().equals("cli-worker-stderr-" + worker.pid()))
+                .toList();
+
+        assertThat(readers).hasSize(2).allMatch(t -> !t.isVirtual() && t.isDaemon());
+    }
+
     private Path writeStub(String body) throws IOException {
         Path p = tempDir.resolve("claude-stub-" + System.nanoTime() + ".sh");
         Files.writeString(p, body);
