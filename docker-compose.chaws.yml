@@ -1,0 +1,125 @@
+# 운영 3PL 서버 chaws(3.39.94.112, /home/ubuntu/aimbase) 의 회사용 Aimbase compose(CR-162). ./deploy.sh chaws* 가 서버의 docker-compose.yml 로 올린다.
+# 서버에서 고치지 않는다. 고칠 일이 있으면 이 파일을 고치고 배포한다.
+# 같은 서버에 운영 3PL 컨테이너가 돌아 모든 컨테이너에 메모리 한도를 두고, 호스트 포트는 127.0.0.1 에만 연다.
+# DB 와 Redis 는 운영 bp-postgres, bp-redis 와 나눈다. 문서 검색(rag-pipeline)과 스킬 실행 컨테이너는 쓰지 않아 두지 않는다.
+# 비밀값은 서버의 db.env, api.env, agent.env 에 있고 저장소에는 없다. ./deploy.sh chaws-init 이 처음 한 번 만든다.
+name: aimbase
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB(aimbase_master). 테넌트 DB 도 이 계정으로 만든다.
+    env_file: db.env
+    mem_limit: 1g
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # 세션은 24시간 TTL 이라 한도에 닿으면 TTL 있는 키부터 비운다.
+    command: ["redis-server", "--maxmemory", "192mb", "--maxmemory-policy", "volatile-lru"]
+    mem_limit: 256m
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: aimbase-api:latest
+    build:
+      context: ./build/backend
+      dockerfile: platform-core/Dockerfile
+    init: true
+    restart: unless-stopped
+    env_file: api.env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: "8080"
+      MASTER_DB_URL: jdbc:postgresql://db:5432/aimbase_master
+      TENANT_DB_HOST: db
+      TENANT_DB_PORT: "5432"
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: "6379"
+      RAG_MCP_ENABLED: "false"
+      ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS: "660"
+      CLAUDE_CODE_WORKING_DIRECTORY: /data/workspace
+      AIMBASE_WORKSPACE_BASE: /data/workspace
+      AIMBASE_WORKSPACE_WHITELIST: /data/workspace
+    mem_limit: 2g
+    # 관리 API 는 맥에서 SSH 터널로만 부른다. bp-wms 는 aimbase-apps 망으로 부른다.
+    ports: ["127.0.0.1:8280:8080"]
+    volumes:
+      - ./claude-accounts:/home/appuser/.claude-accounts
+      - ./aimbase-storage:/data/aimbase
+      - ./workspace:/data/workspace
+    networks:
+      default: {}
+      aimbase-apps:
+        aliases: [aimbase-api]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  aimbase-agent:
+    image: aimbase-aimbase-agent:latest
+    build:
+      context: ./build/backend
+      dockerfile: aimbase-agent/Dockerfile
+    init: true
+    restart: unless-stopped
+    # 실행기 호출 키(AIMBASE_RUNNER_API_KEY)와 bp_wms 테넌트 실행기 전용 키(AIMBASE_RUNNER_SERVER_MCP_API_KEY, AGENT_API_KEY 같은 값).
+    env_file: agent.env
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "3"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wms"
+      SERVER_PORT: "8290"
+      AGENT_NAME: "cli-runner-bp-wms"
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_TENANT_ID: "bp_wms"
+      AGENT_MCP_PORT: "8291"
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent:8290"
+    mem_limit: 1536m
+    # 계정 폴더 work01, work02, work03 을 api 와 같이 붙인다. 연결마다 config.config_dir 로 폴더를 고른다.
+    volumes:
+      - ./claude-accounts:/home/appuser/.claude-accounts
+      - ./workspace:/data/workspace
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8290/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+# bp-wms 가 합류하는 망. ./deploy.sh chaws-init 이 만들고 어느 compose 를 내려도 지워지지 않게 밖에 둔다.
+networks:
+  aimbase-apps:
+    external: true
+
+volumes:
+  pgdata:
+  redisdata:

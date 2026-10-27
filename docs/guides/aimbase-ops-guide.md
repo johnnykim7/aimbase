@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.15.0** | 2026-10-26 | Aimbase v8.18.0 기준
+> **v3.17.0** | 2026-10-27 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -457,6 +457,48 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 3. master `global_config` 의 `llm.anthropic-cli.enabled-tenants` 에 그 테넌트를 더한다(`*` 이면 그대로). CLI 연결 시험과 연결을 고르지 않은 채팅이 이 목록을 본다
 4. 그 테넌트에 CLI 연결을 만든다(`adapter=anthropic-cli`, `config.agent_name` 은 실행기 이름, `config.runner_api_key` 는 `RUNNER_API_KEY` 와 같은 값)
 5. 그 서비스만 올린다(`docker compose build <서비스>` 뒤 `docker compose up -d --no-deps <서비스>`). `./deploy.sh agents` 는 다른 실행기와 api 까지 다시 만든다
+
+### 2-10. 운영 3PL 서버의 회사용 Aimbase [CR-162]
+
+운영 3PL 서버 chaws(3.39.94.112)의 `/home/ubuntu/aimbase` 에 회사용 Aimbase 가 있습니다. 같은 서버에 운영 3PL 컨테이너가 돌아, DB 와 Redis 는 운영 3PL 것(`bp-postgres`, `bp-redis`)과 나누고 모든 컨테이너에 메모리 한도를 둡니다. compose 정본은 저장소 `docker-compose.chaws.yml` 이고 서버에서 고치지 않습니다. 문서 검색(rag-pipeline)과 스킬 실행 컨테이너는 쓰는 곳이 없어 두지 않습니다.
+
+| 컨테이너 | 메모리 한도 | 닿는 곳 |
+|---|---|---|
+| db (pgvector pg16) | 1GB | compose 망 안에서만. master `aimbase_master` 와 테넌트 DB 가 여기 있다 |
+| redis | 256MB(`maxmemory 192mb`, TTL 있는 키부터 비움) | compose 망 안에서만 |
+| api | 2GB | 서버 `127.0.0.1:8280`(맥에서 SSH 터널), 외부 망 `aimbase-apps` 의 `http://aimbase-api:8080` |
+| aimbase-agent(실행기 `cli-runner-bp-wms`, CLI 동시 3개) | 1.5GB | compose 망 안에서만 |
+
+**관리 API 부르기**: `ssh -L 8280:127.0.0.1:8280 chaws` 를 열어 두고 맥에서 `http://localhost:8280/api/v1` 을 부릅니다. 보안 그룹은 열지 않고 관리자 화면도 두지 않습니다.
+
+**소비앱 붙이기**: 같은 서버의 소비앱 컨테이너는 외부 망 `aimbase-apps` 에 합류해 `http://aimbase-api:8080` 을 부릅니다. 테넌트마다 소비앱 키를 따로 발급해 서버 `secrets/` 에 둡니다. 지금은 bp-wms(테넌트 `bp_wms`, 키 `secrets/bp-wms-api-key`) 하나입니다.
+
+**비밀값**: `db.env`(DB 계정), `api.env`(DB 계정, `JWT_SECRET`), `agent.env`(실행기 호출 키 `AIMBASE_RUNNER_API_KEY`, 실행기 키 `AIMBASE_RUNNER_SERVER_MCP_API_KEY` 와 `AGENT_API_KEY`), `secrets/`(관리자 비밀번호, 소비앱 키). `./deploy.sh chaws-init` 이 처음 한 번 만들고 있는 파일은 덮지 않습니다. 짝이 되는 곳과 바꾸는 순서는 § 2-9 와 같습니다.
+
+**처음 세우기** (맥의 저장소 루트에서. `bootstrap <단계>` 는 `ssh chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh <단계>'`):
+1. `./deploy.sh chaws-init`: 서버 폴더, 비밀값 파일, 망 `aimbase-apps`
+2. `./deploy.sh chaws-be`: db, redis, api 를 올리고 `chaws-bootstrap.sh` 를 서버 `build/` 에 둔다
+3. `bootstrap admin`: 플랫폼 관리자(비밀번호는 `secrets/admin-password`), master `global_config` 의 CLI 허용 테넌트에 `bp_wms`
+4. `bootstrap tenant`: 테넌트 `bp_wms`, 실행기 전용 키(`agent.env` 에 덧붙임), 소비앱 키(`secrets/bp-wms-api-key`)
+5. `./deploy.sh chaws-agent`: 실행기. 실행기 기록에 `Agent registered successfully: name=cli-runner-bp-wms` 가 나오면 된 것
+6. 계정 로그인(아래)
+7. `bootstrap connections`: 계정마다 CLI 커넥션(`cli-runner-bp-wms-work01` 부터 `work03`, `config_dir` 만 다름)과 묶음 `cli-runner-bp-wms-rr`(`ROUND_ROBIN`)
+8. `bootstrap workflow < <워크플로우 JSON>`: 등록하거나 고친다. 단계 `opinion` 의 커넥션은 `cli-runner-bp-wms-work01`
+9. `bootstrap smoke`: bp-wms 가 부르는 길(망 `aimbase-apps`, 소비앱 키)로 워크플로우를 한 번 돌려 상태와 결과를 찍는다
+
+`bootstrap` 은 이미 된 일을 건너뛰어 다시 돌려도 됩니다. 응답 본문에 키가 섞여 있어 오류일 때도 `message` 만 찍습니다.
+
+**계정 로그인** (처음 한 번, 계정마다. 사람이 칩니다):
+```bash
+ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent claude'
+```
+CLI 가 뜨면 `/login` 을 치고, 나온 주소를 맥 브라우저에서 그 계정으로 승인한 뒤 받은 코드를 붙여 넣습니다. `/exit` 로 나와 `work02`, `work03` 도 같이 합니다. 로그인 정보는 서버 `claude-accounts/<계정>` 에만 남습니다.
+
+**고치기**: `./deploy.sh chaws-be` 는 api 만, `./deploy.sh chaws-agent` 는 실행기만 다시 만듭니다(`--no-deps`). jar 는 맥에서 빌드하지 않고 개발기 59 에서 지금 도는 jar 와 Dockerfile 을 옮깁니다. 59 build 폴더의 jar 가 59 컨테이너 안 jar 와 다르면 멈추니, 운영에 올릴 판은 59 에 먼저 반영합니다. db, redis 와 운영 3PL 컨테이너는 다시 만들지 않습니다. 운영 3PL 의 자동 배포는 자기 서비스만 다시 만들고 꼬리표 없는 이미지만 지워 Aimbase 와 겹치지 않습니다.
+
+**되돌리기**: 배포 때 앞 이미지에 `pre-<시각>` 꼬리표를 붙이고 되돌리는 명령을 찍습니다(`docker tag aimbase-api:pre-<시각> aimbase-api:latest && docker compose up -d --no-deps --force-recreate api`). 앞 compose 는 `deploy-backup/docker-compose.yml.<시각>` 에 있습니다.
+
+**점검**: 한도 대비 쓰는 양은 `docker stats --no-stream $(docker compose ps -q)`. 실행기가 안 붙으면 § 2-9 의 `Aimbase registration failed` 줄을 봅니다. CLI 가 `Not logged in` 으로 실패하면 그 커넥션의 계정 폴더에 로그인이 없는 것입니다.
 
 ---
 
@@ -1599,6 +1641,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.17.0 | 2026-10-27 | **CR-162 운영 3PL 서버의 회사용 Aimbase** (§ 2-10). chaws 의 컨테이너와 메모리 한도, 관리 API 는 SSH 터널, 소비앱은 망 `aimbase-apps`, 처음 세우는 순서와 계정 로그인, 고치기와 되돌리기 |
 | v3.15.0 | 2026-10-26 | **CR-159 워크플로우 단계 첨부**. LLM_CALL `attachments` 의 운영 점검(실패 조건, 실행 기록의 `[첨부]` 줄, 사진 축소 설정) |
 | v3.14.0 | 2026-10-26 | **CR-158 bp-office 실행기** (§ 2-9). bp-office 실행기 키 `BP_OFFICE_SERVER_MCP_API_KEY` 추가. 테넌트 실행기를 새로 붙이는 순서 |
 | v3.13.0 | 2026-10-25 | **CR-156 실행기 등록 인증** (§ 2-9). 실행기 등록 키를 따로 두지 않고 실행기 테넌트 키 하나로 등록과 서버 MCP 접속. AXOPM, WorkMap 실행기 키 추가. 실행기 재등록과 등록 실패 확인법 |

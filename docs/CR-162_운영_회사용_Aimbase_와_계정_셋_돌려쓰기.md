@@ -99,7 +99,7 @@
 
 - compose 정본은 저장소 `docker-compose.chaws.yml`. 서버에서 고치지 않는다
 - 서버 폴더 `/home/ubuntu/aimbase`. 3PL 레포 폴더(`/home/ubuntu/projects`)와 GitHub 실행기 폴더 밖이다. compose 이름은 `aimbase`
-- `./deploy.sh chaws-be`(DB, Redis, api), `./deploy.sh chaws-agent`(실행기), `./deploy.sh chaws`(이 순서로 둘). 우진비드 AWS 대상(CR-151)과 같은 방식이다. 맥에서 만든 jar 와 Dockerfile 을 서버 `build/` 로 보내 서버에서 이미지를 만들고, 바꾸기 전 이미지는 `pre-<시각>` 태그로 남겨 되돌리는 명령을 출력한다. 기동 판정은 컨테이너 healthy 다
+- `./deploy.sh chaws-be`(DB, Redis, api), `./deploy.sh chaws-agent`(실행기), `./deploy.sh chaws`(이 순서로 둘). 우진비드 AWS 대상(CR-151)과 같은 방식이다. jar 는 맥에서 빌드하지 않고 개발기 59 에서 지금 도는 jar 와 Dockerfile 을 서버 `build/` 로 옮겨 서버에서 이미지를 만들고(59 build 폴더의 jar 가 59 컨테이너 안 jar 와 sha256 이 다르면 멈춘다. 맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있다), 바꾸기 전 이미지는 `pre-<시각>` 태그로 남겨 되돌리는 명령을 출력한다. 기동 판정은 컨테이너 healthy 다
 - 3PL 자동 배포와 섞이지 않는다. 그쪽은 bp-infra compose 의 서비스 이름을 집어 `--no-deps` 로만 올리고, `docker image prune -f` 는 이름 없는 이미지만 지운다. `pre-<시각>` 은 이름이 있어 남는다
 - 비밀값은 서버 `api.env`, `agent.env`, `db.env` 와 `secrets/` 아래 파일에만 둔다(권한 600). 서버에서 `openssl rand` 로 만들고 화면과 기록에 찍지 않는다
 
@@ -117,7 +117,7 @@
 ### 3.7 CR-161 과의 순서
 
 1. CR-161 이 운영에 들어오기 전: 워크플로우 단계 `opinion` 의 `config.connection_id` 에 `cli-runner-bp-wms-work01` 을 넣는다. 그동안은 work01 하나만 쓴다
-2. CR-161 이 단계에서 묶음을 받게 되면: chaws api 를 그 판으로 다시 올리고(`./deploy.sh chaws-be`), 단계 설정을 묶음 `cli-runner-bp-wms-rr` 로 바꾼다. 부르는 쪽(bp-wms)은 바꿀 것이 없다
+2. CR-161 이 단계에서 묶음을 받게 되면: chaws api 를 그 판으로 다시 올리고(`./deploy.sh chaws-be`), 단계 `opinion` 의 `config.connection_id` 를 빼고 `config.connection_group_id` 에 묶음 `cli-runner-bp-wms-rr` 을 넣는다(CR-161 운용 가이드 시나리오 P). `chaws-bootstrap.sh workflow` 가 그 자리를 채우게 같이 고친다. 부르는 쪽(bp-wms)은 바꿀 것이 없다
 
 ### 3.8 계정 로그인
 
@@ -125,7 +125,7 @@
 
 ## 4. 운영 반영 순서
 
-서버를 바꾸는 단계마다 직전에 컨타에 `[승인요청]` 한다. 운영 3PL 컨테이너는 건드리지 않는다.
+서버를 바꾸는 단계마다 직전에 컨타에 `[승인요청]` 한다. 운영 3PL 컨테이너는 건드리지 않는다. 단계마다 칠 명령은 운용 가이드 § 2-10 「처음 세우기」 의 같은 번호다.
 
 | 순번 | 단계 | 서버 변경 |
 |---|---|---|
@@ -160,12 +160,29 @@
 | 2 | T2-1 | 영향 없음. 새 라이브러리, 새 이미지 없음(pgvector:pg16, redis:7-alpine 은 인프라 기술 스택에 있다) |
 | 3 | T3 | 영향 없음. 앱 동작, 테이블, API 변경 없음 |
 | 4 | 운용 가이드 | § 2-10 운영 chaws 서버 순서를 더한다(설치, 갱신, 되돌리기, 계정 로그인, 메모리 한도) |
-| 5 | 저장소 파일 | `docker-compose.chaws.yml`(신규), `deploy.sh`(chaws 대상) |
+| 5 | 저장소 파일 | `docker-compose.chaws.yml`(신규), `deploy.sh`(chaws 대상), `scripts/chaws-bootstrap.sh`(신규, 4절 3, 4, 7, 8번을 서버에서 돌린다) |
 
 ## 7. 검증
 
 - 로컬: `docker compose -f docker-compose.chaws.yml config` 통과, `bash -n deploy.sh`. 같은 compose 를 맥 도커로 띄워 api 가 문서 검색, 스킬 실행 컨테이너 없이 healthy 가 되는지 본다
 - 운영: 4절 순서대로. 실행기 등록, 연결 셋 시험 호출, `aimbase-apps` 망 안에서 워크플로우 실행이 `completed` 이고 `choice`, `opinion` 이 나오는지 본다. 운영 3PL 컨테이너의 상태와 메모리가 반영 전과 같은지 본다
+
+### 7.1 로컬 리허설 (10/27 맥 도커, compose 이름 `cr162local`)
+
+운영 compose 를 그대로 띄우고 이미지 이름만 로컬 것으로 바꿔 4절 1번부터 8번까지 `chaws-bootstrap.sh` 로 돌렸다.
+
+| 순번 | 본 것 | 결과 |
+|---|---|---|
+| 1 | 새 master DB 로 api 기동, 문서 검색과 스킬 실행 컨테이너 없음 | healthy. 메모리 api 795에서 862MiB, DB 53에서 76MiB, Redis 5에서 9MiB |
+| 2 | admin, tenant | 관리자 로그인, 테넌트 생성(`aimbase_bp_wms` DB), 실행기 키와 bp-wms 키 발급 |
+| 3 | 실행기 | `Agent registered successfully: name=cli-runner-bp-wms`, 메모리 325에서 420MiB |
+| 4 | connections | 연결 셋과 묶음 201. 다시 돌리면 넷 다 「있음」 으로 건너뜀 |
+| 5 | workflow | 처음 201, 다시 돌리면 200(고침). DB 의 단계 `opinion` 연결이 `cli-runner-bp-wms-work01` |
+| 6 | smoke | 망 `aimbase-apps` 와 bp-wms 키로 실행이 만들어지고 실행기 CLI 까지 갔다. 계정 로그인이 없어 `Not logged in` 으로 `failed`(로컬에선 예상한 결과) |
+
+- 리허설 jar 는 맥에서 12:03 에 빌드한 것이다. 그때까지 59 배포(api 10/26 23:16, 실행기 10/25 23:59) 뒤 바뀐 소스가 없었고 크기도 59 jar 와 같았다(148741516 바이트). 12:08 부터 CR-161 창이 작업 폴더 소스를 고치기 시작해, 운영에는 맥 빌드 대신 59 에서 도는 jar 를 옮기게 `deploy.sh` 를 바꿨다. 받기와 대조만 떼어 돌려 api `0de1b8be24e8`, 실행기 `789d20c224b1` 이 59 컨테이너 안 jar 와 같음을 봤다
+- 본 것 1: smoke 첫 시도는 34초 만에 `Not logged in` 으로 실패했고, 두 번째 시도는 새 CLI 를 띄운 뒤 실행기 한 턴 제한(600초)까지 답이 없었다. 로그인 없음 때문인지, 같은 때 로컬 장비가 느려진 탓인지(본 것 2) 가르지 못했다. 운영에서는 계정 로그인 뒤 smoke 를 돌리므로 다시 나오면 그때 본다
+- 본 것 2: 리허설 중 로컬 DB 가 두 번 스스로 재시작했다(`server process exited with exit code 2`, 컨테이너 재시작과 메모리 초과 종료는 없음). 그때 맥 도커 메모리 8GB 를 컨테이너 25개가 7GB 가까이 쓰고 있었다. 원인은 확인 못 했다. 운영 반영 뒤 DB 기록에서 같은 줄이 있는지 본다
 
 ## 8. 운영 반영
 

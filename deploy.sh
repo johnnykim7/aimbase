@@ -22,6 +22,13 @@
 #         ./deploy.sh wjbid-agent   (러너)
 #         ./deploy.sh wjbid         (위 셋을 이 순서로)
 #
+# 운영 3PL 서버 chaws(/home/ubuntu/aimbase, CR-162). compose 는 docker-compose.chaws.yml, 화면은 없다. 운영 3PL 컨테이너와 같은 서버라 그쪽 폴더와 compose 를 쓰지 않는다.
+# jar 는 맥에서 빌드하지 않고 개발기 59 에서 지금 도는 것을 옮긴다. 운영에 올릴 판은 59 에 먼저 반영한다.
+#         ./deploy.sh chaws-init  (처음 한 번: 폴더, 비밀값 파일, 망 aimbase-apps. 있는 파일은 덮지 않는다)
+#         ./deploy.sh chaws-be    (DB, Redis, api)
+#         ./deploy.sh chaws-agent (실행기)
+#         ./deploy.sh chaws       (be, agent 를 이 순서로)
+#
 # ⚠️ CR-124 이후: BE 와 러너는 MCP transport(Streamable HTTP)가 맞아야 도구 호출이 된다.
 #    한쪽만 올리면 그 사이 BE↔agent 도구 호출이 실패하므로, MCP 관련 배포는
 #    반드시 `./deploy.sh mcp` 로 BE + 러너 전체를 연속 배포할 것.
@@ -228,6 +235,128 @@ deploy_wjbid_agent() {
   wjbid_wait_healthy aimbase-agent
 }
 
+# 운영 3PL 서버 chaws 는 jar 와 Dockerfile 을 build/ 로 보내 서버에서 이미지를 만든다.
+# jar 는 맥에서 빌드하지 않는다. 맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있어, 59 에서 지금 도는 jar 를 그대로 옮긴다.
+# DB 와 Redis 는 이미 떠 있으면 다시 만들지 않는다. api, 실행기는 --no-deps 로 그것만 다시 만든다.
+CHAWS_SERVER="ubuntu@3.39.94.112"
+CHAWS_SSH_KEY="$HOME/.ssh/id_ed25519_therecommerce"
+CHAWS_REMOTE="/home/ubuntu/aimbase"
+CHAWS_STAMP="$(date +%Y%m%d-%H%M%S)"
+
+chaws_run()  { ssh -i "$CHAWS_SSH_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=10 "$CHAWS_SERVER" "$@"; }
+chaws_send() { scp -q -i "$CHAWS_SSH_KEY" -o IdentitiesOnly=yes "$@"; }
+
+# 비밀값은 서버에서 만들고 화면에 찍지 않는다. 이미 있는 파일은 그대로 둔다.
+# 실행기 전용 키(AIMBASE_RUNNER_SERVER_MCP_API_KEY)는 bp_wms 테넌트를 만든 뒤 발급해 agent.env 에 더한다(운용 가이드 § 2-10).
+deploy_chaws_init() {
+  echo "[chaws-init] 폴더, 비밀값 파일, 망"
+  chaws_run "set -e; umask 077; cd $CHAWS_REMOTE 2>/dev/null || { mkdir -p $CHAWS_REMOTE; cd $CHAWS_REMOTE; }
+    mkdir -p build deploy-backup secrets claude-accounts/work01 claude-accounts/work02 claude-accounts/work03 workspace aimbase-storage
+    if [ -f db.env ] && [ -f api.env ]; then echo '[chaws-init] db.env, api.env 있음. 그대로 둔다'
+    elif [ -f db.env ] || [ -f api.env ]; then echo '[chaws-init] db.env 와 api.env 가운데 하나만 있습니다. DB 비밀번호가 어긋나니 손으로 맞추세요.'; exit 1
+    else P=\$(openssl rand -hex 24)
+      printf 'POSTGRES_USER=platform\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=aimbase_master\n' \"\$P\" > db.env
+      printf 'MASTER_DB_USERNAME=platform\nMASTER_DB_PASSWORD=%s\nTENANT_DB_USERNAME=platform\nTENANT_DB_PASSWORD=%s\nJWT_SECRET=%s\n' \"\$P\" \"\$P\" \"\$(openssl rand -hex 32)\" > api.env
+      echo '[chaws-init] db.env, api.env 만듦'
+    fi
+    [ -f agent.env ] || { printf 'AIMBASE_RUNNER_API_KEY=%s\n' \"\$(openssl rand -hex 32)\" > agent.env; echo '[chaws-init] agent.env 만듦'; }
+    docker network inspect aimbase-apps >/dev/null 2>&1 || docker network create aimbase-apps
+    docker run --rm -v $CHAWS_REMOTE:/w --entrypoint chown pgvector/pgvector:pg16 -R 999 /w/claude-accounts /w/workspace /w/aimbase-storage"
+  echo "[chaws-init] 완료"
+}
+
+# $1 모듈(platform-core, aimbase-agent), $2 59 에서 그 jar 로 도는 컨테이너.
+# 59 build 폴더의 jar 가 그 컨테이너 안 jar 와 다르면 59 배포가 덜 끝난 것이라 멈춘다.
+# 받은 파일은 맥 backend/<모듈>/build/chaws/ 에 두고 다음 배포 때 덮어쓴다.
+chaws_promote_from_dev() {
+  local dir jar sum running
+  jar=$(ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=10 "$SERVER" "ls $REMOTE/backend/$1/build/libs/*.jar | grep -v plain")
+  if [ -z "$jar" ] || [ "$(printf '%s\n' "$jar" | wc -l)" -ne 1 ]; then
+    echo "59 backend/$1/build/libs 에 jar 가 하나가 아닙니다."
+    exit 1
+  fi
+  running=$(ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "$SERVER" "docker exec $2 sha256sum /app/app.jar" | cut -d' ' -f1)
+  dir="backend/$1/build/chaws"
+  mkdir -p "$dir"
+  scp -q -i "$SSH_KEY" -o IdentitiesOnly=yes "$SERVER:$jar" "$dir/$1.jar"
+  scp -q -i "$SSH_KEY" -o IdentitiesOnly=yes "$SERVER:$REMOTE/backend/$1/Dockerfile" "$dir/Dockerfile"
+  sum=$(shasum -a 256 "$dir/$1.jar" | cut -d' ' -f1)
+  if [ "$sum" != "$running" ]; then
+    echo "59 의 $1 jar 가 $2 에서 도는 것과 다릅니다. 59 배포를 먼저 마치세요."
+    exit 1
+  fi
+  echo "[chaws] 59 $2 와 같은 jar ${sum:0:12}"
+  chaws_run "mkdir -p $CHAWS_REMOTE/build/backend/$1/build/libs"
+  # Dockerfile 이 libs 의 *.jar 를 모두 복사하므로 이름을 하나로 고정해 덮어쓴다.
+  chaws_send "$dir/$1.jar" "$CHAWS_SERVER:$CHAWS_REMOTE/build/backend/$1/build/libs/$1.jar"
+  chaws_send "$dir/Dockerfile" "$CHAWS_SERVER:$CHAWS_REMOTE/build/backend/$1/Dockerfile"
+}
+
+chaws_require_env() {
+  if ! chaws_run "cd $CHAWS_REMOTE && [ -f db.env ] && [ -f api.env ] && [ -f agent.env ] && docker network inspect aimbase-apps >/dev/null 2>&1"; then
+    echo "chaws $CHAWS_REMOTE 에 db.env, api.env, agent.env 또는 망 aimbase-apps 가 없습니다. ./deploy.sh chaws-init 을 먼저 실행하세요."
+    exit 1
+  fi
+}
+
+chaws_sync_compose() {
+  chaws_send docker-compose.chaws.yml "$CHAWS_SERVER:$CHAWS_REMOTE/docker-compose.yml.new"
+  chaws_run "cd $CHAWS_REMOTE && { [ -f docker-compose.yml ] && diff -u docker-compose.yml docker-compose.yml.new || true; }"
+  chaws_run "cd $CHAWS_REMOTE && { [ -f docker-compose.yml ] && cp -p docker-compose.yml deploy-backup/docker-compose.yml.$CHAWS_STAMP || true; } && mv docker-compose.yml.new docker-compose.yml"
+}
+
+chaws_keep_image() {
+  chaws_run "docker image inspect $1:latest >/dev/null 2>&1 && docker tag $1:latest $1:pre-$CHAWS_STAMP || true"
+  echo "[chaws] 되돌리기: docker tag $1:pre-$CHAWS_STAMP $1:latest && cd $CHAWS_REMOTE && docker compose up -d --no-deps --force-recreate $2"
+}
+
+chaws_wait_healthy() {
+  if ! chaws_run "for i in \$(seq 1 180); do s=\$(docker inspect --format '{{.State.Health.Status}}' \$(cd $CHAWS_REMOTE && docker compose ps -q $1) 2>/dev/null); [ \"\$s\" = healthy ] && exit 0; sleep 1; done; exit 1"; then
+    echo "[chaws] $1 이 180초 안에 healthy 가 되지 않았습니다."
+    chaws_run "cd $CHAWS_REMOTE && docker compose logs --tail 80 $1" || true
+    exit 1
+  fi
+  echo "[chaws] $1 healthy"
+}
+
+deploy_chaws_be() {
+  chaws_require_env
+  echo "[chaws-be] 59 api jar 옮기기"
+  chaws_promote_from_dev platform-core aimbase-api-1
+  chaws_send scripts/chaws-bootstrap.sh "$CHAWS_SERVER:$CHAWS_REMOTE/build/chaws-bootstrap.sh"
+  chaws_sync_compose
+  echo "[chaws-be] DB, Redis"
+  chaws_run "cd $CHAWS_REMOTE && docker compose up -d db redis"
+  chaws_wait_healthy db
+  chaws_wait_healthy redis
+  chaws_keep_image aimbase-api api
+  echo "[chaws-be] 이미지 빌드와 api 재시작"
+  chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build api && docker compose up -d --no-deps --force-recreate api"
+  chaws_wait_healthy api
+}
+
+deploy_chaws_agent() {
+  chaws_require_env
+  if ! chaws_run "grep -Eq '^AIMBASE_RUNNER_SERVER_MCP_API_KEY=.+' $CHAWS_REMOTE/agent.env && grep -Eq '^AGENT_API_KEY=.+' $CHAWS_REMOTE/agent.env"; then
+    echo "chaws $CHAWS_REMOTE/agent.env 에 bp_wms 실행기 전용 키가 없습니다. 운용 가이드 § 2-10 대로 발급해 넣은 뒤 다시 실행하세요."
+    exit 1
+  fi
+  echo "[chaws-agent] 59 실행기 jar 옮기기"
+  chaws_promote_from_dev aimbase-agent aimbase-aimbase-agent-1
+  chaws_sync_compose
+  chaws_keep_image aimbase-aimbase-agent aimbase-agent
+  echo "[chaws-agent] 이미지 빌드와 실행기 재시작"
+  chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build aimbase-agent && docker compose up -d --no-deps --force-recreate aimbase-agent"
+  chaws_wait_healthy aimbase-agent
+}
+
+case "$TARGET" in
+  chaws-init)  deploy_chaws_init; exit 0 ;;
+  chaws-be)    deploy_chaws_be; echo "배포 완료: 운영 chaws $CHAWS_SERVER db, redis, api"; exit 0 ;;
+  chaws-agent) deploy_chaws_agent; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent"; exit 0 ;;
+  chaws)       deploy_chaws_be; deploy_chaws_agent; echo "배포 완료: 운영 chaws $CHAWS_SERVER db, redis, api, aimbase-agent"; exit 0 ;;
+esac
+
 case "$TARGET" in
   wjbid-sandbox) deploy_wjbid_sandbox; echo "배포 완료: 우진비드 AWS $WJBID_SERVER skill-sandbox"; exit 0 ;;
   wjbid-be)      deploy_wjbid_be; echo "배포 완료: 우진비드 AWS $WJBID_SERVER api"; exit 0 ;;
@@ -245,7 +374,7 @@ case "$TARGET" in
   mcp)    deploy_mcp ;;
   sandbox) deploy_sandbox ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws]"; exit 1 ;;
 esac
 
 echo ""
