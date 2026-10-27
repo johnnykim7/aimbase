@@ -151,7 +151,7 @@
 | 4 | 열쇠 | chaws `/home/ubuntu/aimbase/secrets/bp-wms-api-key`(값은 파일에만) |
 | 5 | 단계에 넣은 연결 | `cli-runner-bp-wms-work01`. CR-161 뒤 묶음 `cli-runner-bp-wms-rr` |
 | 6 | 운영 등록 완료 시각 | 4절 8번 뒤 적는다 |
-| 7 | 등록할 워크플로우 정의 | bp-wms dev f71bc0531 의 `docs/자산/aimbase/wave-plan-opinion-workflow.json`(이미 있으면 PUT 으로 고친다). 맥 연습 설치에 이 판을 PUT(200)으로 넣어 DB 의 단계가 정의와 같음을 봤다(단계 연결만 더함) |
+| 7 | 등록할 워크플로우 정의 | bp-wms dev 1c9fe88e8 의 `docs/자산/aimbase/wave-plan-opinion-workflow.json`(이미 있으면 PUT 으로 고친다). 구역을 「구역 N」 으로 부르게 지시문을 고친 판으로, f71bc0531 판과는 지시문 두 칸만 다르다. 맥 연습 설치에 이 판을 PUT(200)으로 넣어 DB 의 단계가 정의와 같음을 봤다(단계 연결만 더함) |
 
 ## 6. 영향 설계서
 
