@@ -5,8 +5,9 @@
 # 비밀값은 secrets/ 와 agent.env 에만 쓰고 화면과 명령 인자에 싣지 않는다. 이미 된 일은 건너뛴다.
 #   admin        첫 관리자(tenant_admins)와 CLI 허용 테넌트
 #   tenant       테넌트 bp_wms, 실행기 전용 키(agent.env), bp-wms 키(secrets/bp-wms-api-key)
-#   connections  계정마다 연결 하나와 ROUND_ROBIN 묶음. 로그인 전 계정은 ACCOUNTS 에서 빼고 돌리고,
-#                로그인 뒤 같은 단계를 다시 돌리면 연결을 더하고 묶음 구성원을 ACCOUNTS 대로 맞춘다
+#   connections  로그인된 계정마다 연결 하나와 ROUND_ROBIN 묶음. 계정은 실행기의 claude-accounts 아래
+#                로그인 파일이 있는 폴더다. 계정을 새로 로그인한 뒤 다시 돌리면 연결을 더하고 묶음 구성원을 맞춘다.
+#                ACCOUNTS="work01 work02" 처럼 주면 그 목록을 쓴다
 #   workflow     워크플로우 정의(표준 입력)를 등록한다. 단계 opinion 의 연결은 work01
 #   smoke        bp-wms 가 부르는 길로 워크플로우를 한 번 돌린다. work01 로그인 뒤에 한다
 set -euo pipefail
@@ -17,7 +18,7 @@ API="http://127.0.0.1:8280/api/v1"
 TENANT="bp_wms"
 ADMIN_EMAIL="platform-admin@aimbase.local"
 RUNNER="cli-runner-bp-wms"
-ACCOUNTS="${ACCOUNTS:-work01 work02 work03}"
+ACCOUNTS="${ACCOUNTS:-}"
 GROUP="$RUNNER-rr"
 WORKFLOW_CONNECTION="$RUNNER-work01"
 HDR="secrets/.auth-header"
@@ -109,7 +110,19 @@ PY
   fi
 }
 
+# 계정 폴더는 실행 계정 999 소유라 서버 계정으로는 못 읽는다. 실행기 컨테이너 안에서 센다.
+logged_in_accounts() {
+  docker compose exec -T aimbase-agent sh -c \
+    'for d in /home/appuser/.claude-accounts/*/; do [ -s "$d.credentials.json" ] && basename "$d"; done; true' \
+    | sort | paste -sd ' ' -
+}
+
 step_connections() {
+  if [ -z "$ACCOUNTS" ]; then
+    ACCOUNTS=$(logged_in_accounts)
+    [ -n "${ACCOUNTS// /}" ] || { echo "[connections] 로그인된 계정이 없음. 계정 로그인 뒤 다시 돌린다"; exit 1; }
+    echo "[connections] 로그인된 계정: $ACCOUNTS"
+  fi
   login_tenant
   for a in $ACCOUNTS; do
     id="$RUNNER-$a"
