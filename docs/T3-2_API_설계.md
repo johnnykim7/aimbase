@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 6.9 | 최종 수정: 2026-10-25 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156
+> 설계 버전: 7.0 | 최종 수정: 2026-10-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -282,9 +282,38 @@
   "connection_group_id": "grp-anthropic-prod"
 }
 ```
-- `connection_group_id` 지정 시 → 그룹 전략에 따라 커넥션 선택 + 커넥션 레벨 폴백
-- `connection_id` 지정 시 → 기존 동작 (단일 커넥션, 폴백 없음)
-- 둘 다 미지정 시 → 테넌트 기본 그룹(is_default=true) 사용, 없으면 ModelRouter
+- `connection_group_id` 지정 시: 그룹에서 멤버 커넥션 하나를 골라, 그 커넥션을 `connection_id` 로 지정한 요청과 같은 처리로 실행한다. 일반, 도구 루프(`actions_enabled`), 실시간(`stream=true`) 모두 같다 (CR-161, BIZ-127)
+  - 멤버 순서: 같은 `session_id` 로 앞서 성공한 멤버(고정) 먼저, 그다음 그룹 전략 순서. 서킷 브레이커가 열렸거나 한도로 빠진 멤버는 건너뛴다. `session_id` 가 없으면 고정 없이 전략 순서
+  - 다음 멤버로 넘기는 실패는 BIZ-128. 그 밖의 실패는 그 멤버의 오류를 그대로 돌려준다
+  - 실시간은 답 이벤트(text, thinking, tool_use)를 하나라도 보낸 뒤면 넘기지 않는다
+  - 채팅 실행 기록, 사용량, 이벤트의 `connection_id` 는 실제로 실행한 멤버다
+  - 둘 다 주면 `connection_group_id` 가 앞선다
+- `connection_id` 지정 시: 기존 동작 (단일 커넥션, 폴백 없음)
+- 둘 다 미지정 시: 테넌트의 기본 anthropic-cli 커넥션(CR-075), 없으면 ModelRouter. 테넌트 기본 그룹(is_default=true)은 요청 처리에 쓰지 않는다 (CR-161 에서 코드 기준으로 고침)
+
+### 커넥션 그룹 오류 (CR-161)
+
+| 순번 | 메시지 머리 | 뜻 | 비스트림 HTTP |
+|------|------------|----|--------------|
+| 1 | `connection_group_unavailable:retry_after=<ISO-8601>` | 고를 수 있는 멤버가 없다. 가장 먼저 풀리는 시각 | 503 |
+| 2 | `cli_account_limited:resets_at=<epoch 초>:type=<한도 종류>:` | CLI 계정 한도. 그룹 안에서는 다음 멤버로 넘기고, 단일 커넥션 요청이면 그대로 돌려준다 | 503 |
+
+실시간은 기존처럼 SSE 오류로 끝난다.
+
+### 워크플로우 단계 config `connection_group_id` (CR-161, PRD-348)
+
+| 순번 | 단계 | 키 | 같은 멤버를 쓰는 단위 |
+|------|------|----|----------------------|
+| 1 | LLM_CALL (EVALUATOR_LOOP generator 포함) | `connection_group_id` | 워크플로우 run |
+| 2 | AGENT_CALL | `connection_group_id` | 단계의 자식 세션 (CR-106 이어하기 포함) |
+| 3 | LARGE_INPUT | `connection_group_id` | 워크플로우 run. 청크 호출마다 그룹을 거친다 |
+
+- `connection_id` 보다 앞선다. 워크플로우 저장 API 는 바뀌지 않는다(steps JSONB 의 config 키)
+- 단계 이벤트(STEP_START, LLM_REQUEST 등)의 `connection_id` 는 실제로 실행한 멤버다
+
+### 실행기 `/v1/chat` 오류 본문 (CR-161)
+
+실행기는 CLI 실패를 `{"error": "<메시지>"}` 본문으로 돌려준다(지금은 Spring 기본 오류 본문이라 메시지가 빠진다). 실시간 `/v1/chat/stream` 은 기존 `{"type":"error","message":...}` 그대로다.
 
 ### 검증 규칙
 - members 내 모든 connection_id는 동일 adapter 타입이어야 함 (크로스 프로바이더 불가)
