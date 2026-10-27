@@ -99,7 +99,7 @@
 
 - compose 정본은 저장소 `docker-compose.chaws.yml`. 서버에서 고치지 않는다
 - 서버 폴더 `/home/ubuntu/aimbase`. 3PL 레포 폴더(`/home/ubuntu/projects`)와 GitHub 실행기 폴더 밖이다. compose 이름은 `aimbase`
-- `./deploy.sh chaws-be`(DB, Redis, api), `./deploy.sh chaws-agent`(실행기), `./deploy.sh chaws`(이 순서로 둘). 우진비드 AWS 대상(CR-151)과 같은 방식이다. jar 는 맥에서 빌드하지 않고 개발기 59 에서 지금 도는 jar 와 Dockerfile 을 서버 `build/` 로 옮겨 서버에서 이미지를 만들고(59 build 폴더의 jar 가 59 컨테이너 안 jar 와 sha256 이 다르면 멈춘다. 맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있다), 바꾸기 전 이미지는 `pre-<시각>` 태그로 남겨 되돌리는 명령을 출력한다. 기동 판정은 컨테이너 healthy 다
+- `./deploy.sh chaws-be`(DB, Redis, api), `./deploy.sh chaws-agent`(실행기), `./deploy.sh chaws`(이 순서로 둘). 우진비드 AWS 대상(CR-151)과 같은 방식이다. 올릴 커밋을 `CHAWS_COMMIT` 으로 받아 그 커밋만 받은 별도 worktree 에서 jar 를 빌드하고, jar 와 Dockerfile 을 서버 `build/` 로 보내 서버에서 이미지를 만들고(맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있다. 서버 `deploy-backup/deployed.log` 에 서비스별 커밋을 남긴다), 바꾸기 전 이미지는 `pre-<시각>` 태그로 남겨 되돌리는 명령을 출력한다. 기동 판정은 컨테이너 healthy 다
 - 3PL 자동 배포와 섞이지 않는다. 그쪽은 bp-infra compose 의 서비스 이름을 집어 `--no-deps` 로만 올리고, `docker image prune -f` 는 이름 없는 이미지만 지운다. `pre-<시각>` 은 이름이 있어 남는다
 - 비밀값은 서버 `api.env`, `agent.env`, `db.env` 와 `secrets/` 아래 파일에만 둔다(권한 600). 서버에서 `openssl rand` 로 만들고 화면과 기록에 찍지 않는다
 
@@ -180,7 +180,7 @@
 | 5 | workflow | 처음 201, 다시 돌리면 200(고침). DB 의 단계 `opinion` 연결이 `cli-runner-bp-wms-work01` |
 | 6 | smoke | 망 `aimbase-apps` 와 bp-wms 키로 실행이 만들어지고 실행기 CLI 까지 갔다. 계정 로그인이 없어 `Not logged in` 으로 `failed`(로컬에선 예상한 결과) |
 
-- 리허설 jar 는 맥에서 12:03 에 빌드한 것이다. 그때까지 59 배포(api 10/26 23:16, 실행기 10/25 23:59) 뒤 바뀐 소스가 없었고 크기도 59 jar 와 같았다(148741516 바이트). 12:08 부터 CR-161 창이 작업 폴더 소스를 고치기 시작해, 운영에는 맥 빌드 대신 59 에서 도는 jar 를 옮기게 `deploy.sh` 를 바꿨다. 받기와 대조만 떼어 돌려 api `0de1b8be24e8`, 실행기 `789d20c224b1` 이 59 컨테이너 안 jar 와 같음을 봤다
+- 리허설 jar 는 맥 작업 폴더에서 12:03 에 빌드한 것이다. 12:08 부터 CR-161 창이 작업 폴더 소스를 고치기 시작해, 운영에는 정해진 커밋의 worktree 에서 빌드하게 `deploy.sh` 를 바꿨다(컨타 지시). 그런데 dev 끝 42bbfba 는 worktree 에서 컴파일되지 않는다. 59 에 나가 있는 앞 CR 변경이 커밋되지 않았기 때문이다(새 파일 4개와 고친 파일 여럿, 그중 7개는 CR-161 이 고치는 파일과 섞임). 정리 커밋 뒤 그 커밋의 jar 로 리허설을 다시 돈다
 - 본 것 1: smoke 첫 시도는 34초 만에 `Not logged in` 으로 실패했고, 두 번째 시도는 새 CLI 를 띄운 뒤 실행기 한 턴 제한(600초)까지 답이 없었다. 로그인 없음 때문인지, 같은 때 로컬 장비가 느려진 탓인지(본 것 2) 가르지 못했다. 운영에서는 계정 로그인 뒤 smoke 를 돌리므로 다시 나오면 그때 본다
 - 본 것 2: 리허설 중 로컬 DB 가 두 번 스스로 재시작했다(`server process exited with exit code 2`, 컨테이너 재시작과 메모리 초과 종료는 없음). 그때 맥 도커 메모리 8GB 를 컨테이너 25개가 7GB 가까이 쓰고 있었다. 원인은 확인 못 했다. 운영 반영 뒤 DB 기록에서 같은 줄이 있는지 본다
 

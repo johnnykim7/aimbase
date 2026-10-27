@@ -477,10 +477,10 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 
 **처음 세우기** (맥의 저장소 루트에서. `bootstrap <단계>` 는 `ssh chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh <단계>'`):
 1. `./deploy.sh chaws-init`: 서버 폴더, 비밀값 파일, 망 `aimbase-apps`
-2. `./deploy.sh chaws-be`: db, redis, api 를 올리고 `chaws-bootstrap.sh` 를 서버 `build/` 에 둔다
+2. `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-be`: db, redis, api 를 올리고 `chaws-bootstrap.sh` 를 서버 `build/` 에 둔다
 3. `bootstrap admin`: 플랫폼 관리자(비밀번호는 `secrets/admin-password`), master `global_config` 의 CLI 허용 테넌트에 `bp_wms`
 4. `bootstrap tenant`: 테넌트 `bp_wms`, 실행기 전용 키(`agent.env` 에 덧붙임), 소비앱 키(`secrets/bp-wms-api-key`)
-5. `./deploy.sh chaws-agent`: 실행기. 실행기 기록에 `Agent registered successfully: name=cli-runner-bp-wms` 가 나오면 된 것
+5. `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent`: 실행기. 실행기 기록에 `Agent registered successfully: name=cli-runner-bp-wms` 가 나오면 된 것
 6. 계정 로그인(아래)
 7. `bootstrap connections`: 계정마다 CLI 커넥션(`cli-runner-bp-wms-work01` 부터 `work03`, `config_dir` 만 다름)과 묶음 `cli-runner-bp-wms-rr`(`ROUND_ROBIN`)
 8. `bootstrap workflow < <워크플로우 JSON>`: 등록하거나 고친다. 단계 `opinion` 의 커넥션은 `cli-runner-bp-wms-work01`
@@ -494,7 +494,7 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 ```
 CLI 가 뜨면 `/login` 을 치고, 나온 주소를 맥 브라우저에서 그 계정으로 승인한 뒤 받은 코드를 붙여 넣습니다. `/exit` 로 나와 `work02`, `work03` 도 같이 합니다. 로그인 정보는 서버 `claude-accounts/<계정>` 에만 남습니다.
 
-**고치기**: `./deploy.sh chaws-be` 는 api 만, `./deploy.sh chaws-agent` 는 실행기만 다시 만듭니다(`--no-deps`). jar 는 맥에서 빌드하지 않고 개발기 59 에서 지금 도는 jar 와 Dockerfile 을 옮깁니다. 59 build 폴더의 jar 가 59 컨테이너 안 jar 와 다르면 멈추니, 운영에 올릴 판은 59 에 먼저 반영합니다. db, redis 와 운영 3PL 컨테이너는 다시 만들지 않습니다. 운영 3PL 의 자동 배포는 자기 서비스만 다시 만들고 꼬리표 없는 이미지만 지워 Aimbase 와 겹치지 않습니다.
+**고치기**: `./deploy.sh chaws-be` 는 api 만, `./deploy.sh chaws-agent` 는 실행기만 다시 만듭니다(`--no-deps`). 올릴 커밋은 `CHAWS_COMMIT` 으로 줍니다. 맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있어, 그 커밋만 받은 별도 worktree(`~/.cache/aimbase-chaws-build`)에서 jar 를 빌드하고 Dockerfile, compose, 설치 스크립트도 거기서 보냅니다. 무엇이 도는지는 서버 `deploy-backup/deployed.log` 에 서비스별 커밋으로 남습니다. db, redis 와 운영 3PL 컨테이너는 다시 만들지 않습니다. 운영 3PL 의 자동 배포는 자기 서비스만 다시 만들고 꼬리표 없는 이미지만 지워 Aimbase 와 겹치지 않습니다.
 
 **되돌리기**: 배포 때 앞 이미지에 `pre-<시각>` 꼬리표를 붙이고 되돌리는 명령을 찍습니다(`docker tag aimbase-api:pre-<시각> aimbase-api:latest && docker compose up -d --no-deps --force-recreate api`). 앞 compose 는 `deploy-backup/docker-compose.yml.<시각>` 에 있습니다.
 

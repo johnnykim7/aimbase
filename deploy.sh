@@ -23,7 +23,7 @@
 #         ./deploy.sh wjbid         (위 셋을 이 순서로)
 #
 # 운영 3PL 서버 chaws(/home/ubuntu/aimbase, CR-162). compose 는 docker-compose.chaws.yml, 화면은 없다. 운영 3PL 컨테이너와 같은 서버라 그쪽 폴더와 compose 를 쓰지 않는다.
-# jar 는 맥에서 빌드하지 않고 개발기 59 에서 지금 도는 것을 옮긴다. 운영에 올릴 판은 59 에 먼저 반영한다.
+# 운영에 올릴 커밋을 CHAWS_COMMIT 으로 준다(예: CHAWS_COMMIT=42bbfba ./deploy.sh chaws-be). 그 커밋을 받은 별도 worktree 에서 빌드한다.
 #         ./deploy.sh chaws-init  (처음 한 번: 폴더, 비밀값 파일, 망 aimbase-apps. 있는 파일은 덮지 않는다)
 #         ./deploy.sh chaws-be    (DB, Redis, api)
 #         ./deploy.sh chaws-agent (실행기)
@@ -236,12 +236,14 @@ deploy_wjbid_agent() {
 }
 
 # 운영 3PL 서버 chaws 는 jar 와 Dockerfile 을 build/ 로 보내 서버에서 이미지를 만든다.
-# jar 는 맥에서 빌드하지 않는다. 맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있어, 59 에서 지금 도는 jar 를 그대로 옮긴다.
+# jar, Dockerfile, compose, 설치 스크립트는 맥 작업 폴더가 아니라 CHAWS_COMMIT 을 받은 worktree 에서 가져간다.
+# 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있고, 운영에는 어느 커밋인지 알 수 있는 것만 올린다.
 # DB 와 Redis 는 이미 떠 있으면 다시 만들지 않는다. api, 실행기는 --no-deps 로 그것만 다시 만든다.
 CHAWS_SERVER="ubuntu@3.39.94.112"
 CHAWS_SSH_KEY="$HOME/.ssh/id_ed25519_therecommerce"
 CHAWS_REMOTE="/home/ubuntu/aimbase"
 CHAWS_STAMP="$(date +%Y%m%d-%H%M%S)"
+CHAWS_WORKTREE="$HOME/.cache/aimbase-chaws-build"
 
 chaws_run()  { ssh -i "$CHAWS_SSH_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=10 "$CHAWS_SERVER" "$@"; }
 chaws_send() { scp -q -i "$CHAWS_SSH_KEY" -o IdentitiesOnly=yes "$@"; }
@@ -265,31 +267,42 @@ deploy_chaws_init() {
   echo "[chaws-init] 완료"
 }
 
-# $1 모듈(platform-core, aimbase-agent), $2 59 에서 그 jar 로 도는 컨테이너.
-# 59 build 폴더의 jar 가 그 컨테이너 안 jar 와 다르면 59 배포가 덜 끝난 것이라 멈춘다.
-# 받은 파일은 맥 backend/<모듈>/build/chaws/ 에 두고 다음 배포 때 덮어쓴다.
-chaws_promote_from_dev() {
-  local dir jar sum running
-  jar=$(ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=10 "$SERVER" "ls $REMOTE/backend/$1/build/libs/*.jar | grep -v plain")
-  if [ -z "$jar" ] || [ "$(printf '%s\n' "$jar" | wc -l)" -ne 1 ]; then
-    echo "59 backend/$1/build/libs 에 jar 가 하나가 아닙니다."
+chaws_checkout() {
+  if [ -z "$CHAWS_COMMIT" ]; then
+    echo "운영에 올릴 커밋을 CHAWS_COMMIT=<커밋> 으로 주세요."
     exit 1
   fi
-  running=$(ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "$SERVER" "docker exec $2 sha256sum /app/app.jar" | cut -d' ' -f1)
-  dir="backend/$1/build/chaws"
-  mkdir -p "$dir"
-  scp -q -i "$SSH_KEY" -o IdentitiesOnly=yes "$SERVER:$jar" "$dir/$1.jar"
-  scp -q -i "$SSH_KEY" -o IdentitiesOnly=yes "$SERVER:$REMOTE/backend/$1/Dockerfile" "$dir/Dockerfile"
-  sum=$(shasum -a 256 "$dir/$1.jar" | cut -d' ' -f1)
-  if [ "$sum" != "$running" ]; then
-    echo "59 의 $1 jar 가 $2 에서 도는 것과 다릅니다. 59 배포를 먼저 마치세요."
+  if ! CHAWS_SHA=$(git rev-parse -q --verify "$CHAWS_COMMIT^{commit}"); then
+    echo "커밋 $CHAWS_COMMIT 을 찾지 못했습니다."
     exit 1
   fi
-  echo "[chaws] 59 $2 와 같은 jar ${sum:0:12}"
+  git worktree prune
+  if [ -d "$CHAWS_WORKTREE" ]; then
+    if [ -n "$(git -C "$CHAWS_WORKTREE" status --porcelain)" ]; then
+      echo "$CHAWS_WORKTREE 에 고친 파일이 있습니다. 커밋에 없는 것이 섞이니 비우고 다시 실행하세요."
+      exit 1
+    fi
+    git -C "$CHAWS_WORKTREE" checkout -q --detach "$CHAWS_SHA"
+  else
+    git worktree add -q --detach "$CHAWS_WORKTREE" "$CHAWS_SHA"
+  fi
+  echo "[chaws] 커밋 ${CHAWS_SHA:0:9} 에서 빌드"
+}
+
+# $1 모듈(platform-core, aimbase-agent). worktree 에서 빌드한 jar 와 그 커밋의 Dockerfile 을 서버 build/ 로 보낸다.
+chaws_build_send() {
+  local jar
+  (cd "$CHAWS_WORKTREE/backend" && ./gradlew "$1:bootJar")
+  jar=$(find "$CHAWS_WORKTREE/backend/$1/build/libs" -name '*.jar' ! -name '*plain*')
   chaws_run "mkdir -p $CHAWS_REMOTE/build/backend/$1/build/libs"
   # Dockerfile 이 libs 의 *.jar 를 모두 복사하므로 이름을 하나로 고정해 덮어쓴다.
-  chaws_send "$dir/$1.jar" "$CHAWS_SERVER:$CHAWS_REMOTE/build/backend/$1/build/libs/$1.jar"
-  chaws_send "$dir/Dockerfile" "$CHAWS_SERVER:$CHAWS_REMOTE/build/backend/$1/Dockerfile"
+  chaws_send "$jar" "$CHAWS_SERVER:$CHAWS_REMOTE/build/backend/$1/build/libs/$1.jar"
+  chaws_send "$CHAWS_WORKTREE/backend/$1/Dockerfile" "$CHAWS_SERVER:$CHAWS_REMOTE/build/backend/$1/Dockerfile"
+}
+
+# 지금 무엇이 도는지 서버에서 볼 수 있게 서비스별 커밋을 남긴다.
+chaws_record() {
+  chaws_run "echo '$CHAWS_STAMP $1 $CHAWS_SHA' >> $CHAWS_REMOTE/deploy-backup/deployed.log"
 }
 
 chaws_require_env() {
@@ -300,7 +313,7 @@ chaws_require_env() {
 }
 
 chaws_sync_compose() {
-  chaws_send docker-compose.chaws.yml "$CHAWS_SERVER:$CHAWS_REMOTE/docker-compose.yml.new"
+  chaws_send "$CHAWS_WORKTREE/docker-compose.chaws.yml" "$CHAWS_SERVER:$CHAWS_REMOTE/docker-compose.yml.new"
   chaws_run "cd $CHAWS_REMOTE && { [ -f docker-compose.yml ] && diff -u docker-compose.yml docker-compose.yml.new || true; }"
   chaws_run "cd $CHAWS_REMOTE && { [ -f docker-compose.yml ] && cp -p docker-compose.yml deploy-backup/docker-compose.yml.$CHAWS_STAMP || true; } && mv docker-compose.yml.new docker-compose.yml"
 }
@@ -321,9 +334,9 @@ chaws_wait_healthy() {
 
 deploy_chaws_be() {
   chaws_require_env
-  echo "[chaws-be] 59 api jar 옮기기"
-  chaws_promote_from_dev platform-core aimbase-api-1
-  chaws_send scripts/chaws-bootstrap.sh "$CHAWS_SERVER:$CHAWS_REMOTE/build/chaws-bootstrap.sh"
+  chaws_checkout
+  chaws_build_send platform-core
+  chaws_send "$CHAWS_WORKTREE/scripts/chaws-bootstrap.sh" "$CHAWS_SERVER:$CHAWS_REMOTE/build/chaws-bootstrap.sh"
   chaws_sync_compose
   echo "[chaws-be] DB, Redis"
   chaws_run "cd $CHAWS_REMOTE && docker compose up -d db redis"
@@ -333,6 +346,7 @@ deploy_chaws_be() {
   echo "[chaws-be] 이미지 빌드와 api 재시작"
   chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build api && docker compose up -d --no-deps --force-recreate api"
   chaws_wait_healthy api
+  chaws_record api
 }
 
 deploy_chaws_agent() {
@@ -341,13 +355,14 @@ deploy_chaws_agent() {
     echo "chaws $CHAWS_REMOTE/agent.env 에 bp_wms 실행기 전용 키가 없습니다. 운용 가이드 § 2-10 대로 발급해 넣은 뒤 다시 실행하세요."
     exit 1
   fi
-  echo "[chaws-agent] 59 실행기 jar 옮기기"
-  chaws_promote_from_dev aimbase-agent aimbase-aimbase-agent-1
+  chaws_checkout
+  chaws_build_send aimbase-agent
   chaws_sync_compose
   chaws_keep_image aimbase-aimbase-agent aimbase-agent
   echo "[chaws-agent] 이미지 빌드와 실행기 재시작"
   chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build aimbase-agent && docker compose up -d --no-deps --force-recreate aimbase-agent"
   chaws_wait_healthy aimbase-agent
+  chaws_record aimbase-agent
 }
 
 case "$TARGET" in
