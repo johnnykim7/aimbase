@@ -49,7 +49,8 @@ class WorkflowEngineCyclicTest {
                 null,    // CR-116: activeCliWorkerRegistryProvider
                 null,    // CR-116: connectionAdapterFactoryProvider
                 null,    // CR-121: cancelRegistryProvider (엔진 자체 폴백 인스턴스)
-                null);   // CR-147: stepSkillsProvider
+                null,    // CR-147: stepSkillsProvider
+                null);   // CR-164: devWorkRunBindingProvider
     }
 
     private WorkflowEntity wf(String graphMode) {

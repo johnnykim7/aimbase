@@ -257,7 +257,7 @@ public class HttpRequestTool implements EnhancedToolExecutor {
         auditPayload.put("method", method);
         auditPayload.put("uri", uri.toString());
         auditPayload.put("status", status);
-        auditPayload.put("requestHeaders", maskHeaders(requestHeaders));
+        auditPayload.put("requestHeaders", maskHeaders(requestHeaders, authHeaderName(config)));
         auditPayload.put("requestBody", bodyString == null ? null : truncate(bodyString, AUDIT_BODY_SUMMARY_LIMIT));
         auditPayload.put("responseSummary", truncate(response.body(), AUDIT_BODY_SUMMARY_LIMIT));
 
@@ -381,11 +381,31 @@ public class HttpRequestTool implements EnhancedToolExecutor {
         return flat;
     }
 
-    private Map<String, String> maskHeaders(Map<String, String> headers) {
+    /**
+     * CR-164 BIZ-132: 연결 auth 가 API_KEY 머리값이면 그 이름도 비밀이다.
+     * 값이 비어 주입하지 않았더라도 입력 headers 로 같은 이름을 실을 수 있으니 이름만으로 정한다.
+     */
+    @SuppressWarnings("unchecked")
+    private String authHeaderName(Map<String, Object> config) {
+        if (!(config.get("auth") instanceof Map<?, ?> authMap)) {
+            return null;
+        }
+        Map<String, Object> auth = (Map<String, Object>) authMap;
+        String authType = Optional.ofNullable(auth.get("type")).map(Object::toString).orElse("NONE").toUpperCase(Locale.ROOT);
+        String in = Optional.ofNullable(auth.get("in")).map(Object::toString).orElse("header").toLowerCase(Locale.ROOT);
+        if (!"API_KEY".equals(authType) || !"header".equals(in)) {
+            return null;
+        }
+        return Optional.ofNullable(auth.get("name")).map(Object::toString).orElse("X-Api-Key");
+    }
+
+    private Map<String, String> maskHeaders(Map<String, String> headers, String authHeaderName) {
+        String secretName = authHeaderName == null ? null : authHeaderName.toLowerCase(Locale.ROOT);
         Map<String, String> masked = new LinkedHashMap<>();
         headers.forEach((k, v) -> {
             if (k == null) return;
-            if (MASKED_HEADERS.contains(k.toLowerCase(Locale.ROOT))) {
+            String lower = k.toLowerCase(Locale.ROOT);
+            if (MASKED_HEADERS.contains(lower) || lower.equals(secretName)) {
                 masked.put(k, "***");
             } else {
                 masked.put(k, v);

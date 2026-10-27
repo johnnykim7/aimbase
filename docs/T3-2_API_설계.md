@@ -2833,7 +2833,7 @@ cap 32000
 
 ### GET `/api/v1/dev-work-items` [PRD-350]
 
-최근 바뀐 순. 쿼리 `page`(0부터), `size`(기본 20, 최대 100). 응답은 `item` 모양의 배열과 `total`.
+최근 바뀐 순. 쿼리 `page`(0부터), `size`(기본 20, 최대 100). 응답은 `ApiResponse.page` 모양으로 `data` 는 `item` 모양의 배열, `pagination` 은 `page`, `size`, `totalElements`, `totalPages`.
 
 ### GET `/api/v1/dev-work-items/{work_item_id}` [PRD-350]
 

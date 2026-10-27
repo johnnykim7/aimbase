@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.23.0** | 2026-10-27 | Aimbase v8.18.0 기준
+> **v3.24.0** | 2026-10-28 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -744,7 +744,7 @@ Aimbase는 토큰 비용 절감을 위해 세 가지 최적화를 자동 적용�
 
 ### 7-6. HTTP 요청 도구 (`http_request`) [CR-054]
 
-Aimbase 에이전트/워크플로우가 임의의 외부 REST API를 호출할 때 사용하는 범용 Tool. 기존 `connections` 테이블에 `type="HTTP"` 레코드를 등록한 뒤 `connection_id`로 참조한다. 인증 헤더는 Connection 메타에서 자동 주입되며 4xx/5xx 응답도 예외가 아닌 status 코드로 반환되어 워크플로우 CONDITION 분기가 동작한다.
+Aimbase 에이전트/워크플로우가 임의의 외부 REST API를 호출할 때 사용하는 범용 Tool. 기존 `connections` 테이블에 `type="HTTP"` 레코드를 등록한 뒤 `connection_id`로 참조한다. 인증 헤더는 Connection 메타에서 자동 주입된다. 응답 상태가 200~399 면 성공이고, 4xx/5xx 와 네트워크 실패는 도구 결과 `success=false` 다. 워크플로우 TOOL_CALL 단계에서는 이것이 단계 실패가 되어 `error_handling` 재시도를 따른다.
 
 **Connection 등록 (type=HTTP)**
 
@@ -824,11 +824,11 @@ curl -X POST /api/v1/tools/http_request/execute \
 }
 ```
 
-이후 CONDITION 스텝에서 `{{call_external.structured_data.status}} equals 200`으로 분기 가능.
+이후 CONDITION 스텝에서 `{{call_external.structured_data.status}} equals 200`처럼 성공 상태끼리 분기할 수 있다. 4xx/5xx 는 단계가 실패하므로 CONDITION 까지 오지 않는다.
 
 **주의**
 - 기본 타임아웃 30초, 최대 120초. 더 긴 호출은 별도 Tool(SDK) 사용 권장
-- 인증 헤더/`Authorization`/`X-Api-Key`/`Cookie`는 감사 로그에 `***`로 마스킹되어 남음
+- `Authorization`, `X-Api-Key`, `Cookie`, `Proxy-Authorization` 과, Connection `auth` 가 `API_KEY` 머리값이면 그 `name`(예 `X-Service-Token`)은 감사 로그에 `***`로 마스킹되어 남음. 입력 `headers` 로 같은 이름을 실어도 대소문자 무관하게 가림(CR-164)
 - 워크플로우 레벨 재시도(`WorkflowStep.retry`)만 사용 — Tool 내부 재시도 없음
 
 ---
@@ -2269,9 +2269,97 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 
 실시간은 SSE `error` 이벤트로 끝납니다. 워크플로우 단계는 단계 실패로 남고 메시지는 위와 같습니다.
 
+## 26. 개발 작업 상태와 상태 변경 알림 [CR-164]
+
+개발 작업 하나(작업 번호)의 단계, 상태, 증빙 주소를 Aimbase 가 원천으로 들고, 바뀔 때마다 이벤트 트리거를 단 워크플로우를 실행합니다. 받는 쪽으로 보내는 일은 그 워크플로우의 `http_request` 단계가 합니다. 실행이 실패해도 FAILED 로 바뀐 것이 새 알림 실행을 만들므로 실패도 보내집니다.
+
+### 26-1. 상태 보고
+
+```bash
+curl -X POST /api/v1/dev-work-items/W-1/status \
+  -H "X-API-Key: ..." -H "Content-Type: application/json" \
+  -d '{"feature_name": "주문 취소 화면", "stage": "기능", "status": "IN_PROGRESS", "evidence_url": "https://example.com/pr/1"}'
+```
+
+| 칸 | 규칙 |
+|---|---|
+| `work_item_id`(경로) | 필수, 100자 이하 |
+| `feature_name` | 새 작업이면 필수, 300자 이하. 있는 작업이면 생략 가능 |
+| `stage` | 필수, 50자 이하 |
+| `status` | 필수. `IN_PROGRESS`, `COMPLETED`, `FAILED`, `CANCELLED` |
+| `evidence_url` | 선택. http, https 절대 주소, 2000자 이하. 생략하거나 빈 글이면 없음 |
+
+응답 `data` 는 `item`(작업)과 `change`(이번에 남은 변경 한 줄)입니다. 단계, 상태, 증빙이 지금과 모두 같으면 `change` 는 null 이고 알림도 나가지 않습니다(BIZ-129). 같은 보고를 재시도해도 알림이 두 번 나가지 않습니다.
+
+시각 칸(`status_changed_at`, `changed_at`)은 UTC 이고 밀리초까지입니다.
+
+### 26-2. 조회
+
+| 요청 | 응답 |
+|---|---|
+| `GET /api/v1/dev-work-items?page=0&size=20` | 상태가 최근에 바뀐 순. `data` 는 작업 배열, `pagination` 은 `page`, `size`, `totalElements`, `totalPages`. `size` 는 최대 100 |
+| `GET /api/v1/dev-work-items/{work_item_id}` | `item` 과 `changes`(최근순, 최대 100줄). 없으면 404 |
+
+### 26-3. 워크플로우 실행과 잇기
+
+워크플로우 실행 입력에 `_dev_work_item` 을 실으면 그 실행이 작업 상태를 바꿉니다(BIZ-130). 시작에 `IN_PROGRESS`, 끝에 `COMPLETED`, `FAILED`, `CANCELLED` 입니다. 재실행도 같은 입력을 쓰므로 다시 `IN_PROGRESS` 부터 남습니다.
+
+```json
+{"input": {"_dev_work_item": {"work_item_id": "W-1", "feature_name": "주문 취소 화면",
+                              "stage": "실증", "evidence_url": "https://example.com/run/1"}}}
+```
+
+- 칸이 틀리면 run 을 만들지 않고 400 `dev_work_item_invalid:<칸>`
+- 하위 워크플로우 실행(부모 run 이 있는 것)은 잇지 않습니다. 부모가 잇습니다
+
+### 26-4. 상태 변경 워크플로우
+
+`trigger_config` 를 아래로 두면 그 테넌트에서 작업 상태가 바뀔 때마다 실행됩니다(BIZ-131).
+
+```json
+{"type": "event", "event": "DEV_WORK_ITEM_STATUS_CHANGED"}
+```
+
+| 입력 칸 | 값 |
+|---|---|
+| `work_item_id`, `feature_name`, `stage`, `status` | 그 변경의 값 |
+| `evidence_url` | 증빙 주소. 없으면 빈 글 |
+| `reported_at` | 바뀐 시각, UTC 오프셋 ISO-8601(예 `2026-10-28T06:30:00.123Z`) |
+| `change_id` | 변경 줄 id |
+| `source`, `source_run_id` | `API` 또는 `WORKFLOW_RUN`, 실행에서 났으면 그 run id(없으면 빈 글) |
+
+보내는 예(연결 `bp-office-inbound` 는 § 7-6 처럼 `type=HTTP`, `auth` 는 `API_KEY` 머리값과 `value_env`):
+
+```json
+{"trigger_config": {"type": "event", "event": "DEV_WORK_ITEM_STATUS_CHANGED"},
+ "error_handling": {"retryMaxAttempts": 3, "retryDelayMs": 5000},
+ "steps": [{"id": "send", "type": "TOOL_CALL",
+            "config": {"tool": "http_request",
+                       "input": {"connection_id": "bp-office-inbound", "method": "POST",
+                                 "path": "/api/v1/inbound/dev-agent-status",
+                                 "body": {"workItemId": "{{input.work_item_id}}",
+                                          "featureName": "{{input.feature_name}}",
+                                          "stage": "{{input.stage}}",
+                                          "status": "{{input.status}}",
+                                          "evidenceUrl": "{{input.evidence_url}}",
+                                          "reportedAt": "{{input.reported_at}}"}}}}]}
+```
+
+- 알림 실행은 비동기이고, 하나가 실패해도 다른 알림과 상태 기록에 영향이 없습니다
+- 받는 쪽이 4xx, 5xx 를 주면 단계가 실패하고 `error_handling` 재시도를 따릅니다. 그래도 실패하면 실행 기록에서 그 run 을 재실행합니다. 같은 입력이라 `reported_at` 이 바뀌지 않아 받는 쪽이 중복을 거를 수 있습니다
+- 알림 실행 입력에는 `_dev_work_item` 이 없으므로 알림이 다시 알림을 부르지 않습니다
+
+### 26-5. 에러
+
+| 코드 | 원인 |
+|---|---|
+| 400 `dev_work_item_invalid:<칸>` | 칸 없음, 길이 초과, 모르는 상태, http, https 가 아닌 증빙 주소, 새 작업에 `feature_name` 없음 |
+| 404 | 없는 작업 |
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.24.0 | 2026-10-28 | **CR-164 개발 작업 상태와 상태 변경 알림** (§ 26, § 7-6). 개발 작업 API 3개, 실행 입력 `_dev_work_item`, 워크플로우 이벤트 트리거 `DEV_WORK_ITEM_STATUS_CHANGED`. `http_request` 가 연결 `API_KEY` 머리값 이름도 감사에서 가린다. 4xx/5xx 가 단계 실패라는 § 7-6 설명 보정. 기존 워크플로우와 연결은 그대로 |
 | v3.23.0 | 2026-10-27 | **CR-161 연결 묶음** (§ 25, § 5, 스텝 타입 표). 채팅 전 경로(일반, 도구 사용, 실시간)와 LLM_CALL, AGENT_CALL, LARGE_INPUT 단계 config 의 `connection_group_id`. CLI 계정 한도와 실행기에 닿지 못한 실패에서 다음 커넥션으로 넘김, 같은 세션과 실행 1건은 같은 커넥션. 오류 `connection_group_unavailable`, `cli_account_limited`. 그룹 목록, 생성, 수정 응답 필드 이름을 상세와 같게(`is_active` 등) |
 | v3.22.0 | 2026-10-26 | **CR-160 변환 구간 의심 표시** (§ 22-2). `include_segments=true` 구간에 `no_speech_prob`, `avg_logprob`, `compression_ratio`, `suspect_reason`(`NO_SPEECH`, `KNOWN_PHRASE`, null)을 더함. 기존 칸과 받아쓴 글은 그대로 |
 | v3.21.0 | 2026-10-26 | **CR-159 워크플로우 첨부** (§ 4-4, 스텝 타입 표). 실행 API 에 `session_id` 선택 인자, LLM_CALL config `attachments`. 그 세션으로 올린 사진, PDF 를 모델이 그림으로 읽는다. 둘 다 안 쓰면 기존과 같다 |

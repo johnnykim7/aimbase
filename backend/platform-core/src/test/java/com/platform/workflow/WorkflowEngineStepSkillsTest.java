@@ -55,7 +55,8 @@ class WorkflowEngineStepSkillsTest {
         engine = new WorkflowEngine(mock(WorkflowRepository.class), mock(WorkflowRunRepository.class),
                 mock(PendingApprovalRepository.class), new ObjectMapper(), List.of(), mock(PlatformMetrics.class),
                 mock(WorkflowEventPublisher.class), provider(recorder), null, null, null, null, null,
-                provider(stepSkills));
+                provider(stepSkills),
+                null); // CR-164: devWorkRunBindingProvider
     }
 
     @Test

@@ -311,6 +311,80 @@ class HttpRequestToolTest {
         assertThat(reqHeaders.get("X-Api-Key")).isEqualTo("***");
     }
 
+    // ── CR-164 TC-DW-116: 연결 auth 의 API_KEY 머리값 이름도 감사에서 가린다 ──
+    @Test
+    void audit_payload_masks_connection_auth_header_name() {
+        stubConnection(buildConnection("svc", "HTTP", Map.of(
+                "baseUrl", baseUrl,
+                "auth", Map.of("type", "API_KEY", "in", "header", "name", "X-Service-Token", "value", "svc-secret")
+        )));
+        wireMock.stubFor(post(urlEqualTo("/inbound"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{}")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "svc",
+                "method", "POST",
+                "path", "/inbound",
+                "body", Map.of("workItemId", "W-1")
+        ), ToolContext.minimal(null, null));
+
+        wireMock.verify(com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor(urlEqualTo("/inbound"))
+                .withHeader("X-Service-Token", equalTo("svc-secret")));
+        Map<?, ?> reqHeaders = (Map<?, ?>) result.auditPayload().get("requestHeaders");
+        assertThat(reqHeaders.get("X-Service-Token")).isEqualTo("***");
+        assertThat(result.auditPayload().toString()).doesNotContain("svc-secret");
+    }
+
+    // ── CR-164 TC-DW-117: 입력 headers 로 같은 이름(대소문자 달라도)을 실어도 가린다 ──
+    @Test
+    void audit_payload_masks_input_header_with_auth_name_case_insensitive() {
+        stubConnection(buildConnection("svc2", "HTTP", Map.of(
+                "baseUrl", baseUrl,
+                "auth", Map.of("type", "API_KEY", "in", "header", "name", "X-Service-Token", "value_env", "CR164_UNSET_ENV")
+        )));
+        wireMock.stubFor(get(urlEqualTo("/h"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{}")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "svc2",
+                "method", "GET",
+                "path", "/h",
+                "headers", Map.of("x-service-token", "typed-secret")
+        ), ToolContext.minimal(null, null));
+
+        Map<?, ?> reqHeaders = (Map<?, ?>) result.auditPayload().get("requestHeaders");
+        assertThat(reqHeaders.get("x-service-token")).isEqualTo("***");
+        assertThat(result.auditPayload().toString()).doesNotContain("typed-secret");
+    }
+
+    // ── CR-164 TC-DW-118: 기존 가림 이름은 그대로 가리고 일반 머리값은 건드리지 않는다 ──
+    @Test
+    void audit_payload_keeps_existing_masks_and_plain_headers() {
+        stubConnection(buildConnection("svc3", "HTTP", Map.of(
+                "baseUrl", baseUrl,
+                "auth", Map.of("type", "BEARER", "value", "bearer-secret")
+        )));
+        wireMock.stubFor(get(urlEqualTo("/p"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{}")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "svc3",
+                "method", "GET",
+                "path", "/p",
+                "headers", Map.of("X-Request-Id", "req-1")
+        ), ToolContext.minimal(null, null));
+
+        Map<?, ?> reqHeaders = (Map<?, ?>) result.auditPayload().get("requestHeaders");
+        assertThat(reqHeaders.get("Authorization")).isEqualTo("***");
+        assertThat(reqHeaders.get("X-Request-Id")).isEqualTo("req-1");
+    }
+
     // ── T12: 입력 검증 — connection_id 누락 ──
     @Test
     void validateInput_missing_connection_id() {

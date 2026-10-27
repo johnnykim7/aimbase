@@ -71,6 +71,9 @@ public class WorkflowEngine {
     /** CR-147: 단계 지정 스킬 고정. 미주입 환경(일부 단위 테스트)이면 고정하지 않고 실행기가 스스로 해석한다. */
     private final com.platform.skill.StepSkillService stepSkills;
 
+    /** CR-164: 실행 입력 _dev_work_item 을 개발 작업에 잇는다. 미주입 환경(일부 단위 테스트)이면 잇지 않는다. */
+    private final com.platform.devwork.DevWorkItemRunBinding devWorkRunBinding;
+
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
                           PendingApprovalRepository pendingApprovalRepository,
@@ -84,7 +87,8 @@ public class WorkflowEngine {
                           org.springframework.beans.factory.ObjectProvider<com.platform.agent.ActiveCliWorkerRegistry> activeCliWorkerRegistryProvider,
                           org.springframework.beans.factory.ObjectProvider<com.platform.llm.ConnectionAdapterFactory> connectionAdapterFactoryProvider,
                           org.springframework.beans.factory.ObjectProvider<WorkflowCancellationRegistry> cancelRegistryProvider,
-                          org.springframework.beans.factory.ObjectProvider<com.platform.skill.StepSkillService> stepSkillsProvider) {
+                          org.springframework.beans.factory.ObjectProvider<com.platform.skill.StepSkillService> stepSkillsProvider,
+                          org.springframework.beans.factory.ObjectProvider<com.platform.devwork.DevWorkItemRunBinding> devWorkRunBindingProvider) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -104,6 +108,7 @@ public class WorkflowEngine {
         WorkflowCancellationRegistry cr = cancelRegistryProvider != null ? cancelRegistryProvider.getIfAvailable() : null;
         this.cancelRegistry = cr != null ? cr : new WorkflowCancellationRegistry();
         this.stepSkills = stepSkillsProvider != null ? stepSkillsProvider.getIfAvailable() : null;
+        this.devWorkRunBinding = devWorkRunBindingProvider != null ? devWorkRunBindingProvider.getIfAvailable() : null;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
@@ -314,6 +319,8 @@ public class WorkflowEngine {
         run.setSessionId(resolveSessionId(sessionId));
         run.setStatus("running");
         Map<String, Object> effectiveInput = input != null ? input : Map.of();
+        // CR-164 BIZ-130: 칸이 틀린 _dev_work_item 은 run 을 만들기 전에 막는다
+        if (devWorkRunBinding != null) devWorkRunBinding.validate(effectiveInput);
         run.setInputData(effectiveInput);
         run.setStepResults(new LinkedHashMap<>());
         // 디버그: inputData 키 및 값 길이 로깅
@@ -325,6 +332,8 @@ public class WorkflowEngine {
                                 Map.Entry::getKey,
                                 e -> e.getValue() != null ? String.valueOf(e.getValue()).length() : 0)));
         WorkflowRunEntity saved = workflowRunRepository.save(run);
+        // CR-164 BIZ-130: 실행 스레드보다 먼저 남겨야 진행 중이 끝 상태 뒤에 오지 않는다
+        if (devWorkRunBinding != null) devWorkRunBinding.onRunStarted(saved);
 
         // Virtual Thread에 TenantContext 전파
         String tenantId = TenantContext.getTenantId();
@@ -415,7 +424,12 @@ public class WorkflowEngine {
                     "detail", reason != null ? reason : ""
             ));
             run.setCompletedAt(OffsetDateTime.now());
-            return workflowRunRepository.save(run);
+            WorkflowRunEntity rejected = workflowRunRepository.save(run);
+            // CR-164: 거절도 run 의 끝이라 종료 신호를 받는 쪽(실행 구독, 개발 작업)이 알아야 한다
+            if (eventPublisher != null) {
+                eventPublisher.runCompleted(rejected.getId(), rejected.getParentRunId(), "failed", runDurationMs(rejected));
+            }
+            return rejected;
         }
 
         // 승인 → HUMAN_INPUT 스텝 결과를 stepResults에 추가 후 재개
@@ -685,6 +699,10 @@ public class WorkflowEngine {
                 run.setStatus("completed");
                 run.setCompletedAt(OffsetDateTime.now());
                 workflowRunRepository.save(run);
+                // CR-164: 단계가 없어도 run 의 끝이다
+                if (eventPublisher != null) {
+                    eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "completed", runDurationMs(run));
+                }
                 return;
             }
 
