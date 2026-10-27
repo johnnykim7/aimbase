@@ -180,9 +180,34 @@ BIZ-131: 개발 작업 상태가 바뀌면(4.1 의 변경 한 줄이 생기면) 
 | `http_request` 연결 읽기 | 고친 뒤 `cr164-self` 로 `GET /actuator/health` 200, 도구 성공 |
 | 머리값 가림 | 감사 기록 `requestHeaders` 에 연결 머리값 `X-Service-Token` 과 입력 머리값 `x-service-token` 이 모두 `***`. 다른 머리값은 그대로. 토큰 값과 입력한 평문은 응답 어디에도 없다 |
 
+실제 보내기(10/28 06:50 KST, 받는 곳 `localhost:8253`)
+
+| 순번 | workItemId | 상태 | 바뀐 곳 | reportedAt(UTC) | 알림 실행 | bp-office 응답 |
+|---|---|---|---|---|---|---|
+| 1 | CR164-DEMO-01 | IN_PROGRESS | API | 2026-10-27T21:50:16.033Z | a5ad76dd completed | 200, inboundEventId 100, PROCESSED, duplicate false |
+| 2 | CR164-DEMO-01 | COMPLETED | API(증빙 주소 포함) | 2026-10-27T21:50:21.635Z | 2d065c3e completed | 200, inboundEventId 101, PROCESSED, duplicate false |
+| 3 | CR164-DEMO-02 | IN_PROGRESS | 실행 357b59f4 시작 | 2026-10-27T21:50:24.022Z | c189ba2f completed | 200, inboundEventId 102, PROCESSED, duplicate false |
+| 4 | CR164-DEMO-02 | FAILED | 실행 357b59f4 실패(단계가 3번 시도 뒤 400) | 2026-10-27T21:50:31.98Z | c4d81163 completed | 200, inboundEventId 103, PROCESSED, duplicate false |
+| 5 | CR164-DEMO-02 | FAILED | 4번 알림 실행을 06:51 에 다시 실행 | 2026-10-27T21:50:31.98Z(같은 값) | 0dd8f1f3 completed | 200, inboundEventId 103, duplicate true |
+
+- 실행이 실패로 끝나도 FAILED 가 알림 실행을 새로 만들어 보내졌다(요청서 3절 3)
+- 다시 보내도 `reportedAt` 은 바뀐 시각 그대로라 bp-office 가 중복으로 걸렀다(요청서 3절 2)
+- 알림 실행 기록 어디에도 토큰 값이 없다
+
 ## 8. 개발기 반영
 
-미실시.
+개발기(59.8.160.12) api 에 코드와 테넌트 표를 올린다. 개발기에는 알림 워크플로우와 bp-office 연결을 만들지 않는다. 받는 쪽 토큰을 개발기 환경에 넣는 일과 개발기끼리 보내기는 이번 범위 밖이다.
+
+1. 작업 폴더 사본에 CR-164 파일 40개를 덮고 대조한다(CR-164 파일은 작업 사본과 같고, CR-161 파일은 dev 커밋 16468d6 과 같다. 다른 것은 작업 폴더의 미커밋 `OrchestratorEngine` CR-131 분뿐이고 개발기 실행본에 이미 든 것이다)
+2. 사본에서 워크플로우, 도구, 개발 작업, LLM, 오케스트레이터 영역 시험
+3. 서버의 지금 jar 를 `platform-core.jar.before-cr164` 로 복사해 둔다
+4. 사본에서 `./deploy.sh be`(api 다시 만듦)
+5. 테넌트 마이그레이션 V74(`dev_work_items`, `dev_work_item_changes` 새 표 2개). 기동 때 돌지 않으면 `POST /api/v1/platform/tenants/migrate` 로 활성 테넌트 전체
+6. 확인: api health, 테넌트별 V74 적용, 실행기 다시 붙음, 개발 작업 목록 API 200
+
+같이 실리는 것: dev 의 CR-161 api 변경(아직 개발기 미반영). CR-161 은 연결 묶음이 0건이라 지금 동작이 바뀌지 않는다고 적었다(CR-161 2.1).
+
+되돌리기: 3의 jar 로 바꿔 api 를 다시 만든다. V74 표는 새 표뿐이라 남겨도 다른 기능에 닿지 않는다.
 
 ## 9. 경과
 
