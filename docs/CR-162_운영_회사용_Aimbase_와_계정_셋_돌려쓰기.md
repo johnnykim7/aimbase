@@ -150,7 +150,7 @@
 | 3 | 운영 테넌트 | `bp_wms` |
 | 4 | 열쇠 | chaws `/home/ubuntu/aimbase/secrets/bp-wms-api-key`(값은 파일에만) |
 | 5 | 단계에 넣은 연결 | `cli-runner-bp-wms-work01`. CR-161 뒤 묶음 `cli-runner-bp-wms-rr` |
-| 6 | 운영 등록 완료 시각 | 4절 8번 뒤 적는다 |
+| 6 | 운영 등록 완료 시각 | 10/27 22:32(KST). 8절 |
 | 7 | 등록할 워크플로우 정의 | bp-wms dev 1c9fe88e8 의 `docs/자산/aimbase/wave-plan-opinion-workflow.json`(이미 있으면 PUT 으로 고친다). 구역을 「구역 N」 으로 부르게 지시문을 고친 판으로, f71bc0531 판과는 지시문 두 칸만 다르다. 맥 연습 설치에 이 판을 PUT(200)으로 넣어 DB 의 단계가 정의와 같음을 봤다(단계 연결만 더함) |
 
 ## 6. 영향 설계서
@@ -188,4 +188,22 @@
 
 ## 8. 운영 반영
 
-4절 뒤에 쓴다.
+운영 chaws 에 10/27 19:33 부터 22:34 까지 4절 순서대로 반영했다. 서버 `deploy-backup/deployed.log` 의 마지막 판은 api `503da60`, 실행기 `6889aed` 다.
+
+| 순번 | 결과 |
+|---|---|
+| 1 | 19:33 서버 폴더, db.env, api.env, agent.env, 망 `aimbase-apps`. 계정 폴더와 작업 폴더는 실행 계정 999 소유 |
+| 2 | db, redis, api(503da60) healthy. api 는 127.0.0.1:8280 만 연다 |
+| 3 | 첫 관리자 로그인, CLI 허용 테넌트 `bp_wms` |
+| 4 | 테넌트 `bp_wms`(DB `aimbase_bp_wms`) 201. 실행기 전용 키는 agent.env, bp-wms 키는 `secrets/bp-wms-api-key` 에만 |
+| 5 | 19:39 실행기(503da60) healthy, `Agent registered successfully: name=cli-runner-bp-wms` |
+| 6 | 22:25 사용자가 work01, work02 로그인(구독 max). work03 은 뒤에 한다 |
+| 실행기 다시 올림 | 22:30 실행기를 `6889aed` 로 다시 올렸다. 실행기 소스는 CR-163 의 8da5cfb 와 같다(그 사이는 단위시험 1줄, 문서, 설치 스크립트뿐). healthy, 다시 등록됨, work01, work02 로그인 그대로. 되돌리기 이미지 `aimbase-aimbase-agent:pre-20261027-223007` |
+| 7 | `ACCOUNTS="work01 work02"` 로 연결 `cli-runner-bp-wms-work01`, `-work02` 201, 묶음 `cli-runner-bp-wms-rr`(ROUND_ROBIN, 구성원 둘) 201. DB 에서 연결마다 계정 폴더와 실행기 이름을 봤다 |
+| 8 | 워크플로우 `wms-wave-plan-opinion`(bp-wms 1c9fe88e8 판) 201, DB 단계가 정의와 같고 단계 연결은 work01. smoke 실행 `fc9038de` 는 22:32:21 에 시작해 22:34:03 에 `completed`, `choice` B 와 `opinion` 이 나왔다. 102초 가운데 모델 답 생성이 거의 전부다(출력 6904 토큰, 결과 125자). 실행기 CLI 계정은 work01 |
+
+- 운영 3PL 컨테이너 24개(돌고 있는 21개, 원래 멈춰 있던 3개)의 시작 시각, 재시작 횟수, 상태가 시작 전과 단계마다 같았다. bp-postgres, bp-redis, 보안 그룹은 건드리지 않았다
+- 실행기 대상 배포는 설치 스크립트를 서버에 올리지 않는다(api 대상만 올린다). 그래서 6889aed worktree 의 `scripts/chaws-bootstrap.sh` 한 파일을 배포 스크립트와 같은 scp 로 서버 `build/` 에 올렸다(sha256 이 맥 것과 같다)
+- Aimbase DB 기록에 재시작 줄이 없다(첫 기동의 초기화 안내문뿐). 7.1 본 것 2 는 운영에서 나오지 않았고, 본 것 1 의 600초 멈춤도 나오지 않았다. api 기록에 ERROR 줄 없음
+- 메모리 api 676MiB, 실행기 464MiB, DB 74MiB, Redis 15MiB. 서버 남은 메모리 약 14GB
+- 남은 일: work03 로그인 뒤 계정 목록 없이 `chaws-bootstrap.sh connections` 를 한 번 더 돌려 연결 work03 을 더하고 묶음 구성원을 셋으로 맞춘다(운영 Aimbase DB 쓰기라 그때 승인요청). CR-161 이 들어오면 단계 연결을 묶음 `cli-runner-bp-wms-rr` 로 바꾼다
