@@ -1,10 +1,16 @@
 package com.platform.api;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.domain.ConnectionEntity;
+import com.platform.llm.ConnectionAdapterFactory;
+import com.platform.llm.ConnectionApiKeys;
 import com.platform.repository.ConnectionRepository;
 import com.platform.speech.SpeechException;
 import com.platform.speech.SpeechService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,7 +19,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * PRD-127: TTS/STT API Proxy (CR-011).
@@ -28,15 +36,21 @@ import java.util.Map;
 public class SpeechController {
 
     private static final Logger log = LoggerFactory.getLogger(SpeechController.class);
-    private static final String OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech";
 
     private final ConnectionRepository connectionRepository;
     private final SpeechService speechService;
+    private final ObjectMapper objectMapper;
+    private final URI openaiTtsUri;
     private final HttpClient httpClient;
 
-    public SpeechController(ConnectionRepository connectionRepository, SpeechService speechService) {
+    public SpeechController(ConnectionRepository connectionRepository,
+                            SpeechService speechService,
+                            ObjectMapper objectMapper,
+                            @Value("${aimbase.speech.openai-tts-url}") String openaiTtsUrl) {
         this.connectionRepository = connectionRepository;
         this.speechService = speechService;
+        this.objectMapper = objectMapper;
+        this.openaiTtsUri = URI.create(openaiTtsUrl);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(java.time.Duration.ofSeconds(30))
                 .build();
@@ -50,28 +64,19 @@ public class SpeechController {
      */
     @PostMapping("/tts")
     public ResponseEntity<byte[]> textToSpeech(@RequestBody TtsRequest request) {
+        if (request.text() == null || request.text().isBlank()) {
+            return ResponseEntity.badRequest().body(null);
+        }
         String apiKey = resolveOpenAIKey();
         if (apiKey == null) {
             return ResponseEntity.status(503).body(null);
         }
 
         try {
-            String model = request.model() != null ? request.model() : "tts-1";
-            String voice = request.voice() != null ? request.voice() : "alloy";
-            double speed = request.speed() != null ? request.speed() : 1.0;
-
-            String jsonBody = String.format(
-                    """
-                    {"model":"%s","input":"%s","voice":"%s","speed":%s}
-                    """,
-                    model,
-                    request.text().replace("\"", "\\\"").replace("\n", "\\n"),
-                    voice,
-                    speed
-            );
+            String jsonBody = buildTtsBody(request);
 
             HttpRequest httpReq = HttpRequest.newBuilder()
-                    .uri(URI.create(OPENAI_TTS_URL))
+                    .uri(openaiTtsUri)
                     .timeout(java.time.Duration.ofSeconds(60))
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
@@ -138,17 +143,43 @@ public class SpeechController {
     }
 
     /**
-     * 테넌트의 OpenAI Connection에서 API 키 조회 (TTS 전용).
+     * CR-165: 글에 역슬래시, 탭, 캐리지 리턴 같은 제어 문자가 들어도 JSON 이 깨지지 않게 직렬화기로 만든다.
+     */
+    String buildTtsBody(TtsRequest request) throws JsonProcessingException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", request.model() != null ? request.model() : "tts-1");
+        body.put("input", request.text());
+        body.put("voice", request.voice() != null ? request.voice() : "alloy");
+        body.put("speed", request.speed() != null ? request.speed() : 1.0);
+        return objectMapper.writeValueAsString(body);
+    }
+
+    /**
+     * 테넌트의 OpenAI 연결에서 API 키 조회 (TTS 전용).
+     *
+     * <p>CR-165: 처음 만든 모양({@code type=openai}, {@code config.api_key})을 먼저 본다. 그 모양으로
+     * 등록해 쓰는 곳이 있으면 그대로 돈다. 없으면 관리 화면과 연결 API 가 만드는 OpenAI LLM 연결을 본다.
      */
     private String resolveOpenAIKey() {
-        return connectionRepository.findAll().stream()
-                .filter(c -> "openai".equalsIgnoreCase(c.getType())
-                        && "connected".equalsIgnoreCase(c.getStatus()))
+        List<ConnectionEntity> connected = connectionRepository.findAll().stream()
+                .filter(c -> "connected".equalsIgnoreCase(c.getStatus()))
+                .toList();
+
+        String legacyKey = connected.stream()
+                .filter(c -> "openai".equalsIgnoreCase(c.getType()))
                 .findFirst()
-                .map(c -> {
-                    Map<String, Object> cfg = c.getConfig();
-                    return cfg != null ? (String) cfg.get("api_key") : null;
-                })
+                .map(c -> c.getConfig() != null ? (String) c.getConfig().get("api_key") : null)
+                .orElse(null);
+        if (legacyKey != null) {
+            return legacyKey;
+        }
+
+        return connected.stream()
+                .filter(c -> "llm".equalsIgnoreCase(c.getType())
+                        && "openai".equals(ConnectionAdapterFactory.normalizeAdapterType(c.getAdapter())))
+                .map(c -> ConnectionApiKeys.resolve(c.getConfig()))
+                .filter(Objects::nonNull)
+                .findFirst()
                 .orElse(null);
     }
 

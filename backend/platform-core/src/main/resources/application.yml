@@ -244,6 +244,9 @@ aimbase:
     # 페이지 분할 가드 임계 (도구 경로) — 초과 시 통째 처리 대신 모델에게 pages 분할 호출 안내
     # openclaude PDF_AT_MENTION_INLINE_THRESHOLD=10 대응 (CR-095 후속)
     inline-page-threshold: ${AIMBASE_PDF_INLINE_PAGE_THRESHOLD:10}
+  # CR-165: OpenAI 음성 합성 주소. 로컬에서 가짜 OpenAI 로 보낸 본문을 받아 볼 때 바꾼다
+  speech:
+    openai-tts-url: ${AIMBASE_SPEECH_OPENAI_TTS_URL:https://api.openai.com/v1/audio/speech}
   # CR-159 워크플로우 LLM 단계 첨부(config.attachments)
   workflow:
     attachment:

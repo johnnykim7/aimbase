@@ -1,5 +1,6 @@
 package com.platform.api;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.repository.ConnectionRepository;
 import com.platform.speech.SpeechException;
 import com.platform.speech.SpeechService;
@@ -33,7 +34,7 @@ class SpeechControllerRegressionTest {
 
     @Test
     void returnsTextAndLanguageAndDuration_whenServiceSucceeds() throws Exception {
-        SpeechController controller = new SpeechController(connectionRepository, speechService);
+        SpeechController controller = new SpeechController(connectionRepository, speechService, new ObjectMapper(), "http://localhost:1/unused");
         when(speechService.transcribe(any(byte[].class), anyString(), anyString(), anyString()))
                 .thenReturn(new SpeechService.TranscribeResult("안녕하세요", "ko", 3.4));
 
@@ -54,7 +55,7 @@ class SpeechControllerRegressionTest {
 
     @Test
     void returns503_whenProviderUnavailable() throws Exception {
-        SpeechController controller = new SpeechController(connectionRepository, speechService);
+        SpeechController controller = new SpeechController(connectionRepository, speechService, new ObjectMapper(), "http://localhost:1/unused");
         when(speechService.transcribe(any(byte[].class), any(), any(), anyString()))
                 .thenThrow(SpeechException.providerUnavailable());
 
@@ -70,7 +71,7 @@ class SpeechControllerRegressionTest {
 
     @Test
     void returns502_whenUpstreamError() throws Exception {
-        SpeechController controller = new SpeechController(connectionRepository, speechService);
+        SpeechController controller = new SpeechController(connectionRepository, speechService, new ObjectMapper(), "http://localhost:1/unused");
         when(speechService.transcribe(any(byte[].class), any(), any(), anyString()))
                 .thenThrow(SpeechException.upstream(500, "boom"));
 
@@ -85,7 +86,7 @@ class SpeechControllerRegressionTest {
 
     @Test
     void returns504_whenTimeout() throws Exception {
-        SpeechController controller = new SpeechController(connectionRepository, speechService);
+        SpeechController controller = new SpeechController(connectionRepository, speechService, new ObjectMapper(), "http://localhost:1/unused");
         when(speechService.transcribe(any(byte[].class), any(), any(), anyString()))
                 .thenThrow(SpeechException.timeout(new java.net.http.HttpTimeoutException("slow")));
 

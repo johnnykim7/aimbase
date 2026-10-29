@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.17.1** | 2026-10-27 | Aimbase v8.18.0 기준
+> **v3.18.0** | 2026-10-30 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -542,6 +542,26 @@ LLM 프로바이더(Anthropic, OpenAI, Ollama 등) 및 외부 어댑터(HTTP, SE
 ```
 
 > **권장**: Connection 생성 후 반드시 `test` API로 연결 상태를 확인하세요.
+
+**키를 서버 환경변수에 두는 LLM 연결** [CR-165]:
+
+키 값을 테넌트 DB 와 연결 조회 응답에 싣지 않으려면 서버 `.env` 에 값을 두고 `config` 에는 변수 이름만 `apiKey_env` 로 둔다. `apiKey` 에 값이 있으면 그것이 먼저다. 연결 만들기, 연결 시험, 음성 합성(`POST /api/v1/speech/tts`)이 같은 순서로 키를 읽는다.
+
+```json
+{
+  "id": "openai-tts-001",
+  "name": "OpenAI 음성 합성",
+  "adapter": "OpenAI",
+  "type": "llm",
+  "config": { "apiKey_env": "BP_OFFICE_OPENAI_API_KEY", "model": "gpt-4o-mini" }
+}
+```
+
+1. 서버 `.env` 에 변수를 더하고 api 컨테이너를 다시 만든다(`docker compose up -d --force-recreate api`). 컨테이너는 만들 때의 `.env` 만 읽는다
+2. 연결을 만들고 `test` 로 `connected` 를 받는다. 시험은 OpenAI 에 1토큰 요청을 보낸다
+3. 관리 화면의 연결 수정 창은 화면에 없는 `config` 항목을 지운다. 이 연결은 화면에서 고쳐 저장하지 말고 `PUT /connections/{id}` 로 고친다
+
+음성 합성은 테넌트 연결 중 상태가 `connected` 인 것에서 키를 찾는다. 처음 모양(`type=openai`, `config.api_key`)을 먼저 보고, 없으면 OpenAI LLM 연결(어댑터 `OpenAI`)을 본다. OpenAI 호환 연결(`OpenAI Compatible`, `openai_compatible`)은 보지 않는다. 못 찾으면 503 이다.
 
 **HTTP Connection 생성 예시** [CR-054]:
 
@@ -1672,6 +1692,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.18.0 | 2026-10-30 | **CR-165 키를 서버 환경변수에 두는 LLM 연결** (§ 3-1). `config.apiKey_env` 에 변수 이름만 둔다. 음성 합성이 OpenAI LLM 연결에서 키를 찾는 순서. 관리 화면이 저장하는 `OpenAI Compatible` 이 OpenAI 로 잘못 분류되던 것을 바로잡음 |
 | v3.17.1 | 2026-10-27 | **CR-162 계정 늘리기** (§ 2-10). 설치 스크립트가 로그인된 계정 폴더를 세어 커넥션과 묶음 구성원을 맞춘다. 계정 늘리는 순서 |
 | v3.17.0 | 2026-10-27 | **CR-162 운영 3PL 서버의 회사용 Aimbase** (§ 2-10). chaws 의 컨테이너와 메모리 한도, 관리 API 는 SSH 터널, 소비앱은 망 `aimbase-apps`, 처음 세우는 순서와 계정 로그인, 고치기와 되돌리기 |
 | v3.16.0 | 2026-10-27 | **CR-161 CLI 계정 여러 개 나눠 쓰기** (시나리오 P). 계정별 로그인 폴더와 커넥션(`config_dir`), 커넥션 그룹 `ROUND_ROBIN`, 단계와 채팅의 `connection_group_id`. 한도에 걸린 계정은 풀리는 시각까지 빠짐, 계정 추가와 되돌리기, 점검 |

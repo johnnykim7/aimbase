@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.23.0** | 2026-10-27 | Aimbase v8.18.0 기준
+> **v3.24.0** | 2026-10-30 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2269,9 +2269,28 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 
 실시간은 SSE `error` 이벤트로 끝납니다. 워크플로우 단계는 단계 실패로 남고 메시지는 위와 같습니다.
 
+## 26. 음성 합성 (`speech/tts`) [CR-011, CR-165]
+
+`POST /api/v1/speech/tts`. 글을 OpenAI 음성 합성으로 바꿔 `audio/mpeg` 로 돌려줍니다. 테넌트 인증(`X-API-Key` 또는 JWT).
+
+| 칸 | 필수 | 설명 |
+|---|---|---|
+| text | 예 | 읽을 글. 역슬래시, 탭, 캐리지 리턴, 따옴표가 들어도 된다(v3.24.0 전에는 역슬래시와 큰따옴표, 줄바꿈 밖의 제어 문자가 들면 OpenAI 로 가는 JSON 이 깨졌다). OpenAI 한 번에 4,096자까지 |
+| model | 아니오 | 없으면 `tts-1` |
+| voice | 아니오 | 없으면 `alloy` |
+| speed | 아니오 | 없으면 1.0 |
+
+| HTTP | 뜻 |
+|---|---|
+| 200 | `audio/mpeg` 본문 |
+| 400 | `text` 가 비었다 |
+| 503 | 테넌트에 쓸 수 있는 OpenAI 연결이 없다(운용 가이드 § 3-1 「키를 서버 환경변수에 두는 LLM 연결」) |
+| 그 밖 4xx, 5xx | OpenAI 가 돌려준 상태와 본문 그대로 |
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.24.0 | 2026-10-30 | **CR-165 음성 합성** (§ 26). 본문을 JSON 직렬화기로 만들어 역슬래시, 탭, 캐리지 리턴이 든 글도 보낸다. 빈 글은 400. 키는 테넌트의 OpenAI LLM 연결에서 찾는다 |
 | v3.23.0 | 2026-10-27 | **CR-161 연결 묶음** (§ 25, § 5, 스텝 타입 표). 채팅 전 경로(일반, 도구 사용, 실시간)와 LLM_CALL, AGENT_CALL, LARGE_INPUT 단계 config 의 `connection_group_id`. CLI 계정 한도와 실행기에 닿지 못한 실패에서 다음 커넥션으로 넘김, 같은 세션과 실행 1건은 같은 커넥션. 오류 `connection_group_unavailable`, `cli_account_limited`. 그룹 목록, 생성, 수정 응답 필드 이름을 상세와 같게(`is_active` 등) |
 | v3.22.0 | 2026-10-26 | **CR-160 변환 구간 의심 표시** (§ 22-2). `include_segments=true` 구간에 `no_speech_prob`, `avg_logprob`, `compression_ratio`, `suspect_reason`(`NO_SPEECH`, `KNOWN_PHRASE`, null)을 더함. 기존 칸과 받아쓴 글은 그대로 |
 | v3.21.0 | 2026-10-26 | **CR-159 워크플로우 첨부** (§ 4-4, 스텝 타입 표). 실행 API 에 `session_id` 선택 인자, LLM_CALL config `attachments`. 그 세션으로 올린 사진, PDF 를 모델이 그림으로 읽는다. 둘 다 안 쓰면 기존과 같다 |
