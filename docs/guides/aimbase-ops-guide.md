@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.20.0** | 2026-10-31 | Aimbase v8.18.0 기준
+> **v3.20.1** | 2026-10-31 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -514,7 +514,7 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 1. `tts-mac-sidecar/.env` 에 `TTS_API_KEY=<키>` 한 줄을 둔다. 키가 비면 엔진이 기동하지 않는다
 2. `tts-mac-sidecar/deploy/install-mac.sh` 를 돌린다. 실행본을 `~/Server/tts-mac-sidecar` 에 두고 launchd `com.aimbase.tts` 로 상주시킨다. 소스나 목소리를 고치면 다시 돌린다
 3. 처음 기동 때 모델(약 4GB)을 받는다. `curl http://127.0.0.1:8391/health` 의 `loaded` 가 `true` 면 준비가 끝났다
-4. 개발기, 운영 서버가 부르려면 공유기 포트 전달 8391 을 맥으로 둔다(받아쓰기 엔진 8291 과 같은 방식)
+4. 개발기, 운영 서버가 부르려면 공유기 포트 전달 8391 을 맥으로 둔다(받아쓰기 엔진 8291 과 같은 방식). 외부 8391 을 맥 내부 주소의 8391(TCP)로 보낸다. 맥 브라우저에서 `http://<공인 주소>:8391/health` 가 열리고, 서버에서 `nc -z -w 5 <공인 주소> 8391` 이 성공하면 된 것이다. 8291 은 열리는데 8391 만 응답 없이 끝나면 공유기 규칙이 적용되지 않은 것이다
 
 엔진은 한 번에 하나씩, 1초에 약 8자를 만든다. 그래픽 메모리를 최대 약 11.5GB 쓴다. 로그는 `~/Server/tts-mac-sidecar/logs/sidecar.log` 이고 글 본문은 남기지 않는다.
 
@@ -558,7 +558,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 
 **장애 대응**:
 
-- **응답 머리글 `X-Aimbase-TTS-Engine: openai` 가 계속 온다**: 맥 엔진에 닿지 못하고 있다. api 로그의 `맥 음성 엔진 실패(...)` 줄에서 이유를 본다. `PROVIDER_UNAVAILABLE` 은 연결이나 키가 없는 것, `TIMEOUT` 은 앞 요청이 길거나 맥이 잠든 것, `UPSTREAM_ERROR` 는 엔진이 오류를 돌려준 것이다(404 는 엔진에 없는 목소리 id)
+- **응답 머리글 `X-Aimbase-TTS-Engine: openai` 가 계속 온다**: 맥 엔진에 닿지 못하고 있다. api 로그의 `맥 음성 엔진 실패(...)` 줄에서 이유를 본다. `PROVIDER_UNAVAILABLE` 은 연결이나 키가 없는 것, `TIMEOUT` 은 앞 요청이 길거나 맥이 잠든 것, 또는 공유기 규칙이 없어 연결에 응답이 없는 것(연결 15초를 기다린 뒤 전환하므로 요청마다 15초 늦어진다), `UPSTREAM_ERROR` 는 엔진이 오류를 돌려준 것이다(404 는 엔진에 없는 목소리 id)
 - **엔진이 기동하지 않는다**: `sidecar.log` 에 `TTS_API_KEY 가 비어 있다` 가 있으면 `.env` 를 본다. launchd 상태는 `launchctl print gui/$(id -u)/com.aimbase.tts`
 - **OpenAI 로 전환됐는데 503**: 테넌트에 쓸 수 있는 OpenAI 연결이 없다(§ 3-1)
 
@@ -1781,6 +1781,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.20.1 | 2026-10-31 | **CR-165 맥 엔진 포트 확인** (§ 2-11). 공유기 포트 전달 8391 이 적용됐는지 보는 법, 연결에 응답이 없을 때 `TIMEOUT` 으로 남고 요청마다 15초 늦어지는 것 |
 | v3.20.0 | 2026-10-31 | **CR-166 같은 목소리 음성 생성기** (§ 2-12). 컨테이너 `tts-sidecar` 설치(`./deploy.sh tts`), 모델 볼륨, 자원 상한, `aimbase.tts.*` 설정, 음색 늘리기, 장애 대응 |
 | v3.19.0 | 2026-10-31 | **CR-165 음성 합성 맥 엔진** (§ 2-11). 목소리 목록의 목소리는 맥 엔진(Qwen3-TTS 복제 목소리)이 만들고 실패하면 OpenAI 로 전환한다. 설치, `tts_local` 연결, `tts.*` 설정, 목소리 바꾸기, 장애 대응 |
 | v3.18.0 | 2026-10-30 | **CR-165 키를 서버 환경변수에 두는 LLM 연결** (§ 3-1). `config.apiKey_env` 에 변수 이름만 둔다. 음성 합성이 OpenAI LLM 연결에서 키를 찾는 순서. 관리 화면이 저장하는 `OpenAI Compatible` 이 OpenAI 로 잘못 분류되던 것을 바로잡음 |
