@@ -11,7 +11,7 @@ aimbase 개발기에서는 2026-10-30 06:07 에 bp-office 워크플로우 8개�
 
 ## 2. 바꿀 곳
 
-줄 번호는 2026-10-30 bp-office `develop`(1c420cf) 기준이다. 모두 `docs/자산/AI_워크플로우/` 아래 파일이다.
+줄 번호는 2026-10-31 bp-office `develop`(371588c7) 기준이다. 모두 `docs/자산/AI_워크플로우/` 아래 파일이다. 10/30 에 8개로 보냈고, 그 뒤 생긴 9, 10 을 더했다. `bp-office-decision-report.json`, `bp-office-briefing.json` 은 이미 묶음 값이라 그대로 둔다.
 
 | 순번 | 파일 | 줄 |
 |---|---|---|
@@ -23,6 +23,10 @@ aimbase 개발기에서는 2026-10-30 06:07 에 bp-office 워크플로우 8개�
 | 6 | `bp-office-meeting-proposal.json` | 40 |
 | 7 | `bp-office-suspect-segments.json` | 30 |
 | 8 | `bp-office-task-execution.json` | 38 |
+| 9 | `bp-office-lead-report.json` | 275 |
+| 10 | `bp-office-calendar-conflict.json` | 84 |
+
+9 는 2026-10-30 06:48 에 이 파일 그대로 개발기에 다시 등록돼, 지금 개발기에서도 계정 하나로 돈다. 10 은 아직 개발기에 등록되지 않았다.
 
 각 줄의 `"connection_id": "cli-runner-bp-office-001"` 을 `"connection_group_id": "cli-runner-bp-office-rr"` 로 바꾼다. 같은 단계 config 의 다른 값은 그대로 둔다. 두 값이 같이 있으면 묶음이 앞서지만, aimbase 화면이 저장하는 모양과 같게 `connection_id` 는 뺀다.
 
