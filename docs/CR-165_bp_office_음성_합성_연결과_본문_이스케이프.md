@@ -133,7 +133,7 @@ bp-office 음성 브리핑(OFC-REPORT-005)이 `POST /api/v1/speech/tts` 를 부�
 
 | 시각 | 정한 것 | 누가 |
 |---|---|---|
-| 10/31 07:08 | 음성 엔진은 맥에 상주하는 Qwen3-TTS 다. 받아쓰기처럼 맥 엔진을 먼저 쓰고 실패하면 OpenAI 로 넘긴다. AWS GPU 는 보지 않는다 | 컨타 [승인] |
+| 10/31 07:08 | 음성 엔진은 맥에 상주하는 Qwen3-TTS 다. 받아쓰기처럼 맥 엔진을 먼저 쓰고 실패하면 OpenAI 로 전환한다. AWS GPU 는 보지 않는다 | 컨타 [승인] |
 | 10/31 | 날짜·시각을 읽는 말로 바꾸는 단계를 둔다 | 사용자 |
 | 10/31 | 목소리는 쓰는 사람이 선택한다. Aimbase 가 목소리 목록과 기본값을 주고, 선택 화면은 bp-office 가 둔다 | 사용자 |
 | 10/31 10:36 | 첫 목소리는 후보3 이다(2차 03번 소리를 견본으로 한 복제) | 사용자 |
@@ -150,7 +150,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 | 속도 | 220자에 27초, 소리 32초(10/31 실측) | 소리 1초에 약 7초 |
 | 부르는 모양 | 지금 창구 `POST /speech/tts` 그대로, 응답으로 소리를 바로 받는다 | `POST /speech/tts-jobs` 로 맡기고 조회한다 |
 | 글 | 날짜·시각을 읽는 말로 바꾼다. 길이는 지금 창구와 같다 | 1 ~ 200자, 바꾸지 않는다 |
-| 실패하면 | OpenAI 로 넘긴다 | FAILED |
+| 실패하면 | OpenAI 로 전환한다 | FAILED |
 | 소스 폴더 | `tts-mac-sidecar/` | `tts-sidecar/` |
 | 설정 | 플랫폼 설정 `tts.*` | application.yml `aimbase.tts.*` |
 
@@ -173,7 +173,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 |---|---|
 | 빈 글 | 400(1 ~ 6절 그대로) |
 | 목록 길 speed 범위 밖 | 400 |
-| 맥 엔진 실패, OpenAI 로 넘기기 꺼짐 | 503 |
+| 맥 엔진 실패, OpenAI 전환 꺼짐 | 503 |
 | OpenAI 로 갔는데 쓸 수 있는 OpenAI 연결이 없다 | 503 |
 | OpenAI 가 오류를 돌려줌 | 그 상태와 본문 그대로(지금과 같다) |
 
@@ -211,7 +211,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 
 ### 9.5 날짜·시각을 읽는 말로 바꾸기
 
-목록 길에서만 바꾼다. 맥 엔진과 OpenAI 로 넘길 때 같은 글을 쓴다.
+목록 길에서만 바꾼다. 맥 엔진과 OpenAI 로 전환할 때 같은 글을 쓴다.
 
 | 글 | 읽는 말 |
 |---|---|
@@ -241,7 +241,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 | 항목 | 값 |
 |---|---|
 | 소스 | `run.sh`, `requirements.lock.txt`, `src/app.py`, `voices/`, `deploy/com.aimbase.tts.plist`, `deploy/install-mac.sh` |
-| 상주 | launchd `com.aimbase.tts`. 실행본은 저장소 밖 `~/Server/tts-mac-sidecar` 에 둔다(launchd 가 띄운 프로세스는 `~/Documents` 를 못 읽는다) |
+| 상주 | launchd `com.aimbase.tts`. 실행본은 저장소 밖 `~/Server/tts-mac-sidecar` 에 둔다(launchd 가 기동한 프로세스는 `~/Documents` 를 못 읽는다) |
 | 엔진 | mlx-audio 0.6.3, `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16`(후보3 을 만든 판). 모델(약 4GB)은 처음 기동 때 받는다 |
 | 포트 | 8391(`TTS_PORT`), 전체 인터페이스. 개발기는 공유기 포트 전달로 부른다(받아쓰기 8291 과 같은 방식, 7절 질의 6) |
 | 키 | 머리글 `X-Api-Key`. 값은 맥 `.env` 의 `TTS_API_KEY` 에 둔다. 비어 있으면 기동하지 않는다 |
@@ -284,7 +284,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 | 키 | 기본값 | 뜻 |
 |---|---|---|
 | `tts.provider` | `local` | 목록 목소리를 먼저 보낼 곳. `local`, `openai` |
-| `tts.fallback-to-openai` | `true` | 맥 엔진이 실패하면 OpenAI 로 넘길지 |
+| `tts.fallback-to-openai` | `true` | 맥 엔진이 실패하면 OpenAI 로 전환할지 |
 | `tts.voices` | 9.4 | 목소리 목록 |
 | `tts.speed-min`, `tts.speed-max` | 0.5, 2.0 | 목록 길 speed 범위 |
 
@@ -306,7 +306,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 | `speech/TtsTextNormalizer.java`(새) | 날짜·시각 읽는 말(9.5) |
 | `speech/LocalTtsService.java`(새) | `tts_local` 연결로 맥 엔진 부르기 |
 | `speech/OpenAiTtsService.java`(새) | 컨트롤러에 있던 OpenAI 보내기와 연결 찾기를 옮긴다 |
-| `speech/TtsServiceRouter.java`(새) | 9.3 길 나누기와 넘기기 |
+| `speech/TtsServiceRouter.java`(새) | 9.3 길 나누기와 OpenAI 전환 |
 | `api/SpeechController.java` | `/tts` 는 라우터를 부르고 엔진 머리글을 싣는다. `/voices` 새로 |
 | Flyway 마스터 다음 번호 `__cr165_seed_tts_settings.sql` | 9.7 플랫폼 설정 |
 | 시험 | 9.10 |
@@ -319,7 +319,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 
 1. 날짜·시각 표(9.5)의 바꾸는 것과 바꾸지 않는 것 전부
 2. 목록 목소리: 맥 엔진 성공이면 엔진 머리글 `local`, OpenAI 를 부르지 않는다
-3. 목록 목소리: 맥 엔진 연결 없음, 시간 초과, 500, 404 이고 넘기기가 켜져 있으면 OpenAI 에 바꾼 글과 `openai_voice` 가 간다. 꺼져 있으면 503 이고 OpenAI 를 부르지 않는다
+3. 목록 목소리: 맥 엔진 연결 없음, 시간 초과, 500, 404 이고 OpenAI 전환이 켜져 있으면 OpenAI 에 바꾼 글과 `openai_voice` 가 간다. 꺼져 있으면 503 이고 OpenAI 를 부르지 않는다
 4. `tts.provider=openai` 면 맥 엔진을 부르지 않는다
 5. 목록 밖 목소리(`nova`)와 빈 목소리는 지금처럼 OpenAI 로 가고 글이 바뀌지 않는다(다른 소비처 보호). 1 ~ 6절 시험 그대로 통과
 6. 목록 길 speed 0.49, 2.01 은 400. 0.5, 2.0 은 통과
@@ -328,7 +328,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 
 로컬 확인
 
-1. 맥 엔진을 launchd 로 띄우고, 로컬 api 에 `tts_local` 연결을 넣어 bp-office 와 같은 모양(`X-API-Key`)으로 브리핑 글을 만든다. 날짜·시각이 읽는 말로 나오는지 로컬 받아쓰기로 본다
+1. 맥 엔진을 launchd 로 기동하고, 로컬 api 에 `tts_local` 연결을 넣어 bp-office 와 같은 모양(`X-API-Key`)으로 브리핑 글을 만든다. 날짜·시각이 읽는 말로 나오는지 로컬 받아쓰기로 본다
 2. 맥 엔진을 내리면 OpenAI 로 넘어가는지 가짜 OpenAI 로 본다(실제 OpenAI 는 부르지 않는다)
 3. 목록 밖 목소리 요청이 지금처럼 OpenAI(가짜)로 가는지 본다
 

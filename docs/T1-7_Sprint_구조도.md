@@ -621,7 +621,7 @@ flowchart LR
 | PRD-360 | 맥 음성 엔진(mlx-audio, Qwen3-TTS 1.7B Base bf16, launchd, 한 번에 하나), 첫 목소리 후보3 | - | 엔진 단위시험, 맥에서 같은 글 두 번이 같은 소리 | 맥 엔진 | 설계중 |
 | PRD-358 | 날짜·시각 읽는 말 바꾸기 | - | 단위시험 TC-TTS-201 ~ 210 | BE | 설계중 |
 | PRD-359 | 목소리 목록 조회 `GET /speech/voices`, 플랫폼 설정 `tts.*` | - | 단위시험 TC-TTS-221 ~ 223 | BE | 설계중 |
-| PRD-357 | `POST /speech/tts` 목록 목소리 길, OpenAI 넘기기, 엔진 머리글 | PRD-358, PRD-359, PRD-360 | 단위시험 TC-TTS-211 ~ 220, 로컬 bootRun 과 맥 엔진으로 브리핑 글, 맥 엔진을 내리면 가짜 OpenAI 로 넘어감 | BE | 설계중 |
+| PRD-357 | `POST /speech/tts` 목록 목소리 길, OpenAI 전환, 엔진 머리글 | PRD-358, PRD-359, PRD-360 | 단위시험 TC-TTS-211 ~ 220, 로컬 bootRun 과 맥 엔진으로 브리핑 글, 맥 엔진을 내리면 가짜 OpenAI 로 넘어감 | BE | 설계중 |
 | - | 공유기 포트 전달, 개발기 `.env` 키 변수, bp_office `tts_local` 연결 | 위 전부 | 개발기에서 bp_office 키로 목록 목소리 한 번 | 인프라 | 설계중 |
 
 ---
