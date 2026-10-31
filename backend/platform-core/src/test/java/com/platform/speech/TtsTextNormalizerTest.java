@@ -9,7 +9,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * CR-165: 날짜·시각을 읽는 말로 바꾸기(BIZ-137, TC-TTS-201 ~ 210, 224).
+ * CR-165: 날짜·시각을 읽는 말로 바꾸기(BIZ-137, TC-TTS-201 ~ 210, 224, 225).
  */
 class TtsTextNormalizerTest {
 
@@ -70,13 +70,34 @@ class TtsTextNormalizerTest {
             "오후 14:30, 오후 2시 30분",
             "오후 12:00, 오후 12시",
             "2026-11-07 오후 2:30, 2026년 11월 7일 오후 2시 30분",
-            "오후 3:00~5:00, 오후 3시~오후 5시",
-            "오후 3:00 - 5:00, 오후 3시 - 오후 5시",
-            "14:00~16:00, 오후 2시~오후 4시",
             "'오후 3:00, 9:00', '오후 3시, 오전 9시'",
     })
     void readsWriterMeridiemOnce(String text, String spoken) {
         assertThat(TtsTextNormalizer.normalize(text)).isEqualTo(spoken);
+    }
+
+    @ParameterizedTest(name = "{0} = {1}")
+    @DisplayName("TC-TTS-225 물결, 붙임표로 이은 날짜·시각은 부터, 까지로 읽는다")
+    @CsvSource({
+            "오후 3:00~5:00 입니다, 오후 3시부터 오후 5시까지 입니다",
+            "오후 3:00 - 5:00, 오후 3시부터 오후 5시까지",
+            "14:00~16:00, 오후 2시부터 오후 4시까지",
+            "11:30～13:00, 오전 11시 30분부터 오후 1시까지",
+            "오후 3:00~5:00까지, 오후 3시부터 오후 5시까지",
+            "2026-11-07~2026-11-10, 2026년 11월 7일부터 2026년 11월 10일까지",
+            "2026.11.07 ~ 2026.11.10, 2026년 11월 7일부터 2026년 11월 10일까지",
+            "2026-11-07 09:00~2026-11-07 18:00, 2026년 11월 7일 오전 9시부터 2026년 11월 7일 오후 6시까지",
+    })
+    void readsRangesWithButeoKkaji(String text, String spoken) {
+        assertThat(TtsTextNormalizer.normalize(text)).isEqualTo(spoken);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @DisplayName("TC-TTS-225 날짜·시각이 아닌 값 사이의 물결은 그대로")
+    @ValueSource(strings = {"16:9 ~ 4:3", "3~5건", "010-1234-5678"})
+    void keepsTildeBetweenOtherValues(String value) {
+        String text = "값 " + value + " 끝";
+        assertThat(TtsTextNormalizer.normalize(text)).isEqualTo(text);
     }
 
     @Test

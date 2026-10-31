@@ -29,13 +29,24 @@ public final class TtsTextNormalizer {
             "(?:(" + AM + "|" + PM + ")\\s*)?(?<!\\d)(?<!\\d:)" + TIME + "(?!\\d)(?!:\\d)");
 
     /** "오후 3:00~5:00" 의 뒤 시각은 앞의 오전, 오후를 잇는다. */
-    private static final Pattern RANGE_GAP = Pattern.compile("\\s*[~\\-]\\s*");
+    private static final Pattern RANGE_GAP = Pattern.compile("\\s*[~～\\-]\\s*");
+
+    private static final String SPOKEN_TIME = "(?:" + AM + "|" + PM + ") \\d{1,2}시(?: \\d{1,2}분)?(?: \\d{1,2}초)?";
+    private static final String SPOKEN_DATE = "\\d{4}년 \\d{1,2}월 \\d{1,2}일(?: " + SPOKEN_TIME + ")?";
+    private static final String SPOKEN = "(" + SPOKEN_DATE + "|" + SPOKEN_TIME + ")";
+
+    /** 엔진이 물결과 붙임표를 읽지 않아 "오후 3시 오후 5시" 로 들린다. 바꾼 말 둘 사이면 "부터, 까지" 로 읽는다. */
+    private static final Pattern SPOKEN_RANGE = Pattern.compile(SPOKEN + "\\s*[~～\\-]\\s*" + SPOKEN + "(까지)?");
 
     private TtsTextNormalizer() {}
 
     public static String normalize(String text) {
         if (text == null || text.isEmpty()) return text;
-        return replaceTimes(replaceDates(text));
+        return readRanges(replaceTimes(replaceDates(text)));
+    }
+
+    private static String readRanges(String text) {
+        return SPOKEN_RANGE.matcher(text).replaceAll("$1부터 $2까지");
     }
 
     private static String replaceDates(String text) {
