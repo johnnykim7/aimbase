@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.1 | 최종 수정: 2026-10-31 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-166
+> 설계 버전: 7.2 | 최종 수정: 2026-10-31 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-165, CR-166
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -1708,6 +1708,53 @@ PY-019(독성 분류 강화)는 기존 `validate_output` 도구 내부 로직 �
 |--------|------|------|------|
 | POST | `/speech/tts` | Text-to-Speech 변환 | 🔒 |
 | POST | `/speech/stt` | Speech-to-Text 변환 | 🔒 |
+| GET | `/speech/voices` | 음성 합성 목소리 목록 [CR-165] | 🔒 |
+
+### POST `/speech/tts` 🔒 [PRD-357, PRD-358, v7.2, CR-165]
+
+**Request Body**:
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| text | String | ✅ | 읽을 글. 비면 400 |
+| voice | String | 선택 | 목소리 목록의 `id` 면 목록 길, 그 밖의 값(`nova` 등)이나 빈 값이면 OpenAI 길 |
+| model | String | 선택 | OpenAI 로 보낼 때의 모델. 없으면 `tts-1` |
+| speed | Number | 선택 | 기본 1.0. 목록 길은 `tts.speed-min` ~ `tts.speed-max`(기본 0.5 ~ 2.0) |
+
+```json
+{ "text": "주간 회의는 2026-10-31 14:00 입니다.", "voice": "ko-female-01", "model": "tts-1-hd", "speed": 1.0 }
+```
+
+**동작**:
+- 목록 길: 글의 날짜·시각을 읽는 말로 바꾼다(BIZ-137). `tts.provider=local` 이면 테넌트의 `tts_local` 연결로 맥 엔진에 보내고, 실패하면 `tts.fallback-to-openai=true` 일 때 그 목소리의 `openai_voice` 로 OpenAI 에 보낸다(BIZ-136)
+- OpenAI 길: 지금처럼 테넌트의 OpenAI 연결로 보낸다. 글을 바꾸지 않는다
+
+**응답**: 200 `audio/mpeg` 본문, 머리글 `X-Aimbase-TTS-Engine: local | openai`
+
+| 상태 | 뜻 |
+|------|------|
+| 400 | 빈 글, 목록 길 speed 범위 밖 |
+| 503 | 맥 엔진 실패에 넘기기 꺼짐, 또는 쓸 수 있는 OpenAI 연결이 없다 |
+| 그 밖 | OpenAI 가 돌려준 상태와 본문 그대로 |
+
+### GET `/speech/voices` 🔒 [PRD-359, v7.2, CR-165]
+
+**설명**: 플랫폼 설정 `tts.voices` 의 목소리 목록과 speed 범위. 맥 엔진이 꺼져 있어도 나온다. `openai_voice` 는 싣지 않는다.
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "voices": [
+      { "id": "ko-female-01", "name": "밝은 비서", "description": "20대 여성, 밝고 친근한 말투", "default": true }
+    ],
+    "speed": { "min": 0.5, "max": 2.0, "default": 1.0 }
+  }
+}
+```
+
+설정이 JSON 으로 읽히지 않으면 `voices` 는 빈 배열이다. 첫 목소리 이름은 CR-165 7절 질의 5 로 정한다.
 | POST | `/speech/tts-jobs` | 같은 목소리 음성 생성 작업 맡기기 (CR-166) | 🔒 |
 | GET | `/speech/tts-jobs/{job_id}` | 음성 생성 작업 조회 (CR-166) | 🔒 |
 
