@@ -3,8 +3,13 @@ package com.platform.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.domain.ConnectionEntity;
+import com.platform.config.PlatformSettingsService;
 import com.platform.repository.ConnectionRepository;
+import com.platform.speech.LocalTtsService;
+import com.platform.speech.OpenAiTtsService;
 import com.platform.speech.SpeechService;
+import com.platform.speech.TtsServiceRouter;
+import com.platform.speech.TtsVoiceCatalog;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +33,8 @@ import static org.mockito.Mockito.when;
 /**
  * CR-165: 음성 합성 창구가 OpenAI 로 보내는 본문과, 키를 찾는 연결 모양.
  *
- * <p>OpenAI 대신 JVM 안의 HTTP 서버가 받은 본문과 머리값을 본다.
+ * <p>OpenAI 대신 JVM 안의 HTTP 서버가 받은 본문과 머리값을 본다. 목소리 목록이 빈 설정이라
+ * 모든 요청이 CR-165 이전과 같은 OpenAI 길로 간다(TC-TTS-220).
  */
 @ExtendWith(MockitoExtension.class)
 class SpeechControllerTtsTest {
@@ -37,6 +43,7 @@ class SpeechControllerTtsTest {
 
     @Mock private ConnectionRepository connectionRepository;
     @Mock private SpeechService speechService;
+    @Mock private PlatformSettingsService settings;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private HttpServer fakeOpenAi;
@@ -58,7 +65,10 @@ class SpeechControllerTtsTest {
         });
         fakeOpenAi.start();
         String url = "http://127.0.0.1:" + fakeOpenAi.getAddress().getPort() + "/v1/audio/speech";
-        controller = new SpeechController(connectionRepository, speechService, objectMapper, url);
+        TtsVoiceCatalog catalog = new TtsVoiceCatalog(settings);
+        TtsServiceRouter router = new TtsServiceRouter(new LocalTtsService(connectionRepository),
+                new OpenAiTtsService(connectionRepository, objectMapper, url), catalog, settings);
+        controller = new SpeechController(speechService, router, catalog);
     }
 
     @AfterEach

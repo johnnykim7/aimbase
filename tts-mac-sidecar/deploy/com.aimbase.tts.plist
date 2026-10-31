@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  맥 상주 설정 견본. 직접 복사하지 않고 deploy/install-mac.sh 로 설치한다.
+  스크립트가 __TARGET__ 을 실행본 폴더(기본 ~/Server/tts-mac-sidecar)로 바꾼다.
+  launchd 가 기동한 프로세스는 ~/Documents 를 읽지 못해 저장소 안 경로로는 뜨지 않는다.
+
+  로그인 세션에 묶이므로 맥이 잠자기로 들어가면 멈춘다. 그동안 Aimbase 는 OpenAI 로 전환한다.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aimbase.tts</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__TARGET__/run.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__TARGET__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__TARGET__/logs/sidecar.log</string>
+    <key>StandardErrorPath</key>
+    <string>__TARGET__/logs/sidecar.log</string>
+</dict>
+</plist>

@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.18.0** | 2026-10-30 | Aimbase v8.18.0 기준
+> **v3.19.0** | 2026-10-31 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -504,6 +504,63 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 **되돌리기**: 배포 때 앞 이미지에 `pre-<시각>` 꼬리표를 붙이고 되돌리는 명령을 찍습니다(`docker tag aimbase-api:pre-<시각> aimbase-api:latest && docker compose up -d --no-deps --force-recreate api`). 앞 compose 는 `deploy-backup/docker-compose.yml.<시각>` 에 있습니다.
 
 **점검**: 한도 대비 쓰는 양은 `docker stats --no-stream $(docker compose ps -q)`. 실행기가 안 붙으면 § 2-9 의 `Aimbase registration failed` 줄을 봅니다. CLI 가 `Not logged in` 으로 실패하면 그 커넥션의 계정 폴더에 로그인이 없는 것입니다.
+
+### 2-11. 음성 합성 맥 엔진 운영 [CR-165]
+
+목소리 목록에 있는 목소리(`voice`)로 온 음성 합성 요청은 맥에 상주하는 음성 엔진(Qwen3-TTS 복제 목소리, MLX)이 만듭니다. 맥이 잠들거나 엔진이 실패하면 같은 글을 OpenAI 로 전환합니다. 목록 밖 목소리는 엔진과 상관없이 OpenAI 로만 갑니다.
+
+**맥 엔진 설치** (저장소 `tts-mac-sidecar/`):
+
+1. `tts-mac-sidecar/.env` 에 `TTS_API_KEY=<키>` 한 줄을 둔다. 키가 비면 엔진이 기동하지 않는다
+2. `tts-mac-sidecar/deploy/install-mac.sh` 를 돌린다. 실행본을 `~/Server/tts-mac-sidecar` 에 두고 launchd `com.aimbase.tts` 로 상주시킨다. 소스나 목소리를 고치면 다시 돌린다
+3. 처음 기동 때 모델(약 4GB)을 받는다. `curl http://127.0.0.1:8391/health` 의 `loaded` 가 `true` 면 준비가 끝났다
+4. 개발기, 운영 서버가 부르려면 공유기 포트 전달 8391 을 맥으로 둔다(받아쓰기 엔진 8291 과 같은 방식)
+
+엔진은 한 번에 하나씩, 1초에 약 8자를 만든다. 그래픽 메모리를 최대 약 11.5GB 쓴다. 로그는 `~/Server/tts-mac-sidecar/logs/sidecar.log` 이고 글 본문은 남기지 않는다.
+
+**테넌트 연결** (`type=tts_local`):
+
+```json
+{
+  "id": "tts-local-mac",
+  "name": "맥 음성 엔진",
+  "adapter": "http",
+  "type": "tts_local",
+  "config": { "base_url": "http://<맥 주소>:8391", "apiKey_env": "AIMBASE_TTS_LOCAL_KEY", "timeout_seconds": 600 }
+}
+```
+
+- 키는 서버 `.env` 의 변수(위 예는 `AIMBASE_TTS_LOCAL_KEY`)에 두고 api 컨테이너를 다시 만든다(§ 3-1 「키를 서버 환경변수에 두는 LLM 연결」과 같다)
+- `timeout_seconds` 는 앞 요청을 기다리는 시간까지 포함한다. 기본 600
+- 연결이 없거나 꺼져 있으면(`disabled`) 맥 엔진을 부르지 않고 OpenAI 로 전환한다
+
+**플랫폼 설정** (`global_config`, 마스터 V72 가 넣는다. 이미 있으면 덮지 않는다):
+
+| Key | 기본값 | 의미 |
+|-----|--------|------|
+| `tts.provider` | `local` | `openai` 로 바꾸면 맥 엔진을 부르지 않는다. 맥을 오래 끌 때 쓴다 |
+| `tts.fallback-to-openai` | `true` | `false` 면 맥 엔진이 실패할 때 503. OpenAI 비용을 막아야 할 때 쓴다 |
+| `tts.voices` | 목소리 하나(`ko-female-01`) | 목소리 목록 JSON 배열. `id`, `name`, `description`, `openai_voice`, `default` |
+| `tts.speed-min`, `tts.speed-max` | 0.5, 2.0 | 목록 목소리 speed 범위. 밖이면 400 |
+
+```bash
+psql -U platform -h localhost -p 5432 -d aimbase_master -c "
+SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%';"
+```
+
+설정은 5분 캐시 뒤 반영된다. 관리 화면의 설정 목록에는 나오지 않으므로 psql 로 고친다.
+
+**목소리 바꾸기, 늘리기**:
+
+- 이름과 설명만 바꿀 때는 `tts.voices` 의 `name`, `description` 을 고친다. 소비앱 선택 화면에 그대로 보인다
+- 목소리를 늘릴 때는 `tts-mac-sidecar/voices/<id>/` 에 `ref.wav`(견본 소리 10 ~ 15초)와 `voice.json`(견본 글, 씨앗, 생성값)을 두고 설치 스크립트를 다시 돌린 뒤 `tts.voices` 에 한 줄을 추가한다. 폴더 모양은 CR-166 음성 생성기(`tts-sidecar/voices/`)와 같아 그대로 옮길 수 있다
+- `openai_voice` 는 맥 엔진이 실패했을 때 쓸 OpenAI 목소리다. 목록 API 로 내보내지 않는다
+
+**장애 대응**:
+
+- **응답 머리글 `X-Aimbase-TTS-Engine: openai` 가 계속 온다**: 맥 엔진에 닿지 못하고 있다. api 로그의 `맥 음성 엔진 실패(...)` 줄에서 이유를 본다. `PROVIDER_UNAVAILABLE` 은 연결이나 키가 없는 것, `TIMEOUT` 은 앞 요청이 길거나 맥이 잠든 것, `UPSTREAM_ERROR` 는 엔진이 오류를 돌려준 것이다(404 는 엔진에 없는 목소리 id)
+- **엔진이 기동하지 않는다**: `sidecar.log` 에 `TTS_API_KEY 가 비어 있다` 가 있으면 `.env` 를 본다. launchd 상태는 `launchctl print gui/$(id -u)/com.aimbase.tts`
+- **OpenAI 로 전환됐는데 503**: 테넌트에 쓸 수 있는 OpenAI 연결이 없다(§ 3-1)
 
 ---
 
@@ -1692,6 +1749,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.19.0 | 2026-10-31 | **CR-165 음성 합성 맥 엔진** (§ 2-11). 목소리 목록의 목소리는 맥 엔진(Qwen3-TTS 복제 목소리)이 만들고 실패하면 OpenAI 로 전환한다. 설치, `tts_local` 연결, `tts.*` 설정, 목소리 바꾸기, 장애 대응 |
 | v3.18.0 | 2026-10-30 | **CR-165 키를 서버 환경변수에 두는 LLM 연결** (§ 3-1). `config.apiKey_env` 에 변수 이름만 둔다. 음성 합성이 OpenAI LLM 연결에서 키를 찾는 순서. 관리 화면이 저장하는 `OpenAI Compatible` 이 OpenAI 로 잘못 분류되던 것을 바로잡음 |
 | v3.17.1 | 2026-10-27 | **CR-162 계정 늘리기** (§ 2-10). 설치 스크립트가 로그인된 계정 폴더를 세어 커넥션과 묶음 구성원을 맞춘다. 계정 늘리는 순서 |
 | v3.17.0 | 2026-10-27 | **CR-162 운영 3PL 서버의 회사용 Aimbase** (§ 2-10). chaws 의 컨테이너와 메모리 한도, 관리 API 는 SSH 터널, 소비앱은 망 `aimbase-apps`, 처음 세우는 순서와 계정 로그인, 고치기와 되돌리기 |
