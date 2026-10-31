@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.0 | 최종 수정: 2026-10-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161
+> 설계 버전: 7.1 | 최종 수정: 2026-10-31 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-166
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -1708,6 +1708,8 @@ PY-019(독성 분류 강화)는 기존 `validate_output` 도구 내부 로직 �
 |--------|------|------|------|
 | POST | `/speech/tts` | Text-to-Speech 변환 | 🔒 |
 | POST | `/speech/stt` | Speech-to-Text 변환 | 🔒 |
+| POST | `/speech/tts-jobs` | 같은 목소리 음성 생성 작업 맡기기 (CR-166) | 🔒 |
+| GET | `/speech/tts-jobs/{job_id}` | 음성 생성 작업 조회 (CR-166) | 🔒 |
 
 ---
 
@@ -2797,6 +2799,66 @@ cap 32000
 ```
 
 **제약**: total_length_bytes > 8192 시 `warning: "합산 길이 8KB 초과"` 반환.
+
+---
+
+## 같은 목소리 음성 생성 작업 [v7.1, CR-166]
+
+### POST `/api/v1/speech/tts-jobs` 🔒 [PRD-354]
+**설명**: 음색과 글을 맡기고 작업 번호를 바로 받는다. 소리는 생성기가 뒤에서 만든다. 테넌트 키(X-API-Key)의 테넌트에 작업을 둔다.
+
+**Request Body**:
+```json
+{ "voice": "field-voice-07", "text": "검수대 3번으로 이동하세요." }
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| voice | string | ✅ | 음색 이름 |
+| text | string | ✅ | 1 ~ 200자. 바꾸지 않고 그대로 읽는다 |
+
+**Response 202**:
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07",
+            "reused": false, "created_at": "2026-10-31T10:40:00+09:00" } }
+```
+
+- 같은 테넌트에 같은 음색, 같은 글의 작업이 있으면(FAILED 제외) 그 작업을 돌려준다. `reused=true`, `status` 는 그 작업의 지금 상태(BIZ-134)
+
+### GET `/api/v1/speech/tts-jobs/{job_id}` 🔒 [PRD-354]
+**설명**: 작업 상태와 결과.
+
+**Response 200**:
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "COMPLETED", "voice": "field-voice-07",
+            "text": "검수대 3번으로 이동하세요.",
+            "created_at": "...", "started_at": "...", "finished_at": "...",
+            "mime_type": "audio/mpeg", "audio_base64": "SUQzBAAAAA...",
+            "duration_sec": 2.21, "elapsed_sec": 21.7 } }
+```
+
+- `mime_type`, `audio_base64`, `duration_sec` 은 COMPLETED 일 때만, `error` 는 FAILED 일 때만
+- FAILED `error`: `generation_failed:<empty_audio|non_finite_audio|silent_audio|too_short|hit_token_limit>`, `tts_generator_unavailable`, `tts_generator_timeout`
+
+### 오류
+본문 `{ "success": false, "error": "<코드>" }`
+
+| HTTP | 코드 | 때 |
+|------|------|-----|
+| 400 | `voice_required`, `text_required`, `text_too_long:max=200`, `invalid_job_id` | 칸이 비었거나 길거나 작업 번호 모양이 틀림 |
+| 404 | `voice_not_found:<이름>` | 없는 음색 |
+| 404 | `job_not_found` | 없는 작업, 보관 기간이 지나 지운 작업, 다른 테넌트의 작업 |
+| 429 | `tts_queue_full:max=500` | 테넌트의 대기, 진행 중 작업이 상한(BIZ-133) |
+| 503 | `tts_generator_unavailable` | 생성기가 떠 있지 않거나 모델을 올리는 중 |
+
+### 생성기 내부 창구 (api 만 부른다)
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `http://tts-sidecar:8310/health` | 모델과 음색이 올라왔으면 200 `{"status":"ok","voices":[...]}`, 아니면 503 |
+| POST | `http://tts-sidecar:8310/synthesize` | `{voice, text}` 를 MP3 로. 머리값 `X-Duration-Sec`, `X-Elapsed-Sec`, `X-Attempt`. 없는 음색 404, 빈 글 400, 검사 3번 실패 422 `{"error":"generation_failed:<까닭>"}` |
 
 ---
 

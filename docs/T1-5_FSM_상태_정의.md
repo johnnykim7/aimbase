@@ -1,6 +1,6 @@
 # T1-5. FSM 상태 정의서
 
-> 설계 버전: 1.0 | 최종 수정: 2026-03-10 | 관련 CR: CR-001
+> 설계 버전: 1.1 | 최종 수정: 2026-10-31 | 관련 CR: CR-001, CR-166
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -18,6 +18,7 @@
 | PendingApproval | `pending`, `approved`, `rejected` |
 | Tenant | `provisioning`, `active`, `suspended`, `deleted` |
 | User | `active`, `inactive` |
+| TtsJob | `PENDING`, `RUNNING`, `COMPLETED`, `FAILED` |
 
 ---
 
@@ -251,6 +252,45 @@ stateDiagram-v2
 - **진입 조건**: DELETE /users/{id} (소프트 삭제)
 - **허용 다음 상태**: `active`
 - **관련 기능 ID**: PRD-070
+
+---
+
+## TtsJob (음성 생성 작업) [CR-166]
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING : 작업 맡기기
+    PENDING --> RUNNING : 작업 스레드가 집음
+    RUNNING --> COMPLETED : 소리 만들기 성공
+    RUNNING --> FAILED : 생성기 실패, 연결 실패, 시간 초과
+    RUNNING --> PENDING : api 재기동으로 차례에서 빠진 것을 다시 넣음
+    COMPLETED --> [*]
+    FAILED --> [*]
+```
+
+### PENDING | 대기
+- **설명**: 맡겨졌고 차례를 기다린다
+- **진입 조건**: POST /speech/tts-jobs, 또는 차례에서 빠진 RUNNING 작업을 조회나 같은 글 다시 맡기기로 다시 넣을 때
+- **허용 다음 상태**: `RUNNING`
+- **관련 기능 ID**: PRD-354
+
+### RUNNING | 만드는 중
+- **설명**: 생성기가 이 작업의 소리를 만들고 있다. 서버 전체에서 하나뿐이다(BIZ-133)
+- **진입 조건**: 작업 스레드가 차례에서 꺼냄
+- **허용 다음 상태**: `COMPLETED`, `FAILED`, `PENDING`(api 재기동 뒤 다시 넣을 때만)
+- **관련 기능 ID**: PRD-354
+
+### COMPLETED | 끝남
+- **설명**: 소리가 저장됐다
+- **진입 조건**: 생성기가 MP3 를 돌려줌
+- **허용 다음 상태**: 없음 (종결 상태). 7일 뒤 행을 지운다(BIZ-135)
+- **관련 기능 ID**: PRD-354
+
+### FAILED | 실패
+- **설명**: 만들지 못했다. error 에 까닭
+- **진입 조건**: 생성기 422(검사 3번 실패), 생성기에 닿지 못함, 시간 초과
+- **허용 다음 상태**: 없음 (종결 상태). 같은 글을 다시 맡기면 새 작업이 된다(BIZ-134)
+- **관련 기능 ID**: PRD-354
 
 ---
 
