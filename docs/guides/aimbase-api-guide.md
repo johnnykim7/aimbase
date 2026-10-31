@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.25.0** | 2026-10-31 | Aimbase v8.18.0 기준
+> **v3.26.0** | 2026-10-31 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2316,9 +2316,64 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 - 목록이 비어 있으면 맥 엔진을 쓰지 않는 운영이다. 그때는 지금처럼 OpenAI 목소리 이름을 보낸다
 - 말투가 다른 목소리는 목록에 다른 목소리로 들어온다. 요청에 말투를 따로 주는 칸은 없다
 
+### 26-2. 같은 목소리 음성 생성 작업 (`speech/tts-jobs`) [CR-166]
+
+현장 안내 소리처럼 늘 같은 목소리여야 하는 짧은 문장을 서버의 음성 생성기(Qwen3-TTS 복제 목소리, CPU)로 만듭니다. 문장 하나에 약 15 ~ 35초가 걸려 작업을 맡기고 조회하는 방식입니다. § 26 의 `speech/tts` 와 엔진, 목소리가 다르고 서로 영향이 없습니다. 테넌트 인증(`X-API-Key` 또는 JWT)과 `X-Tenant-Id`.
+
+**맡기기** `POST /api/v1/speech/tts-jobs`
+
+```json
+{ "voice": "field-voice-07", "text": "검수대 3번으로 이동하세요." }
+```
+
+| 칸 | 필수 | 설명 |
+|---|---|---|
+| voice | 예 | 생성기에 등록된 음색 이름. 지금은 `field-voice-07` 하나 |
+| text | 예 | 1 ~ 200자(유니코드 문자 수). 공백만 있으면 빈 글. 글자를 바꾸지 않고 그대로 읽는다. 숫자로 쓴 날짜, 시각(`2026-10-31 14:00`)은 못 읽으니 읽는 말로 바꿔 보낸다 |
+
+202 와 작업을 바로 돌려줍니다.
+
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07",
+            "reused": false, "created_at": "2026-10-31T01:40:00Z" } }
+```
+
+같은 테넌트에 같은 음색, 같은 글의 작업이 이미 있으면(FAILED 제외, 보관 기간 안) 새로 만들지 않고 그 작업을 돌려줍니다. 이때 `reused` 가 true 이고 `status` 는 그 작업의 지금 상태입니다(이미 COMPLETED 일 수 있다).
+
+**조회** `GET /api/v1/speech/tts-jobs/{job_id}`
+
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "COMPLETED", "voice": "field-voice-07",
+            "text": "검수대 3번으로 이동하세요.",
+            "created_at": "...", "started_at": "...", "finished_at": "...",
+            "mime_type": "audio/mpeg", "audio_base64": "SUQzBAAAAA...",
+            "duration_sec": 2.21, "elapsed_sec": 21.7 } }
+```
+
+- `status`: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`. COMPLETED, FAILED 는 끝이다
+- `mime_type`, `audio_base64`, `duration_sec` 은 COMPLETED 일 때만. MP3, 24kHz 단일 채널 96k
+- `error` 는 FAILED 일 때만: `generation_failed:<empty_audio|non_finite_audio|silent_audio|too_short|hit_token_limit|internal_error>`, `tts_generator_unavailable`, `tts_generator_timeout`. 실패한 글을 다시 맡기면 새 작업이 된다
+- `elapsed_sec` 은 생성기가 만드는 데 걸린 시간(대기 시간 빼고)
+- 시각(`created_at`, `started_at`, `finished_at`)은 UTC 로 싣는다
+
+| HTTP | 코드 | 때 |
+|---|---|---|
+| 400 | `voice_required`, `text_required`, `text_too_long:max=200`, `invalid_job_id` | 칸이 비었거나 길거나 작업 번호 모양이 틀림 |
+| 404 | `voice_not_found:<이름>` | 없는 음색 |
+| 404 | `job_not_found` | 없는 작업, 보관 기간이 지나 지운 작업, 다른 테넌트의 작업 |
+| 429 | `tts_queue_full:max=500` | 그 테넌트의 대기, 진행 중 작업이 500개 |
+| 503 | `tts_generator_unavailable` | 생성기가 떠 있지 않거나 모델을 올리는 중 |
+
+- 서버 전체에서 한 번에 하나, 맡긴 시각 순서대로 만든다. 몰아서 맡기면 뒤의 문장은 앞 것이 끝나야 만든다(299개 약 75분)
+- 조회는 5 ~ 10초 간격이면 된다. Aimbase 가 다시 기동해도 조회가 오면 남은 작업을 이어 만든다
+- 같은 음색, 같은 글은 다시 만들어도 같은 소리다. 끝난 작업은 7일 둔다
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.26.0 | 2026-10-31 | **CR-166 같은 목소리 음성 생성 작업** (§ 26-2). `POST /speech/tts-jobs` 로 맡기고 `GET /speech/tts-jobs/{job_id}` 로 조회한다. 서버 전체에서 한 번에 하나, 맡긴 시각 순. 같은 글 다시 맡기기는 그 작업을 돌려준다(`reused`). 오류 `voice_not_found`, `text_too_long`, `tts_queue_full`, `tts_generator_unavailable`, `job_not_found`. 끝난 작업 7일 보관 |
 | v3.25.0 | 2026-10-31 | **CR-165 맥 음성 엔진과 목소리 목록** (§ 26, § 26-1). `GET /speech/voices` 추가. 목록 목소리는 날짜와 시각을 읽는 말로 바꿔 맥 음성 엔진으로 만들고, 실패하면 OpenAI 로 전환한다. 응답 머리글 `X-Aimbase-TTS-Engine`. 목록 목소리 speed 범위 밖은 400. 목록 밖 목소리는 그대로 |
 | v3.24.0 | 2026-10-30 | **CR-165 음성 합성** (§ 26). 본문을 JSON 직렬화기로 만들어 역슬래시, 탭, 캐리지 리턴이 든 글도 보낸다. 빈 글은 400. 키는 테넌트의 OpenAI LLM 연결에서 찾는다 |
 | v3.23.0 | 2026-10-27 | **CR-161 연결 묶음** (§ 25, § 5, 스텝 타입 표). 채팅 전 경로(일반, 도구 사용, 실시간)와 LLM_CALL, AGENT_CALL, LARGE_INPUT 단계 config 의 `connection_group_id`. CLI 계정 한도와 실행기에 닿지 못한 실패에서 다음 커넥션으로 넘김, 같은 세션과 실행 1건은 같은 커넥션. 오류 `connection_group_unavailable`, `cli_account_limited`. 그룹 목록, 생성, 수정 응답 필드 이름을 상세와 같게(`is_active` 등) |

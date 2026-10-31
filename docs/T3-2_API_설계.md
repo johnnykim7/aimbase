@@ -2868,7 +2868,7 @@ cap 32000
 ```json
 { "success": true,
   "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07",
-            "reused": false, "created_at": "2026-10-31T10:40:00+09:00" } }
+            "reused": false, "created_at": "2026-10-31T01:40:00Z" } }
 ```
 
 - 같은 테넌트에 같은 음색, 같은 글의 작업이 있으면(FAILED 제외) 그 작업을 돌려준다. `reused=true`, `status` 는 그 작업의 지금 상태(BIZ-134)
@@ -2887,7 +2887,8 @@ cap 32000
 ```
 
 - `mime_type`, `audio_base64`, `duration_sec` 은 COMPLETED 일 때만, `error` 는 FAILED 일 때만
-- FAILED `error`: `generation_failed:<empty_audio|non_finite_audio|silent_audio|too_short|hit_token_limit>`, `tts_generator_unavailable`, `tts_generator_timeout`
+- 시각(`created_at`, `started_at`, `finished_at`)은 UTC 로 싣는다(`2026-10-31T01:40:00Z`)
+- FAILED `error`: `generation_failed:<empty_audio|non_finite_audio|silent_audio|too_short|hit_token_limit|internal_error>`, `tts_generator_unavailable`, `tts_generator_timeout`
 
 ### 오류
 본문 `{ "success": false, "error": "<코드>" }`
