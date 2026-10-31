@@ -51,6 +51,7 @@ services:
       ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS: "660"
       CLAUDE_CODE_WORKING_DIRECTORY: /data/workspace
       SKILL_SANDBOX_URL: http://skill-sandbox:8300
+      AIMBASE_TTS_SIDECAR_URL: http://tts-sidecar:8310
     # skill-sandbox 는 skill-sandbox-net 에만 있으므로 api 가 그 망에 더 붙는다.
     # default 를 함께 적지 않으면 러너와 rag-pipeline 이 api 에 닿지 못한다.
     networks:
@@ -435,6 +436,33 @@ services:
       retries: 5
       start_period: 10s
 
+  # CR-166 같은 목소리 음성 생성기. api 만 부르므로 호스트 포트를 열지 않는다.
+  # 모델은 처음 기동 때 tts-models 볼륨에 받는다(4.3GB, 받는 동안 /health 503).
+  tts-sidecar:
+    build:
+      context: ./tts-sidecar
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    volumes:
+      - tts-models:/models
+    environment:
+      TTS_THREADS: "8"
+    # 59 코어 16개 중 8개까지만 쓰고, CPU 가 모자랄 때는 기본 몫(1024)인 api 와 러너보다 늦게 받는다.
+    cpus: 8
+    cpu_shares: 256
+    mem_limit: 16g
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8310/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 900s
+
 networks:
   skill-sandbox-net:
     internal: true
+
+volumes:
+  tts-models:
