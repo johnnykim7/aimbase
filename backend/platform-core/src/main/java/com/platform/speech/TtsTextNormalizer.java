@@ -17,13 +17,19 @@ import java.util.regex.Pattern;
 public final class TtsTextNormalizer {
 
     private static final String TIME = "(\\d{1,2}):(\\d{2})(?::(\\d{2}))?";
+    private static final String AM = "오전";
+    private static final String PM = "오후";
 
     /** 날짜 뒤에 공백이나 T 로 시각이 붙으면 같이 바꾼다. 구분자는 세 칸이 같아야 한다. */
     private static final Pattern DATE = Pattern.compile(
             "(?<!\\d)(\\d{4})([-./])(\\d{1,2})\\2(\\d{1,2})(?:[ T]" + TIME + ")?(?!\\d)");
 
+    /** 글쓴이가 앞에 붙인 오전, 오후도 같이 잡는다. 그대로 두면 "오후 오후 2시" 로 두 번 읽힌다. */
     private static final Pattern STANDALONE_TIME = Pattern.compile(
-            "(?<!\\d)(?<!\\d:)" + TIME + "(?!\\d)(?!:\\d)");
+            "(?:(" + AM + "|" + PM + ")\\s*)?(?<!\\d)(?<!\\d:)" + TIME + "(?!\\d)(?!:\\d)");
+
+    /** "오후 3:00~5:00" 의 뒤 시각은 앞의 오전, 오후를 잇는다. */
+    private static final Pattern RANGE_GAP = Pattern.compile("\\s*[~\\-]\\s*");
 
     private TtsTextNormalizer() {}
 
@@ -43,7 +49,7 @@ public final class TtsTextNormalizer {
             } else if (m.group(5) == null) {
                 replacement = date;
             } else {
-                String time = spokenTime(m.group(5), m.group(6), m.group(7));
+                String time = spokenTime(null, m.group(5), m.group(6), m.group(7));
                 // 시각이 없는 값이면 날짜만 바꾸고 뒤의 글자는 그대로 둔다.
                 replacement = time != null
                         ? date + " " + time
@@ -58,9 +64,18 @@ public final class TtsTextNormalizer {
     private static String replaceTimes(String text) {
         Matcher m = STANDALONE_TIME.matcher(text);
         StringBuilder out = new StringBuilder();
+        String lastMeridiem = null;
+        int lastEnd = -1;
         while (m.find()) {
-            String time = spokenTime(m.group(1), m.group(2), m.group(3));
+            String meridiem = m.group(1);
+            if (meridiem == null && lastMeridiem != null
+                    && RANGE_GAP.matcher(text.substring(lastEnd, m.start())).matches()) {
+                meridiem = lastMeridiem;
+            }
+            String time = spokenTime(meridiem, m.group(2), m.group(3), m.group(4));
             m.appendReplacement(out, Matcher.quoteReplacement(time != null ? time : m.group()));
+            lastMeridiem = time != null ? meridiem : null;
+            lastEnd = m.end();
         }
         m.appendTail(out);
         return out.toString();
@@ -78,17 +93,22 @@ public final class TtsTextNormalizer {
         return y + "년 " + mo + "월 " + d + "일";
     }
 
-    private static String spokenTime(String hour, String minute, String second) {
+    /** meridiem 은 글쓴이가 붙인 오전, 오후. 없으면 24시 표기로 보고 정한다. */
+    private static String spokenTime(String meridiem, String hour, String minute, String second) {
         int h = Integer.parseInt(hour);
         int mi = Integer.parseInt(minute);
         int s = second != null ? Integer.parseInt(second) : 0;
         if (h > 23 || mi > 59 || s > 59) return null;
+        // "오전 14:00" 은 어느 쪽이 맞는지 알 수 없어 글을 그대로 둔다.
+        if (AM.equals(meridiem) && h > 12) return null;
 
         StringBuilder sb = new StringBuilder();
-        if (h < 12) {
-            sb.append("오전 ").append(h).append("시");
+        if (meridiem != null) {
+            sb.append(meridiem).append(' ').append(h > 12 ? h - 12 : h).append("시");
+        } else if (h < 12) {
+            sb.append(AM).append(' ').append(h).append("시");
         } else {
-            sb.append("오후 ").append(h == 12 ? 12 : h - 12).append("시");
+            sb.append(PM).append(' ').append(h == 12 ? 12 : h - 12).append("시");
         }
         if (mi > 0 || s > 0) sb.append(' ').append(mi).append("분");
         if (s > 0) sb.append(' ').append(s).append("초");

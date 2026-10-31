@@ -9,7 +9,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * CR-165: 날짜·시각을 읽는 말로 바꾸기(BIZ-137, TC-TTS-201 ~ 210).
+ * CR-165: 날짜·시각을 읽는 말로 바꾸기(BIZ-137, TC-TTS-201 ~ 210, 224).
  */
 class TtsTextNormalizerTest {
 
@@ -59,6 +59,30 @@ class TtsTextNormalizerTest {
     void keepsValuesThatAreNotDatesOrTimes(String value) {
         String text = "값 " + value + " 끝";
         assertThat(TtsTextNormalizer.normalize(text)).isEqualTo(text);
+    }
+
+    @ParameterizedTest(name = "{0} = {1}")
+    @DisplayName("TC-TTS-224 글쓴이가 붙인 오전, 오후는 한 번만 읽는다")
+    @CsvSource({
+            "오후 2:30, 오후 2시 30분",
+            "오전 9:05, 오전 9시 5분",
+            "오후2:30, 오후 2시 30분",
+            "오후 14:30, 오후 2시 30분",
+            "오후 12:00, 오후 12시",
+            "2026-11-07 오후 2:30, 2026년 11월 7일 오후 2시 30분",
+            "오후 3:00~5:00, 오후 3시~오후 5시",
+            "오후 3:00 - 5:00, 오후 3시 - 오후 5시",
+            "14:00~16:00, 오후 2시~오후 4시",
+            "'오후 3:00, 9:00', '오후 3시, 오전 9시'",
+    })
+    void readsWriterMeridiemOnce(String text, String spoken) {
+        assertThat(TtsTextNormalizer.normalize(text)).isEqualTo(spoken);
+    }
+
+    @Test
+    @DisplayName("TC-TTS-224 오전에 13시 이후가 붙으면 어느 쪽인지 몰라 그대로 둔다")
+    void keepsConflictingMeridiem() {
+        assertThat(TtsTextNormalizer.normalize("값 오전 14:00 끝")).isEqualTo("값 오전 14:00 끝");
     }
 
     @Test
