@@ -1,0 +1,24 @@
+{
+  "ref_audio": "ref.wav",
+  "ref_text": "1번. 스물한 개. 200번. 아흔아홉 개.",
+  "language": "Korean",
+  "seed": 20261031,
+  "attempts": 3,
+  "tokens_per_char": 8,
+  "min_new_tokens": 48,
+  "max_new_tokens": 1600,
+  "generation": {
+    "temperature": 0.65,
+    "top_p": 0.90,
+    "top_k": 30,
+    "repetition_penalty": 1.05,
+    "subtalker_temperature": 0.65,
+    "subtalker_top_p": 0.90,
+    "subtalker_top_k": 30
+  },
+  "postprocess": {
+    "filter": "silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB,areverse,atempo=0.90,apad=pad_dur=0.05,adelay=50",
+    "sample_rate": 24000,
+    "bitrate": "96k"
+  }
+}

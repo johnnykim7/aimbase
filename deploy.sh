@@ -15,6 +15,7 @@
 #         ./deploy.sh agents  (러너 전체, 아래 AGENT_SERVICES)
 #         ./deploy.sh mcp     (BE + 러너 전체 — MCP 프로토콜 변경 시 필수)
 #         ./deploy.sh sandbox (스킬 실행 컨테이너 소스 동기화 + 이미지 재빌드 + 재기동)
+#         ./deploy.sh tts     (같은 목소리 음성 생성기 소스 동기화 + 이미지 재빌드 + 재기동)
 #
 # 우진비드 AWS 서버(/opt/wjbid/aimbase). 나중에 생길 AXOPM AWS 와 구분해 wjbid 로 부른다. compose 는 docker-compose.wjbid.yml, 화면은 없다.
 #         ./deploy.sh wjbid-sandbox (스킬 실행 컨테이너)
@@ -101,6 +102,21 @@ deploy_sandbox() {
   echo "[sandbox] 이미지 빌드와 재시작"
   ssh_run "cd $REMOTE && docker compose up -d --build skill-sandbox"
   echo "[sandbox] 완료: $REMOTE/skill-sandbox/"
+}
+
+# CR-166: 같은 목소리 음성 생성기. 처음 기동 때 모델(4.3GB)을 볼륨에 받아 /health 가 200 이 되기까지 몇 분 걸린다.
+# api 가 생성기 주소를 환경변수로 받는 것은 api 를 다시 만들 때다(./deploy.sh be).
+deploy_tts() {
+  echo "[tts] 소스 동기화"
+  ssh_run "mkdir -p $REMOTE/tts-sidecar"
+  scp_send tts-sidecar/Dockerfile tts-sidecar/.dockerignore tts-sidecar/requirements.txt tts-sidecar/server.py \
+    "$SERVER:$REMOTE/tts-sidecar/"
+  scp_send -r tts-sidecar/voices "$SERVER:$REMOTE/tts-sidecar/"
+  scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
+
+  echo "[tts] 이미지 빌드와 재시작"
+  ssh_run "cd $REMOTE && docker compose up -d --build tts-sidecar"
+  echo "[tts] 완료: $REMOTE/tts-sidecar/"
 }
 
 deploy_agent() {
@@ -388,8 +404,9 @@ case "$TARGET" in
   agents) deploy_agents ;;
   mcp)    deploy_mcp ;;
   sandbox) deploy_sandbox ;;
+  tts)    deploy_tts ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws]"; exit 1 ;;
 esac
 
 echo ""
