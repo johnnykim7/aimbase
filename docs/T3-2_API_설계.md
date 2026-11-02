@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.2 | 최종 수정: 2026-10-31 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-165, CR-166
+> 설계 버전: 7.3 | 최종 수정: 2026-11-03 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-165, CR-166, CR-167
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -2899,13 +2899,13 @@ cap 32000
 | 404 | `voice_not_found:<이름>` | 없는 음색 |
 | 404 | `job_not_found` | 없는 작업, 보관 기간이 지나 지운 작업, 다른 테넌트의 작업 |
 | 429 | `tts_queue_full:max=500` | 테넌트의 대기, 진행 중 작업이 상한(BIZ-133) |
-| 503 | `tts_generator_unavailable` | 생성기가 떠 있지 않거나 모델을 올리는 중 |
+| 503 | `tts_generator_unavailable` | 생성기가 떠 있지 않거나, 모델 파일을 받는 중이거나, 모델 프로세스가 죽어 쉬는 중(BIZ-140). 모델을 싣는 중에는 503 이 아니라 받아서 기다렸다 만든다(CR-167) |
 
 ### 생성기 내부 창구 (api 만 부른다)
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| GET | `http://tts-sidecar:8310/health` | 모델과 음색이 올라왔으면 200 `{"status":"ok","voices":[...]}`, 아니면 503 |
+| GET | `http://tts-sidecar:8310/health` | 200 `{"status":"ok","voices":[...],"model":"unloaded"\|"loading"\|"ready"}`. 모델이 내려가 있어도 200 이다. 503 `{"status":"downloading"}`, `{"status":"failed","error":...}`, `{"status":"backoff","error":...,"retry_after":초}` (CR-167) |
 | POST | `http://tts-sidecar:8310/synthesize` | `{voice, text}` 를 MP3 로. 머리값 `X-Duration-Sec`, `X-Elapsed-Sec`, `X-Attempt`. 없는 음색 404, 빈 글 400, 검사 3번 실패 422 `{"error":"generation_failed:<까닭>"}` |
 
 ---
