@@ -16,11 +16,13 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * CR-013: API Rate Limit 필터.
  *
- * TenantResolver(@Order -200) 뒤, SecurityFilterChain 앞에서 실행.
+ * TenantResolver(@Order -200) 뒤에서 실행한다. 순서값이 같은 Spring Security 필터 묶음이 먼저 등록되어
+ * 인증을 통과한 요청만 여기에 온다(CR-168 로컬 실측).
  * 테넌트별 분당 요청 수를 Redis TokenBucket으로 제한.
  * 초과 시 429 Too Many Requests + X-RateLimit-* 헤더 반환.
  */
@@ -29,6 +31,13 @@ import java.util.Map;
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
+
+    // CR-168 BIZ-141: 실행기 연결 신호(등록, 상태 알림). 업무 요청이 한도를 다 써도 상태 알림이 거절되어
+    // 실행기가 끊김(STALE)으로 바뀌지 않게 한도에서 제외한다. 실행기와 AgentRegistryController 가 정하는
+    // 경로라 설정값이 아니라 여기 둔다. 상태 알림의 id 는 등록 id(UUID) 모양만 맞춘다.
+    private static final String AGENT_REGISTER_PATH = "/api/v1/agents/register";
+    private static final Pattern AGENT_HEARTBEAT_PATH = Pattern.compile(
+            "^/api/v1/agents/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/heartbeat$");
 
     private final TokenBucketRateLimiter rateLimiter;
     private final SubscriptionRepository subscriptionRepository;
@@ -48,7 +57,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // Rate Limit 대상: /api/v1/** 경로만
         // 인증, 액추에이터, 정적 리소스, MCP 등 제외
         return !path.startsWith("/api/v1/")
-            || path.startsWith("/api/v1/auth/");
+            || path.startsWith("/api/v1/auth/")
+            || isAgentConnectionSignal(request);
+    }
+
+    static boolean isAgentConnectionSignal(HttpServletRequest request) {
+        if (!"POST".equals(request.getMethod())) {
+            return false;
+        }
+        String path = request.getRequestURI();
+        return AGENT_REGISTER_PATH.equals(path) || AGENT_HEARTBEAT_PATH.matcher(path).matches();
     }
 
     @Override
