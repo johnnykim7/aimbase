@@ -575,7 +575,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 3. `docker compose ps tts-sidecar` 가 `healthy` 면 준비가 끝났다. 모델 파일을 받는 동안(최대 15분)은 맡기기가 503 `tts_generator_unavailable` 이다. 모델 자체는 첫 문장이 올 때 싣는다
 4. api 는 `AIMBASE_TTS_SIDECAR_URL`(기본 `http://tts-sidecar:8310`)로 부른다. 호스트 포트는 열지 않는다
 
-**자원**: 코어 8개 상한(`cpus: 8`), CPU 몫(`cpu_shares`)은 다른 컨테이너의 1/4, 메모리 16GB 상한. 한 번에 한 문장만 만든다. 코어가 모자랄 때는 api, 실행기가 먼저 CPU 를 받는다.
+**자원**: 코어 8개 상한(`cpus: 8`), CPU 몫(`cpu_shares`)은 다른 컨테이너의 1/4, 메모리 16GB 상한. 한 번에 한 문장만 만든다. 코어가 모자랄 때는 api, 실행기가 먼저 CPU 를 받는다. 운영 chaws 는 코어 2개, 스레드 2개, 메모리 10GB 상한이다. 스레드 수가 다르면 소리 길이는 같고 파일은 미세하게 달라진다(BIZ-134).
 
 **설정** (`application.yml`, 환경변수로 바꾼다):
 
