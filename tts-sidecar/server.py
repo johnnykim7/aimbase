@@ -387,12 +387,13 @@ class ModelHost:
 
     def _end_process(self):
         process, conn = self._process, self._conn
-        self._process, self._conn, self._loaded = None, None, False
         if conn is not None:
             conn.close()
         if process is not None:
             process.kill()
             process.join()
+        # unloaded 는 메모리가 돌아왔다는 뜻이라 프로세스가 끝난 뒤에 바꾼다.
+        self._process, self._conn, self._loaded = None, None, False
 
     def _watch_idle(self):
         interval = min(IDLE_CHECK_SECONDS, self._idle_seconds / 2)
