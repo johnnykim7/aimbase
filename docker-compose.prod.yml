@@ -449,6 +449,8 @@ services:
       - tts-models:/models
     environment:
       TTS_THREADS: "8"
+      TTS_IDLE_UNLOAD_SECONDS: "300"
+      TTS_LOAD_RETRY_SECONDS: "600"
     # 59 코어 16개 중 8개까지만 쓰고, CPU 가 모자랄 때는 기본 몫(1024)인 api 와 러너보다 늦게 받는다.
     cpus: 8
     cpu_shares: 256

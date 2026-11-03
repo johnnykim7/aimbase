@@ -20,6 +20,8 @@ COPY server.py /app/server.py
 COPY voices /app/voices
 
 ENV HF_HOME=/models TTS_THREADS=8
+# 할당기 조각을 줄인다. 만든 소리는 비트까지 같고 문장 20개 뒤 메모리가 9.6GB 에서 8.5GB 로 준다(CR-167 7절).
+ENV MALLOC_ARENA_MAX=2 MALLOC_MMAP_THRESHOLD_=1048576 MALLOC_TRIM_THRESHOLD_=1048576
 USER tts
 EXPOSE 8310
 CMD ["uvicorn", "server:build_app", "--factory", "--host", "0.0.0.0", "--port", "8310"]
