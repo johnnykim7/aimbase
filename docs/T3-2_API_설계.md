@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.5 | 최종 수정: 2026-11-03 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168
+> 설계 버전: 7.6 | 최종 수정: 2026-11-04 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -1121,7 +1121,7 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 | 상태 알림 404 | 그 테넌트에 그런 등록 id 가 없다. 해제된 등록(DEREGISTERED)은 200 이다 |
 | 실행기 재등록 | 시작 때 등록에 실패했거나 상태 알림이 404 이면 상태 알림 주기마다 다시 등록한다(tool-sdk-mcp `AgentLifecycle`) |
 | 실행기 키 | 실행기마다 자기 테넌트 키 하나로 등록하고 서버 MCP(`/mcp`)에도 붙는다 |
-| 요청 한도 [CR-168] | 등록(`POST /agents/register`)과 상태 알림(`POST /agents/{UUID}/heartbeat`)은 테넌트 분당 요청 한도(`subscriptions.api_rpm_limit`)에 세지 않는다. 응답에 `X-RateLimit-*` 머리글이 없다. 등록 해제와 목록은 센다(BIZ-141) |
+| 요청 한도 [CR-168] | 등록(`POST /agents/register`)과 상태 알림(`POST /agents/{UUID}/heartbeat`)은 테넌트 분당 요청 한도(`subscriptions.api_rpm_limit`)에서 제외하고 응답에 `X-RateLimit-*` 머리글이 없다. 대신 연결 신호 전용 칸(Redis `rl:agent-signal:{테넌트}:{분}`)으로 테넌트마다 따로 세고, 설정값 `ratelimit.agent-signal-max-per-minute`(기본 60)을 넘으면 429, `Retry-After`, 본문 `error` 는 `Agent connection signal limit exceeded. Max {n} per minute.` 이다. 등록 해제와 목록은 테넌트 한도로 센다(BIZ-141) |
 
 ---
 

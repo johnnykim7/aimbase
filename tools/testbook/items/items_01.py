@@ -1,4 +1,4 @@
-# 영역 01 CLI 작업과 앱 도구 시험항목. 근거는 CR-152(T3-12 § 4.3), CR-153(T1-3 BIZ-125, T3-13 § 4.4, T3-5 TC-MCP-RES-001~005), CR-154(T1-1 PRD-107, T3-5 TC-AK-011~016), CR-155(운용 가이드 § 2-9), CR-156(T1-3 BIZ-126, T3-5 TC-AGR-001~006), CR-163(CR 문서 § 6), CR-168(T1-3 BIZ-141, T3-5 TC-RL-001~006)이다.
+# 영역 01 CLI 작업과 앱 도구 시험항목. 근거는 CR-152(T3-12 § 4.3), CR-153(T1-3 BIZ-125, T3-13 § 4.4, T3-5 TC-MCP-RES-001~005), CR-154(T1-1 PRD-107, T3-5 TC-AK-011~016), CR-155(운용 가이드 § 2-9), CR-156(T1-3 BIZ-126, T3-5 TC-AGR-001~006), CR-163(CR 문서 § 6), CR-168(T1-3 BIZ-141, T3-5 TC-RL-001~008)이다.
 # CR-152, CR-153 의 대상 기능(PRD-306, PRD-281)은 T1-1 에 행이 없어 req·fc 를 비워 두고 src 에 CR 번호를 적는다. CR-154 도 같은 영역이라 같게 둔다.
 
 ITEMS = [
@@ -170,6 +170,19 @@ dict(id='IT-01-015', flow='실행기 연결 신호 요청 한도', kind='정상'
             '2. 0번이다',
      judge=['서버', '서버'],
      pair={1: [1], 2: [2]},
+     req=['BIZ-141'], src=['CR-168'], pri='High'),
+
+
+dict(id='IT-01-016', flow='실행기 연결 신호 요청 한도', kind='예외', title='한 테넌트의 연결 신호가 한 분에 상한(60)을 넘으면 넘는 것부터 429 를 받고 업무 요청 한도는 쓰지 않는다',
+     pre='개발기 시험 테넌트의 API 키, 그 테넌트에 등록된 실행기 id 1개, master global_config 의 ratelimit.agent-signal-max-per-minute 가 60',
+     steps='1. 한 분 안에 그 실행기 id 로 상태 알림(POST /api/v1/agents/{id}/heartbeat)을 70번 보내고 응답 코드를 센다\n'
+           '2. 같은 분 안에 등록(POST /api/v1/agents/register)을 한 번 보낸다\n'
+           '3. 같은 분 안에 업무 요청(GET /api/v1/workflows)을 한 번 보낸다',
+     expect='1. 그 분에 이미 받은 연결 신호를 합쳐 60번째까지 200, 그 뒤는 429 와 Retry-After. 429 응답에 X-RateLimit-* 가 없고 본문이 Agent connection signal limit exceeded 다\n'
+            '2. 429 다\n'
+            '3. 200 이다. 연결 신호 70번이 테넌트 분당 요청 한도를 쓰지 않았다',
+     judge=['서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3]},
      req=['BIZ-141'], src=['CR-168'], pri='High'),
 
 ]

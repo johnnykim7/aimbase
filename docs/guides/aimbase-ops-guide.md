@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.21.2** | 2026-11-03 | Aimbase v8.18.0 기준
+> **v3.21.3** | 2026-11-04 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -575,7 +575,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 3. `docker compose ps tts-sidecar` 가 `healthy` 면 준비가 끝났다. 모델 파일을 받는 동안(최대 15분)은 맡기기가 503 `tts_generator_unavailable` 이다. 모델 자체는 첫 문장이 올 때 싣는다
 4. api 는 `AIMBASE_TTS_SIDECAR_URL`(기본 `http://tts-sidecar:8310`)로 부른다. 호스트 포트는 열지 않는다
 
-**자원**: 코어 8개 상한(`cpus: 8`), CPU 몫(`cpu_shares`)은 다른 컨테이너의 1/4, 메모리 16GB 상한. 한 번에 한 문장만 만든다. 코어가 모자랄 때는 api, 실행기가 먼저 CPU 를 받는다. 운영 chaws 는 코어 2개, 스레드 2개, 메모리 10GB 상한이다. 운영 chaws `bp_wms` 의 분당 요청 한도(`subscriptions.api_rpm_limit`)는 600 이다. 한도는 테넌트 전체에 걸린다. 실행기 연결 신호(등록, 상태 알림)는 한도에 세지 않아, 소비앱 음성 조회가 한도를 다 써도 실행기는 끊김으로 바뀌지 않는다(BIZ-141, CR-168). 그 테넌트의 다른 업무 요청은 429 로 거절된다. 구독 변경 API 로는 바꾸지 못해 master DB 에서 고친다. 스레드 수가 다르면 소리 길이는 같고 파일은 미세하게 달라진다(BIZ-134).
+**자원**: 코어 8개 상한(`cpus: 8`), CPU 몫(`cpu_shares`)은 다른 컨테이너의 1/4, 메모리 16GB 상한. 한 번에 한 문장만 만든다. 코어가 모자랄 때는 api, 실행기가 먼저 CPU 를 받는다. 운영 chaws 는 코어 2개, 스레드 2개, 메모리 10GB 상한이다. 운영 chaws `bp_wms` 의 분당 요청 한도(`subscriptions.api_rpm_limit`)는 600 이다. 한도는 테넌트 전체에 걸린다. 실행기 연결 신호(등록, 상태 알림)는 한도에 세지 않아, 소비앱 음성 조회가 한도를 다 써도 실행기는 끊김으로 바뀌지 않는다(BIZ-141, CR-168). 연결 신호는 따로 테넌트마다 분당 60번까지 받는다. 실행기를 한 테넌트에 아주 많이 붙여 이 상한에 닿으면 master `global_config` 의 `ratelimit.agent-signal-max-per-minute` 를 올린다. 바꾼 값은 5분 안에 반영된다. 그 테넌트의 다른 업무 요청은 429 로 거절된다. 구독 변경 API 로는 바꾸지 못해 master DB 에서 고친다. 스레드 수가 다르면 소리 길이는 같고 파일은 미세하게 달라진다(BIZ-134).
 
 **설정** (`application.yml`, 환경변수로 바꾼다):
 
@@ -1810,6 +1810,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.21.3 | 2026-11-04 | **CR-168 실행기 연결 신호 전용 상한** (§ 2-12). 테넌트마다 분당 60번, 설정 `ratelimit.agent-signal-max-per-minute` |
 | v3.21.2 | 2026-11-03 | **CR-168 실행기 연결 신호 요청 한도 제외** (§ 2-12). 실행기 등록과 상태 알림은 테넌트 분당 요청 한도에 세지 않는다 |
 | v3.21.1 | 2026-11-03 | **CR-167 운영 요청 한도** (§ 2-12). 운영 chaws `bp_wms` 분당 한도 600, 한도가 실행기 연결 신호에도 걸리는 것 |
 | v3.21.0 | 2026-11-03 | **CR-167 필요할 때만 싣기, 운영 chaws 반영** (§ 2-12). 모델을 첫 문장에 싣고 일이 없으면 내린다. `TTS_IDLE_UNLOAD_SECONDS`, `TTS_LOAD_RETRY_SECONDS`, `/health` 의 `model`, `backoff`. `./deploy.sh chaws-tts` |
