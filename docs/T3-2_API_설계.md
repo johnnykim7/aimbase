@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.6 | 최종 수정: 2026-11-04 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168
+> 설계 버전: 7.7 | 최종 수정: 2026-11-04 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -1331,6 +1331,11 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 | maxKnowledgeSources | Integer | 선택 | 최대 지식소스 수 |
 | maxWorkflows | Integer | 선택 | 최대 워크플로우 수 |
 | storageGb | Integer | 선택 | 스토리지 (GB) |
+| apiRpmLimit | Integer | 선택 | 분당 요청 한도. 0 은 무제한. 보내지 않으면 그대로 둔다 [CR-169] |
+
+- `apiRpmLimit` 이 음수, 소수, 정수 범위 밖이면 400, 본문 `error` 는 `apiRpmLimit must be an integer of 0 or greater.` 이다. 숫자가 아니면 요청 본문 해석 오류로 400 이다. 어느 경우든 같이 보낸 값도 저장하지 않는다(BIZ-142)
+- 재기동 없이 다음 요청부터 적용된다. 그 분에 이미 센 수는 그대로다(BIZ-142)
+- 구독 목록과 수정 응답의 칸 이름은 `tenantId`, `plan`, `llmMonthlyTokenQuota`, `maxConnections`, `maxKnowledgeSources`, `maxWorkflows`, `storageGb`, `maxUsers`, `connectionManagementMode`, `apiRpmLimit`, `validFrom`, `validUntil`, `createdAt`, `updatedAt` 이다
 
 ### App 관리 [v3.0, CR-014]
 
