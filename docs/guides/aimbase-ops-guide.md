@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.20.1** | 2026-10-31 | Aimbase v8.18.0 기준
+> **v3.21.0** | 2026-11-03 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -566,11 +566,13 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 
 `POST /api/v1/speech/tts-jobs`(API 가이드 § 26-2)로 맡긴 작업은 api 옆 컨테이너 `tts-sidecar`(Qwen3-TTS 1.7B Base, PyTorch CPU fp32)가 만듭니다. § 2-11 의 맥 엔진과는 따로 돕니다.
 
+**필요할 때만 싣기** [CR-167]: 생성기는 떠 있어도 모델을 싣지 않고 창구 프로세스만 둡니다. 첫 문장이 오면 모델 프로세스를 띄워 싣고, 마지막 문장이 끝나고 `TTS_IDLE_UNLOAD_SECONDS` 가 지나면 그 프로세스를 끝내 메모리를 서버에 돌려줍니다. 쉬던 생성기의 첫 문장은 싣는 시간만큼 더 걸립니다. 지금 상태는 api 컨테이너에서 `curl http://tts-sidecar:8310/health` 의 `model`(`unloaded`, `loading`, `ready`)로 봅니다.
+
 **설치, 갱신** (저장소 `tts-sidecar/`):
 
 1. `./deploy.sh tts` 를 돌린다. 생성기 소스와 `voices/` 를 서버에 올리고 이미지를 만들어 `tts-sidecar` 만 다시 기동한다
 2. 처음 기동 때 모델(4.3GB)을 이름 있는 볼륨 `tts-models` 에 받는다. 이미지를 다시 만들어도 다시 받지 않는다. 이미지와 모델을 합쳐 디스크 약 6GB 가 든다
-3. `docker compose ps tts-sidecar` 가 `healthy` 면 준비가 끝났다. 모델을 받는 동안(최대 15분)은 맡기기가 503 `tts_generator_unavailable` 이다
+3. `docker compose ps tts-sidecar` 가 `healthy` 면 준비가 끝났다. 모델 파일을 받는 동안(최대 15분)은 맡기기가 503 `tts_generator_unavailable` 이다. 모델 자체는 첫 문장이 올 때 싣는다
 4. api 는 `AIMBASE_TTS_SIDECAR_URL`(기본 `http://tts-sidecar:8310`)로 부른다. 호스트 포트는 열지 않는다
 
 **자원**: 코어 8개 상한(`cpus: 8`), CPU 몫(`cpu_shares`)은 다른 컨테이너의 1/4, 메모리 16GB 상한. 한 번에 한 문장만 만든다. 코어가 모자랄 때는 api, 실행기가 먼저 CPU 를 받는다.
@@ -585,6 +587,14 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | `aimbase.tts.max-pending-per-tenant` | `AIMBASE_TTS_MAX_PENDING_PER_TENANT` | 500 | 테넌트마다 대기, 진행 중 작업 상한. 넘으면 429 |
 | `aimbase.tts.retention-days` | `AIMBASE_TTS_RETENTION_DAYS` | 7 | 끝난 작업 보관 일수. 그 테넌트에 새 작업이 올 때 지난 것을 지운다 |
 
+**생성기 설정** (compose 의 `tts-sidecar` 환경변수. 1 이상의 정수가 아니면 기동하지 않는다):
+
+| 환경변수 | 기본값 | 의미 |
+|----------|--------|------|
+| `TTS_IDLE_UNLOAD_SECONDS` | 300 | 마지막 문장이 끝나고 모델을 내리기까지 |
+| `TTS_LOAD_RETRY_SECONDS` | 600 | 모델 프로세스가 죽은 뒤 다시 싣기까지 쉬는 시간 |
+| `TTS_THREADS` | 8 | 연산 스레드 |
+
 **음색 늘리기, 바꾸기**: `tts-sidecar/voices/<이름>/` 에 `ref.wav`(견본 소리)와 `voice.json`(견본 글, 언어, 씨앗, 시도 횟수, 생성 상한, 생성값, 뒤처리)을 두고 `./deploy.sh tts` 를 돌린다. 폴더 이름이 음색 이름이다. 생성값이나 씨앗을 바꾸면 같은 글도 소리가 달라지므로, 이미 만든 소리와 맞춰야 하면 새 이름으로 등록한다.
 
 **장애 대응**:
@@ -593,6 +603,8 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 - **작업이 FAILED `generation_failed:hit_token_limit`**: 소리가 끝맺지 못하고 생성 상한까지 늘어진 것. 씨앗을 바꿔 3번까지 다시 만든 뒤에도 그렇다. 글을 짧게 나눠 맡긴다
 - **작업이 오래 PENDING**: 앞 작업이 차례를 잡고 있다. api 로그의 `tts-job` 줄로 진행을 본다. api 를 다시 기동하면 남은 작업은 조회가 올 때 다시 차례에 들어간다
 - **생성 중 다른 서비스가 느리다**: `cpus`, `cpu_shares` 를 낮춘다(`docker-compose.prod.yml` 의 `tts-sidecar`)
+- **맡기기가 503 이고 `/health` 가 `backoff`**: 모델 프로세스가 죽어 쉬는 중이다. `error` 가 `model process exited: -9` 면 메모리 상한에 걸려 끝난 것이다. `retry_after` 초가 지나면 다음 문장에 다시 싣는다. 쉬는 동안 맡긴 작업은 FAILED `tts_generator_unavailable` 이 되고 bp-wms 가 다음에 다시 맡긴다. 되풀이되면 `mem_limit` 을 본다
+- **일이 없는데 메모리를 계속 쓴다**: `/health` 의 `model` 이 `ready` 면 아직 쉬는 시간이 지나지 않았거나 작업이 남은 것이다. api 로그의 `tts-job` 줄로 남은 작업을 본다
 
 ---
 
@@ -1781,6 +1793,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.21.0 | 2026-11-03 | **CR-167 필요할 때만 싣기, 운영 chaws 반영** (§ 2-12). 모델을 첫 문장에 싣고 일이 없으면 내린다. `TTS_IDLE_UNLOAD_SECONDS`, `TTS_LOAD_RETRY_SECONDS`, `/health` 의 `model`, `backoff`. `./deploy.sh chaws-tts` |
 | v3.20.1 | 2026-10-31 | **CR-165 맥 엔진 포트 확인** (§ 2-11). 공유기 포트 전달 8391 이 적용됐는지 보는 법, 연결에 응답이 없을 때 `TIMEOUT` 으로 남고 요청마다 15초 늦어지는 것 |
 | v3.20.0 | 2026-10-31 | **CR-166 같은 목소리 음성 생성기** (§ 2-12). 컨테이너 `tts-sidecar` 설치(`./deploy.sh tts`), 모델 볼륨, 자원 상한, `aimbase.tts.*` 설정, 음색 늘리기, 장애 대응 |
 | v3.19.0 | 2026-10-31 | **CR-165 음성 합성 맥 엔진** (§ 2-11). 목소리 목록의 목소리는 맥 엔진(Qwen3-TTS 복제 목소리)이 만들고 실패하면 OpenAI 로 전환한다. 설치, `tts_local` 연결, `tts.*` 설정, 목소리 바꾸기, 장애 대응 |
