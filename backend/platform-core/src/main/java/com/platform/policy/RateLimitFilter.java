@@ -1,6 +1,7 @@
 package com.platform.policy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.config.PlatformSettingsService;
 import com.platform.domain.master.SubscriptionEntity;
 import com.platform.repository.master.SubscriptionRepository;
 import com.platform.tenant.TenantContext;
@@ -33,21 +34,28 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
     // CR-168 BIZ-141: 실행기 연결 신호(등록, 상태 알림). 업무 요청이 한도를 다 써도 상태 알림이 거절되어
-    // 실행기가 끊김(STALE)으로 바뀌지 않게 한도에서 제외한다. 실행기와 AgentRegistryController 가 정하는
-    // 경로라 설정값이 아니라 여기 둔다. 상태 알림의 id 는 등록 id(UUID) 모양만 맞춘다.
+    // 실행기가 끊김(STALE)으로 바뀌지 않게 테넌트 한도에서 제외하고, 끝없이 들어오지 않게 전용 칸으로 따로 센다.
+    // 경로는 실행기와 AgentRegistryController 가 정하므로 설정값이 아니라 여기 둔다. 상태 알림의 id 는 등록 id(UUID) 모양만 맞춘다.
     private static final String AGENT_REGISTER_PATH = "/api/v1/agents/register";
     private static final Pattern AGENT_HEARTBEAT_PATH = Pattern.compile(
             "^/api/v1/agents/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/heartbeat$");
+    static final String AGENT_SIGNAL_BUCKET = "agent-signal";
+    static final String AGENT_SIGNAL_LIMIT_KEY = "ratelimit.agent-signal-max-per-minute";
+    // 설정 행이 아직 없는 서버(마이그레이션 전)에서 쓰는 값. V73 시드와 같다.
+    private static final int DEFAULT_AGENT_SIGNAL_LIMIT = 60;
 
     private final TokenBucketRateLimiter rateLimiter;
     private final SubscriptionRepository subscriptionRepository;
+    private final PlatformSettingsService platformSettings;
     private final ObjectMapper objectMapper;
 
     public RateLimitFilter(TokenBucketRateLimiter rateLimiter,
                            SubscriptionRepository subscriptionRepository,
+                           PlatformSettingsService platformSettings,
                            ObjectMapper objectMapper) {
         this.rateLimiter = rateLimiter;
         this.subscriptionRepository = subscriptionRepository;
+        this.platformSettings = platformSettings;
         this.objectMapper = objectMapper;
     }
 
@@ -57,8 +65,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // Rate Limit 대상: /api/v1/** 경로만
         // 인증, 액추에이터, 정적 리소스, MCP 등 제외
         return !path.startsWith("/api/v1/")
-            || path.startsWith("/api/v1/auth/")
-            || isAgentConnectionSignal(request);
+            || path.startsWith("/api/v1/auth/");
     }
 
     static boolean isAgentConnectionSignal(HttpServletRequest request) {
@@ -82,6 +89,19 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
+        if (isAgentConnectionSignal(request)) {
+            // X-RateLimit-* 는 테넌트 한도를 알리는 헤더라 연결 신호에는 싣지 않는다.
+            int signalLimit = platformSettings.getInt(AGENT_SIGNAL_LIMIT_KEY, DEFAULT_AGENT_SIGNAL_LIMIT);
+            TokenBucketRateLimiter.RateLimitResult signal =
+                rateLimiter.tryAcquire(AGENT_SIGNAL_BUCKET, tenantId, signalLimit);
+            if (!signal.allowed()) {
+                reject(response, signal, "Agent connection signal limit exceeded. Max " + signal.limit() + " per minute.");
+                return;
+            }
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         int rpmLimit = resolveRpmLimit(tenantId);
 
         TokenBucketRateLimiter.RateLimitResult result = rateLimiter.tryAcquire(tenantId, rpmLimit);
@@ -91,24 +111,29 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.setHeader("X-RateLimit-Remaining", String.valueOf(result.remaining()));
 
         if (!result.allowed()) {
-            response.setIntHeader("Retry-After", result.retryAfterSeconds());
-            response.setStatus(429);
-            response.setContentType("application/json;charset=UTF-8");
-
-            Map<String, Object> body = Map.of(
-                "success", false,
-                "error", "Rate limit exceeded. Max " + result.limit() + " requests per minute.",
-                "data", Map.of(
-                    "limit", result.limit(),
-                    "current", result.current(),
-                    "retry_after_seconds", result.retryAfterSeconds()
-                )
-            );
-            response.getWriter().write(objectMapper.writeValueAsString(body));
+            reject(response, result, "Rate limit exceeded. Max " + result.limit() + " requests per minute.");
             return;
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private void reject(HttpServletResponse response, TokenBucketRateLimiter.RateLimitResult result,
+                        String message) throws IOException {
+        response.setIntHeader("Retry-After", result.retryAfterSeconds());
+        response.setStatus(429);
+        response.setContentType("application/json;charset=UTF-8");
+
+        Map<String, Object> body = Map.of(
+            "success", false,
+            "error", message,
+            "data", Map.of(
+                "limit", result.limit(),
+                "current", result.current(),
+                "retry_after_seconds", result.retryAfterSeconds()
+            )
+        );
+        response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 
     private int resolveRpmLimit(String tenantId) {
