@@ -564,7 +564,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 
 ### 2-12. 같은 목소리 음성 생성기 운영 [CR-166]
 
-`POST /api/v1/speech/tts-jobs`(API 가이드 § 26-2)로 맡긴 작업은 api 옆 컨테이너 `tts-sidecar`(Qwen3-TTS 1.7B Base, PyTorch CPU fp32)가 만듭니다. § 2-11 의 맥 엔진과는 따로 돕니다.
+`POST /api/v1/speech/tts-jobs`(API 가이드 § 27-2)로 맡긴 작업은 api 옆 컨테이너 `tts-sidecar`(Qwen3-TTS 1.7B Base, PyTorch CPU fp32)가 만듭니다. § 2-11 의 맥 엔진과는 따로 돕니다.
 
 **필요할 때만 싣기** [CR-167]: 생성기는 떠 있어도 모델을 싣지 않고 창구 프로세스만 둡니다. 첫 문장이 오면 모델 프로세스를 띄워 싣고, 마지막 문장이 끝나고 `TTS_IDLE_UNLOAD_SECONDS` 가 지나면 그 프로세스를 끝내 메모리를 서버에 돌려줍니다. 쉬던 생성기의 첫 문장은 싣는 시간만큼 더 걸립니다. 지금 상태는 api 컨테이너에서 `curl http://tts-sidecar:8310/health` 의 `model`(`unloaded`, `loading`, `ready`)로 봅니다.
 
@@ -1579,6 +1579,23 @@ claude-code:
 
 ---
 
+### 시나리오 K: 개발 작업 상태 알림 구성 [CR-164]
+
+개발 작업 상태가 바뀔 때마다 다른 서비스(예 bp-office)로 보내는 구성입니다. 상태 원천과 API 는 API 가이드 § 26 에 있습니다.
+
+1. 받는 쪽 토큰을 Aimbase 서버 환경변수에 넣습니다. 값은 연결 설정, 워크플로우, 문서에 쓰지 않습니다
+2. 연결을 `type=HTTP` 로 만들고 `auth` 를 `{"type": "API_KEY", "in": "header", "name": "<받는 쪽 머리값>", "value_env": "<환경변수 이름>"}` 로 둡니다
+3. 워크플로우를 만들고 `trigger_config` 를 `{"type": "event", "event": "DEV_WORK_ITEM_STATUS_CHANGED"}` 로 둡니다. 단계는 `http_request` 하나로, 본문을 `{{input.work_item_id}}`, `{{input.status}}`, `{{input.reported_at}}` 같은 입력 칸으로 짭니다. `error_handling` 에 재시도를 둡니다
+4. `POST /api/v1/dev-work-items/{작업 번호}/status` 로 한 번 보고하고 워크플로우 실행 기록에 알림 run 이 생겼는지, 받는 쪽에 들어갔는지 봅니다
+5. 감사 기록(도구 실행 기록)의 `requestHeaders` 에서 받는 쪽 머리값이 `***` 인지 봅니다
+
+**장애 대응**:
+- 알림 run 이 실패하면 실행 기록에서 재실행합니다. 같은 입력이라 받는 쪽은 같은 보고를 중복으로 거릅니다
+- 알림 run 이 아예 없으면 워크플로우가 활성인지, `trigger_config` 의 `type`, `event` 철자가 맞는지 봅니다. 같은 값을 다시 보고하면 바뀐 것이 없어 알림이 나가지 않습니다
+- 이벤트 트리거를 단 워크플로우는 그 테넌트의 모든 상태 변경마다 돕니다. 보내지 않을 동안은 비활성화합니다
+
+---
+
 ## 5. 운영 주의사항
 
 ### 보안
@@ -1799,6 +1816,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 | v3.20.0 | 2026-10-31 | **CR-166 같은 목소리 음성 생성기** (§ 2-12). 컨테이너 `tts-sidecar` 설치(`./deploy.sh tts`), 모델 볼륨, 자원 상한, `aimbase.tts.*` 설정, 음색 늘리기, 장애 대응 |
 | v3.19.0 | 2026-10-31 | **CR-165 음성 합성 맥 엔진** (§ 2-11). 목소리 목록의 목소리는 맥 엔진(Qwen3-TTS 복제 목소리)이 만들고 실패하면 OpenAI 로 전환한다. 설치, `tts_local` 연결, `tts.*` 설정, 목소리 바꾸기, 장애 대응 |
 | v3.18.0 | 2026-10-30 | **CR-165 키를 서버 환경변수에 두는 LLM 연결** (§ 3-1). `config.apiKey_env` 에 변수 이름만 둔다. 음성 합성이 OpenAI LLM 연결에서 키를 찾는 순서. 관리 화면이 저장하는 `OpenAI Compatible` 이 OpenAI 로 잘못 분류되던 것을 바로잡음 |
+| v3.18.0 | 2026-10-28 | **CR-164 개발 작업 상태 알림 구성** (§ 4 시나리오 K). 상태 변경 이벤트 트리거 워크플로우와 받는 쪽 토큰을 환경변수로 둔 HTTP 연결로 보내는 순서, 장애 대응 |
 | v3.17.1 | 2026-10-27 | **CR-162 계정 늘리기** (§ 2-10). 설치 스크립트가 로그인된 계정 폴더를 세어 커넥션과 묶음 구성원을 맞춘다. 계정 늘리는 순서 |
 | v3.17.0 | 2026-10-27 | **CR-162 운영 3PL 서버의 회사용 Aimbase** (§ 2-10). chaws 의 컨테이너와 메모리 한도, 관리 API 는 SSH 터널, 소비앱은 망 `aimbase-apps`, 처음 세우는 순서와 계정 로그인, 고치기와 되돌리기 |
 | v3.16.0 | 2026-10-27 | **CR-161 CLI 계정 여러 개 나눠 쓰기** (시나리오 P). 계정별 로그인 폴더와 커넥션(`config_dir`), 커넥션 그룹 `ROUND_ROBIN`, 단계와 채팅의 `connection_group_id`. 한도에 걸린 계정은 풀리는 시각까지 빠짐, 계정 추가와 되돌리기, 점검 |

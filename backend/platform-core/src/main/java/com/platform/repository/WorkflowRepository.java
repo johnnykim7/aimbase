@@ -29,4 +29,11 @@ public interface WorkflowRepository extends JpaRepository<WorkflowEntity, String
 
     // CR-022: 사용자별 리소스 소유
     List<WorkflowEntity> findByCreatedByAndIsActiveTrue(String createdBy);
+
+    // CR-164 BIZ-131: 이벤트 트리거를 단 활성 워크플로우
+    @org.springframework.data.jpa.repository.Query(value =
+        "SELECT * FROM workflows WHERE is_active = true AND trigger_config ->> 'type' = :type "
+            + "AND trigger_config ->> 'event' = :event ORDER BY id", nativeQuery = true)
+    List<WorkflowEntity> findActiveByTrigger(@org.springframework.data.repository.query.Param("type") String type,
+                                             @org.springframework.data.repository.query.Param("event") String event);
 }

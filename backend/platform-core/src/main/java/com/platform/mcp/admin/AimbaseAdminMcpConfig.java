@@ -64,7 +64,7 @@ public class AimbaseAdminMcpConfig {
               - CONDITION: {"expression":"...", "true_step":"...", "false_step":"..."}
               - HUMAN_INPUT: {"message":"...", "timeout_hours":24}
               - SUB_WORKFLOW: {"workflow_id":"..."}
-            - trigger_config: {"type":"manual"} 또는 {"type":"webhook","path":"/hooks/..."} 또는 {"type":"schedule","cron":"..."}
+            - trigger_config: {"type":"manual"} 또는 {"type":"webhook","path":"/hooks/..."} 또는 {"type":"schedule","cron":"..."} 또는 {"type":"event","event":"DEV_WORK_ITEM_STATUS_CHANGED"}(CR-164, 개발 작업 상태가 바뀔 때마다 실행)
             - error_handling: {"retryMaxAttempts":2, "retryDelayMs":3000} (0 이상 정수, 그 밖의 칸은 거부)
             - 도구 호출 루프 최대 5회 (BIZ-001)
             """;

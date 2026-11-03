@@ -66,7 +66,7 @@ bp-office 음성 브리핑(OFC-REPORT-005)이 `POST /api/v1/speech/tts` 를 부�
 | `application.yml` | `aimbase.speech.openai-tts-url`(env `AIMBASE_SPEECH_OPENAI_TTS_URL`) |
 | 시험 `SpeechControllerTtsTest`(새), `ConnectionApiKeysTest`(새), `ConnectionAdapterTypeTest`(새), `SpeechControllerRegressionTest`(생성자) | 6절 |
 | `T3-1_데이터_모델.md` | connections config 의 `apiKey_env` |
-| 운용 가이드 v3.18.0 § 3-1, API 가이드 v3.24.0 § 26 | 키를 환경변수에 두는 연결, 음성 합성 창구 |
+| 운용 가이드 v3.18.0 § 3-1, API 가이드 v3.24.0 § 27 | 키를 환경변수에 두는 연결, 음성 합성 창구 |
 
 ## 6. 시험과 개발기 반영
 
@@ -324,7 +324,7 @@ CR-166(같은 날 착수)은 같은 모델(Qwen3-TTS 1.7B Base)로 bp-wms 현장
 | Flyway 마스터 다음 번호 `__cr165_seed_tts_settings.sql` | 9.7 플랫폼 설정 |
 | 시험 | 9.10 |
 | 설계서 | T1-1, T1-3, T1-7, T2-1, T3-1, T3-2, T3-5, CR 변경 이력 |
-| 가이드 | API 가이드 § 26(목소리 목록, 머리글), 운용 가이드(맥 음성 엔진 설치, 연결, 설정) |
+| 가이드 | API 가이드 § 27(목소리 목록, 머리글), 운용 가이드(맥 음성 엔진 설치, 연결, 설정) |
 
 ### 9.10 시험
 
