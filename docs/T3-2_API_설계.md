@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.1 | 최종 수정: 2026-10-28 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164
+> 설계 버전: 7.4 | 최종 수정: 2026-11-03 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -1708,6 +1708,55 @@ PY-019(독성 분류 강화)는 기존 `validate_output` 도구 내부 로직 �
 |--------|------|------|------|
 | POST | `/speech/tts` | Text-to-Speech 변환 | 🔒 |
 | POST | `/speech/stt` | Speech-to-Text 변환 | 🔒 |
+| GET | `/speech/voices` | 음성 합성 목소리 목록 [CR-165] | 🔒 |
+
+### POST `/speech/tts` 🔒 [PRD-357, PRD-358, v7.2, CR-165]
+
+**Request Body**:
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| text | String | ✅ | 읽을 글. 비면 400 |
+| voice | String | 선택 | 목소리 목록의 `id` 면 목록 길, 그 밖의 값(`nova` 등)이나 빈 값이면 OpenAI 길 |
+| model | String | 선택 | OpenAI 로 보낼 때의 모델. 없으면 `tts-1` |
+| speed | Number | 선택 | 기본 1.0. 목록 길은 `tts.speed-min` ~ `tts.speed-max`(기본 0.5 ~ 2.0) |
+
+```json
+{ "text": "주간 회의는 2026-10-31 14:00 입니다.", "voice": "ko-female-01", "model": "tts-1-hd", "speed": 1.0 }
+```
+
+**동작**:
+- 목록 길: 글의 날짜·시각을 읽는 말로 바꾼다(BIZ-137). `tts.provider=local` 이면 테넌트의 `tts_local` 연결로 맥 엔진에 보내고, 실패하면 `tts.fallback-to-openai=true` 일 때 그 목소리의 `openai_voice` 로 OpenAI 에 보낸다(BIZ-136)
+- OpenAI 길: 지금처럼 테넌트의 OpenAI 연결로 보낸다. 글을 바꾸지 않는다
+
+**응답**: 200 `audio/mpeg` 본문, 머리글 `X-Aimbase-TTS-Engine: local | openai`
+
+| 상태 | 뜻 |
+|------|------|
+| 400 | 빈 글, 목록 길 speed 범위 밖 |
+| 503 | 맥 엔진 실패에 OpenAI 전환 꺼짐, 또는 쓸 수 있는 OpenAI 연결이 없다 |
+| 그 밖 | OpenAI 가 돌려준 상태와 본문 그대로 |
+
+### GET `/speech/voices` 🔒 [PRD-359, v7.2, CR-165]
+
+**설명**: 플랫폼 설정 `tts.voices` 의 목소리 목록과 speed 범위. 맥 엔진이 꺼져 있어도 나온다. `openai_voice` 는 싣지 않는다.
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "voices": [
+      { "id": "ko-female-01", "name": "밝은 비서", "description": "20대 여성, 밝고 친근한 말투", "default": true }
+    ],
+    "speed": { "min": 0.5, "max": 2.0, "default": 1.0 }
+  }
+}
+```
+
+설정이 JSON 으로 읽히지 않으면 `voices` 는 빈 배열이다. 첫 목소리 이름은 CR-165 7절 질의 5 로 정한다.
+| POST | `/speech/tts-jobs` | 같은 목소리 음성 생성 작업 맡기기 (CR-166) | 🔒 |
+| GET | `/speech/tts-jobs/{job_id}` | 음성 생성 작업 조회 (CR-166) | 🔒 |
 
 ---
 
@@ -2870,6 +2919,65 @@ cap 32000
 ### http_request 기록 머리값 [PRD-353]
 
 `auditPayload.requestHeaders` 에서 연결 auth(API_KEY, in=header)의 name 머리값을 `***` 로 가린다. 도구 직접 실행 API(`POST /api/v1/tools/http_request/execute`) 응답도 같다(BIZ-132).
+
+## 같은 목소리 음성 생성 작업 [v7.1, CR-166]
+
+### POST `/api/v1/speech/tts-jobs` 🔒 [PRD-354]
+**설명**: 음색과 글을 맡기고 작업 번호를 바로 받는다. 소리는 생성기가 뒤에서 만든다. 테넌트 키(X-API-Key)의 테넌트에 작업을 둔다.
+
+**Request Body**:
+```json
+{ "voice": "field-voice-07", "text": "검수대 3번으로 이동하세요." }
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| voice | string | ✅ | 음색 이름 |
+| text | string | ✅ | 1 ~ 200자. 바꾸지 않고 그대로 읽는다 |
+
+**Response 202**:
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07",
+            "reused": false, "created_at": "2026-10-31T01:40:00Z" } }
+```
+
+- 같은 테넌트에 같은 음색, 같은 글의 작업이 있으면(FAILED 제외) 그 작업을 돌려준다. `reused=true`, `status` 는 그 작업의 지금 상태(BIZ-134)
+
+### GET `/api/v1/speech/tts-jobs/{job_id}` 🔒 [PRD-354]
+**설명**: 작업 상태와 결과.
+
+**Response 200**:
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "COMPLETED", "voice": "field-voice-07",
+            "text": "검수대 3번으로 이동하세요.",
+            "created_at": "...", "started_at": "...", "finished_at": "...",
+            "mime_type": "audio/mpeg", "audio_base64": "SUQzBAAAAA...",
+            "duration_sec": 2.21, "elapsed_sec": 21.7 } }
+```
+
+- `mime_type`, `audio_base64`, `duration_sec` 은 COMPLETED 일 때만, `error` 는 FAILED 일 때만
+- 시각(`created_at`, `started_at`, `finished_at`)은 UTC 로 싣는다(`2026-10-31T01:40:00Z`)
+- FAILED `error`: `generation_failed:<empty_audio|non_finite_audio|silent_audio|too_short|hit_token_limit|internal_error>`, `tts_generator_unavailable`, `tts_generator_timeout`
+
+### 오류
+본문 `{ "success": false, "error": "<코드>" }`
+
+| HTTP | 코드 | 때 |
+|------|------|-----|
+| 400 | `voice_required`, `text_required`, `text_too_long:max=200`, `invalid_job_id` | 칸이 비었거나 길거나 작업 번호 모양이 틀림 |
+| 404 | `voice_not_found:<이름>` | 없는 음색 |
+| 404 | `job_not_found` | 없는 작업, 보관 기간이 지나 지운 작업, 다른 테넌트의 작업 |
+| 429 | `tts_queue_full:max=500` | 테넌트의 대기, 진행 중 작업이 상한(BIZ-133) |
+| 503 | `tts_generator_unavailable` | 생성기가 떠 있지 않거나, 모델 파일을 받는 중이거나, 모델 프로세스가 죽어 쉬는 중(BIZ-140). 모델을 싣는 중에는 503 이 아니라 받아서 기다렸다 만든다(CR-167) |
+
+### 생성기 내부 창구 (api 만 부른다)
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `http://tts-sidecar:8310/health` | 200 `{"status":"ok","voices":[...],"model":"unloaded"\|"loading"\|"ready"}`. 모델이 내려가 있어도 200 이다. 503 `{"status":"downloading"}`, `{"status":"failed","error":...}`, `{"status":"backoff","error":...,"retry_after":초}` (CR-167) |
+| POST | `http://tts-sidecar:8310/synthesize` | `{voice, text}` 를 MP3 로. 머리값 `X-Duration-Sec`, `X-Elapsed-Sec`, `X-Attempt`. 없는 음색 404, 빈 글 400, 검사 3번 실패 422 `{"error":"generation_failed:<까닭>"}` |
 
 ---
 

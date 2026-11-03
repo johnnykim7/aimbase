@@ -1,8 +1,9 @@
 package com.platform.api;
 
-import com.platform.repository.ConnectionRepository;
 import com.platform.speech.SpeechException;
 import com.platform.speech.SpeechService;
+import com.platform.speech.TtsServiceRouter;
+import com.platform.speech.TtsVoiceCatalog;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -28,12 +29,13 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class SpeechControllerRegressionTest {
 
-    @Mock private ConnectionRepository connectionRepository;
+    @Mock private TtsServiceRouter ttsRouter;
+    @Mock private TtsVoiceCatalog voiceCatalog;
     @Mock private SpeechService speechService;
 
     @Test
     void returnsTextAndLanguageAndDuration_whenServiceSucceeds() throws Exception {
-        SpeechController controller = new SpeechController(connectionRepository, speechService);
+        SpeechController controller = new SpeechController(speechService, ttsRouter, voiceCatalog);
         when(speechService.transcribe(any(byte[].class), anyString(), anyString(), anyString()))
                 .thenReturn(new SpeechService.TranscribeResult("안녕하세요", "ko", 3.4));
 
@@ -54,7 +56,7 @@ class SpeechControllerRegressionTest {
 
     @Test
     void returns503_whenProviderUnavailable() throws Exception {
-        SpeechController controller = new SpeechController(connectionRepository, speechService);
+        SpeechController controller = new SpeechController(speechService, ttsRouter, voiceCatalog);
         when(speechService.transcribe(any(byte[].class), any(), any(), anyString()))
                 .thenThrow(SpeechException.providerUnavailable());
 
@@ -70,7 +72,7 @@ class SpeechControllerRegressionTest {
 
     @Test
     void returns502_whenUpstreamError() throws Exception {
-        SpeechController controller = new SpeechController(connectionRepository, speechService);
+        SpeechController controller = new SpeechController(speechService, ttsRouter, voiceCatalog);
         when(speechService.transcribe(any(byte[].class), any(), any(), anyString()))
                 .thenThrow(SpeechException.upstream(500, "boom"));
 
@@ -85,7 +87,7 @@ class SpeechControllerRegressionTest {
 
     @Test
     void returns504_whenTimeout() throws Exception {
-        SpeechController controller = new SpeechController(connectionRepository, speechService);
+        SpeechController controller = new SpeechController(speechService, ttsRouter, voiceCatalog);
         when(speechService.transcribe(any(byte[].class), any(), any(), anyString()))
                 .thenThrow(SpeechException.timeout(new java.net.http.HttpTimeoutException("slow")));
 

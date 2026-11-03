@@ -8,7 +8,7 @@
   - 범위 사용자 10/27 11:47 3절 ①(모든 경로가 묶음을 받고 bp-wes, bp-wms 는 묶음 id 를 보내게 각 레포에 CR 요청)
   - 사용자 10/28 05:25 「진행하세요」(비 bp 실행기에도 들어가는 실행기 공통 변경 4.4), 「컨셉만」(화면은 컨셉 승인 뒤 코드), 「요청하세요」(bp-wes, bp-wms 는 인계 문서로 요청)
 - 규모: 중. 워크플로우 단계 설정에 묶음 칸, 워크플로우 스튜디오 단계 설정 화면에 칸 추가, 채팅 경로의 묶음 처리 변경. 새 테이블 없음
-- 상태: 구현과 로컬 확인 끝(api 묶음 처리, 실행기 한도 표식, 단계 설정 화면 칸). 개발기 반영 전(7.6)
+- 상태: 구현, 로컬 확인, 개발기 반영 끝(api, 화면, 실행기, 계정 연결 12개와 그룹 4개, bp-office 워크플로우 8개, 7.7). bp-office 실제 호출이 work01~03 으로 나뉘어 가는 것을 확인했다(7.7). bp-wes, bp-wms, bp-office 쪽 반영이 남았다(7.6)
 
 ---
 
@@ -136,6 +136,8 @@
 6. bp-office 워크플로우 2개의 LLM_CALL 단계 `connection_id` 를 `connection_group_id` 로 바꾼다
 7. bp-wes, bp-wms 는 6절 CR 이 반영되면 그룹으로 바뀐다
 
+반영하며 바뀐 것(7.7): 실행기는 사용자 10/28 06:08 「전부 다해도 되는데」로 전체를 다시 띄웠다. 사용자가 10/30 에 work03 까지 로그인해 그룹은 처음부터 세 멤버다. bp-office 워크플로우는 반영 때 8개여서 8개를 다 바꿨다(사용자 10/30 06:06 「1」).
+
 ## 6. 다른 레포 요청
 
 | 순번 | 레포 | 바꿀 곳 | 내용 |
@@ -219,5 +221,21 @@ TC-CG-101~110 `ConnectionGroupSelectorTest` 11건, TC-CG-115 `LlmCallStepExecuto
 
 ### 7.6 남은 일
 
-1. bp-wes, bp-wms 는 인계 문서(`docs/기록/CR-161_bp-wes_bp-wms_인계.md`)로 요청. aimbase 개발기 반영 뒤 묶음 id 를 넣게 알린다
-2. 개발기 반영(5절), 계정 로그인은 사용자
+1. bp-wes, bp-wms: 인계 문서(`docs/기록/CR-161_bp-wes_bp-wms_인계.md`). 개발기 묶음이 생겼으니 묶음 id 를 넣어도 된다고 사용자를 통해 알린다
+2. bp-office: 워크플로우 정의 파일 10개를 개발기와 같은 값으로 바꾸게 인계 문서(`docs/기록/CR-161_bp-office_인계.md`)로 요청한다. 안 바꾸면 bp-office 가 그 파일로 다시 등록할 때 계정 하나로 돌아간다. 10/30 06:48 에 다시 등록된 `bp-office-lead-report` 가 이미 그렇게 돌아갔다(7.7 순번 8)
+3. bp-wes 가 묶음 id 를 넣은 뒤 bp-wes 실행기 로그 `configDir=` 가 work01~03 으로 나뉘는지 본다. 10/31 13시 기준 bp-wes 평소 호출은 아직 `local-agent-1`, `local-agent-cs` 한 계정으로 간다
+
+### 7.7 개발기 반영 (10/28 ~ 10/31)
+
+| 순번 | 단계 | 결과 |
+|---|---|---|
+| 1 | api | 10/28 06:27 작업 폴더 사본으로 `./deploy.sh be`, healthy. 10/29 14:45 CR-164 반영본에도 들어 있다(10/30 실행본 jar 안에 `ConnectionGroupSelector`, `CliAccountLimitedException` 을 봤다) |
+| 2 | 화면 | 10/28 같은 사본으로 `./deploy.sh fe`. CR-129, CR-130 화면 파일은 HEAD 로 되돌린 사본이라 CR-161 화면만 나갔다(사용자 10/28 06:37 「1」). 번들에 새 문구 둘 |
+| 3 | 실행기 | 10/30 05:50 작업 폴더에서 `./deploy.sh agents`(사용자 05:49 「재기동하세요」). 앞 실행기 배포(10/27 19:38) 뒤 실행기 소스 변경은 CR-161 한도 표식뿐이고 나머지는 시험 파일이다. 서버 compose 파일과 레포 compose 파일이 같았다. 실행기 7개 healthy, 모두 다시 등록됐고 api 는 이번에는 재기동되지 않았다 |
+| 4 | 계정 로그인 | 사용자 10/30 05:42 ~ 05:47. `claude-accounts/work01~03`(bp-office, bp-wes 가 같이 쓴다), `claude-accounts-wes-cs/work01~03` 여섯 폴더에 로그인 파일이 있고, 폴더 이름과 로그인한 계정 이름이 맞는지 셌다(값은 찍지 않았다) |
+| 5 | 연결 | 10/30 06:02(사용자 06:01 「예」). bp_office `cli-runner-bp-office-work01~03`, bp_wes `cli-runner-bp-wes-work01~03`, `cli-runner-bp-wes-cs-work01~03`, `cli-runner-bp-wms-field-issue-work01~03`. `-001` 의 config 를 복사하고 `config_dir` 만 계정 폴더로 바꿨다(나머지 config 가 `-001` 과 같은지 DB 에서 대조). 상태는 `disconnected` 로 넣었다. 연결을 정하지 않은 호출은 `connected` 인 CLI 연결 중 첫 번째로 가서(`ConnectionAdapterFactory.findDefaultCliConnectionForCurrentTenant`), 새 연결이 그 자리를 뺏지 않게 했다. 그룹 실행은 상태를 보지 않는다 |
+| 6 | 그룹 | 같은 때. `cli-runner-bp-office-rr`, `cli-runner-bp-wes-rr`, `cli-runner-bp-wes-cs-rr`, `cli-runner-bp-wms-field-issue-rr`. ROUND_ROBIN, 멤버 work01, work02, work03(priority 1~3, weight 1), 켜짐, 기본 아님 |
+| 7 | bp-office 워크플로우 | 10/30 06:07(사용자 06:06 「1」). 8개 워크플로우의 LLM_CALL 단계 하나씩에서 `connection_id`(`cli-runner-bp-office-001`)를 빼고 `connection_group_id` `cli-runner-bp-office-rr` 을 넣었다. DB 에서 8개 모두 확인 |
+| 8 | 실제 호출 | 10/31 13시에 셌다. bp_office 실행 12건이 모두 completed. 10/30 06:39 extraction 3건과 classification 3건 때 bp-office 실행기가 work01, work02, work03 으로 CLI 를 2번씩 기동했고, 07:29 briefing 3건 때 한 번씩 기동했다(실행기 로그 `configDir=`). api 로그는 10/31 13:17 다른 배포로 api 가 재기동돼 남지 않았다. 지금 LLM_CALL 단계가 있는 bp-office 워크플로우 11개 중 10개가 묶음이다. `bp-office-lead-report` 는 10/30 06:48 bp-office 가 `-001` 로 다시 등록해 묶음 밖이다. `bp-office-decision-report`, `bp-office-briefing` 은 bp-office 가 묶음 값으로 등록했다. bp-wes 는 10/30 06시 뒤 bp-wes 실행기 16번 중 15번이 `local-agent-1`, wes-cs 실행기 32번 중 30번이 `local-agent-cs` 였다. work 계정은 10/31 07:11 의 3번뿐이고, bp-wes api 환경에는 묶음 설정이 없다 |
+
+되돌리기: 단계 config 에서 `connection_group_id` 를 빼고 `connection_id` 에 `cli-runner-bp-office-001` 을 넣는다. `-001` 연결은 그대로 있다.

@@ -1,18 +1,16 @@
 package com.platform.api;
 
-import com.platform.repository.ConnectionRepository;
 import com.platform.speech.SpeechException;
 import com.platform.speech.SpeechService;
+import com.platform.speech.TtsServiceRouter;
+import com.platform.speech.TtsVoiceCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -22,78 +20,95 @@ import java.util.Map;
  * 테넌트의 OpenAI Connection 설정에서 API 키를 가져와 요청을 중계.
  *
  * CR-060: STT 로직은 {@link SpeechService} 로 이동. 본 컨트롤러는 Platform JWT 경로 유지.
+ * CR-165: TTS 길 나누기와 OpenAI 호출은 {@link TtsServiceRouter} 로 이동. 목소리 목록 창구 추가.
  */
 @RestController
 @RequestMapping("/api/v1/speech")
 public class SpeechController {
 
     private static final Logger log = LoggerFactory.getLogger(SpeechController.class);
-    private static final String OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech";
 
-    private final ConnectionRepository connectionRepository;
+    /** 소리를 만든 엔진(local, openai). 맥 엔진이 실패해 OpenAI 로 전환됐는지 소비앱이 본다. */
+    static final String ENGINE_HEADER = "X-Aimbase-TTS-Engine";
+
     private final SpeechService speechService;
-    private final HttpClient httpClient;
+    private final TtsServiceRouter ttsRouter;
+    private final TtsVoiceCatalog voiceCatalog;
 
-    public SpeechController(ConnectionRepository connectionRepository, SpeechService speechService) {
-        this.connectionRepository = connectionRepository;
+    public SpeechController(SpeechService speechService,
+                            TtsServiceRouter ttsRouter,
+                            TtsVoiceCatalog voiceCatalog) {
         this.speechService = speechService;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(java.time.Duration.ofSeconds(30))
-                .build();
+        this.ttsRouter = ttsRouter;
+        this.voiceCatalog = voiceCatalog;
     }
 
     /**
      * POST /api/v1/speech/tts — Text-to-Speech.
      *
      * Request Body: { "text": "안녕하세요", "model": "tts-1", "voice": "alloy", "speed": 1.0 }
-     * Response: audio/mpeg 바이너리 스트림
+     * Response: audio/mpeg 바이너리 스트림, 머리글 X-Aimbase-TTS-Engine
+     *
+     * <p>CR-165: 목소리 목록에 있는 목소리는 맥 음성 엔진으로 먼저 보낸다. 목록 밖 목소리는 지금처럼 OpenAI.
      */
     @PostMapping("/tts")
     public ResponseEntity<byte[]> textToSpeech(@RequestBody TtsRequest request) {
-        String apiKey = resolveOpenAIKey();
-        if (apiKey == null) {
-            return ResponseEntity.status(503).body(null);
+        if (request.text() == null || request.text().isBlank()) {
+            return ResponseEntity.badRequest().body(null);
+        }
+        // 목록 밖 목소리의 speed 는 지금처럼 OpenAI 가 판단한다.
+        if (voiceCatalog.find(request.voice()).isPresent() && !voiceCatalog.speedInRange(request.speed())) {
+            return ResponseEntity.badRequest().body(null);
         }
 
         try {
-            String model = request.model() != null ? request.model() : "tts-1";
-            String voice = request.voice() != null ? request.voice() : "alloy";
-            double speed = request.speed() != null ? request.speed() : 1.0;
-
-            String jsonBody = String.format(
-                    """
-                    {"model":"%s","input":"%s","voice":"%s","speed":%s}
-                    """,
-                    model,
-                    request.text().replace("\"", "\\\"").replace("\n", "\\n"),
-                    voice,
-                    speed
-            );
-
-            HttpRequest httpReq = HttpRequest.newBuilder()
-                    .uri(URI.create(OPENAI_TTS_URL))
-                    .timeout(java.time.Duration.ofSeconds(60))
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                    .build();
-
-            HttpResponse<byte[]> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofByteArray());
-
-            if (resp.statusCode() >= 400) {
-                log.warn("TTS API error: HTTP {}", resp.statusCode());
-                return ResponseEntity.status(resp.statusCode())
-                        .body(resp.body());
+            TtsServiceRouter.Result r = ttsRouter.synthesize(
+                    request.text(), request.model(), request.voice(), request.speed());
+            if (r.status() >= 400) {
+                return ResponseEntity.status(r.status()).body(r.body());
             }
-
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType("audio/mpeg"))
-                    .body(resp.body());
-
-        } catch (Exception e) {
+                    .header(ENGINE_HEADER, r.engine())
+                    .body(r.body());
+        } catch (SpeechException e) {
+            if (e.getCode() == SpeechException.ErrorCode.PROVIDER_UNAVAILABLE) {
+                log.warn("TTS unavailable: {}", e.getMessage());
+                return ResponseEntity.status(503).body(null);
+            }
             log.error("TTS proxy failed: {}", e.getMessage());
             return ResponseEntity.status(500).body(null);
         }
+    }
+
+    /**
+     * GET /api/v1/speech/voices: 음성 합성 목소리 목록(CR-165, PRD-359).
+     *
+     * <p>소비앱 선택 화면용이다. 맥 엔진을 부르지 않으므로 맥이 꺼져 있어도 나온다.
+     * OpenAI 전환용 목소리({@code openai_voice})는 내보내지 않는다.
+     */
+    @GetMapping("/voices")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> listVoices() {
+        List<Map<String, Object>> voices = voiceCatalog.voices().stream()
+                .map(v -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", v.id());
+                    m.put("name", v.name());
+                    m.put("description", v.description());
+                    m.put("default", v.isDefault());
+                    return m;
+                })
+                .toList();
+
+        Map<String, Object> speed = new LinkedHashMap<>();
+        speed.put("min", voiceCatalog.speedMin());
+        speed.put("max", voiceCatalog.speedMax());
+        speed.put("default", TtsVoiceCatalog.NORMAL_SPEED);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("voices", voices);
+        body.put("speed", speed);
+        return ResponseEntity.ok(ApiResponse.ok(body));
     }
 
     /**
@@ -135,21 +150,6 @@ public class SpeechController {
             log.error("STT request read failed: {}", e.getMessage());
             return ResponseEntity.status(400).body(ApiResponse.error("invalid multipart: " + e.getMessage()));
         }
-    }
-
-    /**
-     * 테넌트의 OpenAI Connection에서 API 키 조회 (TTS 전용).
-     */
-    private String resolveOpenAIKey() {
-        return connectionRepository.findAll().stream()
-                .filter(c -> "openai".equalsIgnoreCase(c.getType())
-                        && "connected".equalsIgnoreCase(c.getStatus()))
-                .findFirst()
-                .map(c -> {
-                    Map<String, Object> cfg = c.getConfig();
-                    return cfg != null ? (String) cfg.get("api_key") : null;
-                })
-                .orElse(null);
     }
 
     // ─── 요청 DTO ────────────────────────────────────────────────────

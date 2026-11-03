@@ -15,6 +15,7 @@
 #         ./deploy.sh agents  (러너 전체, 아래 AGENT_SERVICES)
 #         ./deploy.sh mcp     (BE + 러너 전체 — MCP 프로토콜 변경 시 필수)
 #         ./deploy.sh sandbox (스킬 실행 컨테이너 소스 동기화 + 이미지 재빌드 + 재기동)
+#         ./deploy.sh tts     (같은 목소리 음성 생성기 소스 동기화 + 이미지 재빌드 + 재기동)
 #
 # 우진비드 AWS 서버(/opt/wjbid/aimbase). 나중에 생길 AXOPM AWS 와 구분해 wjbid 로 부른다. compose 는 docker-compose.wjbid.yml, 화면은 없다.
 #         ./deploy.sh wjbid-sandbox (스킬 실행 컨테이너)
@@ -27,6 +28,7 @@
 #         ./deploy.sh chaws-init  (처음 한 번: 폴더, 비밀값 파일, 망 aimbase-apps. 있는 파일은 덮지 않는다)
 #         ./deploy.sh chaws-be    (DB, Redis, api)
 #         ./deploy.sh chaws-agent (실행기)
+#         ./deploy.sh chaws-tts   (같은 목소리 음성 생성기. chaws 묶음에 들지 않는다)
 #         ./deploy.sh chaws       (be, agent 를 이 순서로)
 #
 # ⚠️ CR-124 이후: BE 와 러너는 MCP transport(Streamable HTTP)가 맞아야 도구 호출이 된다.
@@ -101,6 +103,21 @@ deploy_sandbox() {
   echo "[sandbox] 이미지 빌드와 재시작"
   ssh_run "cd $REMOTE && docker compose up -d --build skill-sandbox"
   echo "[sandbox] 완료: $REMOTE/skill-sandbox/"
+}
+
+# CR-166: 같은 목소리 음성 생성기. 처음 기동 때 모델(4.3GB)을 볼륨에 받아 /health 가 200 이 되기까지 몇 분 걸린다.
+# api 가 생성기 주소를 환경변수로 받는 것은 api 를 다시 만들 때다(./deploy.sh be).
+deploy_tts() {
+  echo "[tts] 소스 동기화"
+  ssh_run "mkdir -p $REMOTE/tts-sidecar"
+  scp_send tts-sidecar/Dockerfile tts-sidecar/.dockerignore tts-sidecar/requirements.txt tts-sidecar/server.py \
+    "$SERVER:$REMOTE/tts-sidecar/"
+  scp_send -r tts-sidecar/voices "$SERVER:$REMOTE/tts-sidecar/"
+  scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
+
+  echo "[tts] 이미지 빌드와 재시작"
+  ssh_run "cd $REMOTE && docker compose up -d --build tts-sidecar"
+  echo "[tts] 완료: $REMOTE/tts-sidecar/"
 }
 
 deploy_agent() {
@@ -323,9 +340,11 @@ chaws_keep_image() {
   echo "[chaws] 되돌리기: docker tag $1:pre-$CHAWS_STAMP $1:latest && cd $CHAWS_REMOTE && docker compose up -d --no-deps --force-recreate $2"
 }
 
+# $1 서비스, $2 기다릴 초(기본 180)
 chaws_wait_healthy() {
-  if ! chaws_run "for i in \$(seq 1 180); do s=\$(docker inspect --format '{{.State.Health.Status}}' \$(cd $CHAWS_REMOTE && docker compose ps -q $1) 2>/dev/null); [ \"\$s\" = healthy ] && exit 0; sleep 1; done; exit 1"; then
-    echo "[chaws] $1 이 180초 안에 healthy 가 되지 않았습니다."
+  local seconds=${2:-180}
+  if ! chaws_run "for i in \$(seq 1 $seconds); do s=\$(docker inspect --format '{{.State.Health.Status}}' \$(cd $CHAWS_REMOTE && docker compose ps -q $1) 2>/dev/null); [ \"\$s\" = healthy ] && exit 0; sleep 1; done; exit 1"; then
+    echo "[chaws] $1 이 ${seconds}초 안에 healthy 가 되지 않았습니다."
     chaws_run "cd $CHAWS_REMOTE && docker compose logs --tail 80 $1" || true
     exit 1
   fi
@@ -365,10 +384,29 @@ deploy_chaws_agent() {
   chaws_record aimbase-agent
 }
 
+deploy_chaws_tts() {
+  chaws_require_env
+  chaws_checkout
+  echo "[chaws-tts] 소스 동기화"
+  chaws_run "mkdir -p $CHAWS_REMOTE/build/tts-sidecar"
+  chaws_send "$CHAWS_WORKTREE/tts-sidecar/Dockerfile" "$CHAWS_WORKTREE/tts-sidecar/.dockerignore" \
+    "$CHAWS_WORKTREE/tts-sidecar/requirements.txt" "$CHAWS_WORKTREE/tts-sidecar/server.py" \
+    "$CHAWS_SERVER:$CHAWS_REMOTE/build/tts-sidecar/"
+  chaws_send -r "$CHAWS_WORKTREE/tts-sidecar/voices" "$CHAWS_SERVER:$CHAWS_REMOTE/build/tts-sidecar/"
+  chaws_sync_compose
+  chaws_keep_image aimbase-tts-sidecar tts-sidecar
+  echo "[chaws-tts] 이미지 빌드와 생성기 재시작"
+  chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build tts-sidecar && docker compose up -d --no-deps --force-recreate tts-sidecar"
+  # 처음에는 모델(4.3GB)을 받는다. compose 의 start_period 와 맞춘다.
+  chaws_wait_healthy tts-sidecar 900
+  chaws_record tts-sidecar
+}
+
 case "$TARGET" in
   chaws-init)  deploy_chaws_init; exit 0 ;;
   chaws-be)    deploy_chaws_be; echo "배포 완료: 운영 chaws $CHAWS_SERVER db, redis, api"; exit 0 ;;
   chaws-agent) deploy_chaws_agent; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent"; exit 0 ;;
+  chaws-tts)   deploy_chaws_tts; echo "배포 완료: 운영 chaws $CHAWS_SERVER tts-sidecar"; exit 0 ;;
   chaws)       deploy_chaws_be; deploy_chaws_agent; echo "배포 완료: 운영 chaws $CHAWS_SERVER db, redis, api, aimbase-agent"; exit 0 ;;
 esac
 
@@ -388,8 +426,9 @@ case "$TARGET" in
   agents) deploy_agents ;;
   mcp)    deploy_mcp ;;
   sandbox) deploy_sandbox ;;
+  tts)    deploy_tts ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-tts|chaws]"; exit 1 ;;
 esac
 
 echo ""

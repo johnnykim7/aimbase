@@ -1,6 +1,6 @@
 # T1-5. FSM 상태 정의서
 
-> 설계 버전: 1.1 | 최종 수정: 2026-10-28 | 관련 CR: CR-001, CR-164
+> 설계 버전: 1.3 | 최종 수정: 2026-11-03 | 관련 CR: CR-001, CR-164, CR-166, CR-167
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -19,6 +19,8 @@
 | DevWorkItem | `IN_PROGRESS`, `COMPLETED`, `FAILED`, `CANCELLED` |
 | Tenant | `provisioning`, `active`, `suspended`, `deleted` |
 | User | `active`, `inactive` |
+| TtsJob | `PENDING`, `RUNNING`, `COMPLETED`, `FAILED` |
+| 생성기 모델(저장하지 않음) | `downloading`, `failed`, `unloaded`, `loading`, `ready`, `backoff` |
 
 ---
 
@@ -293,6 +295,102 @@ stateDiagram-v2
 - **진입 조건**: DELETE /users/{id} (소프트 삭제)
 - **허용 다음 상태**: `active`
 - **관련 기능 ID**: PRD-070
+
+---
+
+## TtsJob (음성 생성 작업) [CR-166]
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING : 작업 맡기기
+    PENDING --> RUNNING : 작업 스레드가 집음
+    RUNNING --> COMPLETED : 소리 만들기 성공
+    RUNNING --> FAILED : 생성기 실패, 연결 실패, 시간 초과
+    RUNNING --> PENDING : api 재기동으로 차례에서 빠진 것을 다시 넣음
+    COMPLETED --> [*]
+    FAILED --> [*]
+```
+
+### PENDING | 대기
+- **설명**: 맡겨졌고 차례를 기다린다
+- **진입 조건**: POST /speech/tts-jobs, 또는 차례에서 빠진 RUNNING 작업을 조회나 같은 글 다시 맡기기로 다시 넣을 때
+- **허용 다음 상태**: `RUNNING`
+- **관련 기능 ID**: PRD-354
+
+### RUNNING | 만드는 중
+- **설명**: 생성기가 이 작업의 소리를 만들고 있다. 서버 전체에서 하나뿐이다(BIZ-133)
+- **진입 조건**: 작업 스레드가 차례에서 꺼냄
+- **허용 다음 상태**: `COMPLETED`, `FAILED`, `PENDING`(api 재기동 뒤 다시 넣을 때만)
+- **관련 기능 ID**: PRD-354
+
+### COMPLETED | 끝남
+- **설명**: 소리가 저장됐다
+- **진입 조건**: 생성기가 MP3 를 돌려줌
+- **허용 다음 상태**: 없음 (종결 상태). 7일 뒤 행을 지운다(BIZ-135)
+- **관련 기능 ID**: PRD-354
+
+### FAILED | 실패
+- **설명**: 만들지 못했다. error 에 까닭
+- **진입 조건**: 생성기 422(검사 3번 실패), 생성기에 닿지 못함, 시간 초과
+- **허용 다음 상태**: 없음 (종결 상태). 같은 글을 다시 맡기면 새 작업이 된다(BIZ-134)
+- **관련 기능 ID**: PRD-354
+
+---
+
+## 생성기 모델 (저장하지 않음) [CR-167]
+
+생성기 프로세스 안의 상태다. DB 에 남지 않고 `GET /health` 로만 보인다. 생성기가 다시 뜨면 처음부터다.
+
+```mermaid
+stateDiagram-v2
+    [*] --> downloading : 창구 기동
+    downloading --> unloaded : 모델 파일 준비 끝
+    downloading --> failed : 받기 실패, 파일이 볼륨에 없음
+    unloaded --> loading : 문장이 옴
+    loading --> ready : 싣기와 견본 특징 끝
+    loading --> backoff : 모델 프로세스가 죽음
+    ready --> unloaded : 일이 없고 쉬는 시간 지남
+    ready --> backoff : 만드는 중 모델 프로세스가 죽음
+    backoff --> unloaded : 쉬는 시간 지남
+```
+
+금지 전이: 만드는 중의 `ready` 에서 `unloaded` 로 가지 않는다. `backoff` 에서 바로 `loading` 으로 가지 않는다. `failed` 는 다시 기동해야 벗어난다.
+
+### downloading | 모델 파일 받는 중
+- **설명**: 창구만 떠 있고 볼륨에 모델 파일을 받거나 있는지 본다. `/health` 503
+- **진입 조건**: 생성기 기동
+- **허용 다음 상태**: `unloaded`, `failed`
+- **관련 기능 ID**: PRD-361
+
+### failed | 모델 파일 없음
+- **설명**: 받기에 실패했고 볼륨에도 파일이 없다. `/health` 503
+- **진입 조건**: 받기 실패
+- **허용 다음 상태**: 없음. 생성기를 다시 기동한다
+- **관련 기능 ID**: PRD-361
+
+### unloaded | 내려감
+- **설명**: 모델 프로세스가 없고 메모리를 쓰지 않는다. `/health` 200
+- **진입 조건**: 파일 준비 끝, 쉬는 시간이 지나 내림, `backoff` 가 끝남
+- **허용 다음 상태**: `loading`
+- **관련 기능 ID**: PRD-361
+
+### loading | 싣는 중
+- **설명**: 모델 프로세스가 모델과 견본 특징을 싣는다. 이때 온 문장은 잠금 앞에서 기다린다. `/health` 200
+- **진입 조건**: `unloaded` 에서 문장이 옴
+- **허용 다음 상태**: `ready`, `backoff`
+- **관련 기능 ID**: PRD-361
+
+### ready | 실림
+- **설명**: 문장을 차례로 만든다. 마지막 문장이 끝난 때부터 쉬는 시간을 잰다. `/health` 200
+- **진입 조건**: 싣기 끝
+- **허용 다음 상태**: `unloaded`, `backoff`
+- **관련 기능 ID**: PRD-361
+
+### backoff | 실패 뒤 쉬는 중
+- **설명**: 모델 프로세스가 죽어 `TTS_LOAD_RETRY_SECONDS` 동안 다시 싣지 않는다. `/health`, `/synthesize` 503
+- **진입 조건**: 싣다가 또는 만들다가 모델 프로세스가 죽음
+- **허용 다음 상태**: `unloaded`
+- **관련 기능 ID**: PRD-361
 
 ---
 

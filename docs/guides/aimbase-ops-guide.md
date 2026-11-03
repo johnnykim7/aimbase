@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.18.0** | 2026-10-28 | Aimbase v8.18.0 기준
+> **v3.21.0** | 2026-11-03 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -505,6 +505,107 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 
 **점검**: 한도 대비 쓰는 양은 `docker stats --no-stream $(docker compose ps -q)`. 실행기가 안 붙으면 § 2-9 의 `Aimbase registration failed` 줄을 봅니다. CLI 가 `Not logged in` 으로 실패하면 그 커넥션의 계정 폴더에 로그인이 없는 것입니다.
 
+### 2-11. 음성 합성 맥 엔진 운영 [CR-165]
+
+목소리 목록에 있는 목소리(`voice`)로 온 음성 합성 요청은 맥에 상주하는 음성 엔진(Qwen3-TTS 복제 목소리, MLX)이 만듭니다. 맥이 잠들거나 엔진이 실패하면 같은 글을 OpenAI 로 전환합니다. 목록 밖 목소리는 엔진과 상관없이 OpenAI 로만 갑니다.
+
+**맥 엔진 설치** (저장소 `tts-mac-sidecar/`):
+
+1. `tts-mac-sidecar/.env` 에 `TTS_API_KEY=<키>` 한 줄을 둔다. 키가 비면 엔진이 기동하지 않는다
+2. `tts-mac-sidecar/deploy/install-mac.sh` 를 돌린다. 실행본을 `~/Server/tts-mac-sidecar` 에 두고 launchd `com.aimbase.tts` 로 상주시킨다. 소스나 목소리를 고치면 다시 돌린다
+3. 처음 기동 때 모델(약 4GB)을 받는다. `curl http://127.0.0.1:8391/health` 의 `loaded` 가 `true` 면 준비가 끝났다
+4. 개발기, 운영 서버가 부르려면 공유기 포트 전달 8391 을 맥으로 둔다(받아쓰기 엔진 8291 과 같은 방식). 외부 8391 을 맥 내부 주소의 8391(TCP)로 보낸다. 맥 브라우저에서 `http://<공인 주소>:8391/health` 가 열리고, 서버에서 `nc -z -w 5 <공인 주소> 8391` 이 성공하면 된 것이다. 8291 은 열리는데 8391 만 응답 없이 끝나면 공유기 규칙이 적용되지 않은 것이다
+
+엔진은 한 번에 하나씩, 1초에 약 8자를 만든다. 그래픽 메모리를 최대 약 11.5GB 쓴다. 로그는 `~/Server/tts-mac-sidecar/logs/sidecar.log` 이고 글 본문은 남기지 않는다.
+
+**테넌트 연결** (`type=tts_local`):
+
+```json
+{
+  "id": "tts-local-mac",
+  "name": "맥 음성 엔진",
+  "adapter": "http",
+  "type": "tts_local",
+  "config": { "base_url": "http://<맥 주소>:8391", "apiKey_env": "AIMBASE_TTS_LOCAL_KEY", "timeout_seconds": 600 }
+}
+```
+
+- 키는 서버 `.env` 의 변수(위 예는 `AIMBASE_TTS_LOCAL_KEY`)에 두고 api 컨테이너를 다시 만든다(§ 3-1 「키를 서버 환경변수에 두는 LLM 연결」과 같다)
+- `timeout_seconds` 는 앞 요청을 기다리는 시간까지 포함한다. 기본 600
+- 연결이 없거나 꺼져 있으면(`disabled`) 맥 엔진을 부르지 않고 OpenAI 로 전환한다
+
+**플랫폼 설정** (`global_config`, 마스터 V72 가 넣는다. 이미 있으면 덮지 않는다):
+
+| Key | 기본값 | 의미 |
+|-----|--------|------|
+| `tts.provider` | `local` | `openai` 로 바꾸면 맥 엔진을 부르지 않는다. 맥을 오래 끌 때 쓴다 |
+| `tts.fallback-to-openai` | `true` | `false` 면 맥 엔진이 실패할 때 503. OpenAI 비용을 막아야 할 때 쓴다 |
+| `tts.voices` | 목소리 하나(`ko-female-01`) | 목소리 목록 JSON 배열. `id`, `name`, `description`, `openai_voice`, `default` |
+| `tts.speed-min`, `tts.speed-max` | 0.5, 2.0 | 목록 목소리 speed 범위. 밖이면 400 |
+
+```bash
+psql -U platform -h localhost -p 5432 -d aimbase_master -c "
+SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%';"
+```
+
+설정은 5분 캐시 뒤 반영된다. 관리 화면의 설정 목록에는 나오지 않으므로 psql 로 고친다.
+
+**목소리 바꾸기, 늘리기**:
+
+- 이름과 설명만 바꿀 때는 `tts.voices` 의 `name`, `description` 을 고친다. 소비앱 선택 화면에 그대로 보인다
+- 목소리를 늘릴 때는 `tts-mac-sidecar/voices/<id>/` 에 `ref.wav`(견본 소리 10 ~ 15초)와 `voice.json`(견본 글, 씨앗, 생성값)을 두고 설치 스크립트를 다시 돌린 뒤 `tts.voices` 에 한 줄을 추가한다. 폴더 모양은 CR-166 음성 생성기(`tts-sidecar/voices/`)와 같아 그대로 옮길 수 있다
+- `openai_voice` 는 맥 엔진이 실패했을 때 쓸 OpenAI 목소리다. 목록 API 로 내보내지 않는다
+
+**장애 대응**:
+
+- **응답 머리글 `X-Aimbase-TTS-Engine: openai` 가 계속 온다**: 맥 엔진에 닿지 못하고 있다. api 로그의 `맥 음성 엔진 실패(...)` 줄에서 이유를 본다. `PROVIDER_UNAVAILABLE` 은 연결이나 키가 없는 것, `TIMEOUT` 은 앞 요청이 길거나 맥이 잠든 것, 또는 공유기 규칙이 없어 연결에 응답이 없는 것(연결 15초를 기다린 뒤 전환하므로 요청마다 15초 늦어진다), `UPSTREAM_ERROR` 는 엔진이 오류를 돌려준 것이다(404 는 엔진에 없는 목소리 id)
+- **엔진이 기동하지 않는다**: `sidecar.log` 에 `TTS_API_KEY 가 비어 있다` 가 있으면 `.env` 를 본다. launchd 상태는 `launchctl print gui/$(id -u)/com.aimbase.tts`
+- **OpenAI 로 전환됐는데 503**: 테넌트에 쓸 수 있는 OpenAI 연결이 없다(§ 3-1)
+
+### 2-12. 같은 목소리 음성 생성기 운영 [CR-166]
+
+`POST /api/v1/speech/tts-jobs`(API 가이드 § 27-2)로 맡긴 작업은 api 옆 컨테이너 `tts-sidecar`(Qwen3-TTS 1.7B Base, PyTorch CPU fp32)가 만듭니다. § 2-11 의 맥 엔진과는 따로 돕니다.
+
+**필요할 때만 싣기** [CR-167]: 생성기는 떠 있어도 모델을 싣지 않고 창구 프로세스만 둡니다. 첫 문장이 오면 모델 프로세스를 띄워 싣고, 마지막 문장이 끝나고 `TTS_IDLE_UNLOAD_SECONDS` 가 지나면 그 프로세스를 끝내 메모리를 서버에 돌려줍니다. 쉬던 생성기의 첫 문장은 싣는 시간만큼 더 걸립니다. 지금 상태는 api 컨테이너에서 `curl http://tts-sidecar:8310/health` 의 `model`(`unloaded`, `loading`, `ready`)로 봅니다.
+
+**설치, 갱신** (저장소 `tts-sidecar/`):
+
+1. `./deploy.sh tts` 를 돌린다. 생성기 소스와 `voices/` 를 서버에 올리고 이미지를 만들어 `tts-sidecar` 만 다시 기동한다
+2. 처음 기동 때 모델(4.3GB)을 이름 있는 볼륨 `tts-models` 에 받는다. 이미지를 다시 만들어도 다시 받지 않는다. 이미지와 모델을 합쳐 디스크 약 6GB 가 든다
+3. `docker compose ps tts-sidecar` 가 `healthy` 면 준비가 끝났다. 모델 파일을 받는 동안(최대 15분)은 맡기기가 503 `tts_generator_unavailable` 이다. 모델 자체는 첫 문장이 올 때 싣는다
+4. api 는 `AIMBASE_TTS_SIDECAR_URL`(기본 `http://tts-sidecar:8310`)로 부른다. 호스트 포트는 열지 않는다
+
+**자원**: 코어 8개 상한(`cpus: 8`), CPU 몫(`cpu_shares`)은 다른 컨테이너의 1/4, 메모리 16GB 상한. 한 번에 한 문장만 만든다. 코어가 모자랄 때는 api, 실행기가 먼저 CPU 를 받는다.
+
+**설정** (`application.yml`, 환경변수로 바꾼다):
+
+| Key | 환경변수 | 기본값 | 의미 |
+|-----|----------|--------|------|
+| `aimbase.tts.sidecar-url` | `AIMBASE_TTS_SIDECAR_URL` | `http://tts-sidecar:8310` | 생성기 주소 |
+| `aimbase.tts.request-timeout-seconds` | `AIMBASE_TTS_REQUEST_TIMEOUT_SECONDS` | 600 | 문장 하나를 기다리는 시간. 넘으면 그 작업은 `tts_generator_timeout` |
+| `aimbase.tts.max-text-length` | `AIMBASE_TTS_MAX_TEXT_LENGTH` | 200 | 글 상한(문자 수) |
+| `aimbase.tts.max-pending-per-tenant` | `AIMBASE_TTS_MAX_PENDING_PER_TENANT` | 500 | 테넌트마다 대기, 진행 중 작업 상한. 넘으면 429 |
+| `aimbase.tts.retention-days` | `AIMBASE_TTS_RETENTION_DAYS` | 7 | 끝난 작업 보관 일수. 그 테넌트에 새 작업이 올 때 지난 것을 지운다 |
+
+**생성기 설정** (compose 의 `tts-sidecar` 환경변수. 1 이상의 정수가 아니면 기동하지 않는다):
+
+| 환경변수 | 기본값 | 의미 |
+|----------|--------|------|
+| `TTS_IDLE_UNLOAD_SECONDS` | 300 | 마지막 문장이 끝나고 모델을 내리기까지 |
+| `TTS_LOAD_RETRY_SECONDS` | 600 | 모델 프로세스가 죽은 뒤 다시 싣기까지 쉬는 시간 |
+| `TTS_THREADS` | 8 | 연산 스레드 |
+
+**음색 늘리기, 바꾸기**: `tts-sidecar/voices/<이름>/` 에 `ref.wav`(견본 소리)와 `voice.json`(견본 글, 언어, 씨앗, 시도 횟수, 생성 상한, 생성값, 뒤처리)을 두고 `./deploy.sh tts` 를 돌린다. 폴더 이름이 음색 이름이다. 생성값이나 씨앗을 바꾸면 같은 글도 소리가 달라지므로, 이미 만든 소리와 맞춰야 하면 새 이름으로 등록한다.
+
+**장애 대응**:
+
+- **맡기기가 503 `tts_generator_unavailable`**: `docker compose logs --tail 50 tts-sidecar`. 모델을 받는 중이면 기다린다. `voice ... not found`, `no voice under` 는 `voices/` 폴더가 빠진 것
+- **작업이 FAILED `generation_failed:hit_token_limit`**: 소리가 끝맺지 못하고 생성 상한까지 늘어진 것. 씨앗을 바꿔 3번까지 다시 만든 뒤에도 그렇다. 글을 짧게 나눠 맡긴다
+- **작업이 오래 PENDING**: 앞 작업이 차례를 잡고 있다. api 로그의 `tts-job` 줄로 진행을 본다. api 를 다시 기동하면 남은 작업은 조회가 올 때 다시 차례에 들어간다
+- **생성 중 다른 서비스가 느리다**: `cpus`, `cpu_shares` 를 낮춘다(`docker-compose.prod.yml` 의 `tts-sidecar`)
+- **맡기기가 503 이고 `/health` 가 `backoff`**: 모델 프로세스가 죽어 쉬는 중이다. `error` 가 `model process exited: -9` 면 메모리 상한에 걸려 끝난 것이다. `retry_after` 초가 지나면 다음 문장에 다시 싣는다. 쉬는 동안 맡긴 작업은 FAILED `tts_generator_unavailable` 이 되고 bp-wms 가 다음에 다시 맡긴다. 되풀이되면 `mem_limit` 을 본다
+- **일이 없는데 메모리를 계속 쓴다**: `/health` 의 `model` 이 `ready` 면 아직 쉬는 시간이 지나지 않았거나 작업이 남은 것이다. api 로그의 `tts-job` 줄로 남은 작업을 본다
+
 ---
 
 ## 3. 테넌트 관리 (ADMIN)
@@ -542,6 +643,26 @@ LLM 프로바이더(Anthropic, OpenAI, Ollama 등) 및 외부 어댑터(HTTP, SE
 ```
 
 > **권장**: Connection 생성 후 반드시 `test` API로 연결 상태를 확인하세요.
+
+**키를 서버 환경변수에 두는 LLM 연결** [CR-165]:
+
+키 값을 테넌트 DB 와 연결 조회 응답에 싣지 않으려면 서버 `.env` 에 값을 두고 `config` 에는 변수 이름만 `apiKey_env` 로 둔다. `apiKey` 에 값이 있으면 그것이 먼저다. 연결 만들기, 연결 시험, 음성 합성(`POST /api/v1/speech/tts`)이 같은 순서로 키를 읽는다.
+
+```json
+{
+  "id": "openai-tts-001",
+  "name": "OpenAI 음성 합성",
+  "adapter": "OpenAI",
+  "type": "llm",
+  "config": { "apiKey_env": "BP_OFFICE_OPENAI_API_KEY", "model": "gpt-4o-mini" }
+}
+```
+
+1. 서버 `.env` 에 변수를 더하고 api 컨테이너를 다시 만든다(`docker compose up -d --force-recreate api`). 컨테이너는 만들 때의 `.env` 만 읽는다
+2. 연결을 만들고 `test` 로 `connected` 를 받는다. 시험은 OpenAI 에 1토큰 요청을 보낸다
+3. 관리 화면의 연결 수정 창은 화면에 없는 `config` 항목을 지운다. 이 연결은 화면에서 고쳐 저장하지 말고 `PUT /connections/{id}` 로 고친다
+
+음성 합성은 테넌트 연결 중 상태가 `connected` 인 것에서 키를 찾는다. 처음 모양(`type=openai`, `config.api_key`)을 먼저 보고, 없으면 OpenAI LLM 연결(어댑터 `OpenAI`)을 본다. OpenAI 호환 연결(`OpenAI Compatible`, `openai_compatible`)은 보지 않는다. 못 찾으면 503 이다.
 
 **HTTP Connection 생성 예시** [CR-054]:
 
@@ -1689,6 +1810,11 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.21.0 | 2026-11-03 | **CR-167 필요할 때만 싣기, 운영 chaws 반영** (§ 2-12). 모델을 첫 문장에 싣고 일이 없으면 내린다. `TTS_IDLE_UNLOAD_SECONDS`, `TTS_LOAD_RETRY_SECONDS`, `/health` 의 `model`, `backoff`. `./deploy.sh chaws-tts` |
+| v3.20.1 | 2026-10-31 | **CR-165 맥 엔진 포트 확인** (§ 2-11). 공유기 포트 전달 8391 이 적용됐는지 보는 법, 연결에 응답이 없을 때 `TIMEOUT` 으로 남고 요청마다 15초 늦어지는 것 |
+| v3.20.0 | 2026-10-31 | **CR-166 같은 목소리 음성 생성기** (§ 2-12). 컨테이너 `tts-sidecar` 설치(`./deploy.sh tts`), 모델 볼륨, 자원 상한, `aimbase.tts.*` 설정, 음색 늘리기, 장애 대응 |
+| v3.19.0 | 2026-10-31 | **CR-165 음성 합성 맥 엔진** (§ 2-11). 목소리 목록의 목소리는 맥 엔진(Qwen3-TTS 복제 목소리)이 만들고 실패하면 OpenAI 로 전환한다. 설치, `tts_local` 연결, `tts.*` 설정, 목소리 바꾸기, 장애 대응 |
+| v3.18.0 | 2026-10-30 | **CR-165 키를 서버 환경변수에 두는 LLM 연결** (§ 3-1). `config.apiKey_env` 에 변수 이름만 둔다. 음성 합성이 OpenAI LLM 연결에서 키를 찾는 순서. 관리 화면이 저장하는 `OpenAI Compatible` 이 OpenAI 로 잘못 분류되던 것을 바로잡음 |
 | v3.18.0 | 2026-10-28 | **CR-164 개발 작업 상태 알림 구성** (§ 4 시나리오 K). 상태 변경 이벤트 트리거 워크플로우와 받는 쪽 토큰을 환경변수로 둔 HTTP 연결로 보내는 순서, 장애 대응 |
 | v3.17.1 | 2026-10-27 | **CR-162 계정 늘리기** (§ 2-10). 설치 스크립트가 로그인된 계정 폴더를 세어 커넥션과 묶음 구성원을 맞춘다. 계정 늘리는 순서 |
 | v3.17.0 | 2026-10-27 | **CR-162 운영 3PL 서버의 회사용 Aimbase** (§ 2-10). chaws 의 컨테이너와 메모리 한도, 관리 API 는 SSH 터널, 소비앱은 망 `aimbase-apps`, 처음 세우는 순서와 계정 로그인, 고치기와 되돌리기 |

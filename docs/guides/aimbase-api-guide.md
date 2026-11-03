@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.24.0** | 2026-10-28 | Aimbase v8.18.0 기준
+> **v3.26.3** | 2026-11-03 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2356,9 +2356,117 @@ curl -X POST /api/v1/dev-work-items/W-1/status \
 | 400 `dev_work_item_invalid:<칸>` | 칸 없음, 길이 초과, 모르는 상태, http, https 가 아닌 증빙 주소, 새 작업에 `feature_name` 없음 |
 | 404 | 없는 작업 |
 
+## 27. 음성 합성 (`speech/tts`) [CR-011, CR-165]
+
+`POST /api/v1/speech/tts`. 글을 소리로 바꿔 `audio/mpeg` 로 돌려줍니다. 테넌트 인증(`X-API-Key` 또는 JWT).
+
+| 칸 | 필수 | 설명 |
+|---|---|---|
+| text | 예 | 읽을 글. 역슬래시, 탭, 캐리지 리턴, 따옴표가 들어도 된다(v3.24.0 전에는 역슬래시와 큰따옴표, 줄바꿈 밖의 제어 문자가 들면 OpenAI 로 가는 JSON 이 깨졌다). OpenAI 한 번에 4,096자까지 |
+| model | 아니오 | 없으면 `tts-1`. OpenAI 로 갈 때만 쓴다 |
+| voice | 아니오 | 목소리 목록(§ 27-1)의 `id` 를 주면 맥 음성 엔진으로 간다. 목록 밖 값(`nova` 등)이나 빈 값은 지금처럼 OpenAI 목소리로 보고, 없으면 `alloy` |
+| speed | 아니오 | 없으면 1.0. 목록 목소리는 § 27-1 의 `speed.min` ~ `speed.max` 안이어야 한다 |
+
+목록 목소리의 동작
+
+1. 글의 날짜와 시각을 읽는 말로 바꾼다. `2026-10-31 14:00` 은 「2026년 10월 31일 오후 2시」, `09:05` 는 「오전 9시 5분」. 「오후 2:30」 처럼 앞에 오전, 오후를 붙여 써도 한 번만 읽는다. 물결(`~`)이나 붙임표로 이은 날짜·시각은 「부터, 까지」 로 읽는다(`오후 3:00~5:00` 은 「오후 3시부터 오후 5시까지」). 네 자리 연도 날짜(`-`, `.`, `/`)와 분이 두 자리인 시각만 바꾸고, 없는 날짜, 비율(`16:9`), 전화번호, 두 자리 연도는 그대로 둔다
+2. 맥 음성 엔진(복제 목소리)이 소리를 만든다. 한 번에 하나씩, 1초에 약 8자를 만든다. 앞 요청이 있으면 끝날 때까지 기다린다
+3. 맥 엔진이 꺼져 있거나 실패하면 같은 글을 그 목소리에 짝지은 OpenAI 목소리로 OpenAI 에 보낸다. 운영자가 전환을 끄면 503
+4. 응답 머리글 `X-Aimbase-TTS-Engine` 에 소리를 만든 엔진(`local`, `openai`)이 실린다. 목록 밖 목소리는 언제나 `openai`
+
+| HTTP | 뜻 |
+|---|---|
+| 200 | `audio/mpeg` 본문, 머리글 `X-Aimbase-TTS-Engine` |
+| 400 | `text` 가 비었다. 목록 목소리의 `speed` 가 범위 밖이다 |
+| 503 | 쓸 수 있는 엔진이 없다. 테넌트에 쓸 수 있는 OpenAI 연결이 없거나(운용 가이드 § 3-1 「키를 서버 환경변수에 두는 LLM 연결」), 맥 엔진이 실패했는데 OpenAI 전환이 꺼져 있다 |
+| 그 밖 4xx, 5xx | OpenAI 가 돌려준 상태와 본문 그대로 |
+
+소비앱이 응답을 기다리는 시간은 글 길이에 맞춘다. 맥 엔진은 400자에 약 50초가 걸리고, 앞 요청이 있으면 그만큼 더 걸린다. 긴 글은 문단 단위로 나눠 보내면 첫 소리를 빨리 받는다.
+
+### 27-1. 목소리 목록 (`speech/voices`) [CR-165]
+
+`GET /api/v1/speech/voices`. 선택 화면에 보여 줄 목소리와 speed 범위. 맥 엔진을 부르지 않으므로 맥이 꺼져 있어도 나온다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "voices": [
+      { "id": "ko-female-01", "name": "밝은 비서", "description": "20대 여성, 밝고 친근한 말투", "default": true }
+    ],
+    "speed": { "min": 0.5, "max": 2.0, "default": 1.0 }
+  }
+}
+```
+
+- 사용자가 고른 `id` 를 `POST /speech/tts` 의 `voice` 로 보낸다. 고르지 않았으면 `default: true` 인 목소리를 쓴다
+- 목록이 비어 있으면 맥 엔진을 쓰지 않는 운영이다. 그때는 지금처럼 OpenAI 목소리 이름을 보낸다
+- 말투가 다른 목소리는 목록에 다른 목소리로 들어온다. 요청에 말투를 따로 주는 칸은 없다
+
+### 27-2. 같은 목소리 음성 생성 작업 (`speech/tts-jobs`) [CR-166]
+
+현장 안내 소리처럼 늘 같은 목소리여야 하는 짧은 문장을 서버의 음성 생성기(Qwen3-TTS 복제 목소리, CPU)로 만듭니다. 문장 하나에 약 15 ~ 35초가 걸려 작업을 맡기고 조회하는 방식입니다. § 27 의 `speech/tts` 와 엔진, 목소리가 다르고 서로 영향이 없습니다. 테넌트 인증(`X-API-Key` 또는 JWT)과 `X-Tenant-Id`.
+
+**맡기기** `POST /api/v1/speech/tts-jobs`
+
+```json
+{ "voice": "field-voice-07", "text": "검수대 3번으로 이동하세요." }
+```
+
+| 칸 | 필수 | 설명 |
+|---|---|---|
+| voice | 예 | 생성기에 등록된 음색 이름. 지금은 `field-voice-07` 하나 |
+| text | 예 | 1 ~ 200자(유니코드 문자 수). 공백만 있으면 빈 글. 글자를 바꾸지 않고 그대로 읽는다. 숫자로 쓴 날짜, 시각(`2026-10-31 14:00`)은 못 읽으니 읽는 말로 바꿔 보낸다 |
+
+202 와 작업을 바로 돌려줍니다.
+
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07",
+            "reused": false, "created_at": "2026-10-31T01:40:00Z" } }
+```
+
+같은 테넌트에 같은 음색, 같은 글의 작업이 이미 있으면(FAILED 제외, 보관 기간 안) 새로 만들지 않고 그 작업을 돌려줍니다. 이때 `reused` 가 true 이고 `status` 는 그 작업의 지금 상태입니다(이미 COMPLETED 일 수 있다).
+
+**조회** `GET /api/v1/speech/tts-jobs/{job_id}`
+
+```json
+{ "success": true,
+  "data": { "job_id": "9f3c1a20-...", "status": "COMPLETED", "voice": "field-voice-07",
+            "text": "검수대 3번으로 이동하세요.",
+            "created_at": "...", "started_at": "...", "finished_at": "...",
+            "mime_type": "audio/mpeg", "audio_base64": "SUQzBAAAAA...",
+            "duration_sec": 2.21, "elapsed_sec": 21.7 } }
+```
+
+- `status`: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`. COMPLETED, FAILED 는 끝이다
+- `mime_type`, `audio_base64`, `duration_sec` 은 COMPLETED 일 때만. MP3, 24kHz 단일 채널 96k
+- `error` 는 FAILED 일 때만: `generation_failed:<empty_audio|non_finite_audio|silent_audio|too_short|hit_token_limit|internal_error>`, `tts_generator_unavailable`, `tts_generator_timeout`. 실패한 글을 다시 맡기면 새 작업이 된다
+- `elapsed_sec` 은 생성기가 만드는 데 걸린 시간(대기 시간 빼고)
+- 시각(`created_at`, `started_at`, `finished_at`)은 UTC 로 싣는다
+
+| HTTP | 코드 | 때 |
+|---|---|---|
+| 400 | `voice_required`, `text_required`, `text_too_long:max=200`, `invalid_job_id` | 칸이 비었거나 길거나 작업 번호 모양이 틀림 |
+| 404 | `voice_not_found:<이름>` | 없는 음색 |
+| 404 | `job_not_found` | 없는 작업, 보관 기간이 지나 지운 작업, 다른 테넌트의 작업 |
+| 429 | `tts_queue_full:max=500` | 그 테넌트의 대기, 진행 중 작업이 500개 |
+| 503 | `tts_generator_unavailable` | 생성기가 떠 있지 않거나, 모델 파일을 받는 중이거나, 모델이 죽어 잠시 쉬는 중. 모델을 싣는 중에는 503 이 아니라 받아서 기다렸다 만든다 |
+
+- 서버 전체에서 한 번에 하나, 맡긴 시각 순서대로 만든다. 몰아서 맡기면 뒤의 문장은 앞 것이 끝나야 만든다(299개 약 75분)
+- 일이 없으면 모델을 내려 둔다. 쉬던 뒤의 첫 문장은 모델을 싣는 시간만큼 더 걸린다(CR-167)
+- 조회는 5 ~ 10초 간격이면 된다. Aimbase 가 다시 기동해도 조회가 오면 남은 작업을 이어 만든다
+- 같은 음색, 같은 글은 다시 만들어도 같은 소리다. 끝난 작업은 7일 둔다
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.26.3 | 2026-11-03 | **절 번호 정리** (§ 26, § 27). 개발 작업 상태(CR-164)와 음성 합성(CR-165)이 같은 § 26 을 쓰고 있어 음성 합성을 § 27 로 옮긴다 |
+| v3.26.2 | 2026-11-03 | **CR-167 필요할 때만 싣기** (§ 27-2). 503 의 뜻 보정, 쉬던 뒤 첫 문장 시간 |
+| v3.26.1 | 2026-10-31 | **CR-165 날짜·시각 범위 읽기** (§ 27). 물결이나 붙임표로 이은 날짜·시각을 「부터, 까지」 로 읽는다 |
+| v3.26.0 | 2026-10-31 | **CR-166 같은 목소리 음성 생성 작업** (§ 27-2). `POST /speech/tts-jobs` 로 맡기고 `GET /speech/tts-jobs/{job_id}` 로 조회한다. 서버 전체에서 한 번에 하나, 맡긴 시각 순. 같은 글 다시 맡기기는 그 작업을 돌려준다(`reused`). 오류 `voice_not_found`, `text_too_long`, `tts_queue_full`, `tts_generator_unavailable`, `job_not_found`. 끝난 작업 7일 보관 |
+| v3.25.0 | 2026-10-31 | **CR-165 맥 음성 엔진과 목소리 목록** (§ 27, § 27-1). `GET /speech/voices` 추가. 목록 목소리는 날짜와 시각을 읽는 말로 바꿔 맥 음성 엔진으로 만들고, 실패하면 OpenAI 로 전환한다. 응답 머리글 `X-Aimbase-TTS-Engine`. 목록 목소리 speed 범위 밖은 400. 목록 밖 목소리는 그대로 |
+| v3.24.0 | 2026-10-30 | **CR-165 음성 합성** (§ 27). 본문을 JSON 직렬화기로 만들어 역슬래시, 탭, 캐리지 리턴이 든 글도 보낸다. 빈 글은 400. 키는 테넌트의 OpenAI LLM 연결에서 찾는다 |
 | v3.24.0 | 2026-10-28 | **CR-164 개발 작업 상태와 상태 변경 알림** (§ 26, § 7-6). 개발 작업 API 3개, 실행 입력 `_dev_work_item`, 워크플로우 이벤트 트리거 `DEV_WORK_ITEM_STATUS_CHANGED`. `http_request` 가 연결 `API_KEY` 머리값 이름도 감사에서 가린다. 4xx/5xx 가 단계 실패라는 § 7-6 설명 보정. 기존 워크플로우와 연결은 그대로 |
 | v3.23.0 | 2026-10-27 | **CR-161 연결 묶음** (§ 25, § 5, 스텝 타입 표). 채팅 전 경로(일반, 도구 사용, 실시간)와 LLM_CALL, AGENT_CALL, LARGE_INPUT 단계 config 의 `connection_group_id`. CLI 계정 한도와 실행기에 닿지 못한 실패에서 다음 커넥션으로 넘김, 같은 세션과 실행 1건은 같은 커넥션. 오류 `connection_group_unavailable`, `cli_account_limited`. 그룹 목록, 생성, 수정 응답 필드 이름을 상세와 같게(`is_active` 등) |
 | v3.22.0 | 2026-10-26 | **CR-160 변환 구간 의심 표시** (§ 22-2). `include_segments=true` 구간에 `no_speech_prob`, `avg_logprob`, `compression_ratio`, `suspect_reason`(`NO_SPEECH`, `KNOWN_PHRASE`, null)을 더함. 기존 칸과 받아쓴 글은 그대로 |

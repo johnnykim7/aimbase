@@ -220,7 +220,7 @@ public class ConnectionAdapterFactory {
     public HealthStatus ping(String connectionId) {
         ConnectionEntity conn = findConnection(connectionId);
         String adapterType = normalizeAdapterType(conn.getAdapter());
-        String apiKey = (String) conn.getConfig().get("apiKey");
+        String apiKey = ConnectionApiKeys.resolve(conn.getConfig());
 
         // CR-071: anthropic-cli 는 Phase 4 에서 ClaudeCliAdapter(HTTP Runner) 로 재구현 예정.
         // Phase 1 단계에서는 피처 플래그만 확인 — Runner 가용성 검증은 Phase 4 에서 추가.
@@ -312,7 +312,7 @@ public class ConnectionAdapterFactory {
     private LLMAdapter createAdapter(String connectionId) {
         ConnectionEntity conn = findConnection(connectionId);
         String adapterType = normalizeAdapterType(conn.getAdapter());
-        String apiKey = (String) conn.getConfig().get("apiKey");
+        String apiKey = ConnectionApiKeys.resolve(conn.getConfig());
 
         // CR-050: anthropic-cli 는 OAuth(CLAUDE_CONFIG_DIR) 기반 — apiKey 불필요.
         boolean requiresApiKey = !"anthropic-cli".equals(adapterType);
@@ -461,7 +461,7 @@ public class ConnectionAdapterFactory {
      * FE에서 다양한 표시명으로 저장되므로 내부 어댑터 타입으로 정규화한다.
      * CR-032: openai_compatible, bedrock, vertex_ai 추가.
      */
-    private static String normalizeAdapterType(String adapter) {
+    public static String normalizeAdapterType(String adapter) {
         if (adapter == null) return "";
         String lower = adapter.toLowerCase();
         // CR-050: CLI 경로는 anthropic 보다 먼저 체크 (anthropic-cli → anthropic 으로 오분류 방지).
@@ -472,7 +472,8 @@ public class ConnectionAdapterFactory {
             return "anthropic-cli";
         }
         if (lower.contains("anthropic") || lower.contains("claude")) return "anthropic";
-        if (lower.equals("openai_compatible") || lower.contains("deepseek")
+        // CR-165: FE 표시명 "OpenAI Compatible" 은 공백형이라 아래 contains("openai") 에 걸려 OpenAI 로 오분류되던 것을 먼저 잡는다.
+        if (lower.equals("openai_compatible") || lower.equals("openai compatible") || lower.contains("deepseek")
                 || lower.contains("groq") || lower.contains("mistral")
                 || lower.contains("openrouter") || lower.contains("together")
                 || lower.contains("fireworks") || lower.contains("lm studio")
