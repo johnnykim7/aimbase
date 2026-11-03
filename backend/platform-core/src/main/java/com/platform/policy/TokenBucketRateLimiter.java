@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * CR-013: Redis 기반 분산 TokenBucket Rate Limiter.
  *
  * 슬라이딩 윈도우 카운터 방식:
- * - 키: rl:{tenantId}:{minuteWindow}
+ * - 키: rl:{tenantId}:{minuteWindow}, 따로 세는 칸은 rl:{bucket}:{tenantId}:{minuteWindow}
  * - Redis INCR + EXPIRE 원자적 실행 (Lua 스크립트)
  * - 분산 환경(멀티 인스턴스)에서 정확한 카운팅 보장
  */
@@ -52,11 +52,23 @@ public class TokenBucketRateLimiter {
      * @return 체크 결과
      */
     public RateLimitResult tryAcquire(String tenantId, int maxRequests) {
+        return tryAcquireKey(KEY_PREFIX + tenantId + ":", tenantId, maxRequests);
+    }
+
+    /**
+     * 테넌트 분당 요청 한도와 따로 세는 칸(CR-168 실행기 연결 신호 등).
+     * 키: rl:{bucket}:{tenantId}:{minuteWindow}. 테넌트 칸 rl:{tenantId}:{minuteWindow} 과 섞이지 않는다.
+     */
+    public RateLimitResult tryAcquire(String bucket, String tenantId, int maxRequests) {
+        return tryAcquireKey(KEY_PREFIX + bucket + ":" + tenantId + ":", bucket + "/" + tenantId, maxRequests);
+    }
+
+    private RateLimitResult tryAcquireKey(String keyPrefix, String label, int maxRequests) {
         if (maxRequests <= 0) {
             return RateLimitResult.allowed(0, 0);
         }
 
-        String key = buildKey(tenantId);
+        String key = keyPrefix + currentWindow();
 
         try {
             Long currentCount = redisTemplate.execute(
@@ -66,7 +78,7 @@ public class TokenBucketRateLimiter {
             );
 
             if (currentCount == null) {
-                log.warn("Redis rate limit script returned null for tenant: {}", tenantId);
+                log.warn("Redis rate limit script returned null for {}", label);
                 return RateLimitResult.allowed(maxRequests, 0);
             }
 
@@ -75,21 +87,20 @@ public class TokenBucketRateLimiter {
             int retryAfter = ttl != null && ttl > 0 ? ttl.intValue() : WINDOW_SECONDS;
 
             if (currentCount > maxRequests) {
-                log.warn("Rate limit exceeded for tenant: {} ({}/{})", tenantId, currentCount, maxRequests);
+                log.warn("Rate limit exceeded for {} ({}/{})", label, currentCount, maxRequests);
                 return RateLimitResult.exceeded(maxRequests, currentCount, retryAfter);
             }
 
             return RateLimitResult.allowed(maxRequests, remaining);
 
         } catch (Exception e) {
-            log.error("Redis rate limit check failed for tenant: {}, allowing request", tenantId, e);
+            log.error("Redis rate limit check failed for {}, allowing request", label, e);
             return RateLimitResult.allowed(maxRequests, maxRequests);
         }
     }
 
-    private String buildKey(String tenantId) {
-        long minuteWindow = System.currentTimeMillis() / (WINDOW_SECONDS * 1000L);
-        return KEY_PREFIX + tenantId + ":" + minuteWindow;
+    private static long currentWindow() {
+        return System.currentTimeMillis() / (WINDOW_SECONDS * 1000L);
     }
 
     /**
