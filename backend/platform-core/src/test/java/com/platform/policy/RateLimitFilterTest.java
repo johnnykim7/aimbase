@@ -2,6 +2,7 @@ package com.platform.policy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.config.PlatformSettingsService;
+import com.platform.domain.master.SubscriptionEntity;
 import com.platform.repository.master.SubscriptionRepository;
 import com.platform.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
@@ -38,11 +39,12 @@ class RateLimitFilterTest {
     private TokenBucketRateLimiter rateLimiter;
     private PlatformSettingsService settings;
     private RateLimitFilter filter;
+    private SubscriptionRepository subscriptions;
 
     @BeforeEach
     void setUp() {
         rateLimiter = mock(TokenBucketRateLimiter.class);
-        SubscriptionRepository subscriptions = mock(SubscriptionRepository.class);
+        subscriptions = mock(SubscriptionRepository.class);
         when(subscriptions.findByTenantId(anyString())).thenReturn(Optional.empty());
         when(rateLimiter.tryAcquire(anyString(), anyInt()))
                 .thenReturn(TokenBucketRateLimiter.RateLimitResult.exceeded(60, 61, 30));
@@ -151,5 +153,25 @@ class RateLimitFilterTest {
 
         assertThat(run("POST", "/api/v1/agents/register", new MockHttpServletResponse())).isTrue();
         verify(rateLimiter).tryAcquire(BUCKET, TENANT, 5);
+    }
+
+    /** CR-169 TC-SUB-009: 구독 변경 뒤 재기동 없이 다음 요청부터 새 한도로 센다(BIZ-142). */
+    @Test
+    void tcSub009_limitIsReadOnEveryRequest() throws Exception {
+        when(subscriptions.findByTenantId(TENANT))
+                .thenReturn(Optional.of(subscriptionWithLimit(20)))
+                .thenReturn(Optional.of(subscriptionWithLimit(600)));
+
+        run("GET", "/api/v1/workflows", new MockHttpServletResponse());
+        verify(rateLimiter).tryAcquire(TENANT, 20);
+
+        run("GET", "/api/v1/workflows", new MockHttpServletResponse());
+        verify(rateLimiter).tryAcquire(TENANT, 600);
+    }
+
+    private static SubscriptionEntity subscriptionWithLimit(int limit) {
+        SubscriptionEntity sub = new SubscriptionEntity();
+        sub.setApiRpmLimit(limit);
+        return sub;
     }
 }

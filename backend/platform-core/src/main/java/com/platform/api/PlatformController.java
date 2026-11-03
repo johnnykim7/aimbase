@@ -27,6 +27,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -261,6 +262,8 @@ public class PlatformController {
     public ApiResponse<SubscriptionEntity> updateSubscription(
             @PathVariable String tenantId,
             @RequestBody SubscriptionUpdateRequest request) {
+        if (request.apiRpmLimit() != null) requireApiRpmLimit(request.apiRpmLimit());
+
         SubscriptionEntity sub = subscriptionRepository.findByTenantId(tenantId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                 "Subscription not found for tenant: " + tenantId));
@@ -271,8 +274,22 @@ public class PlatformController {
         if (request.maxKnowledgeSources() != null) sub.setMaxKnowledgeSources(request.maxKnowledgeSources());
         if (request.maxWorkflows() != null) sub.setMaxWorkflows(request.maxWorkflows());
         if (request.storageGb() != null) sub.setStorageGb(request.storageGb());
+        if (request.apiRpmLimit() != null) sub.setApiRpmLimit(request.apiRpmLimit().intValue());
 
         return ApiResponse.ok(subscriptionRepository.save(sub));
+    }
+
+    /**
+     * 0 은 무제한이라 받는다(BIZ-142). 정수 칸으로 받으면 요청 본문 해석이 소수의 뒷자리를 버려
+     * 1.5 가 1 로 저장되므로 십진수로 받아 여기서 거른다.
+     */
+    private static void requireApiRpmLimit(BigDecimal value) {
+        boolean isInt = value.signum() >= 0
+            && value.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) <= 0
+            && value.stripTrailingZeros().scale() <= 0;
+        if (!isInt) {
+            throw new IllegalArgumentException("apiRpmLimit must be an integer of 0 or greater.");
+        }
     }
 
     // ─── Usage Dashboard ─────────────────────────────────────────────
@@ -345,7 +362,8 @@ public class PlatformController {
         Integer maxConnections,
         Integer maxKnowledgeSources,
         Integer maxWorkflows,
-        Integer storageGb
+        Integer storageGb,
+        BigDecimal apiRpmLimit
     ) {}
 
     /** CR-066: 테넌트 일괄 마이그레이션 요청. body 생략 시 활성 테넌트 전체, dryRun=false 적용. */
