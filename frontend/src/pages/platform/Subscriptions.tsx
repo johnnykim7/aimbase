@@ -4,28 +4,55 @@ import { ActionButton } from "../../components/common/ActionButton";
 import { DataTable, type Column } from "../../components/common/DataTable";
 import { LoadingSpinner } from "../../components/common/LoadingSpinner";
 import { EmptyState } from "../../components/common/EmptyState";
-import { FormField, inputStyle } from "../../components/common/FormField";
+import { FormField } from "../../components/common/FormField";
+import { Input } from "../../components/ui/input";
 import { Page } from "../../components/layout/Page";
 import { CreditCard } from "lucide-react";
 import { useSubscriptions, useUpdateSubscription } from "../../hooks/usePlatform";
 import type { Subscription } from "../../types/tenant";
+
+type QuotaKey = "llmMonthlyTokenQuota" | "apiRpmLimit" | "maxConnections";
+type EditForm = Record<QuotaKey, string> & { tenantName?: string };
+
+const QUOTA_FIELDS: { key: QuotaKey; label: string; hint?: string }[] = [
+  { key: "llmMonthlyTokenQuota", label: "월간 토큰 한도" },
+  { key: "apiRpmLimit", label: "분당 요청 한도", hint: "저장하면 다음 요청부터 적용됩니다. 0 은 무제한입니다." },
+  { key: "maxConnections", label: "최대 연결 수" },
+];
+
+const isWholeNumber = (value: string) => /^\d+$/.test(value);
 
 export default function Subscriptions() {
   const { data: subscriptions = [], isLoading } = useSubscriptions();
   const updateSubscription = useUpdateSubscription();
 
   const [editing, setEditing] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<Partial<Subscription>>({});
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
 
   const startEdit = (sub: Subscription) => {
+    updateSubscription.reset();
     setEditing(sub.tenantId);
-    setEditForm({ ...sub });
+    setEditForm({
+      tenantName: sub.tenantName,
+      llmMonthlyTokenQuota: String(sub.llmMonthlyTokenQuota),
+      apiRpmLimit: String(sub.apiRpmLimit),
+      maxConnections: String(sub.maxConnections),
+    });
   };
 
+  const formIsValid = editForm != null && QUOTA_FIELDS.every(({ key }) => isWholeNumber(editForm[key]));
+
   const saveEdit = () => {
-    if (!editing) return;
+    if (!editing || !editForm || !formIsValid) return;
     updateSubscription.mutate(
-      { tenantId: editing, data: editForm },
+      {
+        tenantId: editing,
+        data: {
+          llmMonthlyTokenQuota: Number(editForm.llmMonthlyTokenQuota),
+          apiRpmLimit: Number(editForm.apiRpmLimit),
+          maxConnections: Number(editForm.maxConnections),
+        },
+      },
       { onSuccess: () => setEditing(null) }
     );
   };
@@ -52,24 +79,17 @@ export default function Subscriptions() {
     {
       header: "월간 토큰 한도",
       render: (s) => (
-        <div>
-          <div className="font-mono text-xs text-foreground">
-            {s.monthlyTokenQuota?.toLocaleString() ?? "무제한"}
-          </div>
-          {s.usedTokens != null && s.monthlyTokenQuota != null && (
-            <div className="text-[10px] font-mono text-muted-foreground/40">
-              사용: {((s.usedTokens / s.monthlyTokenQuota) * 100).toFixed(0)}%
-            </div>
-          )}
-        </div>
+        <span className="font-mono text-xs text-foreground">
+          {s.llmMonthlyTokenQuota.toLocaleString()}
+        </span>
       ),
       width: "140px",
     },
     {
-      header: "일일 요청 한도",
+      header: "분당 요청 한도",
       render: (s) => (
         <span className="font-mono text-xs">
-          {s.dailyRequestQuota?.toLocaleString() ?? "무제한"}
+          {s.apiRpmLimit <= 0 ? "무제한" : s.apiRpmLimit.toLocaleString()}
         </span>
       ),
       width: "120px",
@@ -78,7 +98,7 @@ export default function Subscriptions() {
       header: "최대 연결",
       render: (s) => (
         <span className="font-mono text-xs">
-          {s.maxConnections ?? "무제한"}
+          {s.maxConnections}
         </span>
       ),
       width: "90px",
@@ -87,7 +107,7 @@ export default function Subscriptions() {
       header: "만료일",
       render: (s) => (
         <span className="font-mono text-[11px] text-muted-foreground">
-          {s.expiresAt ? new Date(s.expiresAt).toLocaleDateString("ko-KR") : "—"}
+          {s.validUntil ? new Date(s.validUntil).toLocaleDateString("ko-KR") : "-"}
         </span>
       ),
       width: "100px",
@@ -121,34 +141,34 @@ export default function Subscriptions() {
             쿼터 편집 — {editForm.tenantName ?? editing}
           </div>
           <div className="grid grid-cols-3 gap-4">
-            <FormField label="월간 토큰 한도">
-              <input
-                type="number"
-                style={inputStyle}
-                value={editForm.monthlyTokenQuota ?? ""}
-                onChange={(e) => setEditForm((p) => ({ ...p, monthlyTokenQuota: Number(e.target.value) }))}
-              />
-            </FormField>
-            <FormField label="일일 요청 한도">
-              <input
-                type="number"
-                style={inputStyle}
-                value={editForm.dailyRequestQuota ?? ""}
-                onChange={(e) => setEditForm((p) => ({ ...p, dailyRequestQuota: Number(e.target.value) }))}
-              />
-            </FormField>
-            <FormField label="최대 연결 수">
-              <input
-                type="number"
-                style={inputStyle}
-                value={editForm.maxConnections ?? ""}
-                onChange={(e) => setEditForm((p) => ({ ...p, maxConnections: Number(e.target.value) }))}
-              />
-            </FormField>
+            {QUOTA_FIELDS.map(({ key, label, hint }) => {
+              const invalid = !isWholeNumber(editForm[key]);
+              return (
+                <FormField key={key} label={label} hint={hint}>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    aria-label={label}
+                    aria-invalid={invalid}
+                    value={editForm[key]}
+                    onChange={(e) => setEditForm((p) => p && { ...p, [key]: e.target.value })}
+                  />
+                  {invalid && (
+                    <div className="text-[11px] text-destructive mt-1">0 이상의 정수를 입력하세요.</div>
+                  )}
+                </FormField>
+              );
+            })}
           </div>
+          {updateSubscription.isError && (
+            <div className="text-xs text-destructive mb-3">
+              저장하지 못했습니다: {updateSubscription.error.message}
+            </div>
+          )}
           <div className="flex gap-2 justify-end mt-2">
             <ActionButton variant="ghost" onClick={() => setEditing(null)}>취소</ActionButton>
-            <ActionButton variant="primary" icon="💾" disabled={updateSubscription.isPending} onClick={saveEdit}>
+            <ActionButton variant="primary" icon="💾" disabled={updateSubscription.isPending || !formIsValid} onClick={saveEdit}>
               저장
             </ActionButton>
           </div>

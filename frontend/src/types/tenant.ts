@@ -62,17 +62,14 @@ export interface AppTenantCreateRequest {
 }
 
 export interface Subscription {
-  id?: string;
   tenantId: string;
   tenantName?: string;
   plan?: string;
-  monthlyTokenQuota?: number;
-  dailyRequestQuota?: number;
-  maxConnections?: number;
+  llmMonthlyTokenQuota: number;
+  apiRpmLimit: number;
+  maxConnections: number;
   maxWorkflows?: number;
-  expiresAt?: string;
-  usedTokens?: number;
-  usedRequests?: number;
+  validUntil?: string | null;
 }
 
 export interface PlatformUsage {
