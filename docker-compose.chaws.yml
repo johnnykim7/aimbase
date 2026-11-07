@@ -85,7 +85,11 @@ services:
     init: true
     restart: unless-stopped
     # 실행기 호출 키(AIMBASE_RUNNER_API_KEY)와 bp_wms 테넌트 실행기 전용 키(AIMBASE_RUNNER_SERVER_MCP_API_KEY, AGENT_API_KEY 같은 값).
-    env_file: agent.env
+    # PGPASSWORD 는 agent-db.env 에 둔다. 커넥션 안내에 비밀번호를 적지 않아 실행 로그에 남지 않게 한다(59 의 .env.runner-wes 와 같은 방식).
+    env_file:
+      - agent.env
+      - path: agent-db.env
+        required: false
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
@@ -100,6 +104,15 @@ services:
       AGENT_MCP_PORT: "8291"
       AGENT_TURN_ENABLED: "false"
       AGENT_RUNNER_ENDPOINT: "http://aimbase-agent:8290"
+      # 재배치 계획 · 현장 오류 신고 AI 가 psql 로 운영 3PL DB 를 읽는다. claude_ro 는 SELECT 만 가진 읽기 전용 계정이다(CR-WMS-907).
+      PGHOST: "bp-postgres"
+      PGPORT: "5432"
+      PGDATABASE: "bp_fulfillment"
+      PGUSER: "claude_ro"
+    # bp-postgres 는 운영 3PL compose 의 망(bp-infra_default)에만 있다.
+    networks:
+      default: {}
+      bp-infra: {}
     mem_limit: 1536m
     # 계정 폴더 work01, work02, work03 을 api 와 같이 붙인다. 연결마다 config.config_dir 로 폴더를 고른다.
     volumes:
@@ -146,6 +159,9 @@ services:
 networks:
   aimbase-apps:
     external: true
+  bp-infra:
+    external: true
+    name: bp-infra_default
 
 volumes:
   pgdata:
