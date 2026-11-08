@@ -823,9 +823,9 @@ Master DB에 저장되며 모든 테넌트가 사용 가능. `SUPER_ADMIN` 권�
 | GET | `/knowledge-sources/{id}` | 지식소스 상세 조회 | 🔒 |
 | PUT | `/knowledge-sources/{id}` | 지식소스 수정 | 🔒 |
 | DELETE | `/knowledge-sources/{id}` | 지식소스 삭제 | 🔒 |
-| POST | `/knowledge-sources/{id}/sync` | 인제스션 실행 | 🔒 |
+| POST | `/knowledge-sources/{id}/sync` | 인제스션 실행. 모은 문서가 있으면 지식소스 전체를 다시 만들고, 없으면(`api`) 그대로 둔다 (CR-170) | 🔒 |
 | POST | `/knowledge-sources/{id}/upload` | 파일 업로드 (multipart, v3.0 CR-010) | 🔒 |
-| POST | `/knowledge-sources/{id}/ingest-text` | 텍스트 직접 인제스션 (v3.0 CR-011) | 🔒 |
+| POST | `/knowledge-sources/{id}/ingest-text` | 텍스트 직접 인제스션 (v3.0 CR-011). 같은 `documentId` 의 임베딩만 바꾸고 다른 문서는 남는다 (CR-170) | 🔒 |
 | DELETE | `/knowledge-sources/{id}/documents/{documentId}` | 개별 문서 삭제 (v3.0 CR-011) | 🔒 |
 | POST | `/knowledge-sources/search` | 벡터 검색 | 🔒 |
 | GET | `/knowledge-sources/{id}/ingestion-logs` | 인제스션 로그 조회 | 🔒 |
@@ -838,7 +838,7 @@ Master DB에 저장되며 모든 테넌트가 사용 가능. `SUPER_ADMIN` 권�
 |------|------|------|------|
 | id | String | ✅ | 지식소스 ID |
 | name | String | ✅ | 지식소스 이름 |
-| type | String | ✅ | 소스 유형 (text, url, file, database) |
+| type | String | ✅ | 소스 유형 (text, url, file, database, api). `api` 는 `ingest-text` 로만 채우는 지식소스다. 나머지는 동기화하면 넣은 문서가 지워진다 (CR-170) |
 | config | Map | ✅ | 소스별 설정 (JSONB) |
 | chunkingConfig | Map | 선택 | 청킹 설정 |
 | embeddingConfig | Map | 선택 | 임베딩 설정 |
@@ -864,6 +864,20 @@ Master DB에 저장되며 모든 테넌트가 사용 가능. `SUPER_ADMIN` 권�
 | query | String | ✅ | 검색 쿼리 |
 | sourceId | String | 선택 | 특정 소스 한정 검색 |
 | topK | Integer | 선택 | 반환 결과 수 (기본: 5) |
+
+### 벡터 검색 응답
+
+`data.results[]` 항목
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| content | String | 청크 본문 |
+| score | Number | 정렬 점수. 재순위가 되면 cross-encoder 원점수, 안 되면 하이브리드 결합 점수(RRF)라 범위가 정해져 있지 않다 |
+| sourceId | String | 지식소스 ID |
+| sourceName | String | 지식소스 이름 |
+| metadata | Map | 청크 메타데이터 |
+| documentId | String | 넣을 때 준 문서 ID. 문서 ID 없이 넣은 청크는 지식소스 ID (CR-170) |
+| vectorScore | Number | 질문과 청크의 코사인 유사도 0 ~ 1. 키워드로만 걸린 청크와 음수는 0 (CR-170) |
 
 ### 파일 업로드 (v3.0, CR-010)
 
@@ -1426,8 +1440,8 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 
 | Tool 이름 | 설명 | 관련 기능ID |
 |-----------|------|------------|
-| `ingest_document` | 문서 파싱(Unstructured) → 시맨틱 청킹 → 임베딩 → pgvector 저장 | PRD-052, PY-001, PY-002 |
-| `search_hybrid` | 하이브리드 검색(BM25 + 벡터) + 리랭킹 | PRD-053, PY-003, PY-004 |
+| `ingest_document` | 문서 파싱(Unstructured) → 시맨틱 청킹 → 임베딩 → pgvector 저장. `document_id` 가 있으면 그 문서의 임베딩만, 없으면 지식소스 전체를 바꾼다 (CR-170) | PRD-052, PY-001, PY-002 |
+| `search_hybrid` | 하이브리드 검색(BM25 + 벡터) + 리랭킹. 결과에 `document_id`, `vector_score` 를 싣는다 (CR-170) | PRD-053, PY-003, PY-004 |
 | `embed_texts` | 텍스트 배열을 임베딩 벡터로 변환 | PY-002 |
 | `chunk_document` | 문서를 시맨틱 청크로 분할 (인제스션 미수행) | PY-001 |
 | `rerank_results` | 검색 결과를 cross-encoder로 리랭킹 | PY-003 |
