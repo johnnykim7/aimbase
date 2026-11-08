@@ -473,10 +473,11 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 | redis | 256MB(`maxmemory 192mb`, TTL 있는 키부터 비움) | compose 망 안에서만 |
 | api | 2GB | 서버 `127.0.0.1:8280`(맥에서 SSH 터널), 외부 망 `aimbase-apps` 의 `http://aimbase-api:8080` |
 | aimbase-agent(실행기 `cli-runner-bp-wms`, CLI 동시 3개) | 1.5GB | compose 망 안에서만 |
+| aimbase-agent-wes-cs(실행기 `cli-runner-bp-wes-cs`, 테넌트 `bp_wes`, CLI 동시 2개) | 1.5GB | compose 망 안에서만. 운영 3PL DB 는 망 `bp-infra_default` 로 `wes_cs_ai` 계정만 읽는다(CR-173) |
 
 **관리 API 부르기**: `ssh -L 8280:127.0.0.1:8280 chaws` 를 열어 두고 맥에서 `http://localhost:8280/api/v1` 을 부릅니다. 보안 그룹은 열지 않고 관리자 화면도 두지 않습니다.
 
-**소비앱 붙이기**: 같은 서버의 소비앱 컨테이너는 외부 망 `aimbase-apps` 에 합류해 `http://aimbase-api:8080` 을 부릅니다. 테넌트마다 소비앱 키를 따로 발급해 서버 `secrets/` 에 둡니다. 지금은 bp-wms(테넌트 `bp_wms`, 키 `secrets/bp-wms-api-key`) 하나입니다.
+**소비앱 붙이기**: 같은 서버의 소비앱 컨테이너는 외부 망 `aimbase-apps` 에 합류해 `http://aimbase-api:8080` 을 부릅니다. 테넌트마다 소비앱 키를 따로 발급해 서버 `secrets/` 에 둡니다. bp-wms(테넌트 `bp_wms`, 키 `secrets/bp-wms-api-key`)와 bp-wes(테넌트 `bp_wes`, 키 `secrets/bp-wes-api-key`, 아래 「bp-wes CS 실행기」)입니다.
 
 **비밀값**: `db.env`(DB 계정), `api.env`(DB 계정, `JWT_SECRET`), `agent.env`(실행기 호출 키 `AIMBASE_RUNNER_API_KEY`, 실행기 키 `AIMBASE_RUNNER_SERVER_MCP_API_KEY` 와 `AGENT_API_KEY`), `secrets/`(관리자 비밀번호, 소비앱 키). `./deploy.sh chaws-init` 이 처음 한 번 만들고 있는 파일은 덮지 않습니다. 짝이 되는 곳과 바꾸는 순서는 § 2-9 와 같습니다.
 
@@ -509,6 +510,56 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 **되돌리기**: 배포 때 앞 이미지에 `pre-<시각>` 꼬리표를 붙이고 되돌리는 명령을 찍습니다(`docker tag aimbase-api:pre-<시각> aimbase-api:latest && docker compose up -d --no-deps --force-recreate api`). 앞 compose 는 `deploy-backup/docker-compose.yml.<시각>` 에 있습니다.
 
 **점검**: 한도 대비 쓰는 양은 `docker stats --no-stream $(docker compose ps -q)`. 실행기가 안 붙으면 § 2-9 의 `Aimbase registration failed` 줄을 봅니다. CLI 가 `Not logged in` 으로 실패하면 그 커넥션의 계정 폴더에 로그인이 없는 것입니다.
+
+#### bp-wes CS 실행기 [CR-173]
+
+bp-wes 의 CS 초안과 CS 상세 AI 대화(위젯)는 실행기 `aimbase-agent-wes-cs` 로 갑니다. 59 의 같은 이름 실행기와 같게 개인정보 칸을 뺀 읽기 계정 `wes_cs_ai` 만 쥐고, 계정 폴더와 작업 폴더를 `claude-accounts-wes-cs`, `workspace-wes-cs` 로 나눕니다. `aimbase-agent` 의 폴더에는 지난 대화와 산출물에 `claude_ro` 접속값과 조회 결과가 남아 있기 때문입니다. 이미지 이름도 `aimbase-aimbase-agent-wes-cs` 로 따로 두어 한쪽을 올려도 다른 쪽이 바뀌지 않습니다. `./deploy.sh chaws` 묶음에는 들지 않습니다.
+
+| 비밀값 파일 | 내용 | 만드는 것 |
+|---|---|---|
+| `agent-wes-cs.env` | 실행기 호출 키, `bp_wes` 실행기 전용 키(`AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY`) | `bootstrap tenant wes-cs` |
+| `agent-wes-cs-db.env` | `PGPASSWORD`(운영 3PL DB 의 `wes_cs_ai`) | 사람. 계정은 bp-wes 의 `docs/자산/CR-WES-332_wes_cs_ai_계정.sql` 로 만든다 |
+| `secrets/bp-wes-api-key` | bp-wes 가 부르는 소비앱 키. bp-wes 의 `AIMBASE_API_KEY` 로 준다 | `bootstrap tenant wes-cs` |
+
+**세우기** (`bootstrap <단계> wes-cs` 는 `ssh chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh <단계> wes-cs'`):
+1. `./deploy.sh chaws-init`: `claude-accounts-wes-cs/work01`, `work02`, `workspace-wes-cs` 를 만든다. 있는 파일과 폴더는 그대로 둔다
+2. `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-bootstrap`: 설치 스크립트만 서버 `build/` 에 둔다. api 를 다시 만들지 않는다
+3. `bootstrap admin wes-cs`: CLI 허용 테넌트에 `bp_wes` 를 더한다(`bp_wms,bp_wes`). api 는 이 값을 5분까지 묵혀 읽는다
+4. `bootstrap tenant wes-cs`: 테넌트 `bp_wes` 와 DB, `agent-wes-cs.env`, `secrets/bp-wes-api-key`
+5. `agent-wes-cs-db.env` 에 `PGPASSWORD=<wes_cs_ai 비밀번호>` 를 둔다. 없으면 실행기는 뜨지만 CS 조회가 DB 에 붙지 못한다
+6. `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-wes-cs`: 실행기 기록에 `Agent registered successfully: name=cli-runner-bp-wes-cs` 가 나오면 된 것
+7. 계정 로그인 `work01`, `work02`(위와 같은 방법, 서비스 이름만 `aimbase-agent-wes-cs`)
+8. `bootstrap connections wes-cs`: 계정마다 `cli-runner-bp-wes-cs-<계정>`, 묶음 `cli-runner-bp-wes-cs-rr`, 위젯 연결 `cli-runner-bp-wes-cs-001`(계정 `WIDGET_ACCOUNT`, 기본 `work01`). 설정은 59 와 같게 `tool_mode=NATIVE`, 도구 `bash`, `get_current_time`
+9. `bootstrap smoke wes-cs`: 실행기의 DB 계정이 `wes_cs_ai` 인지 보고, bp-wes 가 부르는 길(망 `aimbase-apps`, 소비앱 키, 묶음, `stream=false`)로 CLI 에게 `select current_user` 를 시켜 응답을 찍는다
+
+```bash
+ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent-wes-cs claude'
+```
+
+**위젯 공개 주소**: 운영 BO2 CS 상세의 AI 대화는 브라우저가 `https://aimbase.banpoom.co.kr` 로 직접 붙습니다. 위젯이 쓰는 두 경로만 통과시키고 나머지는 모두 막습니다.
+
+| 순번 | 통과 경로 | 쓰는 것 |
+|---|---|---|
+| 1 | `/widget/` | 위젯 파일(진입 파일, ESM, 청크) |
+| 2 | `/api/v1/chat/` | 대화(`completions`, 응답 스트림), 멈춤(`{세션}/abort`), 첨부(`attachments`), 누르고 말하기(`stt`), 산출물(`artifacts`) |
+
+`/api/v1/chat/` 아래에는 위젯 토큰으로 부르는 창구만 있습니다. 관리 API(`/api/v1/platform/`, `/api/v1/admin/`), 관리자 로그인(`/api/v1/auth/`), 토큰 발급(`/api/v1/sessions/issue-widget-token`, bp-wes 가 망 `aimbase-apps` 안에서 부른다), 실행기 등록과 서버 도구(`/api/v1/agents/`, `/mcp/`), 연결과 워크플로우, `/actuator/` 는 밖에서 닿지 않습니다. 대화는 응답 스트림이라 nginx 에서 버퍼링을 끄고, 대화 대기 300초(`SseEmitter`)보다 읽기 제한을 길게 둡니다. 교차 출처 머리글은 api 가 붙이므로 nginx 에서 더하지 않습니다(두 번 붙으면 브라우저가 막는다). 허용 주소는 `bootstrap widget wes-cs` 로 `widget.allowed-origins` 에 `https://admin.banpoom.co.kr` 를 더합니다(5분까지 묵혀 읽는다).
+
+```nginx
+location /widget/      { proxy_pass http://127.0.0.1:8280; }
+location /api/v1/chat/ {
+    proxy_pass http://127.0.0.1:8280;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    proxy_read_timeout 330s;
+    client_max_body_size 100m;
+}
+location / { return 404; }
+```
+nginx 가 컨테이너면 `127.0.0.1:8280` 대신 망 `aimbase-apps` 에 합류해 `http://aimbase-api:8080` 을 씁니다. `client_max_body_size` 는 api 의 업로드 상한(100MB)과 같습니다.
 
 ### 2-11. 음성 합성 맥 엔진 운영 [CR-165]
 
@@ -1815,6 +1866,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.23.0 | 2026-11-09 | **CR-173 운영 chaws bp-wes CS 실행기와 위젯 공개 주소** (§ 2-10). 실행기 `aimbase-agent-wes-cs`, `./deploy.sh chaws-agent-wes-cs`, `chaws-bootstrap`, 설치 스크립트 대상 `wes-cs` 와 단계 `widget`, 위젯 통과 경로와 nginx 설정 |
 | v3.22.0 | 2026-11-04 | **CR-169 분당 요청 한도 변경** (§ 2-2, § 2-12). 「구독 관리」 화면과 구독 변경 API 로 바꾼다. 0 은 무제한 |
 | v3.21.3 | 2026-11-04 | **CR-168 실행기 연결 신호 전용 상한** (§ 2-12). 테넌트마다 분당 60번, 설정 `ratelimit.agent-signal-max-per-minute` |
 | v3.21.2 | 2026-11-03 | **CR-168 실행기 연결 신호 요청 한도 제외** (§ 2-12). 실행기 등록과 상태 알림은 테넌트 분당 요청 한도에 세지 않는다 |
