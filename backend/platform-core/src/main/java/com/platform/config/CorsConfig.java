@@ -16,7 +16,7 @@ import java.util.List;
  * CR-058: Chat Widget SDK 용 CORS 설정.
  *
  * widget.allowed-origins (global_config, CSV) 에 등록된 전역 화이트리스트를 기준으로
- * 위젯/세션/RAG/워크플로우 관련 엔드포인트에 한해 CORS 를 허용한다.
+ * 위젯/세션/RAG/워크플로우 관련 엔드포인트와 위젯 파일(/widget/**)에 한해 CORS 를 허용한다.
  * 관리 API(/api/v1/platform/**, /api/v1/admin/**)는 이 설정의 적용 범위에서 제외된다.
  *
  * 테넌트별 동적 허용은 본 CR 범위 밖 — 현재 TenantContext 는 CorsFilter 시점에
@@ -30,7 +30,10 @@ public class CorsConfig {
             "/api/v1/conversations/**",
             "/api/v1/workflows/**",
             "/api/v1/knowledge-sources/**",
-            "/api/v1/sessions/issue-widget-token"
+            "/api/v1/sessions/issue-widget-token",
+            // CR-172: UMD 진입 파일이 실행 중에 같은 폴더의 ESM 과 청크를 읽는다. 이 읽기는 교차 출처 요청이라
+            // 허용 머리글이 없으면 브라우저가 막는다. Origin 없는 <script> 요청은 CORS 대상이 아니라 그대로 받는다.
+            "/widget/**"
     );
 
     private final PlatformSettingsService settings;
