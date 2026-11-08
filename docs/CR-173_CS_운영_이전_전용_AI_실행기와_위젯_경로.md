@@ -6,7 +6,7 @@
 - 근거: bp-wes origin/dev `docs/협업/요청_CR-WES-368_운영_이전.md` aimbase 절, `docs/CR/CR-WES-368_CS_수집과_AI_초안_운영_이전_설계.md` 3절 3, 4, 5, 10번과 7절. 사용자 승인 2026-11-09 04:15 `/전승`(구현 준비 시작, 운영 반영은 건마다 승인)
 - 앞 건: CR-162(운영 회사용 Aimbase 와 설치 스크립트), CR-WMS-907(실행기 읽기 전용 계정과 망), CR-172(위젯 파일 교차 출처)
 - 규모: 소. 운영 구성 파일, 배포 스크립트, 설치 스크립트만 바꾼다. 새 창구, 화면, 테이블, 마이그레이션, Java 변경 없음
-- 상태: 진행중(2026-11-09 07:17 운영 chaws 7절 1번부터 9번 끝. 10번 위젯 허용 주소와 nginx, DNS 는 설계 7절 13번 차례에 따로)
+- 상태: 진행중(2026-11-09 08:14 운영 chaws 7절 1번부터 10번 끝. 위젯 공개 주소는 `ai.banpoom.co.kr`. 운영 CS 상세의 대화 확인은 bp-wes AI 켜기 뒤)
 
 ---
 
@@ -43,7 +43,7 @@ bp-wes 의 CS 수집과 AI 초안을 운영으로 옮긴다(CR-WES-368). 59 에�
 
 ## 4. 위젯 통과 경로 (컨타 회신)
 
-운영 BO2 CS 상세의 AI 질문 칸은 브라우저가 `https://aimbase.banpoom.co.kr` 로 직접 붙는다. bp-wes 서버가 부르는 창구는 모두 망 `aimbase-apps` 안에서 `http://aimbase-api:8080` 으로 가므로(bp-infra `a801e19`) 공개 주소에 열 필요가 없다.
+운영 BO2 CS 상세의 AI 질문 칸은 브라우저가 `https://ai.banpoom.co.kr` 로 직접 붙는다. `aimbase.banpoom.co.kr` 은 개발기(59) 관리 화면이 쓰고 있어 운영은 새 주소로 열었다(11-09 08:08 정정). bp-wes 서버가 부르는 창구는 모두 망 `aimbase-apps` 안에서 `http://aimbase-api:8080` 으로 가므로(bp-infra `a801e19`) 공개 주소에 열 필요가 없다.
 
 | 순번 | 구분 | 경로 | 쓰는 것 |
 |---|---|---|---|
@@ -78,7 +78,7 @@ location / { return 404; }
 3. 교차 출처 머리글은 api 가 붙인다. nginx 에서 더하면 두 번 붙어 브라우저가 막는다.
 4. nginx 가 컨테이너면 망 `aimbase-apps` 에 합류해 `http://aimbase-api:8080` 으로 보낸다.
 5. 허용 주소 `https://admin.banpoom.co.kr` 는 설치 스크립트 `widget` 단계가 넣는다. api 는 이 값을 5분까지 묵혀 읽는다.
-6. BO2 의 위젯 주소는 bp-wes 응답값이고, bp-wes 의 `AIMBASE_WIDGET_BASE_URL=https://aimbase.banpoom.co.kr`, `AIMBASE_WIDGET_ORIGIN=https://admin.banpoom.co.kr` 는 bp-infra `757f2e0` 에 준비돼 있다.
+6. BO2 의 위젯 주소는 bp-wes 응답값이고, bp-wes 의 `AIMBASE_WIDGET_BASE_URL=https://ai.banpoom.co.kr`, `AIMBASE_WIDGET_ORIGIN=https://admin.banpoom.co.kr` 는 bp-infra main `72025a8`(PR #182)에 있다. 처음 준비한 `757f2e0` 은 옛 주소이고 AI 켜기 `a801e19` 뒤에 있어 main 에 싣지 않았다.
 
 ## 5. 설계서
 
@@ -131,8 +131,21 @@ location / { return 404; }
 | 7 | Claude 로그인 | 사람이 work01, work02 로그인(07:13 알림). 실행기 안 두 폴더에 로그인 파일이 있음을 확인. work03 폴더는 없다 |
 | 8 | `connections wes-cs` | 07:14. 로그인된 계정 `work01 work02`. 연결 `cli-runner-bp-wes-cs-work01`, `-work02`, 위젯 `-001`, 묶음 `cli-runner-bp-wes-cs-rr`(ROUND_ROBIN, work01 과 work02) 모두 201. 연결 설정은 1절의 59 값과 같다(`-001` 의 계정 폴더만 work01) |
 | 9 | `smoke wes-cs` | 07:14 1차는 응답 200 이지만 CLI 가 「bash 도구를 쓸 수 없다」로 답했다. 시험 질문에 소문자 「bash 로」 라고 써서 모델이 CLI 도구 `Bash` 대신 없는 이름 `bash` 를 불렀다. 실행기 기동 명령과 CLI 판(2.1.197)은 59 와 같고, 59 의 CS 요청은 10일간 `Bash` 를 507번 정상으로 썼다. 질문을 「Bash 도구로」 로 고쳐(`102f711`, 운영 가지 `08f1abc`) 서버 스크립트를 바꾸고 07:17 2차: 응답 200, CLI 가 `Bash` 로 `psql` 을 돌려 `wes_cs_ai` 를 답했다. 1차는 work01, 2차는 work02 로 가 두 계정 로그인이 모두 산다 |
+| 10 | 위젯 열기 | 08:11 부터 08:14. 컨타 승인(사용자 08:08 「바로 적용」). Route 53 `banpoom.co.kr` 영역에 `ai` A `3.39.94.112`(TTL 300). 서버 nginx 에 `sites-available/ai.banpoom.co.kr.conf`(4절 두 경로만 통과, 나머지 404, http 는 https 로 넘김)와 Let's Encrypt 인증서(webroot, 2027-02-06 까지, 기존 certbot 타이머가 갱신). nginx 는 다시 읽기만 했다. `bootstrap widget wes-cs` 로 허용 주소 `https://admin.banpoom.co.kr`. bp-infra 위젯 주소는 main `72025a8`(PR #182, 합침 `8e2d320`), AI 켜기 `a801e19` 는 싣지 않았다 |
 
-api, `aimbase-agent`, db, redis, `tts-sidecar` 는 다시 기동하지 않았다(반영 뒤 가동 시간 그대로). 10번(위젯 허용 주소, nginx, 인증서, DNS)은 하지 않았다.
+7절 1번부터 10번 중 이 창은 api, `aimbase-agent`, db, redis, `tts-sidecar` 를 다시 기동하지 않았다. 08:18 에 본 api 와 `tts-sidecar` 기동 시각은 07:35 부터 07:36 인데 이 창이 친 것이 아니다(다른 반영).
+
+10번 밖(맥)에서 확인(08:12):
+
+| 순번 | 확인 | 결과 |
+|---|---|---|
+| 1 | 위젯 파일 `/widget/v1/aimbase-chat.umd.global.js`, `.esm.js` | 200. 출처 `admin` 으로 부르면 허용 머리글이 붙는다 |
+| 2 | 관리 API, 관리자 로그인, 토큰 발급, 실행기 등록, 서버 도구, 상태 점검, 연결, 워크플로우, `/` | 모두 404 |
+| 3 | 대화 창구 토큰 없이 | 403(api 가 거부. nginx 는 통과) |
+| 4 | 대화 창구 사전 확인 | 출처 `https://admin.banpoom.co.kr` 은 200 과 허용 머리글, 다른 출처는 403 |
+| 5 | 인증서와 http | 인증서 이름 `ai.banpoom.co.kr`. http 는 301 로 https |
+
+응답 스트림이 끊기지 않고 오는지는 실제 대화로만 볼 수 있어 bp-wes AI 켜기(설계 7절 9번) 뒤 운영 CS 상세에서 본다.
 
 관찰: 기본 안내문(요청에 시스템 안내가 없을 때)은 노출 도구를 Aimbase 이름 `bash` 로 적는다. NATIVE 모드 CLI 의 도구 이름은 `Bash` 라 2차에서도 모델이 도구 찾기를 다섯 번 한 뒤 `Bash` 를 썼다. bp-wes CS 요청은 자기 안내문을 실어 59 에서 바로 `Bash` 를 쓰므로 이 건의 범위 밖이다.
 
@@ -166,7 +179,7 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 1. Claude 로그인 두 번(work01, work02). `ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent-wes-cs claude'`, work02 도 같다
 2. 운영 3PL DB 에 `wes_cs_ai` 계정(bp-wes `docs/자산/CR-WES-332_wes_cs_ai_계정.sql`)을 만들고 그 비밀번호를 chaws `agent-wes-cs-db.env` 에 둔다
 3. `secrets/bp-wes-api-key` 값을 bp-infra `env/bp-wes.env` 의 `AIMBASE_API_KEY` 로 옮긴다
-4. `aimbase.banpoom.co.kr` 의 DNS, 인증서, nginx(4절)
+4. `ai.banpoom.co.kr` 의 DNS, 인증서, nginx(4절). 6.3 의 10 에서 이 창이 했다
 
 ## 9. 커밋
 
@@ -181,12 +194,14 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 | `102f711` | origin/dev | 설치 스크립트 시험 질문을 「Bash 도구로」 로(6.3 의 9) |
 | `08f1abc` | origin/chaws-cr173 | `102f711` 을 운영 가지에 얹었다. 서버 `build/chaws-bootstrap.sh` 는 이 판이다 |
 | `991309b` | origin/chaws-cr173 | `1a9c948` 을 얹었다. 운용 가이드 충돌은 운영 가지 쪽을 두었다(문서는 origin/dev 가 정본) |
+| `72025a8` | bp-infra main(PR #182, 합침 `8e2d320`) | 운영 bp-wes 위젯 주소 두 줄(`ai.banpoom.co.kr`). AI 켜기는 꺼진 채 |
+| `8a1fa049` | bp-wes origin/dev | CR-WES-368 설계서 결정 4와 사람 손 3번의 주소를 `ai.banpoom.co.kr` 로 |
 
 ## 10. 남은 것
 
-1. 7절 10번 `bootstrap widget wes-cs`, nginx, 인증서, DNS 는 설계 7절 13번 차례에 컨타가 사용자 승인을 받아 부른다
-2. 8절 3, 4(키를 bp-wes 로 옮기기, DNS와 인증서와 nginx). 8절 1 로그인과 2 `wes_cs_ai` 는 6.3 에서 끝났다
-3. bp-infra 의 bp-wes 연결 켜기(`a801e19`)와 위젯 주소(`757f2e0`)는 bp-infra 몫이다
+1. 8절 3(키를 bp-wes 로 옮기기). 8절 1, 2, 4 는 6.3 에서 끝났다
+2. bp-infra 의 bp-wes AI 켜기(`a801e19`)는 설계 7절 9번 차례에 합친다. 그 가지 `cr-wes-368-cs-prod` 의 `757f2e0` 은 옛 주소라 main `72025a8` 이 대신하므로, 합칠 때 `a801e19` 만 담는다
+3. 운영 CS 상세에서 위젯 대화(응답 스트림 포함) 확인은 AI 켜기 뒤
 
 ## 11. 경과
 
@@ -206,3 +221,7 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 | 2026-11-09 07:13 | 사람이 work01, work02 로그인, 컨타 승인(7절 8번, 9번) |
 | 2026-11-09 07:14 | 운영 연결 셋과 묶음, 시험 1차(질문 문구 탓에 도구 못 씀) |
 | 2026-11-09 07:17 | 시험 질문 고침(`102f711`), 시험 2차 통과 |
+| 2026-11-09 08:08 | 사용자 「바로 적용」, 컨타 지시(7절 10번, 주소는 `ai.banpoom.co.kr`) |
+| 2026-11-09 08:11 | Route 53 `ai` 등록, 서버 nginx 와 인증서, 허용 주소 |
+| 2026-11-09 08:12 | 밖에서 확인(6.3 의 10) |
+| 2026-11-09 08:14 | bp-infra 위젯 주소 main 합침(PR #182), bp-wes 설계서 주소 정정(`8a1fa049`) |

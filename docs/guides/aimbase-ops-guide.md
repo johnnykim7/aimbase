@@ -536,7 +536,7 @@ bp-wes 의 CS 초안과 CS 상세 AI 대화(위젯)는 실행기 `aimbase-agent-
 ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent-wes-cs claude'
 ```
 
-**위젯 공개 주소**: 운영 BO2 CS 상세의 AI 대화는 브라우저가 `https://aimbase.banpoom.co.kr` 로 직접 붙습니다. 위젯이 쓰는 두 경로만 통과시키고 나머지는 모두 막습니다.
+**위젯 공개 주소**: 운영 BO2 CS 상세의 AI 대화는 브라우저가 `https://ai.banpoom.co.kr` 로 직접 붙습니다(`aimbase.banpoom.co.kr` 은 개발기 관리 화면 주소). 서버 nginx 사이트 설정은 `/etc/nginx/sites-available/ai.banpoom.co.kr.conf`, 인증서는 Let's Encrypt(webroot) 이고 기존 certbot 타이머가 갱신합니다. 위젯이 쓰는 두 경로만 통과시키고 나머지는 모두 막습니다.
 
 | 순번 | 통과 경로 | 쓰는 것 |
 |---|---|---|
@@ -1866,6 +1866,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.23.1 | 2026-11-09 | **CR-173 위젯 공개 주소 정정** (§ 2-10). 운영은 `ai.banpoom.co.kr`, 서버 nginx 설정 파일과 인증서 갱신 |
 | v3.23.0 | 2026-11-09 | **CR-173 운영 chaws bp-wes CS 실행기와 위젯 공개 주소** (§ 2-10). 실행기 `aimbase-agent-wes-cs`, `./deploy.sh chaws-agent-wes-cs`, `chaws-bootstrap`, 설치 스크립트 대상 `wes-cs` 와 단계 `widget`, 위젯 통과 경로와 nginx 설정 |
 | v3.22.3 | 2026-11-08 | **CR-172 위젯 파일 교차 출처 허용** (§ 2-5). `widget.allowed-origins` 가 위젯 파일 읽기에도 적용된다고 적는다 |
 | v3.22.0 | 2026-11-04 | **CR-169 분당 요청 한도 변경** (§ 2-2, § 2-12). 「구독 관리」 화면과 구독 변경 API 로 바꾼다. 0 은 무제한 |
