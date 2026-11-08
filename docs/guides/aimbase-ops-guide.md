@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.22.1** | 2026-11-08 | Aimbase v8.18.0 기준
+> **v3.22.2** | 2026-11-08 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -641,6 +641,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | `aimbase.tts.request-timeout-seconds` | `AIMBASE_TTS_REQUEST_TIMEOUT_SECONDS` | 600 | 문장 하나를 기다리는 시간. 넘으면 그 작업은 `tts_generator_timeout` |
 | `aimbase.tts.max-text-length` | `AIMBASE_TTS_MAX_TEXT_LENGTH` | 200 | 글 상한(문자 수) |
 | `aimbase.tts.max-pending-per-tenant` | `AIMBASE_TTS_MAX_PENDING_PER_TENANT` | 500 | 테넌트마다 대기, 진행 중 작업 상한. 넘으면 429 |
+| `aimbase.tts.min-reusable-duration-sec` | `AIMBASE_TTS_MIN_REUSABLE_DURATION_SEC` | 0.25 | 이보다 짧게 끝난 작업은 같은 글을 다시 맡겨도 돌려주지 않고 새로 만든다 |
 | `aimbase.tts.retention-days` | `AIMBASE_TTS_RETENTION_DAYS` | 7 | 끝난 작업 보관 일수. 그 테넌트에 새 작업이 올 때 지난 것을 지운다 |
 
 **생성기 설정** (compose 의 `tts-sidecar` 환경변수. 1 이상의 정수가 아니면 기동하지 않는다):
@@ -651,7 +652,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | `TTS_LOAD_RETRY_SECONDS` | 600 | 모델 프로세스가 죽은 뒤 다시 싣기까지 쉬는 시간 |
 | `TTS_THREADS` | 8 | 연산 스레드 |
 
-**음색 늘리기, 바꾸기**: `tts-sidecar/voices/<이름>/` 에 `ref.wav`(견본 소리)와 `voice.json`(견본 글, 언어, 씨앗, 시도 횟수, 생성 상한, 생성값, 뒤처리)을 두고 `./deploy.sh tts` 를 돌린다. 폴더 이름이 음색 이름이다. 생성값이나 씨앗을 바꾸면 같은 글도 소리가 달라지므로, 이미 만든 소리와 맞춰야 하면 새 이름으로 등록한다.
+**음색 늘리기, 바꾸기**: `tts-sidecar/voices/<이름>/` 에 `ref.wav`(견본 소리)와 `voice.json`(견본 글, 언어, 씨앗, 시도 횟수, 무음 기준 `silent_peak_db`, 생성 상한, 생성값, 뒤처리)을 두고 `./deploy.sh tts` 를 돌린다. 무음 기준은 뒤처리 전 최대 음량(dB)이고 뒤처리 `silenceremove` 기준보다 높게 둔다. 낮으면 뒤처리에서 전부 잘릴 소리가 합격해 빈 파일이 남는다. 폴더 이름이 음색 이름이다. 생성값이나 씨앗을 바꾸면 같은 글도 소리가 달라지므로, 이미 만든 소리와 맞춰야 하면 새 이름으로 등록한다.
 
 **장애 대응**:
 
@@ -1869,6 +1870,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 | v3.23.1 | 2026-11-09 | **CR-173 위젯 공개 주소 정정** (§ 2-10). 운영은 `ai.banpoom.co.kr`, 서버 nginx 설정 파일과 인증서 갱신 |
 | v3.23.0 | 2026-11-09 | **CR-173 운영 chaws bp-wes CS 실행기와 위젯 공개 주소** (§ 2-10). 실행기 `aimbase-agent-wes-cs`, `./deploy.sh chaws-agent-wes-cs`, `chaws-bootstrap`, 설치 스크립트 대상 `wes-cs` 와 단계 `widget`, 위젯 통과 경로와 nginx 설정 |
 | v3.22.3 | 2026-11-08 | **CR-172 위젯 파일 교차 출처 허용** (§ 2-5). `widget.allowed-origins` 가 위젯 파일 읽기에도 적용된다고 적는다 |
+| v3.22.2 | 2026-11-08 | **CR-171 음성 생성기 무음 기준** (§ 2-12). 설정 `aimbase.tts.min-reusable-duration-sec` 과 음색 칸 `silent_peak_db` 를 더했다 |
 | v3.22.1 | 2026-11-08 | **CR-170 텍스트 인제스션과 sync** (§ 3-6). `ingest-text` 가 같은 소스의 다른 문서를 지우던 결함을 고쳤다. 이 용도의 소스는 `api` 유형으로 만들고, `api` 소스는 sync 해도 지우지 않는다고 적는다 |
 | v3.22.0 | 2026-11-04 | **CR-169 분당 요청 한도 변경** (§ 2-2, § 2-12). 「구독 관리」 화면과 구독 변경 API 로 바꾼다. 0 은 무제한 |
 | v3.21.3 | 2026-11-04 | **CR-168 실행기 연결 신호 전용 상한** (§ 2-12). 테넌트마다 분당 60번, 설정 `ratelimit.agent-signal-max-per-minute` |
