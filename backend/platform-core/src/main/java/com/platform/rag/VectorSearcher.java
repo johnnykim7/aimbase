@@ -169,7 +169,10 @@ public class VectorSearcher {
                                     : 0.0;
                     Map<String, Object> meta = r.get("metadata") instanceof Map
                             ? (Map<String, Object>) r.get("metadata") : Map.of();
-                    return new RetrievedChunk(extractChunkId(r), content, score, meta, sourceId);
+                    String documentId = r.get("document_id") instanceof String d ? d : null;
+                    Double vectorScore = r.get("vector_score") instanceof Number n ? n.doubleValue() : null;
+                    return new RetrievedChunk(extractChunkId(r), content, score, meta, sourceId,
+                            documentId, vectorScore);
                 })
                 .toList();
     }
@@ -193,12 +196,15 @@ public class VectorSearcher {
                     double score = meta != null && meta.containsKey("_score")
                             ? ((Number) meta.get("_score")).doubleValue()
                             : 0.0;
+                    // 이 경로의 점수는 코사인 유사도(1 - 거리)라 벡터 유사도로 그대로 쓴다
                     return new RetrievedChunk(
                             entity.getId() != null ? entity.getId().toString() : null,
                             entity.getContent(),
                             score,
                             meta,
-                            entity.getSourceId()
+                            entity.getSourceId(),
+                            entity.getDocumentId(),
+                            score
                     );
                 })
                 .toList();

@@ -136,10 +136,13 @@ def ingest_document(
     Processes document through semantic chunking, generates embeddings,
     and stores them in PostgreSQL with pgvector.
 
+    With a document_id only that document's embeddings are replaced, so one
+    source can hold many documents. Without one the whole source is replaced.
+
     Args:
         source_id: Knowledge source ID
         content: Raw document text to ingest
-        document_id: Optional document identifier
+        document_id: Document identifier. Empty replaces the whole source
         chunking_strategy: "semantic", "recursive", or "fixed"
         chunking_config: JSON string with chunking parameters
         embedding_model: Embedding model name (default: KoSimCSE)
@@ -169,6 +172,7 @@ def ingest_file(
 
     Sidecar handles the entire pipeline including file parsing.
     Supports: txt, md, csv, html, pdf (PyMuPDF), docx (python-docx), pptx (python-pptx).
+    A file source holds one file, so once the file is parsed the whole source is replaced.
 
     Args:
         source_id: Knowledge source ID

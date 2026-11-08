@@ -259,6 +259,16 @@ public class IngestionPipeline {
                 ? (String) chunkingConfig.getOrDefault("strategy", "semantic")
                 : "semantic";
 
+        // 동기화는 지식소스 전체를 다시 만든다. 문서마다 넣는 호출은 그 문서만 바꾸므로 첫 문서 전에
+        // 한 번 비운다. 모은 문서가 없으면 비우지 않는다. api 유형처럼 문서 넣기로만 채우는
+        // 지식소스를 동기화해도 쌓인 문서가 남아야 한다.
+        if (!documents.isEmpty()) {
+            int deleted = embeddingRepository.deleteBySourceId(source.getId());
+            if (deleted > 0) {
+                log.info("Deleted {} existing embeddings for source '{}'", deleted, source.getId());
+            }
+        }
+
         for (RawDocument doc : documents) {
             try {
                 int chunks;
@@ -323,9 +333,7 @@ public class IngestionPipeline {
         List<Map<String, Object>> chunks = chunkResult.get("chunks") instanceof List
                 ? (List<Map<String, Object>>) chunkResult.get("chunks") : List.of();
 
-        // 2. 기존 임베딩 삭제 → 새 임베딩 저장
-        embeddingRepository.deleteBySourceId(sourceId);
-
+        // 2. 임베딩 저장. 지식소스는 doIngestViaMCP 가 동기화 시작에 한 번 비운다
         int saved = 0;
         for (int i = 0; i < chunks.size(); i += BATCH_EMBED_SIZE) {
             List<Map<String, Object>> batch = chunks.subList(i, Math.min(i + BATCH_EMBED_SIZE, chunks.size()));
@@ -390,8 +398,6 @@ public class IngestionPipeline {
         Map<String, Object> parentResult = mcpRagClient.chunkDocument(doc.content(), "fixed", parentConfig);
         List<Map<String, Object>> parentChunks = parentResult.get("chunks") instanceof List
                 ? (List<Map<String, Object>>) parentResult.get("chunks") : List.of();
-
-        embeddingRepository.deleteBySourceId(sourceId);
 
         int saved = 0;
         for (int pi = 0; pi < parentChunks.size(); pi++) {

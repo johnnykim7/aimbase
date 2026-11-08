@@ -114,6 +114,20 @@ def delete_embeddings_by_source(source_id: str) -> int:
         conn.close()
 
 
+def delete_embeddings_by_document(source_id: str, document_id: str) -> int:
+    """Delete existing embeddings of one document within a source. Returns deleted count."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM embeddings WHERE source_id = %s AND document_id = %s",
+                (source_id, document_id),
+            )
+            return cur.rowcount
+    finally:
+        conn.close()
+
+
 def vector_search(
     source_id: str,
     query_vector: list[float],
@@ -126,7 +140,8 @@ def vector_search(
             cur.execute(
                 """
                 SELECT content, metadata,
-                       1 - (embedding <=> %s::vector) AS similarity
+                       1 - (embedding <=> %s::vector) AS similarity,
+                       document_id
                 FROM embeddings
                 WHERE source_id = %s
                 ORDER BY embedding <=> %s::vector
@@ -140,6 +155,7 @@ def vector_search(
                     "content": row[0],
                     "metadata": row[1] or {},
                     "vector_score": float(row[2]),
+                    "document_id": row[3],
                 })
             return results
     finally:
@@ -189,9 +205,12 @@ def keyword_search_contents(source_id: str) -> list[dict]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT content, metadata FROM embeddings WHERE source_id = %s",
+                "SELECT content, metadata, document_id FROM embeddings WHERE source_id = %s",
                 (source_id,),
             )
-            return [{"content": row[0], "metadata": row[1] or {}} for row in cur.fetchall()]
+            return [
+                {"content": row[0], "metadata": row[1] or {}, "document_id": row[2]}
+                for row in cur.fetchall()
+            ]
     finally:
         conn.close()

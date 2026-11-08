@@ -321,6 +321,8 @@ public class KnowledgeController {
             item.put("sourceId", c.sourceId());
             item.put("sourceName", sourceNameMap.getOrDefault(c.sourceId(), c.sourceId()));
             item.put("metadata", c.metadata());
+            item.put("documentId", c.documentId());
+            item.put("vectorScore", toVectorScore(c.vectorScore()));
             return item;
         }).toList();
 
@@ -354,6 +356,17 @@ public class KnowledgeController {
             @NotBlank String content,
             @NotBlank String documentId
     ) {}
+
+    /**
+     * 코사인 유사도는 이론상 -1 ~ 1 이지만 소비앱에는 0 ~ 1 로 약속했다(CR-170).
+     * 반대 방향 벡터는 관련 없음과 같으므로 0 으로 둔다.
+     */
+    static Double toVectorScore(Double cosine) {
+        if (cosine == null) {
+            return null;
+        }
+        return Math.max(0.0, Math.min(1.0, cosine));
+    }
 
     public record SearchRequest(
             @NotBlank String query,

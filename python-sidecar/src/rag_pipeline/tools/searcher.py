@@ -43,7 +43,8 @@ def search_hybrid(
         embedding_model: 쿼리 임베딩에 사용할 모델 (빈 문자열이면 기본 모델)
 
     Returns:
-        List of {content, metadata, vector_score, keyword_score, combined_score}
+        List of {content, metadata, document_id, vector_score, keyword_score, combined_score}.
+        vector_score is the cosine similarity, 0.0 for chunks found by keyword only.
     """
     # 1) Vector search via pgvector
     query_vector = embed_single(query, model=embedding_model)
@@ -72,6 +73,7 @@ def search_hybrid(
         content_scores[key] = {
             "content": vr["content"],
             "metadata": vr["metadata"],
+            "document_id": vr.get("document_id"),
             "vector_score": vr["vector_score"],
             "keyword_score": 0.0,
             "rrf_vector": _rrf_score(rank),
@@ -87,6 +89,7 @@ def search_hybrid(
             content_scores[key] = {
                 "content": key,
                 "metadata": all_chunks[idx].get("metadata", {}),
+                "document_id": all_chunks[idx].get("document_id"),
                 "vector_score": 0.0,
                 "keyword_score": float(score),
                 "rrf_vector": 0.0,
@@ -111,6 +114,7 @@ def search_hybrid(
         {
             "content": r["content"],
             "metadata": r["metadata"],
+            "document_id": r["document_id"],
             "vector_score": r["vector_score"],
             "keyword_score": r["keyword_score"],
             "combined_score": r["combined_score"],

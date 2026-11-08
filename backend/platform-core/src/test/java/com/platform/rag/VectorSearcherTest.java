@@ -105,4 +105,48 @@ class VectorSearcherTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).content()).isEqualTo("검색 결과");
     }
+
+    // ─── CR-170: 검색 결과의 문서 ID 와 벡터 유사도 ─────────────────────
+
+    @Test
+    void searchViaMcp_carriesDocumentIdAndVectorScoreThroughRerank() {
+        // TC-RAG-009
+        when(mcpRagClient.isAvailable()).thenReturn(true);
+        Map<String, Object> hit = Map.of("content", "이슈 본문", "metadata", Map.of(),
+                "document_id", "Issue_1", "vector_score", 0.82, "combined_score", 0.01);
+        when(mcpRagClient.searchHybrid("질문", "src-1", 5, 0.7, 0.3, null))
+                .thenReturn(Map.of("results", List.of(hit)));
+        Map<String, Object> reranked = new LinkedHashMap<>(hit);
+        reranked.put("rerank_score", 3.2);
+        when(mcpRagClient.rerankResults("질문", List.of(hit), 5))
+                .thenReturn(Map.of("results", List.of(reranked)));
+
+        List<RetrievedChunk> results = vectorSearcher.search("질문", "src-1", 5);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).documentId()).isEqualTo("Issue_1");
+        assertThat(results.get(0).vectorScore()).isEqualTo(0.82);
+        assertThat(results.get(0).score()).isEqualTo(3.2);
+    }
+
+    @Test
+    void searchFallback_usesEntityDocumentIdAndCosineScore() {
+        // TC-RAG-009
+        when(mcpRagClient.isAvailable()).thenReturn(false);
+        float[] queryVector = new float[]{0.1f, 0.2f};
+        when(embeddingService.embed("질문")).thenReturn(queryVector);
+        EmbeddingEntity entity = new EmbeddingEntity();
+        entity.setSourceId("src-1");
+        entity.setDocumentId("Issue_2");
+        entity.setContent("본문");
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("_score", 0.64);
+        entity.setMetadata(meta);
+        when(embeddingRepository.findSimilar("src-1", queryVector, 5)).thenReturn(List.of(entity));
+
+        List<RetrievedChunk> results = vectorSearcher.search("질문", "src-1", 5);
+
+        assertThat(results.get(0).documentId()).isEqualTo("Issue_2");
+        assertThat(results.get(0).vectorScore()).isEqualTo(0.64);
+    }
 }

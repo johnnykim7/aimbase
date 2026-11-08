@@ -33,7 +33,7 @@ def rerank_results(
         model: Cross-encoder model name
 
     Returns:
-        List of {content, metadata, rerank_score} sorted by rerank_score desc
+        The input documents with rerank_score added, sorted by rerank_score desc
     """
     if not documents:
         return []
@@ -44,11 +44,12 @@ def rerank_results(
     pairs = [(query, doc["content"]) for doc in documents]
     scores = reranker.predict(pairs)
 
-    # Attach scores and sort
+    # Keep the search fields (document_id, vector_score) so callers can still
+    # tell which document a chunk came from and how close it was.
     scored_docs = []
     for doc, score in zip(documents, scores):
         scored_docs.append({
-            "content": doc["content"],
+            **doc,
             "metadata": doc.get("metadata", {}),
             "rerank_score": float(score),
         })

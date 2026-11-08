@@ -6,7 +6,11 @@ Orchestrates the full pipeline: parse → chunk → embed → store in pgvector.
 import logging
 import os
 
-from rag_pipeline.db import delete_embeddings_by_source, store_embeddings
+from rag_pipeline.db import (
+    delete_embeddings_by_document,
+    delete_embeddings_by_source,
+    store_embeddings,
+)
 from rag_pipeline.tools.chunker import chunk_document
 from rag_pipeline.tools.embedder import embed_texts
 
@@ -42,12 +46,16 @@ def ingest_document(
     chunking_config: dict | None = None,
     embedding_model: str = "",
 ) -> dict:
-    """Full ingestion pipeline: chunk → embed → store.
+    """Ingest one document: chunk, embed and store.
+
+    With a document_id only that document's embeddings are replaced, so one
+    source can hold many documents. Without one the document is stored under
+    the source ID and the whole source is replaced.
 
     Args:
         source_id: Knowledge source ID
         content: Raw document text
-        document_id: Optional document identifier
+        document_id: Document identifier. Empty replaces the whole source
         chunking_strategy: "semantic" | "recursive" | "fixed"
         chunking_config: Chunking parameters
         embedding_model: Embedding model name
@@ -55,16 +63,41 @@ def ingest_document(
     Returns:
         {source_id, document_id, chunks_created, success, errors}
     """
+    return _ingest(
+        source_id,
+        content,
+        document_id or source_id,
+        replace_source=not document_id,
+        chunking_strategy=chunking_strategy,
+        chunking_config=chunking_config,
+        embedding_model=embedding_model,
+    )
+
+
+def _ingest(
+    source_id: str,
+    content: str,
+    doc_id: str,
+    replace_source: bool,
+    chunking_strategy: str,
+    chunking_config: dict | None,
+    embedding_model: str,
+) -> dict:
     errors: list[dict] = []
-    doc_id = document_id or source_id
     # Strip NUL bytes — PostgreSQL text columns reject \x00
     content = content.replace("\x00", "")
 
     try:
-        # 1) Delete existing embeddings for re-sync
-        deleted = delete_embeddings_by_source(source_id)
-        if deleted > 0:
-            logger.info("Deleted %d existing embeddings for source '%s'", deleted, source_id)
+        # 1) Delete what this call replaces
+        if replace_source:
+            deleted = delete_embeddings_by_source(source_id)
+            if deleted > 0:
+                logger.info("Deleted %d existing embeddings for source '%s'", deleted, source_id)
+        else:
+            deleted = delete_embeddings_by_document(source_id, doc_id)
+            if deleted > 0:
+                logger.info("Deleted %d existing embeddings for document '%s' in source '%s'",
+                            deleted, doc_id, source_id)
 
         # 2) Chunk
         chunks = chunk_document(content, chunking_strategy, chunking_config)
@@ -300,11 +333,14 @@ def ingest_file(
             logger.info("Auto-recommended '%s' strategy for %s file (was '%s')", recommended, ext, chunking_strategy)
             chunking_strategy = recommended
 
-        # 3) Delegate to ingest_document for chunk → embed → store
-        return ingest_document(
-            source_id=source_id,
-            content=content,
-            document_id=doc_id,
+        # 3) Chunk, embed and store. A file source holds one file (upload replaces
+        #    its file_path), so syncing it replaces the whole source. Deleting only
+        #    after parsing keeps the old embeddings when the file cannot be read.
+        return _ingest(
+            source_id,
+            content,
+            doc_id,
+            replace_source=True,
             chunking_strategy=chunking_strategy,
             chunking_config=chunking_config,
             embedding_model=embedding_model,
