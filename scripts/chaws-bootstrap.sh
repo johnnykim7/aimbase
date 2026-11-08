@@ -278,7 +278,7 @@ smoke_wes_cs() {
   python3 - "$GROUP" <<'PY' > secrets/.smoke.json
 import json, sys
 print(json.dumps({"connection_group_id": sys.argv[1], "stream": False,
-                  "messages": [{"role": "user", "content": "bash 로 psql -tAc 'select current_user' 를 실행하고 출력 한 줄만 답하세요."}]},
+                  "messages": [{"role": "user", "content": "Bash 도구로 psql -tAc 'select current_user' 를 실행하고 출력 한 줄만 답하세요."}]},
                  ensure_ascii=False))
 PY
   app --max-time 330 -w '\n%{http_code}' -X POST -d @/s/.smoke.json http://aimbase-api:8080/api/v1/chat/completions > secrets/.smoke-run.txt
