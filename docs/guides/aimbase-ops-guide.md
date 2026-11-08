@@ -139,7 +139,7 @@ Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 
 | 설정 키 | 타입 | 기본값 | 설명 |
 |---------|------|--------|------|
-| `widget.allowed-origins` | CSV | *(빈 문자열)* | 위젯 임베드를 허용할 전역 Origin. 비어 있으면 위젯 호출이 전부 CORS 거부된다. 예: `https://oms.company.com,https://rescue.company.com` |
+| `widget.allowed-origins` | CSV | *(빈 문자열)* | 위젯 임베드를 허용할 전역 Origin. 비어 있으면 위젯 호출이 전부 CORS 거부된다. 위젯 파일(`/widget/**`)을 실행 중에 읽어 오는 요청도 이 목록으로 판정한다(CR-172). Origin 없는 `<script>` 요청은 판정 대상이 아니다. 예: `https://oms.company.com,https://rescue.company.com` |
 | `widget.allowed-scopes` | CSV | `chat:stream,chat:upload,workflow:subscribe,rag:read` | 위젯 토큰에 부여 가능한 scope 화이트리스트. 발급 요청 scope 와 교집합만 적용. CR-061: `chat:upload` 미포함 시 위젯 파일 첨부 동작 불가 |
 | `widget.token-ttl-seconds` | int | `1800` | 위젯 토큰 기본 TTL (초) |
 | `widget.token-max-ttl-seconds` | int | `3600` | 위젯 토큰 최대 TTL 하드캡. 요청 TTL 이 이를 초과하면 cap 적용 + 로그 |
@@ -1867,6 +1867,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
 | v3.23.0 | 2026-11-09 | **CR-173 운영 chaws bp-wes CS 실행기와 위젯 공개 주소** (§ 2-10). 실행기 `aimbase-agent-wes-cs`, `./deploy.sh chaws-agent-wes-cs`, `chaws-bootstrap`, 설치 스크립트 대상 `wes-cs` 와 단계 `widget`, 위젯 통과 경로와 nginx 설정 |
+| v3.22.3 | 2026-11-08 | **CR-172 위젯 파일 교차 출처 허용** (§ 2-5). `widget.allowed-origins` 가 위젯 파일 읽기에도 적용된다고 적는다 |
 | v3.22.0 | 2026-11-04 | **CR-169 분당 요청 한도 변경** (§ 2-2, § 2-12). 「구독 관리」 화면과 구독 변경 API 로 바꾼다. 0 은 무제한 |
 | v3.21.3 | 2026-11-04 | **CR-168 실행기 연결 신호 전용 상한** (§ 2-12). 테넌트마다 분당 60번, 설정 `ratelimit.agent-signal-max-per-minute` |
 | v3.21.2 | 2026-11-03 | **CR-168 실행기 연결 신호 요청 한도 제외** (§ 2-12). 실행기 등록과 상태 알림은 테넌트 분당 요청 한도에 세지 않는다 |
