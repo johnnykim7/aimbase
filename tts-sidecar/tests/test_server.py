@@ -24,6 +24,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 SR = 24000
 SAMPLES_PER_TOKEN = 1920
 REPO_VOICES = Path(__file__).resolve().parent.parent / "voices"
+SILENT_PEAK = 0.01
+# 59 와 맥에서 모델이 무음을 낼 때 잰 최대 진폭(-98.9 dB)
+MODEL_SILENCE_PEAK = 10 ** (-98.9 / 20)
 
 
 def tone(seconds, peak=0.3):
@@ -101,17 +104,25 @@ class VoiceTest(unittest.TestCase):
         self.assertEqual(server.max_new_tokens("가" * 300, self.voice), 1600)
 
     def test_152_checks(self):
-        self.assertEqual(server.check_audio(np.zeros(0), SR, 48, SAMPLES_PER_TOKEN), "empty_audio")
+        self.assertEqual(server.check_audio(np.zeros(0), SR, 48, SAMPLES_PER_TOKEN, SILENT_PEAK), "empty_audio")
         bad = tone(1.0)
         bad[10] = np.nan
-        self.assertEqual(server.check_audio(bad, SR, 48, SAMPLES_PER_TOKEN), "non_finite_audio")
-        self.assertEqual(server.check_audio(np.zeros(SR), SR, 48, SAMPLES_PER_TOKEN), "silent_audio")
-        self.assertEqual(server.check_audio(tone(0.2), SR, 48, SAMPLES_PER_TOKEN), "too_short")
-        self.assertEqual(server.check_audio(tone(4.0), SR, 48, SAMPLES_PER_TOKEN), "hit_token_limit")
+        self.assertEqual(server.check_audio(bad, SR, 48, SAMPLES_PER_TOKEN, SILENT_PEAK), "non_finite_audio")
+        self.assertEqual(server.check_audio(np.zeros(SR), SR, 48, SAMPLES_PER_TOKEN, SILENT_PEAK), "silent_audio")
+        self.assertEqual(server.check_audio(tone(0.2), SR, 48, SAMPLES_PER_TOKEN, SILENT_PEAK), "too_short")
+        self.assertEqual(server.check_audio(tone(4.0), SR, 48, SAMPLES_PER_TOKEN, SILENT_PEAK), "hit_token_limit")
         at_limit = np.full(47 * SAMPLES_PER_TOKEN, 0.3, dtype=np.float32)
-        self.assertEqual(server.check_audio(at_limit, SR, 48, SAMPLES_PER_TOKEN), "hit_token_limit")
-        self.assertIsNone(server.check_audio(at_limit[:46 * SAMPLES_PER_TOKEN], SR, 48, SAMPLES_PER_TOKEN))
-        self.assertIsNone(server.check_audio(tone(3.0), SR, 48, SAMPLES_PER_TOKEN))
+        self.assertEqual(server.check_audio(at_limit, SR, 48, SAMPLES_PER_TOKEN, SILENT_PEAK), "hit_token_limit")
+        self.assertIsNone(server.check_audio(at_limit[:46 * SAMPLES_PER_TOKEN], SR, 48, SAMPLES_PER_TOKEN, SILENT_PEAK))
+        self.assertIsNone(server.check_audio(tone(3.0), SR, 48, SAMPLES_PER_TOKEN, SILENT_PEAK))
+
+    def test_152_silent_peak_from_voice(self):
+        self.assertAlmostEqual(self.voice.silent_peak, 0.01)
+        check = partial(server.check_audio, sample_rate=SR, token_limit=48, samples_per_token=SAMPLES_PER_TOKEN,
+                        silent_peak=self.voice.silent_peak)
+        self.assertEqual(check(tone(1.0, peak=MODEL_SILENCE_PEAK)), "silent_audio")
+        self.assertEqual(check(tone(1.0, peak=0.009)), "silent_audio")
+        self.assertIsNone(check(tone(1.0, peak=0.011)))
 
     def test_154_voice_load_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -181,6 +192,13 @@ class EngineTest(unittest.TestCase):
         with self.assertRaises(server.GenerationFailed) as ctx:
             engine.synthesize("field-voice-07", "1번.")
         self.assertEqual(ctx.exception.reason, "silent_audio")
+
+    def test_153_model_silence_retries_with_next_seed(self):
+        engine, _ = self.make([tone(0.56, peak=MODEL_SILENCE_PEAK), tone(1.0)])
+        with mock.patch.object(server, "seed_everything") as seeded:
+            result = engine.synthesize("field-voice-07", "일")
+        self.assertEqual([c.args[0] for c in seeded.call_args_list], [20261031, 20261032])
+        self.assertEqual(result.attempt, 2)
 
     def test_156_one_at_a_time(self):
         engine, model = self.make([tone(1.0), tone(1.0)], delay=0.3)

@@ -50,6 +50,7 @@ public class TtsJobService {
     private final int maxTextLength;
     private final int maxPendingPerTenant;
     private final int retentionDays;
+    private final double minReusableDurationSec;
 
     private final PriorityBlockingQueue<Queued> queue = new PriorityBlockingQueue<>(64,
             Comparator.comparing(Queued::createdAt).thenComparingLong(Queued::seq));
@@ -64,18 +65,22 @@ public class TtsJobService {
                          TtsSidecarClient sidecar,
                          @Value("${aimbase.tts.max-text-length:200}") int maxTextLength,
                          @Value("${aimbase.tts.max-pending-per-tenant:500}") int maxPendingPerTenant,
-                         @Value("${aimbase.tts.retention-days:7}") int retentionDays) {
-        this(store, sidecar, Clock.systemUTC(), maxTextLength, maxPendingPerTenant, retentionDays, true);
+                         @Value("${aimbase.tts.retention-days:7}") int retentionDays,
+                         @Value("${aimbase.tts.min-reusable-duration-sec:0.25}") double minReusableDurationSec) {
+        this(store, sidecar, Clock.systemUTC(), maxTextLength, maxPendingPerTenant, retentionDays,
+                minReusableDurationSec, true);
     }
 
     TtsJobService(TtsJobStore store, TtsSidecarClient sidecar, Clock clock,
-                  int maxTextLength, int maxPendingPerTenant, int retentionDays, boolean startWorker) {
+                  int maxTextLength, int maxPendingPerTenant, int retentionDays,
+                  double minReusableDurationSec, boolean startWorker) {
         this.store = store;
         this.sidecar = sidecar;
         this.clock = clock;
         this.maxTextLength = maxTextLength;
         this.maxPendingPerTenant = maxPendingPerTenant;
         this.retentionDays = retentionDays;
+        this.minReusableDurationSec = minReusableDurationSec;
         this.worker = new Thread(this::loop, "tts-job");
         this.worker.setDaemon(true);
         if (startWorker) {
@@ -112,7 +117,7 @@ public class TtsJobService {
             log.info("[CR-166] 보관 기간 지난 작업 {}건 삭제 tenant={}", deleted, TenantContext.getTenantId());
         }
 
-        Optional<TtsJobEntity> reusable = store.findReusable(voice, text);
+        Optional<TtsJobEntity> reusable = store.findReusable(voice, text).filter(this::hasUsableAudio);
         if (reusable.isPresent()) {
             requeueIfLost(reusable.get());
             return new SubmitResult(reusable.get(), true);
@@ -135,6 +140,12 @@ public class TtsJobService {
                 saved.getJobId(), voice, text.codePointCount(0, text.length()), TenantContext.getTenantId(),
                 queue.size());
         return new SubmitResult(saved, false);
+    }
+
+    /** 기준보다 짧게 끝난 소리는 뒤처리에서 전부 잘린 빈 파일이다(CR-171). 돌려주면 같은 글이 보관 기간 내내 소리 없이 남는다. */
+    private boolean hasUsableAudio(TtsJobEntity job) {
+        return !TtsJobEntity.COMPLETED.equals(job.getStatus())
+                || (job.getDurationSec() != null && job.getDurationSec() >= minReusableDurationSec);
     }
 
     public Optional<TtsJobEntity> find(UUID jobId) {

@@ -48,8 +48,7 @@ BACKOFF = "backoff"
 UNAVAILABLE_STATES = (DOWNLOADING, FAILED, BACKOFF)
 
 MIN_DURATION_SEC = 0.25
-SILENT_PEAK = 1e-5
-REQUIRED_FIELDS = ("ref_audio", "ref_text", "language", "seed", "attempts", "tokens_per_char",
+REQUIRED_FIELDS = ("ref_audio", "ref_text", "language", "seed", "attempts", "silent_peak_db", "tokens_per_char",
                    "min_new_tokens", "max_new_tokens", "generation", "postprocess")
 REQUIRED_POSTPROCESS = ("filter", "sample_rate", "bitrate")
 
@@ -72,6 +71,7 @@ class Voice:
     language: str
     seed: int
     attempts: int
+    silent_peak: float
     tokens_per_char: int
     min_new_tokens: int
     max_new_tokens: int
@@ -96,6 +96,7 @@ def load_voice(folder):
         raise ValueError(f"voice {folder.name}: {spec['ref_audio']} not found")
     return Voice(name=folder.name, ref_audio=ref_audio, ref_text=spec["ref_text"], language=spec["language"],
                  seed=int(spec["seed"]), attempts=int(spec["attempts"]),
+                 silent_peak=10 ** (float(spec["silent_peak_db"]) / 20),
                  tokens_per_char=int(spec["tokens_per_char"]), min_new_tokens=int(spec["min_new_tokens"]),
                  max_new_tokens=int(spec["max_new_tokens"]), generation=dict(spec["generation"]),
                  postprocess=dict(spec["postprocess"]))
@@ -113,13 +114,14 @@ def max_new_tokens(text, voice):
     return max(voice.min_new_tokens, min(voice.max_new_tokens, len(text) * voice.tokens_per_char))
 
 
-def check_audio(wav, sample_rate, token_limit, samples_per_token):
+def check_audio(wav, sample_rate, token_limit, samples_per_token, silent_peak):
     wav = np.asarray(wav, dtype=np.float32).reshape(-1)
     if wav.size == 0:
         return "empty_audio"
     if not np.isfinite(wav).all():
         return "non_finite_audio"
-    if float(np.max(np.abs(wav))) < SILENT_PEAK:
+    # 모델이 낸 무음도 표본 값이 0 은 아니다(-98.9 dB). 뒤처리가 전부 잘라 낼 소리를 여기서 거절한다.
+    if float(np.max(np.abs(wav))) < silent_peak:
         return "silent_audio"
     if wav.size / sample_rate < MIN_DURATION_SEC:
         return "too_short"
@@ -228,7 +230,7 @@ class Engine:
                     text=text, language=voice.language, voice_clone_prompt=self._prompts[voice_name],
                     max_new_tokens=token_limit, **voice.generation)
                 wav = wavs[0] if wavs else np.zeros(0, dtype=np.float32)
-                reason = check_audio(wav, sample_rate, token_limit, self._samples_per_token)
+                reason = check_audio(wav, sample_rate, token_limit, self._samples_per_token, voice.silent_peak)
                 log.info("voice=%s attempt=%d samples=%d tokens=%.1f limit=%d", voice_name, attempt,
                          np.asarray(wav).size, np.asarray(wav).size / self._samples_per_token, token_limit)
                 if reason is None:
