@@ -6,7 +6,7 @@
 - 근거: bp-wes origin/dev `docs/협업/요청_CR-WES-368_운영_이전.md` aimbase 절, `docs/CR/CR-WES-368_CS_수집과_AI_초안_운영_이전_설계.md` 3절 3, 4, 5, 10번과 7절. 사용자 승인 2026-11-09 04:15 `/전승`(구현 준비 시작, 운영 반영은 건마다 승인)
 - 앞 건: CR-162(운영 회사용 Aimbase 와 설치 스크립트), CR-WMS-907(실행기 읽기 전용 계정과 망), CR-172(위젯 파일 교차 출처)
 - 규모: 소. 운영 구성 파일, 배포 스크립트, 설치 스크립트만 바꾼다. 새 창구, 화면, 테이블, 마이그레이션, Java 변경 없음
-- 상태: 진행중(2026-11-09 07:02 운영 chaws 7절 1번부터 6번 반영 끝. 7번 Claude 로그인은 사람 차례, 8번부터 10번은 그 뒤)
+- 상태: 진행중(2026-11-09 07:17 운영 chaws 7절 1번부터 9번 끝. 10번 위젯 허용 주소와 nginx, DNS 는 설계 7절 13번 차례에 따로)
 
 ---
 
@@ -128,7 +128,13 @@ location / { return 404; }
 | 5 | `wes_cs_ai` | bp-wes `docs/자산/CR-WES-332_wes_cs_ai_계정.sql`(origin/dev)을 bp-postgres 소유자 계정으로 돌렸다. 비밀번호는 서버에서 만들어 `agent-wes-cs-db.env`(600)에만 두었고 화면과 맥에 남기지 않았다. 개인정보 칸 8개 확인이 모두 거부, 21개 표 519칸(설계 수와 같다), 접속 3개, 읽기 전용, 조회 30초 |
 | 6 | `chaws-agent-wes-cs` | 06:59 부터 07:02. 실행기 `aimbase-agent-wes-cs` 건강 상태 정상, `Agent registered successfully: name=cli-runner-bp-wes-cs`. 메모리 한도 1536MB, 망 `aimbase_default` 와 `bp-infra_default`, 폴더 `claude-accounts-wes-cs`, `workspace-wes-cs`. 배포 기록 `aimbase-agent-wes-cs 991309b`. 실행기 안 `psql` 은 `wes_cs_ai` 로 붙어 허용 표는 읽고(`wms.warehouses` 2행), 고객 전화 칸은 권한 거부, 쓰기는 읽기 전용 거부 |
 
-api, `aimbase-agent`, db, redis, `tts-sidecar` 는 다시 기동하지 않았다(반영 뒤 가동 시간 그대로). 7번 Claude 로그인 전이라 연결, 묶음, 위젯 허용 주소(8번부터 10번)는 아직 없다.
+| 7 | Claude 로그인 | 사람이 work01, work02 로그인(07:13 알림). 실행기 안 두 폴더에 로그인 파일이 있음을 확인. work03 폴더는 없다 |
+| 8 | `connections wes-cs` | 07:14. 로그인된 계정 `work01 work02`. 연결 `cli-runner-bp-wes-cs-work01`, `-work02`, 위젯 `-001`, 묶음 `cli-runner-bp-wes-cs-rr`(ROUND_ROBIN, work01 과 work02) 모두 201. 연결 설정은 1절의 59 값과 같다(`-001` 의 계정 폴더만 work01) |
+| 9 | `smoke wes-cs` | 07:14 1차는 응답 200 이지만 CLI 가 「bash 도구를 쓸 수 없다」로 답했다. 시험 질문에 소문자 「bash 로」 라고 써서 모델이 CLI 도구 `Bash` 대신 없는 이름 `bash` 를 불렀다. 실행기 기동 명령과 CLI 판(2.1.197)은 59 와 같고, 59 의 CS 요청은 10일간 `Bash` 를 507번 정상으로 썼다. 질문을 「Bash 도구로」 로 고쳐(`102f711`, 운영 가지 `08f1abc`) 서버 스크립트를 바꾸고 07:17 2차: 응답 200, CLI 가 `Bash` 로 `psql` 을 돌려 `wes_cs_ai` 를 답했다. 1차는 work01, 2차는 work02 로 가 두 계정 로그인이 모두 산다 |
+
+api, `aimbase-agent`, db, redis, `tts-sidecar` 는 다시 기동하지 않았다(반영 뒤 가동 시간 그대로). 10번(위젯 허용 주소, nginx, 인증서, DNS)은 하지 않았다.
+
+관찰: 기본 안내문(요청에 시스템 안내가 없을 때)은 노출 도구를 Aimbase 이름 `bash` 로 적는다. NATIVE 모드 CLI 의 도구 이름은 `Bash` 라 2차에서도 모델이 도구 찾기를 다섯 번 한 뒤 `Bash` 를 썼다. bp-wes CS 요청은 자기 안내문을 실어 59 에서 바로 `Bash` 를 쓰므로 이 건의 범위 밖이다.
 
 ## 7. 운영 반영 순서 (승인 뒤, 컨타가 부른다)
 
@@ -172,14 +178,15 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 | `3de6f47` | origin/chaws-cr173 | origin/dev 에 있는 CR-162 `61a1ac1` 을 운영 가지에 얹었다(까닭은 7절). CR-162 문서 충돌은 운영 가지 쪽을 두었다 |
 | `cfee62c` | origin/dev | 운영 초기화가 실행기 폴더를 root 컨테이너 안에서 만든다(6.3 의 1) |
 | `34c9e9c` | origin/chaws-cr173 | `cfee62c` 를 운영 가지에 얹었다. 맥에서 도는 배포 스크립트만 바뀌고 서버에 가는 구성과 설치 스크립트는 `991309b` 와 같다 |
+| `102f711` | origin/dev | 설치 스크립트 시험 질문을 「Bash 도구로」 로(6.3 의 9) |
+| `08f1abc` | origin/chaws-cr173 | `102f711` 을 운영 가지에 얹었다. 서버 `build/chaws-bootstrap.sh` 는 이 판이다 |
 | `991309b` | origin/chaws-cr173 | `1a9c948` 을 얹었다. 운용 가이드 충돌은 운영 가지 쪽을 두었다(문서는 origin/dev 가 정본) |
 
 ## 10. 남은 것
 
-1. 7절 7번 Claude 로그인 work01, work02(사람)
-2. 그 뒤 7절 8번부터 10번(연결과 묶음, 시험 호출, 위젯 허용 주소)은 컨타가 사용자 승인을 받아 부른다
-3. 8절 3, 4(키를 bp-wes 로 옮기기, DNS와 인증서와 nginx). 8절 2 `wes_cs_ai` 는 6.3 의 5 에서 끝났다
-4. bp-infra 의 bp-wes 연결 켜기(`a801e19`)와 위젯 주소(`757f2e0`)는 bp-infra 몫이다
+1. 7절 10번 `bootstrap widget wes-cs`, nginx, 인증서, DNS 는 설계 7절 13번 차례에 컨타가 사용자 승인을 받아 부른다
+2. 8절 3, 4(키를 bp-wes 로 옮기기, DNS와 인증서와 nginx). 8절 1 로그인과 2 `wes_cs_ai` 는 6.3 에서 끝났다
+3. bp-infra 의 bp-wes 연결 켜기(`a801e19`)와 위젯 주소(`757f2e0`)는 bp-infra 몫이다
 
 ## 11. 경과
 
@@ -196,3 +203,6 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 | 2026-11-09 06:57 | 운영 `chaws-init` 실패, 폴더 만드는 곳을 고쳐(`cfee62c`) 다시 침 |
 | 2026-11-09 06:58 | 운영 설치 스크립트, `admin`, `tenant` wes-cs, `wes_cs_ai` |
 | 2026-11-09 07:02 | 운영 실행기 `aimbase-agent-wes-cs` 반영과 확인(6.3) |
+| 2026-11-09 07:13 | 사람이 work01, work02 로그인, 컨타 승인(7절 8번, 9번) |
+| 2026-11-09 07:14 | 운영 연결 셋과 묶음, 시험 1차(질문 문구 탓에 도구 못 씀) |
+| 2026-11-09 07:17 | 시험 질문 고침(`102f711`), 시험 2차 통과 |
