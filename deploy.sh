@@ -272,8 +272,7 @@ chaws_send() { scp -q -i "$CHAWS_SSH_KEY" -o IdentitiesOnly=yes "$@"; }
 deploy_chaws_init() {
   echo "[chaws-init] 폴더, 비밀값 파일, 망"
   chaws_run "set -e; umask 077; cd $CHAWS_REMOTE 2>/dev/null || { mkdir -p $CHAWS_REMOTE; cd $CHAWS_REMOTE; }
-    mkdir -p build deploy-backup secrets claude-accounts/work01 claude-accounts/work02 claude-accounts/work03 workspace aimbase-storage \
-      claude-accounts-wes-cs/work01 claude-accounts-wes-cs/work02 workspace-wes-cs
+    mkdir -p build deploy-backup secrets
     if [ -f db.env ] && [ -f api.env ]; then echo '[chaws-init] db.env, api.env 있음. 그대로 둔다'
     elif [ -f db.env ] || [ -f api.env ]; then echo '[chaws-init] db.env 와 api.env 가운데 하나만 있습니다. DB 비밀번호가 어긋나니 손으로 맞추세요.'; exit 1
     else P=\$(openssl rand -hex 24)
@@ -283,8 +282,11 @@ deploy_chaws_init() {
     fi
     [ -f agent.env ] || { printf 'AIMBASE_RUNNER_API_KEY=%s\n' \"\$(openssl rand -hex 32)\" > agent.env; echo '[chaws-init] agent.env 만듦'; }
     docker network inspect aimbase-apps >/dev/null 2>&1 || docker network create aimbase-apps
-    docker run --rm -v $CHAWS_REMOTE:/w --entrypoint chown pgvector/pgvector:pg16 -R 999 /w/claude-accounts /w/workspace /w/aimbase-storage \
-      /w/claude-accounts-wes-cs /w/workspace-wes-cs"
+    # 실행기 폴더는 실행 계정 999 소유라 한 번 만든 뒤에는 서버 계정이 그 아래에 폴더를 더하지 못한다. root 컨테이너 안에서 만든다.
+    docker run --rm -v $CHAWS_REMOTE:/w --entrypoint sh pgvector/pgvector:pg16 -c 'umask 077; cd /w \
+      && mkdir -p claude-accounts/work01 claude-accounts/work02 claude-accounts/work03 workspace aimbase-storage \
+         claude-accounts-wes-cs/work01 claude-accounts-wes-cs/work02 workspace-wes-cs \
+      && chown -R 999 claude-accounts workspace aimbase-storage claude-accounts-wes-cs workspace-wes-cs'"
   echo "[chaws-init] 완료"
 }
 
