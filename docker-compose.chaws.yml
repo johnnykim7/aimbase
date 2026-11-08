@@ -128,6 +128,61 @@ services:
       retries: 10
       start_period: 40s
 
+  # bp-wes CS 초안과 CS 상세 AI 대화 전용 실행기(CR-173, CR-WES-368). 연결 cli-runner-bp-wes-cs-* 가 이리로 보낸다.
+  # 59 의 같은 이름 실행기와 같게 개인정보 칸을 뺀 wes_cs_ai 계정만 쥔다.
+  # 계정과 작업 폴더를 aimbase-agent 와 나눈다. 그 폴더의 지난 대화와 산출물에 claude_ro 접속값과 조회 결과가 남는다.
+  # 이미지 이름을 따로 두어 이 실행기를 올려도 aimbase-agent 의 이미지가 바뀌지 않는다. ./deploy.sh chaws-agent-wes-cs 로 올린다.
+  aimbase-agent-wes-cs:
+    image: aimbase-aimbase-agent-wes-cs:latest
+    build:
+      context: ./build/backend
+      dockerfile: aimbase-agent/Dockerfile
+    init: true
+    restart: unless-stopped
+    # 실행기 호출 키(AIMBASE_RUNNER_API_KEY)와 bp_wes 테넌트 실행기 전용 키(AIMBASE_RUNNER_SERVER_MCP_API_KEY, AGENT_API_KEY 같은 값).
+    # wes_cs_ai 의 PGPASSWORD 는 agent-wes-cs-db.env 에 둔다.
+    # 처음 세우기 전에는 두 파일이 없다. 없어도 다른 서비스를 올릴 때 compose 가 멈추지 않게 required 를 끈다.
+    env_file:
+      - path: agent-wes-cs.env
+        required: false
+      - path: agent-wes-cs-db.env
+        required: false
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "2"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes-cs"
+      SERVER_PORT: "8298"
+      AGENT_NAME: "cli-runner-bp-wes-cs"
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_TENANT_ID: "bp_wes"
+      AGENT_MCP_PORT: "8299"
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-wes-cs:8298"
+      PGHOST: "bp-postgres"
+      PGPORT: "5432"
+      PGDATABASE: "bp_fulfillment"
+      PGUSER: "wes_cs_ai"
+    networks:
+      default: {}
+      bp-infra: {}
+    mem_limit: 1536m
+    # 계정 폴더 work01, work02 를 붙인다. 연결마다 config.config_dir 로 폴더를 고른다.
+    volumes:
+      - ./claude-accounts-wes-cs:/home/appuser/.claude-accounts
+      - ./workspace-wes-cs:/data/workspace
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8298/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
   # 같은 목소리 음성 생성기(CR-166, CR-167). 모델은 문장이 있을 때만 싣고 일이 없으면 내린다.
   # 운영 3PL 보다 CPU 를 늦게 받는다. 코어 2개와 8개의 문장 시간이 같고, 메모리는 긴 문장까지 8.7GB 다(CR-167 7절).
   # 상한에 걸리면 모델 프로세스만 죽고 창구가 503 으로 답한다(BIZ-140). ./deploy.sh chaws-tts 로 올린다.
