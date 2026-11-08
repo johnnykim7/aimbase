@@ -6,7 +6,7 @@
 - 근거: bp-wes origin/dev `docs/협업/요청_CR-WES-368_운영_이전.md` aimbase 절, `docs/CR/CR-WES-368_CS_수집과_AI_초안_운영_이전_설계.md` 3절 3, 4, 5, 10번과 7절. 사용자 승인 2026-11-09 04:15 `/전승`(구현 준비 시작, 운영 반영은 건마다 승인)
 - 앞 건: CR-162(운영 회사용 Aimbase 와 설치 스크립트), CR-WMS-907(실행기 읽기 전용 계정과 망), CR-172(위젯 파일 교차 출처)
 - 규모: 소. 운영 구성 파일, 배포 스크립트, 설치 스크립트만 바꾼다. 새 창구, 화면, 테이블, 마이그레이션, Java 변경 없음
-- 상태: 진행중(2026-11-09 준비와 로컬 확인 끝. 운영 반영은 컨타가 사용자 승인을 받아 부른다)
+- 상태: 진행중(2026-11-09 07:02 운영 chaws 7절 1번부터 6번 반영 끝. 7번 Claude 로그인은 사람 차례, 8번부터 10번은 그 뒤)
 
 ---
 
@@ -113,6 +113,23 @@ location / { return 404; }
 
 해당 없음. 바뀐 파일은 운영 chaws 구성과 그 배포, 설치 스크립트뿐이고 59 의 구성과 api 는 그대로다.
 
+### 6.3 운영 chaws (11-09 06:56 부터)
+
+반영: 컨타 승인(사용자 06:53 「운영에 올릴건 올리세요」). 7절 1번부터 6번, 5번 `wes_cs_ai` 도 이 창이 맡았다. 7번 Claude 로그인부터는 사람 차례다.
+
+반영 전(읽기 전용, 06:56): 서비스 다섯(api, `aimbase-agent`, db, redis, `tts-sidecar`) 정상. 마지막 api 반영은 `0d6a394`. CLI 허용 테넌트 `bp_wms`, `widget.allowed-origins` 빈 값, 테넌트 `bp_wms` 하나. 운영 3PL DB 에 `wes_cs_ai` 없음(`claude_ro` 만 있음). 망 `aimbase-apps`, `bp-infra_default` 있음.
+
+| 순번 | 단계 | 결과 |
+|---|---|---|
+| 1 | `chaws-init` | 처음 친 판은 실패했다. 기존 실행기 폴더가 999 소유라 서버 계정의 `mkdir -p claude-accounts/work01` 이 권한 거절로 멈췄고, 새 폴더는 서버 계정 소유로만 생겼다. 폴더를 root 컨테이너 안에서 만들게 고쳐(`cfee62c`, 운영 가지 `34c9e9c`) 다시 쳤다. 새 폴더 셋이 999 소유, 기존 폴더와 비밀값 파일, 서비스는 그대로 |
+| 2 | `chaws-bootstrap` | 서버 `build/chaws-bootstrap.sh` 가 `991309b` 것과 같다(sha256 앞 16자리 대조) |
+| 3 | `admin wes-cs` | CLI 허용 테넌트 `bp_wms,bp_wes` |
+| 4 | `tenant wes-cs` | 테넌트 `bp_wes` 만들기 201. `agent-wes-cs.env` 에 키 셋, `secrets/bp-wes-api-key`. 둘 다 600 |
+| 5 | `wes_cs_ai` | bp-wes `docs/자산/CR-WES-332_wes_cs_ai_계정.sql`(origin/dev)을 bp-postgres 소유자 계정으로 돌렸다. 비밀번호는 서버에서 만들어 `agent-wes-cs-db.env`(600)에만 두었고 화면과 맥에 남기지 않았다. 개인정보 칸 8개 확인이 모두 거부, 21개 표 519칸(설계 수와 같다), 접속 3개, 읽기 전용, 조회 30초 |
+| 6 | `chaws-agent-wes-cs` | 06:59 부터 07:02. 실행기 `aimbase-agent-wes-cs` 건강 상태 정상, `Agent registered successfully: name=cli-runner-bp-wes-cs`. 메모리 한도 1536MB, 망 `aimbase_default` 와 `bp-infra_default`, 폴더 `claude-accounts-wes-cs`, `workspace-wes-cs`. 배포 기록 `aimbase-agent-wes-cs 991309b`. 실행기 안 `psql` 은 `wes_cs_ai` 로 붙어 허용 표는 읽고(`wms.warehouses` 2행), 고객 전화 칸은 권한 거부, 쓰기는 읽기 전용 거부 |
+
+api, `aimbase-agent`, db, redis, `tts-sidecar` 는 다시 기동하지 않았다(반영 뒤 가동 시간 그대로). 7번 Claude 로그인 전이라 연결, 묶음, 위젯 허용 주소(8번부터 10번)는 아직 없다.
+
 ## 7. 운영 반영 순서 (승인 뒤, 컨타가 부른다)
 
 운영 가지 `chaws-cr173`(`991309b`). 운영 반영본 `0d6a394`(`chaws-cr172`)에 CR-162 의 설치 스크립트 변경 `61a1ac1` 과 이 건을 얹었다. `0d6a394` 와의 차이는 `deploy.sh`, `docker-compose.chaws.yml`, `scripts/chaws-bootstrap.sh` 와 CR-162 가 고친 운용 가이드 몇 줄뿐이고 api 소스는 같다. 세 파일은 origin/dev `1a9c948` 과 같다.
@@ -153,13 +170,16 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 | `e8a1293` | origin/dev | 운용 가이드 위젯 공개 주소 절의 대화 창구 설명 |
 | `749287a` | origin/dev | 이 문서, 원본, 대장 한 줄. 메인 폴더 로컬 dev 에도 같은 커밋(`77d25f1`)이 있다 |
 | `3de6f47` | origin/chaws-cr173 | origin/dev 에 있는 CR-162 `61a1ac1` 을 운영 가지에 얹었다(까닭은 7절). CR-162 문서 충돌은 운영 가지 쪽을 두었다 |
+| `cfee62c` | origin/dev | 운영 초기화가 실행기 폴더를 root 컨테이너 안에서 만든다(6.3 의 1) |
+| `34c9e9c` | origin/chaws-cr173 | `cfee62c` 를 운영 가지에 얹었다. 맥에서 도는 배포 스크립트만 바뀌고 서버에 가는 구성과 설치 스크립트는 `991309b` 와 같다 |
 | `991309b` | origin/chaws-cr173 | `1a9c948` 을 얹었다. 운용 가이드 충돌은 운영 가지 쪽을 두었다(문서는 origin/dev 가 정본) |
 
 ## 10. 남은 것
 
-1. 운영 반영(7절)은 컨타가 사용자 승인을 받아 부른다
-2. 8절 사람 손 작업
-3. bp-infra 의 bp-wes 연결 켜기(`a801e19`)와 위젯 주소(`757f2e0`)는 bp-infra 몫이다
+1. 7절 7번 Claude 로그인 work01, work02(사람)
+2. 그 뒤 7절 8번부터 10번(연결과 묶음, 시험 호출, 위젯 허용 주소)은 컨타가 사용자 승인을 받아 부른다
+3. 8절 3, 4(키를 bp-wes 로 옮기기, DNS와 인증서와 nginx). 8절 2 `wes_cs_ai` 는 6.3 의 5 에서 끝났다
+4. bp-infra 의 bp-wes 연결 켜기(`a801e19`)와 위젯 주소(`757f2e0`)는 bp-infra 몫이다
 
 ## 11. 경과
 
@@ -172,3 +192,7 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 | 2026-11-09 05:28 | origin/dev `1a9c948`, 운영 가지 `chaws-cr173`(`991309b`) |
 | 2026-11-09 05:33 | CR 문서, 원본, 대장, 위젯 통과 경로 회신 |
 | 2026-11-09 05:40 | 컨타 지시로 운영 가지의 CR-162 커밋 까닭을 7절에 적고, 문서 커밋을 origin/dev 에 올림 |
+| 2026-11-09 06:53 | 사용자 「운영에 올릴건 올리세요」, 컨타 승인(7절 1번부터 6번) |
+| 2026-11-09 06:57 | 운영 `chaws-init` 실패, 폴더 만드는 곳을 고쳐(`cfee62c`) 다시 침 |
+| 2026-11-09 06:58 | 운영 설치 스크립트, `admin`, `tenant` wes-cs, `wes_cs_ai` |
+| 2026-11-09 07:02 | 운영 실행기 `aimbase-agent-wes-cs` 반영과 확인(6.3) |
