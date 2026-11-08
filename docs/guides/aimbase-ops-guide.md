@@ -543,7 +543,7 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 | 1 | `/widget/` | 위젯 파일(진입 파일, ESM, 청크) |
 | 2 | `/api/v1/chat/` | 대화(`completions`, 응답 스트림), 멈춤(`{세션}/abort`), 첨부(`attachments`), 누르고 말하기(`stt`), 산출물(`artifacts`) |
 
-`/api/v1/chat/` 아래에는 위젯 토큰으로 부르는 창구만 있습니다. 관리 API(`/api/v1/platform/`, `/api/v1/admin/`), 관리자 로그인(`/api/v1/auth/`), 토큰 발급(`/api/v1/sessions/issue-widget-token`, bp-wes 가 망 `aimbase-apps` 안에서 부른다), 실행기 등록과 서버 도구(`/api/v1/agents/`, `/mcp/`), 연결과 워크플로우, `/actuator/` 는 밖에서 닿지 않습니다. 대화는 응답 스트림이라 nginx 에서 버퍼링을 끄고, 대화 대기 300초(`SseEmitter`)보다 읽기 제한을 길게 둡니다. 교차 출처 머리글은 api 가 붙이므로 nginx 에서 더하지 않습니다(두 번 붙으면 브라우저가 막는다). 허용 주소는 `bootstrap widget wes-cs` 로 `widget.allowed-origins` 에 `https://admin.banpoom.co.kr` 를 더합니다(5분까지 묵혀 읽는다).
+`/api/v1/chat/` 아래에는 대화 창구 일곱 개(대화, 멈춤, 첨부 올리기와 지우기, 누르고 말하기, 산출물 목록과 내려받기)만 있고 관리 창구는 없습니다. 관리 API(`/api/v1/platform/`, `/api/v1/admin/`), 관리자 로그인(`/api/v1/auth/`), 토큰 발급(`/api/v1/sessions/issue-widget-token`, bp-wes 가 망 `aimbase-apps` 안에서 부른다), 실행기 등록과 서버 도구(`/api/v1/agents/`, `/mcp/`), 연결과 워크플로우, `/actuator/` 는 밖에서 닿지 않습니다. 대화는 응답 스트림이라 nginx 에서 버퍼링을 끄고, 대화 대기 300초(`SseEmitter`)보다 읽기 제한을 길게 둡니다. 교차 출처 머리글은 api 가 붙이므로 nginx 에서 더하지 않습니다(두 번 붙으면 브라우저가 막는다). 허용 주소는 `bootstrap widget wes-cs` 로 `widget.allowed-origins` 에 `https://admin.banpoom.co.kr` 를 더합니다(5분까지 묵혀 읽는다).
 
 ```nginx
 location /widget/      { proxy_pass http://127.0.0.1:8280; }
