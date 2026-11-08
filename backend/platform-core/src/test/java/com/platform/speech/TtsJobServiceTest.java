@@ -59,7 +59,7 @@ class TtsJobServiceTest {
     }
 
     private TtsJobService newService(int maxPending) {
-        return new TtsJobService(store, sidecar, clock, 200, maxPending, 7, false);
+        return new TtsJobService(store, sidecar, clock, 200, maxPending, 7, 0.25, false);
     }
 
     private static TtsSidecarClient.Synthesis mp3() {
@@ -166,6 +166,29 @@ class TtsJobServiceTest {
     }
 
     @Test
+    @DisplayName("TC-TTS-117 기준보다 짧게 끝난 작업은 돌려주지 않고 새 작업을 만들며, 새 작업은 다시 돌려준다")
+    void emptyAudioIsNotReused() {
+        when(sidecar.synthesize(any(), any()))
+                .thenReturn(new TtsSidecarClient.Synthesis(new byte[]{1}, "audio/mpeg", 0.168, 15.5, 1))
+                .thenReturn(mp3());
+        UUID empty = service.submit(VOICE, "일", "u").job().getJobId();
+        service.runNext();
+        TenantContext.setTenantId("tenant_a");
+        clock.plus(Duration.ofSeconds(1));
+
+        TtsJobService.SubmitResult again = service.submit(VOICE, "일", "u");
+        assertFalse(again.reused());
+        assertNotEquals(empty, again.job().getJobId());
+
+        service.runNext();
+        TenantContext.setTenantId("tenant_a");
+        TtsJobService.SubmitResult third = service.submit(VOICE, "일", "u");
+        assertTrue(third.reused());
+        assertEquals(again.job().getJobId(), third.job().getJobId());
+        assertEquals(1.2, third.job().getDurationSec());
+    }
+
+    @Test
     @DisplayName("TC-TTS-108 같은 글이 실패로만 남아 있으면 새 작업을 만든다")
     void failedIsNotReused() {
         when(sidecar.synthesize(any(), any())).thenThrow(new TtsSidecarClient.FailedException("generation_failed:silent_audio"));
@@ -232,7 +255,7 @@ class TtsJobServiceTest {
             done.incrementAndGet();
             return mp3();
         });
-        TtsJobService running = new TtsJobService(store, sidecar, clock, 200, 500, 7, true);
+        TtsJobService running = new TtsJobService(store, sidecar, clock, 200, 500, 7, 0.25, true);
         try {
             for (int i = 0; i < 4; i++) {
                 running.submit(VOICE, "문장 " + i, "u");

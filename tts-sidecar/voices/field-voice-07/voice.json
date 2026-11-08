@@ -4,6 +4,7 @@
   "language": "Korean",
   "seed": 20261031,
   "attempts": 3,
+  "silent_peak_db": -40,
   "tokens_per_char": 8,
   "min_new_tokens": 48,
   "max_new_tokens": 1600,
