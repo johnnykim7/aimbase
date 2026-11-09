@@ -68,7 +68,9 @@ public class ResponseCacheService {
      * PRD-129: Semantic Match — 의미적으로 유사한 질문의 캐시 응답 반환.
      */
     private Optional<String> getSemanticMatch(String userMessage) {
-        if (userMessage == null || userMessage.isBlank()) return Optional.empty();
+        if (userMessage == null || userMessage.isBlank() || !embeddingService.isAvailable()) {
+            return Optional.empty();
+        }
         try {
             float[] embedding = embeddingService.embed(userMessage);
             String embeddingStr = embeddingService.vectorToString(embedding);
@@ -111,16 +113,18 @@ public class ResponseCacheService {
         final ResponseCacheEntity entity = cacheRepository.save(found);
 
         // PRD-129: 임베딩 비동기 저장 (Semantic Match용)
-        Thread.ofVirtual().start(() -> {
-            try {
-                float[] embedding = embeddingService.embed(userMessage);
-                String embeddingStr = embeddingService.vectorToString(embedding);
-                cacheRepository.updateEmbedding(entity.getId(), embeddingStr);
-                log.debug("캐시 임베딩 저장: key={}", key.substring(0, 12));
-            } catch (Exception e) {
-                log.debug("캐시 임베딩 저장 실패 (무시): {}", e.getMessage());
-            }
-        });
+        if (embeddingService.isAvailable()) {
+            Thread.ofVirtual().start(() -> {
+                try {
+                    float[] embedding = embeddingService.embed(userMessage);
+                    String embeddingStr = embeddingService.vectorToString(embedding);
+                    cacheRepository.updateEmbedding(entity.getId(), embeddingStr);
+                    log.debug("캐시 임베딩 저장: key={}", key.substring(0, 12));
+                } catch (Exception e) {
+                    log.debug("캐시 임베딩 저장 실패 (무시): {}", e.getMessage());
+                }
+            });
+        }
 
         log.debug("캐시 저장: key={}, model={}", key.substring(0, 12), model);
     }
