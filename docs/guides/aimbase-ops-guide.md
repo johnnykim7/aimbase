@@ -680,7 +680,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 
 3PL 게이트웨이(bp-3plgw)가 품고 API, 화면 변경을 감지하면 Aimbase 워크플로우 `poomgo-change-repair`(테넌트 `bp_3plgw`)를 부릅니다. 전용 실행기 `aimbase-agent-3plgw`(실행기 이름 `cli-runner-bp-3plgw`, 일꾼 1, 포트 8304, MCP 8305)가 코드 레포를 받아 계약 판 제안 또는 수정 PR 을 만들고, 3PLGW 에 제안을 넣어 BO2 승인을 기다린 뒤 계약 활성화 또는 PR 머지로 끝냅니다. 웹훅 입력과 회신 모양은 `docs/협업/계약_CR-174_품고_변경_수리_요청_웹훅.md` 가 정본입니다.
 
-**다른 실행기와 다른 점**: GitHub 토큰이 이 컨테이너에만 있고, 계정 폴더(`claude-accounts-3plgw`)와 작업장(`workspace-3plgw`)을 bp_wms 실행기와 나눕니다. 운영 DB 자격은 주지 않습니다(PG 환경변수 없음, DB 도구 미노출). 도구 모드는 HYBRID 입니다. 같은 변경 지문에 수리는 한 번이고 Aimbase 는 실패한 run 을 스스로 다시 돌리지 않습니다.
+**다른 실행기와 다른 점**: GitHub 토큰이 이 컨테이너에만 있고, 작업장(`workspace-3plgw`)은 따로 두고 계정 폴더는 다른 실행기와 같은 `claude-accounts` 를 씁니다(토큰 갱신이 한 곳이어야 합니다). 운영 DB 자격은 주지 않습니다(PG 환경변수 없음, DB 도구 미노출). 도구 모드는 HYBRID 입니다. 같은 변경 지문에 수리는 한 번이고 Aimbase 는 실패한 run 을 스스로 다시 돌리지 않습니다.
 
 **비밀값**:
 
@@ -698,7 +698,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 2. `admin 3plgw`: CLI 허용 테넌트에 `bp_3plgw` 를 더한다
 3. `tenant 3plgw`: 테넌트 `bp_3plgw`, 실행기 전용 키, 소비앱 키(`secrets/bp-3plgw-api-key`, 3PLGW 에 전한다). env 에 빠진 비밀값을 경고로 찍는다
 4. 실행기 기동. 59 는 `./deploy.sh agents`(모든 실행기), chaws 는 `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-3plgw`. 기록에 `Agent registered successfully: name=cli-runner-bp-3plgw` 가 나오면 된 것
-5. 계정 로그인: `claude-accounts-3plgw/<계정>/` 에 work01, work02, work03 로그인 파일(§ 2-10 과 같은 방법, 폴더만 다르다)
+5. 계정 로그인: 공용 `claude-accounts/<계정>/` 에 이미 로그인된 work01, work02, work03 을 그대로 쓴다. 없으면 § 2-10 과 같은 방법으로 로그인한다
 6. `connections 3plgw`: 계정마다 CLI 연결 `cli-runner-bp-3plgw-<계정>`(HYBRID)과 묶음 `cli-runner-bp-3plgw-rr`
 7. `TPLGW_BASE_URL=<3PLGW 주소> bootstrap http 3plgw`: HTTP 연결 `bp-3plgw`(59 `http://59.8.160.12:8187`, 운영 `http://bp-3plgw:8187`)와 `github-bp-3plgw`
 8. `workflow 3plgw`: `scripts/poomgo-change-repair.workflow.json` 을 등록하거나 고친다(chaws 는 `build/` 에 같이 올라간다)

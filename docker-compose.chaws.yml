@@ -217,7 +217,8 @@ services:
       GIT_COMMITTER_EMAIL: "${REPAIR_GIT_EMAIL:-aimbase-repair@therecommerce.co.kr}"
     mem_limit: 1536m
     volumes:
-      - ./claude-accounts-3plgw:/home/appuser/.claude-accounts
+      # 계정 폴더는 aimbase-agent 와 같이 쓴다. 토큰 갱신이 한 곳이어야 하고, 격리는 env 로 나눈 토큰과 키로 충분하다(CR-174)
+      - ./claude-accounts:/home/appuser/.claude-accounts
       - ./workspace-3plgw:/data/workspace
     depends_on:
       api:
