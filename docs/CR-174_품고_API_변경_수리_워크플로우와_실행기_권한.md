@@ -34,7 +34,7 @@
 ## 3. 결정할 것
 
 1. 테넌트와 실행기 자리
-   1. 새 테넌트 `bp_3plgw` 와 전용 실행기 컨테이너 `aimbase-agent-3plgw`(권장). 계정 폴더와 작업장을 따로 둔다. CR-173 이 bp-wes CS 에 한 것과 같은 꼴이다
+   1. 새 테넌트 `bp_3plgw` 와 전용 실행기 컨테이너 `aimbase-agent-3plgw`(권장). 작업장은 따로 두고 계정 폴더는 공용 `claude-accounts` 를 같이 쓴다(2026-11-09 16:03 컨타 회신. 격리는 env 로 나눈 GitHub 토큰, 내부 키, DB 자격으로 충분하고 토큰 갱신이 한 곳이어야 한다). CR-173 이 bp-wes CS 에 한 것과 같은 꼴이되 계정 폴더만 나누지 않는다
    2. chaws 의 `bp_wms` 테넌트와 `aimbase-agent` 를 그대로 쓴다(잃는 것: 수리 CLI 가 bash 로 같은 계정 폴더의 지난 대화와 claude_ro 접속값을 읽을 수 있고, GitHub 토큰이 bp-wms 가 부르는 CLI 에도 보인다)
 2. GitHub 자격
    1. bp-3plgw 한 저장소에만 미치는 fine-grained 토큰(Contents 쓰기, Pull requests 쓰기, Metadata 읽기)을 사용자가 만들어 서버 env 파일에만 둔다(권장). 59 와 chaws 에 하나씩
@@ -156,7 +156,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | 이미지 | `backend/aimbase-agent/Dockerfile` 에 git, gh, openssh-client 를 더한다. 모든 실행기가 같은 이미지라 다 갖게 되지만 토큰은 이 실행기에만 있다 |
 | 컨테이너 | `aimbase-agent-3plgw`. 59 `docker-compose.prod.yml`, chaws `docker-compose.chaws.yml`. 실행기 이름 `cli-runner-bp-3plgw`, 테넌트 `bp_3plgw`, 일꾼 1, 포트 8304(실행기), 8305(MCP), `mem_limit 1536m`(chaws) |
 | 환경 | 실행기: `AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY` = `bp_3plgw` 실행기 전용 키(`BP_3PLGW_SERVER_MCP_API_KEY`), `GH_TOKEN`(GitHub 토큰), `TPLGW_INTERNAL_KEY`(3PLGW 내부 키. 계약과 표본 curl). PG 환경변수 없음. 59 는 `.env.runner-3plgw`, chaws 는 `agent-3plgw.env`. api: HTTP 연결 `value_env` 는 api 프로세스 env 를 읽으므로 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 59 `.env`, chaws `api.env` 에도 둔다 |
-| 볼륨 | `claude-accounts-3plgw`(work01, work02, work03 로그인 파일 복사. 다른 실행기 폴더의 지난 대화를 읽지 못하게 나눈다), `workspace-3plgw` |
+| 볼륨 | `claude-accounts`(다른 실행기와 같은 폴더의 work01, work02, work03. 토큰 갱신이 한 곳이어야 한다), `workspace-3plgw` |
 | 연결 | `cli-runner-bp-3plgw-work01`, `-work02`, `-work03`: `anthropic-cli`, `tool_mode HYBRID`, `config_dir` 그 계정, `agent_name cli-runner-bp-3plgw`, `exposed_tools ["get_current_time"]`, `model claude-sonnet-4-5`(설정). 묶음 `cli-runner-bp-3plgw-rr` ROUND_ROBIN |
 | HTTP 연결 | `bp-3plgw`: `baseUrl` 59 `http://59.8.160.12:8187`, 운영 `http://bp-3plgw:8187`(망 `aimbase-apps`. 3PLGW 컨테이너를 붙이는 일은 bp-infra CR-INFRA-008), `auth {type: API_KEY, in: header, name: X-Internal-Service-Key, value_env: TPLGW_INTERNAL_KEY}`, `readTimeoutMs 30000`. `github-bp-3plgw`: `baseUrl https://api.github.com`, `auth {type: BEARER, value_env: GITHUB_TOKEN_3PLGW}` |
 | 운영 DB | 자격을 주지 않는다. 실행기에 PG 환경변수가 없고, 연결에 DB 도구를 노출하지 않는다 |
@@ -235,6 +235,14 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | V76 | 적용 전에는 네 run 모두 HUMAN_INPUT 에서 외래키 위반으로 `failed`. 적용 뒤 위 결과 |
 
 59 와 3PLGW 를 잇는 확인은 컨타 신호 뒤에 한다.
+
+### 7.2 59 설치 (2026-11-09 16:05)
+
+- be 배포: api 재기동, `[ProdTenantMigration]` 10 테넌트 모두 v76(bp_3plgw 포함)
+- `bootstrap admin 3plgw`, `tenant 3plgw`: 관리자 `platform-admin@aimbase.local`(비밀번호 59 `secrets/admin-password`), 테넌트 `bp_3plgw` 201, 실행기 전용 키 `.env` `BP_3PLGW_SERVER_MCP_API_KEY`, 소비앱 키 `secrets/bp-3plgw-api-key`
+- agents 배포: 실행기 8개 재빌드(git 2.53, gh 2.103 포함), `aimbase-agent-3plgw` healthy
+- `connections 3plgw`(ACCOUNTS work01 work02 work03), `http 3plgw`(TPLGW_BASE_URL http://59.8.160.12:8187), `workflow 3plgw`, `smoke 3plgw`: 전부 201/200. smoke 에서 `GH_TOKEN 없음` 만 남음(사용자가 만드는 중)
+- 남은 것: GH_TOKEN 을 `.env.runner-3plgw`, `GITHUB_TOKEN_3PLGW` 를 `.env` 에 넣고 실행기 재기동(이때 계정 폴더를 공용으로 바꾼 compose 반영), 3PLGW 와 잇는 확인
 - 59: 3PLGW 창이 가짜 품고에서 변경을 내면 3PLGW 가 웹훅을 부르고, 제안 또는 PR 이 나오고, BO2 승인이 들어오면 활성화 요청 또는 머지가 나가고, 회신이 3PLGW 에 닿는 것까지 본다. 거절과 시한 초과 회신도 본다
 - 3PLcore `tools/testbook` 에 시험항목을 더한다(`/시험항목`)
 
@@ -246,3 +254,4 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | 2026-11-09 14:30 | 2절 실측, 설계 캐스케이드, 계약 문서 |
 | 2026-11-09 15:20 | 엔진 커밋 37b671e(회신, 시한 감시, run 변수, 시험 10건 통과). 실행기 이미지(git, gh), compose 둘, deploy.sh, 설치 스크립트 대상 3plgw, 워크플로우 정의 JSON. 3PLGW 계약 반영(경로, 머리글, 72시간, pr.title, last_good 404) |
 | 2026-11-09 15:45 | 로컬 확인 7.1 전부 통과. 승인 대기 외래키 결함을 찾아 V76 로 고침(4.3.4). 컨타에 GitHub 토큰 순서와 둘 자리 알림 |
+| 2026-11-09 16:05 | 설치 스크립트 59 배치 분기(커밋 0e827c8). 59 설치 7.2 토큰 앞 단계까지 끝. 계정 폴더는 공용으로(컨타 회신 16:03) |
