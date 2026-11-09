@@ -293,6 +293,7 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 원인 | 수리 단계에 `response_schema` 가 없어 CLI 응답이 글로만 남았고, 있었더라도 진행 설명의 중괄호 때문에 첫 `{`~마지막 `}` 추출이 JSON 이 아니었다(4.3.5) |
 | 고침 | 워크플로우 정의에 `response_schema`, 출력 지시 문구 보강. 엔진 추출기는 마지막 JSON 객체. 단위 시험 11건 통과(새 3건 포함) |
 | 59 반영 | 00:11 api 재생성(healthy), 00:12 워크플로우 재등록 200. 조회로 repair config 에 response_schema(필수 7칸)와 출력 지시 확인 |
+| 재시도 run 10793e47(건 3, 00:13) | `repair` completed, `structured_data` 7칸(result_kind CONTRACT, 요약 "orderSheet.orderCode 를 orderSheet.orderNo 로"). `submit` 201(00:16, 33ms). run `pending_approval`(BO2 승인 단계). 승인은 사용자 합동 시험, 시한 04:16. 반영(activate)과 종료 회신은 감시 스크립트(`build/cr174_watch_run.sh`)로 지켜본다 |
 
 ## 8. 진행 기록
 
@@ -310,3 +311,4 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-09 23:50 | 토큰 반영 7.4: be, agent-3plgw 배포, 공용 계정 폴더 전환, gh 로그인, 실행기 AGENT_CALL 시험 OK(4.6초). 컨타에 알림, 3PLGW 재시도(건 3) 대기 |
 | 2026-11-10 00:20 | 건 3(run be3907d1) 실패 원인: 수리 단계 response_schema 없음 + 진행 설명 중괄호로 첫 { 추출 실패(7.5). 컨타 승인 ①(00:04)로 워크플로우 정의에 response_schema, 엔진 추출기는 마지막 JSON 객체(4.3.5). 단위 시험 11건 통과. 59 api 재배포와 워크플로우 재등록으로 간다 |
 | 2026-11-10 00:14 | 59 api 재배포(deploy.sh be), 워크플로우 재등록 200, 조회로 response_schema 확인(7.5). 컨타에 알림, 3PLGW 재시도(건 3) 대기 |
+| 2026-11-10 00:24 | 3PLGW 재시도 run 10793e47: 수리 단계 structured_data 생성, 제안 전달 201, 승인 대기 진입(7.5). 컨타 승인 ①(00:21): 승인 뒤 반영과 회신 결과 알림 후 완료 보고, 운영 반영 전 완처리 없음 |
