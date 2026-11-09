@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.23.1** | 2026-11-09 | Aimbase v8.18.0 기준
+> **v3.24.0** | 2026-11-09 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -473,7 +473,7 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 | redis | 256MB(`maxmemory 192mb`, TTL 있는 키부터 비움) | compose 망 안에서만 |
 | api | 2GB | 서버 `127.0.0.1:8280`(맥에서 SSH 터널), 외부 망 `aimbase-apps` 의 `http://aimbase-api:8080` |
 | aimbase-agent(실행기 `cli-runner-bp-wms`, CLI 동시 3개) | 1.5GB | compose 망 안에서만 |
-| aimbase-agent-wes-cs(실행기 `cli-runner-bp-wes-cs`, 테넌트 `bp_wes`, CLI 동시 2개) | 1.5GB | compose 망 안에서만. 운영 3PL DB 는 망 `bp-infra_default` 로 `wes_cs_ai` 계정만 읽는다(CR-173) |
+| aimbase-agent-wes-cs(실행기 `cli-runner-bp-wes-cs`, 테넌트 `bp_wes`, CLI 프로세스 실행기 전체 2개) | 1.5GB | compose 망 안에서만. 운영 3PL DB 는 망 `bp-infra_default` 로 `wes_cs_ai` 계정만 읽는다(CR-173) |
 
 **관리 API 부르기**: `ssh -L 8280:127.0.0.1:8280 chaws` 를 열어 두고 맥에서 `http://localhost:8280/api/v1` 을 부릅니다. 보안 그룹은 열지 않고 관리자 화면도 두지 않습니다.
 
@@ -535,6 +535,17 @@ bp-wes 의 CS 초안과 CS 상세 AI 대화(위젯)는 실행기 `aimbase-agent-
 ```bash
 ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent-wes-cs claude'
 ```
+
+**프로세스 상한** (CR-173 14절): CS 실행기는 Claude 프로세스를 실행기 전체에서 2개까지만 띄웁니다(`AIMBASE_RUNNER_MAX_PROCESSES: "2"`, compose 에 있음). 하나가 170MB 에서 300MB 라 java 와 합쳐 메모리 한도 1.5GB 안에 둡니다. 그보다 많은 요청이 한꺼번에 오면 온 순서대로 줄을 서고, 기다리는 동안 답을 마치고 쉬고 있는 프로세스를 오래 쉰 것부터 닫아 자리를 냅니다. 300초(`AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS`, api 가 실행기를 기다리는 시간과 같다) 안에 자리가 나지 않으면 그 요청은 실패로 돌아갑니다. `AIMBASE_RUNNER_MAX_WORKERS` 는 요청 하나 안의 상한이라 실행기 전체 수를 막지 못합니다. 다른 실행기는 상한을 두지 않습니다(값 0).
+
+| 순번 | 실행기 기록 | 뜻 |
+|---|---|---|
+| 1 | `CR-173: process limit 2 per runner, queue timeout PT5M` | 기동 때 상한이 걸렸다 |
+| 2 | `waiting for a process slot (max=2, held=2, queued=N)` | 요청이 줄을 섰다 |
+| 3 | `idle worker closed to free a process slot` | 쉬고 있던 프로세스를 닫아 자리를 냈다 |
+| 4 | `process slot wait timeout` | 300초 안에 자리가 나지 않아 실패했다. 몰림이 잦으면 상한이 아니라 계정이나 실행기를 늘린다 |
+
+59 의 같은 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-cs` 를 씁니다. api 와 다른 실행기는 다시 만들지 않습니다.
 
 **위젯 공개 주소**: 운영 BO2 CS 상세의 AI 대화는 브라우저가 `https://ai.banpoom.co.kr` 로 직접 붙습니다(`aimbase.banpoom.co.kr` 은 개발기 관리 화면 주소). 서버 nginx 사이트 설정은 `/etc/nginx/sites-available/ai.banpoom.co.kr.conf`, 인증서는 Let's Encrypt(webroot) 이고 기존 certbot 타이머가 갱신합니다. 위젯이 쓰는 두 경로만 통과시키고 나머지는 모두 막습니다.
 
@@ -1867,6 +1878,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.24.0 | 2026-11-09 | **CR-173 CS 실행기 프로세스 상한** (§ 2-10). `AIMBASE_RUNNER_MAX_PROCESSES`, `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS`, 줄서기와 자리 내기 기록, 59 의 `./deploy.sh agent-wes-cs` |
 | v3.23.1 | 2026-11-09 | **CR-173 위젯 공개 주소 정정** (§ 2-10). 운영은 `ai.banpoom.co.kr`, 서버 nginx 설정 파일과 인증서 갱신 |
 | v3.23.0 | 2026-11-09 | **CR-173 운영 chaws bp-wes CS 실행기와 위젯 공개 주소** (§ 2-10). 실행기 `aimbase-agent-wes-cs`, `./deploy.sh chaws-agent-wes-cs`, `chaws-bootstrap`, 설치 스크립트 대상 `wes-cs` 와 단계 `widget`, 위젯 통과 경로와 nginx 설정 |
 | v3.22.3 | 2026-11-08 | **CR-172 위젯 파일 교차 출처 허용** (§ 2-5). `widget.allowed-origins` 가 위젯 파일 읽기에도 적용된다고 적는다 |
