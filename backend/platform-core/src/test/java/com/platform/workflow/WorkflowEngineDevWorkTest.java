@@ -76,7 +76,8 @@ class WorkflowEngineDevWorkTest {
                 provider(mock(com.platform.llm.ConnectionAdapterFactory.class)),
                 provider(new WorkflowCancellationRegistry()),
                 null,
-                provider(new DevWorkItemRunBinding(devWorkService, runRepository)));
+                provider(new DevWorkItemRunBinding(devWorkService, runRepository)),
+                null);
     }
 
     private WorkflowEntity emptyWorkflow(String id) {

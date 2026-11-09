@@ -90,7 +90,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 
 - 검사: run 을 만들기 전에 `connection_id` 가 있는 HTTP 연결인지, `path` 가 `/` 로 시작하는지 본다. 틀리면 400 `callback_invalid:<칸>` 이고 run 을 만들지 않는다(`_dev_work_item` 과 같은 자리)
 - 보내는 때: `RunCompleted`(completed, failed, cancelled) 를 `@EventListener` 로 받아 보낸다. 승인 거절, 시한 초과, 단계 실패, 중지, 단계 없는 완료가 모두 여기로 온다
-- 본문: `run_id`, `workflow_id`, `status`, `error`(run 의 `error` 그대로, 없으면 null), `result`(`result_step` 단계의 `output`, 없으면 null), `completed_at`, `duration_ms`
+- 본문: `run_id`, `workflow_id`, `status`, `error`(run 의 `error` 그대로, 없으면 null), `result`(`result_step` 단계의 `structured_data`, 없으면 `output`, 칸이 없으면 null), `completed_at`, `duration_ms`
 - 머리글: 연결 `auth` 가 넣는다(`value_env`). 기록은 `http_request` 와 같이 가린다(BIZ-132)
 - 재시도: 실패하면 `aimbase.workflow.callback.retry-max-attempts`(기본 3) 번까지 `retry-delay-ms`(기본 5000) 간격으로 다시 보낸다. 끝내 실패하면 run 이벤트(CR-090)에 `CALLBACK_FAILED` 를 남기고 경고 로그를 쓴다. run 상태는 바꾸지 않는다
 - 구현 자리: `com.platform.workflow.callback.RunCompletionCallback`(`@Component`, `@EventListener`). 엔진은 `_dev_work_item` 처럼 `ObjectProvider` 로 받아 `validate` 만 부른다
@@ -117,7 +117,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | `approval` | HUMAN_INPUT | `message: "품고 변경 수리 제안 {{input.change_id}}"`, `reason: {{input.summary}}`, `timeoutMs`(기본 14400000, 4시간). `next_step: apply` |
 | `apply` | ROUTER | `routes: [{when: "{{steps.repair.output.result_kind}} == CONTRACT", to: activate}, {when: "{{steps.repair.output.result_kind}} == CODE", to: merge}]`. 둘 다 아니면 실패 |
 | `activate` | TOOL_CALL `http_request` | 연결 `bp-3plgw`, 3PLGW 「계약 활성화」 경로(3PLGW 계약). 본문: `run_id`, `change_id`, `contract_proposal`. 끝 |
-| `merge` | TOOL_CALL `http_request` | 연결 `github-bp-3plgw`, `PUT /repos/therecommerce-develop/bp-3plgw/pulls/{{steps.repair.output.pr.number}}/merge`, 본문 `{merge_method: "squash"}`. 끝 |
+| `merge` | TOOL_CALL `http_request` | 연결 `github-bp-3plgw`, `PUT /repos/therecommerce-develop/3plgw/pulls/{{steps.repair.output.pr.number}}/merge`, 본문 `{merge_method: "squash"}`. 끝 |
 
 #### 4.4.1 repair 단계가 하는 일
 
@@ -147,7 +147,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | 항목 | 값 |
 |---|---|
 | 이미지 | `backend/aimbase-agent/Dockerfile` 에 git, gh, openssh-client 를 더한다. 모든 실행기가 같은 이미지라 다 갖게 되지만 토큰은 이 실행기에만 있다 |
-| 컨테이너 | `aimbase-agent-3plgw`. 59 `docker-compose.prod.yml`, chaws `docker-compose.chaws.yml`. 실행기 이름 `cli-runner-bp-3plgw`, 테넌트 `bp_3plgw`, 일꾼 1, 포트 8302(실행기), 8303(MCP), `mem_limit 1536m`(chaws) |
+| 컨테이너 | `aimbase-agent-3plgw`. 59 `docker-compose.prod.yml`, chaws `docker-compose.chaws.yml`. 실행기 이름 `cli-runner-bp-3plgw`, 테넌트 `bp_3plgw`, 일꾼 1, 포트 8304(실행기), 8305(MCP), `mem_limit 1536m`(chaws) |
 | 환경 | `AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY` = `bp_3plgw` 실행기 전용 키(`BP_3PLGW_SERVER_MCP_API_KEY`), `GH_TOKEN` = GitHub 토큰(`GITHUB_TOKEN_3PLGW`). PG 환경변수 없음. 59 는 `.env`, chaws 는 `agent-3plgw.env` 에만 둔다 |
 | 볼륨 | `claude-accounts-3plgw`(work01, work02, work03 로그인 파일 복사. 다른 실행기 폴더의 지난 대화를 읽지 못하게 나눈다), `workspace-3plgw` |
 | 연결 | `cli-runner-bp-3plgw-work01`, `-work02`, `-work03`: `anthropic-cli`, `tool_mode HYBRID`, `config_dir` 그 계정, `agent_name cli-runner-bp-3plgw`, `exposed_tools ["get_current_time"]`, `model claude-sonnet-4-5`(설정). 묶음 `cli-runner-bp-3plgw-rr` ROUND_ROBIN |

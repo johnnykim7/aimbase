@@ -30,7 +30,9 @@ public class WorkflowRunEventEntity {
         LLM_REQUEST,
         LLM_RESPONSE,
         STEP_END,
-        STEP_FAILED
+        STEP_FAILED,
+        // CR-174: 실행 종료 회신(_callback)을 재시도까지 다 써도 보내지 못함. run 상태는 바꾸지 않는다
+        CALLBACK_FAILED
     }
 
     @Id

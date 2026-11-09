@@ -261,6 +261,14 @@ aimbase:
     attachment:
       # 사진 긴 변 상한(px). 모델이 이 크기로 줄여 읽으므로 더 큰 사진은 줄여서 보낸다. 0 이하면 줄이지 않는다
       image-max-edge: ${AIMBASE_WORKFLOW_IMAGE_MAX_EDGE:1568}
+    # CR-174 실행 종료 회신 _callback. 2xx 가 아니면 이 횟수까지 이 간격으로 다시 보낸다(BIZ-143)
+    callback:
+      retry-max-attempts: ${AIMBASE_WORKFLOW_CALLBACK_RETRY_MAX_ATTEMPTS:3}
+      retry-delay-ms: ${AIMBASE_WORKFLOW_CALLBACK_RETRY_DELAY_MS:5000}
+    # CR-174 승인 시한 감시기 주기(BIZ-144). 시한 자체는 워크플로우 정의의 HUMAN_INPUT timeoutMs
+    approval-timeout:
+      sweep-ms: ${AIMBASE_WORKFLOW_APPROVAL_TIMEOUT_SWEEP_MS:60000}
+      initial-delay-ms: ${AIMBASE_WORKFLOW_APPROVAL_TIMEOUT_INITIAL_DELAY_MS:30000}
 
 logging:
   level:

@@ -56,7 +56,8 @@ class WorkflowEngineStepSkillsTest {
                 mock(PendingApprovalRepository.class), new ObjectMapper(), List.of(), mock(PlatformMetrics.class),
                 mock(WorkflowEventPublisher.class), provider(recorder), null, null, null, null, null,
                 provider(stepSkills),
-                null); // CR-164: devWorkRunBindingProvider
+                null,  // CR-164: devWorkRunBindingProvider
+                null); // CR-174: runCallbackProvider
     }
 
     @Test

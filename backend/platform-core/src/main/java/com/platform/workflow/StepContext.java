@@ -167,6 +167,9 @@ public record StepContext(
         String namespace = tokens.get(0);
         if (namespace.startsWith("[")) return null;
         List<String> pathTokens = tokens.subList(1, tokens.size());
+        if ("run".equals(namespace)) {
+            return runValue(pathTokens);
+        }
         if ("input".equals(namespace)) {
             Object val = inputData != null ? traverse(inputData, pathTokens) : null;
             if (val == null && inputData != null && inputData.get("input") instanceof Map nestedInput) {
@@ -182,6 +185,20 @@ public record StepContext(
     }
 
     // ─── 내부 변수 참조 해석 ──────────────────────────────────────────────
+
+    /**
+     * CR-174 PRD-365: {{run.id}}, {{run.workflow_id}}, {{run.session_id}}.
+     * 바깥 앱이 run id 로 승인과 조회를 하도록 단계가 run id 를 실어 보낼 수 있다. 모르는 키는 null.
+     */
+    private Object runValue(List<String> pathTokens) {
+        if (pathTokens.size() != 1) return null;
+        return switch (pathTokens.get(0)) {
+            case "id" -> workflowRunId;
+            case "workflow_id" -> workflowId;
+            case "session_id" -> sessionId;
+            default -> null;
+        };
+    }
 
     private String resolveRef(String ref) {
         // CR-085 P1: 첫 경로 토큰을 namespace 로, 나머지를 경로로 분리.
@@ -200,6 +217,11 @@ public record StepContext(
         List<String> pathTokens = tokens.subList(1, tokens.size());
         // 로그 메시지용 원본 key 문자열 (기존 로그 포맷 보존)
         String key = ref.substring(namespace.length()).replaceFirst("^\\.", "");
+
+        if ("run".equals(namespace)) {
+            Object val = runValue(pathTokens);
+            return val != null ? val.toString() : "";
+        }
 
         if ("input".equals(namespace)) {
             // CR-085 P1: key 를 중첩 경로(a.b[0].c)로 해석. 1뎁스 키는 첫 토큰만이라 기존과 동일 결과.
