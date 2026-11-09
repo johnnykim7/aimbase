@@ -139,7 +139,7 @@ deploy_agent() {
 }
 
 # 운영 러너 전체 — docker-compose.prod.yml 의 aimbase-agent* 서비스 목록과 일치해야 한다.
-AGENT_SERVICES="aimbase-agent aimbase-agent-axopm aimbase-agent-workmap aimbase-agent-wes aimbase-agent-wes-cs aimbase-agent-lexflow aimbase-agent-bp-office"
+AGENT_SERVICES="aimbase-agent aimbase-agent-axopm aimbase-agent-workmap aimbase-agent-wes aimbase-agent-wes-cs aimbase-agent-lexflow aimbase-agent-bp-office aimbase-agent-3plgw"
 
 deploy_agents() {
   echo "━━━ Agent(Runner) 빌드 ━━━"
@@ -362,6 +362,7 @@ deploy_chaws_be() {
   chaws_checkout
   chaws_build_send platform-core
   chaws_send "$CHAWS_WORKTREE/scripts/chaws-bootstrap.sh" "$CHAWS_SERVER:$CHAWS_REMOTE/build/chaws-bootstrap.sh"
+  chaws_send "$CHAWS_WORKTREE/scripts/poomgo-change-repair.workflow.json" "$CHAWS_SERVER:$CHAWS_REMOTE/build/poomgo-change-repair.workflow.json"
   chaws_sync_compose
   echo "[chaws-be] DB, Redis"
   chaws_run "cd $CHAWS_REMOTE && docker compose up -d db redis"
@@ -374,20 +375,33 @@ deploy_chaws_be() {
   chaws_record api
 }
 
-deploy_chaws_agent() {
+# $1 compose 서비스, $2 env 파일, $3 테넌트, $4 운용 가이드 절. 실행기마다 env 파일이 다르고 이미지는 같다.
+deploy_chaws_runner() {
+  local service=$1 envfile=$2 tenant=$3 guide=$4
   chaws_require_env
-  if ! chaws_run "grep -Eq '^AIMBASE_RUNNER_SERVER_MCP_API_KEY=.+' $CHAWS_REMOTE/agent.env && grep -Eq '^AGENT_API_KEY=.+' $CHAWS_REMOTE/agent.env"; then
-    echo "chaws $CHAWS_REMOTE/agent.env 에 bp_wms 실행기 전용 키가 없습니다. 운용 가이드 § 2-10 대로 발급해 넣은 뒤 다시 실행하세요."
+  if ! chaws_run "[ -f $CHAWS_REMOTE/$envfile ] && grep -Eq '^AIMBASE_RUNNER_SERVER_MCP_API_KEY=.+' $CHAWS_REMOTE/$envfile && grep -Eq '^AGENT_API_KEY=.+' $CHAWS_REMOTE/$envfile"; then
+    echo "chaws $CHAWS_REMOTE/$envfile 에 $tenant 실행기 전용 키가 없습니다. 운용 가이드 $guide 대로 발급해 넣은 뒤 다시 실행하세요."
     exit 1
   fi
   chaws_checkout
   chaws_build_send aimbase-agent
   chaws_sync_compose
-  chaws_keep_image aimbase-aimbase-agent aimbase-agent
-  echo "[chaws-agent] 이미지 빌드와 실행기 재시작"
-  chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build aimbase-agent && docker compose up -d --no-deps --force-recreate aimbase-agent"
-  chaws_wait_healthy aimbase-agent
-  chaws_record aimbase-agent
+  chaws_keep_image aimbase-aimbase-agent "$service"
+  echo "[$service] 이미지 빌드와 실행기 재시작"
+  chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build $service && docker compose up -d --no-deps --force-recreate $service"
+  chaws_wait_healthy "$service"
+  chaws_record "$service"
+}
+
+deploy_chaws_agent() { deploy_chaws_runner aimbase-agent agent.env bp_wms "§ 2-10"; }
+
+# CR-174 수리 실행기. agent-3plgw.env 에는 실행기 호출 키, bp_3plgw 실행기 전용 키, GH_TOKEN 이 있어야 한다.
+deploy_chaws_agent_3plgw() {
+  if ! chaws_run "grep -Eq '^GH_TOKEN=.+' $CHAWS_REMOTE/agent-3plgw.env"; then
+    echo "chaws $CHAWS_REMOTE/agent-3plgw.env 에 GH_TOKEN 이 없습니다. 운용 가이드 § 2-13 대로 넣은 뒤 다시 실행하세요."
+    exit 1
+  fi
+  deploy_chaws_runner aimbase-agent-3plgw agent-3plgw.env bp_3plgw "§ 2-13"
 }
 
 # 실행기를 처음 세우는 단계는 서버의 설치 스크립트로 한다. 그 스크립트만 올려 api 를 다시 만들지 않는다.
@@ -448,6 +462,7 @@ case "$TARGET" in
   chaws-be)    deploy_chaws_be; echo "배포 완료: 운영 chaws $CHAWS_SERVER db, redis, api"; exit 0 ;;
   chaws-agent) deploy_chaws_agent; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent"; exit 0 ;;
   chaws-agent-wes-cs) deploy_chaws_agent_wes_cs; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent-wes-cs"; exit 0 ;;
+  chaws-agent-3plgw) deploy_chaws_agent_3plgw; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent-3plgw"; exit 0 ;;
   chaws-bootstrap) deploy_chaws_bootstrap; exit 0 ;;
   chaws-tts)  deploy_chaws_tts; echo "배포 완료: 운영 chaws $CHAWS_SERVER tts-sidecar"; exit 0 ;;
   chaws)       deploy_chaws_be; deploy_chaws_agent; echo "배포 완료: 운영 chaws $CHAWS_SERVER db, redis, api, aimbase-agent"; exit 0 ;;
@@ -471,7 +486,7 @@ case "$TARGET" in
   sandbox) deploy_sandbox ;;
   tts)    deploy_tts ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-agent-wes-cs|chaws-bootstrap|chaws-tts|chaws]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-agent-wes-cs|chaws-agent-3plgw|chaws-bootstrap|chaws-tts|chaws]"; exit 1 ;;
 esac
 
 echo ""
