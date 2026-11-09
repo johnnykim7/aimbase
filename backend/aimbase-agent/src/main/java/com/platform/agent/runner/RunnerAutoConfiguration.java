@@ -64,6 +64,8 @@ public class RunnerAutoConfiguration {
                 Duration.ofSeconds(props.getReaperIdleThresholdSeconds()));
         // CR-126: AIMBASE 봉인 대상 override (미설정이면 null → 빌더 기본 상수)
         pool.setSealedNativeTools(props.resolveSealedNativeTools());
+        // CR-173: 실행기 전체 Claude 프로세스 상한과 줄 서기
+        pool.setProcessLimit(props.getMaxProcesses(), Duration.ofSeconds(props.getProcessQueueTimeoutSeconds()));
         return pool;
     }
 

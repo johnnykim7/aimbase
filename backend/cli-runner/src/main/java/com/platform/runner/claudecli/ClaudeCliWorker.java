@@ -140,6 +140,13 @@ public class ClaudeCliWorker implements AutoCloseable {
     private volatile String sessionId;       // CLI `system/init` 이벤트에서 추출
     private volatile boolean firstTurnSent;
 
+    // CR-173: 실행기 전체 상한에 걸리면 풀이 쉬고 있는 워커를 닫아 자리를 낸다. 요청이 쥐고 있는 워커는 닫지 않는다.
+    private final java.util.concurrent.atomic.AtomicInteger leases = new java.util.concurrent.atomic.AtomicInteger();
+    // CR-173: 첫 턴(대화 전체 주입) 여부를 워커에 묶는다. 유휴 회수나 자리 내기로 새 워커가 되면 다시 첫 턴이다.
+    private final java.util.concurrent.atomic.AtomicBoolean firstTurnClaimed = new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.atomic.AtomicReference<Runnable> closeListener =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
     // CR-121: 좀비 reaper 가 idle 워커를 판별하기 위한 활동 타임스탬프.
     private final long createdAtMs = System.currentTimeMillis();
     private volatile long lastActivityMs = System.currentTimeMillis();
@@ -357,8 +364,39 @@ public class ClaudeCliWorker implements AutoCloseable {
         return process != null ? process.pid() : -1L;
     }
 
+    public void lease() {
+        leases.incrementAndGet();
+    }
+
+    public void unlease() {
+        leases.updateAndGet(n -> n > 0 ? n - 1 : 0);
+    }
+
+    public boolean isLeased() {
+        return leases.get() > 0;
+    }
+
+    /** 이 워커에서 처음 부르면 true. 같은 run 의 동시 호출 가운데 하나만 대화 전체를 넣는다. */
+    public boolean claimFirstTurn() {
+        return firstTurnClaimed.compareAndSet(false, true);
+    }
+
+    /** close 가 끝난 뒤 한 번 부른다. 풀이 실행기 전체 자리를 돌려받는 데 쓴다. */
+    public void setCloseListener(Runnable listener) {
+        closeListener.set(listener);
+    }
+
     @Override
     public void close() {
+        try {
+            closeProcess();
+        } finally {
+            Runnable listener = closeListener.getAndSet(null);
+            if (listener != null) listener.run();
+        }
+    }
+
+    private void closeProcess() {
         if (process == null) return;
         try {
             if (stdin != null) {

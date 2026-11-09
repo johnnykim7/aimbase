@@ -46,6 +46,8 @@ class RunnerServiceTest {
                 nullable(String.class), nullable(ClaudeCliCommandBuilder.ToolMode.class),
                 ArgumentMatchers.<List<String>>any(), nullable(String.class), anyBoolean(),
                 ArgumentMatchers.<List<SkillRef>>any());
+        // 풀이 돌려주는 워커는 새로 띄운 것으로 본다(첫 턴).
+        when(worker.claimFirstTurn()).thenReturn(true);
     }
 
     private static LLMRequest request(String runId) {
@@ -89,7 +91,7 @@ class RunnerServiceTest {
                 .isInstanceOf(RuntimeException.class);
         verify(pool, times(1)).shutdownForRun("run-1");
 
-        // 2차: firstTurnDone 마커가 회수되어 다시 turnFirst(첫 턴) 경로로 진입 → 정상 응답
+        // 2차: 정리 뒤 새로 뜬 워커라 다시 turnFirst(첫 턴) 경로로 진입해 정상 응답
         LLMResponse resp = service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
         verify(worker, times(2)).turnFirst(any());
         assertThatNoException(resp);
@@ -126,6 +128,42 @@ class RunnerServiceTest {
         verify(pool).getOrCreateMain(eq("run-1"), nullable(String.class), nullable(String.class),
                 nullable(String.class), eq(ClaudeCliCommandBuilder.ToolMode.NATIVE),
                 ArgumentMatchers.<List<String>>any(), nullable(String.class), anyBoolean(), eq(pins));
+    }
+
+    @Test
+    @DisplayName("CR-173: 턴이 끝나면 성공이든 실패든 워커 lease 를 푼다(실행기 전체 상한의 자리 내기 대상이 된다)")
+    void turnReleasesLeaseOnSuccessAndFailure() {
+        when(worker.turnFirst(any())).thenReturn(okResponse())
+                .thenThrow(new RuntimeException("turn timeout after 300s"));
+
+        service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
+        assertThatThrownBy(() -> service.chat(request("run-2"), ClaudeCliCommandBuilder.ToolMode.AIMBASE,
+                null, null)).isInstanceOf(RuntimeException.class);
+
+        verify(worker, times(2)).unlease();
+    }
+
+    @Test
+    @DisplayName("CR-173: 같은 run 이라도 워커가 새로 떴으면(유휴 회수, 자리 내기) 대화 전체를 첫 턴으로 다시 넣는다")
+    void freshWorkerForKnownRunGetsWholeConversation() {
+        when(worker.claimFirstTurn()).thenReturn(true, false, true);
+        when(worker.turnFirst(any())).thenReturn(okResponse());
+        when(worker.turn(any())).thenReturn(okResponse());
+
+        service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
+        service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
+        service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
+
+        verify(worker, times(2)).turnFirst(any());
+        verify(worker, times(1)).turn(any());
+    }
+
+    private static LLMResponse okResponse() {
+        return new LLMResponse(
+                "run-1", "claude-sonnet-4-5",
+                List.of(new com.platform.llm.model.ContentBlock.Text("ok")),
+                List.of(), new com.platform.llm.model.TokenUsage(0, 0),
+                LLMResponse.FinishReason.END, 1L, 0.0);
     }
 
     private static void assertThatNoException(LLMResponse resp) {

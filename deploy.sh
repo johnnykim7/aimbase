@@ -13,6 +13,7 @@
 #         ./deploy.sh rag     (RAG 소스 동기화 + 이미지 재빌드 + 재기동)
 #         ./deploy.sh agent   (러너 1개 — aimbase-agent 만)
 #         ./deploy.sh agents  (러너 전체, 아래 AGENT_SERVICES)
+#         ./deploy.sh agent-wes-cs (bp-wes CS 실행기만. api 와 다른 러너는 다시 올리지 않는다)
 #         ./deploy.sh mcp     (BE + 러너 전체 — MCP 프로토콜 변경 시 필수)
 #         ./deploy.sh sandbox (스킬 실행 컨테이너 소스 동기화 + 이미지 재빌드 + 재기동)
 #         ./deploy.sh tts     (같은 목소리 음성 생성기 소스 동기화 + 이미지 재빌드 + 재기동)
@@ -161,6 +162,24 @@ deploy_agents() {
   echo "━━━ 러너 전체 재빌드/재기동: $AGENT_SERVICES ━━━"
   ssh_run "cd $REMOTE && docker compose build $AGENT_SERVICES && docker compose up -d --force-recreate $AGENT_SERVICES"
   echo "✅ Agent 전체 완료 → $AGENT_SERVICES"
+}
+
+# CR-173 bp-wes CS 실행기만 새 jar 로 다시 올린다. api 와 다른 러너는 건드리지 않는다.
+# --no-deps 를 빼면 depends_on 의 api 까지 다시 만들 수 있다. 다른 러너에도 같은 jar 를 실으려면 agents 로 올린다.
+deploy_agent_wes_cs() {
+  echo "[agent-wes-cs] 실행기 jar 빌드"
+  cd backend
+  ./gradlew aimbase-agent:bootJar
+  cd ..
+
+  echo "[agent-wes-cs] jar, Dockerfile, compose 전송"
+  ssh_run "mkdir -p $REMOTE/backend/aimbase-agent/build/libs"
+  AGENT_JAR=$(find backend/aimbase-agent/build/libs -name '*.jar' ! -name '*plain*')
+  scp_send "$AGENT_JAR" "$SERVER:$REMOTE/backend/aimbase-agent/build/libs/$(basename "$AGENT_JAR")"
+  scp_send backend/aimbase-agent/Dockerfile "$SERVER:$REMOTE/backend/aimbase-agent/Dockerfile"
+  scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
+  ssh_run "cd $REMOTE && docker compose build aimbase-agent-wes-cs && docker compose up -d --no-deps --force-recreate aimbase-agent-wes-cs"
+  echo "[agent-wes-cs] 완료"
 }
 
 # CR-124: MCP transport 변경은 BE 와 러너가 함께 올라가야 한다.
@@ -466,12 +485,13 @@ case "$TARGET" in
   be)    deploy_be ;;
   rag)   deploy_rag ;;
   agent)  deploy_agent ;;
+  agent-wes-cs) deploy_agent_wes_cs ;;
   agents) deploy_agents ;;
   mcp)    deploy_mcp ;;
   sandbox) deploy_sandbox ;;
   tts)    deploy_tts ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agents|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-agent-wes-cs|chaws-bootstrap|chaws-tts|chaws]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agent-wes-cs|agents|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-agent-wes-cs|chaws-bootstrap|chaws-tts|chaws]"; exit 1 ;;
 esac
 
 echo ""
