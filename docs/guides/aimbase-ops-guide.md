@@ -693,7 +693,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 
 **GitHub 토큰 만들기** (사용자가 한 번): github.com 의 Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token. Resource owner `therecommerce-develop`, Repository access 는 Only select repositories 로 `3plgw` 하나, Repository permissions 는 Contents 「Read and write」, Pull requests 「Read and write」, Metadata 「Read-only」(자동). 만료는 조직 정책대로 두고 만료 전에 같은 자리에 새 값을 넣는다. 한 값을 실행기 env `GH_TOKEN` 과 api env `GITHUB_TOKEN_3PLGW` 에 같이 넣는다(실행기는 clone, push, PR 만들기에, api 는 PR 머지에 쓴다). 조직이 fine-grained 토큰 승인을 요구하면 조직 관리자 승인 뒤에 쓸 수 있다.
 
-**세우기** (`bootstrap <단계> 3plgw`. chaws 는 § 2-10 과 같이 `build/chaws-bootstrap.sh`, 59 는 작업 폴더의 `scripts/chaws-bootstrap.sh`):
+**세우기** (`bootstrap <단계> 3plgw` 는 서버 폴더에서 `bash build/chaws-bootstrap.sh <단계> 3plgw`. chaws 는 § 2-10 과 같고, 59 는 `./deploy.sh be` 가 `build/` 에 같이 올린다. 스크립트는 `api.env` 가 있으면 chaws 배치, 없으면 59 배치(`.env`, `.env.runner-3plgw`, 호스트 PostgreSQL)로 본다):
 1. 위 비밀값을 env 파일에 넣는다. api 가 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 새로 읽어야 하면 api 를 다시 올린다
 2. `admin 3plgw`: CLI 허용 테넌트에 `bp_3plgw` 를 더한다
 3. `tenant 3plgw`: 테넌트 `bp_3plgw`, 실행기 전용 키, 소비앱 키(`secrets/bp-3plgw-api-key`, 3PLGW 에 전한다). env 에 빠진 비밀값을 경고로 찍는다
