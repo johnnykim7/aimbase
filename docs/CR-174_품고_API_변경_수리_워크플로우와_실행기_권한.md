@@ -242,7 +242,8 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 - `bootstrap admin 3plgw`, `tenant 3plgw`: 관리자 `platform-admin@aimbase.local`(비밀번호 59 `secrets/admin-password`), 테넌트 `bp_3plgw` 201, 실행기 전용 키 `.env` `BP_3PLGW_SERVER_MCP_API_KEY`, 소비앱 키 `secrets/bp-3plgw-api-key`
 - agents 배포: 실행기 8개 재빌드(git 2.53, gh 2.103 포함), `aimbase-agent-3plgw` healthy
 - `connections 3plgw`(ACCOUNTS work01 work02 work03), `http 3plgw`(TPLGW_BASE_URL http://59.8.160.12:8187), `workflow 3plgw`, `smoke 3plgw`: 전부 201/200. smoke 에서 `GH_TOKEN 없음` 만 남음(사용자가 만드는 중)
-- 남은 것: GH_TOKEN 을 `.env.runner-3plgw`, `GITHUB_TOKEN_3PLGW` 를 `.env` 에 넣고 실행기 재기동(이때 계정 폴더를 공용으로 바꾼 compose 반영), 3PLGW 와 잇는 확인
+- 3PLGW 컨테이너(bp-3plgw-api-1)에서 Aimbase `http://59.8.160.12:8280` 닿음(200). 소비앱 키로 워크플로우 조회 200(active true, 6 단계), 잘못된 `_callback` 은 400 `callback_invalid:path` 로 run 없이 거절. 맥에서는 59 의 8280 이 닿지 않는다(방화벽)
+- 남은 것: GH_TOKEN 을 `.env.runner-3plgw`, `GITHUB_TOKEN_3PLGW` 를 `.env` 에 넣고 `./deploy.sh be`, `./deploy.sh agent-3plgw`(이때 계정 폴더를 공용으로 바꾼 compose 반영), 3PLGW 와 잇는 확인
 - 59: 3PLGW 창이 가짜 품고에서 변경을 내면 3PLGW 가 웹훅을 부르고, 제안 또는 PR 이 나오고, BO2 승인이 들어오면 활성화 요청 또는 머지가 나가고, 회신이 3PLGW 에 닿는 것까지 본다. 거절과 시한 초과 회신도 본다
 - 3PLcore `tools/testbook` 에 시험항목을 더한다(`/시험항목`)
 
