@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.22.2** | 2026-11-08 | Aimbase v8.18.0 기준
+> **v3.23.1** | 2026-11-09 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
