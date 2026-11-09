@@ -247,6 +247,23 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 - 59: 3PLGW 창이 가짜 품고에서 변경을 내면 3PLGW 가 웹훅을 부르고, 제안 또는 PR 이 나오고, BO2 승인이 들어오면 활성화 요청 또는 머지가 나가고, 회신이 3PLGW 에 닿는 것까지 본다. 거절과 시한 초과 회신도 본다
 - 3PLcore `tools/testbook` 에 시험항목을 더한다(`/시험항목`)
 
+### 7.3 59 토큰 없는 범위 시험 (2026-11-09 18:25, 테넌트 bp_3plgw, 컨타 결정 18:09)
+
+3PLGW 가 59 에 아직 없어 compose 망(aimbase_default)에 대역 수신기 컨테이너(python, 18174)를 두고 HTTP 연결 `cb-probe-59` 로 받았다. 호스트 포트에 둔 수신기는 api 컨테이너에서 timeout 이었다(59 방화벽이 컨테이너에서 호스트 포트로 가는 길을 막음, Redis 6379 때와 같은 원인).
+
+| 확인 | 결과 |
+|---|---|
+| 승인 대기 진입(V76) | 시험 워크플로우 run 3건 모두 `pending_approval` |
+| 승인 거절 | run `failed` `{reason: Human approval rejected, detail: no}`, 회신 `/result/B` status failed 도달 |
+| 승인 | `done` 단계 실행 뒤 `completed`, 회신 `/result/A` 도달 |
+| 승인 시한 | 40초 시한, 감시가 09:20:28Z 에 닫음, run `failed` `{reason: approval_timeout, detail: <시한>}`, 회신 `/result/C` 09:20:58Z 도달 |
+| 회신 머리글 | `X-Internal-Service-Key` 64자(연결 auth value_env 가 api env 에서 풀림) |
+| 실제 웹훅 수신 | 소비앱 키 + `X-Tenant-Id` 로 run 생성 2건(38bf2f5b, 4ae9d6e6). `repair` 가 1초 만에 실패: CLI `Not logged in`. 실행기가 아직 전용(빈) 계정 폴더를 마운트하고 있어 예상된 실패. `./deploy.sh agent-3plgw`(공용 claude-accounts)로 풀린다 |
+| 실패 회신 | 두 번째 run 의 `/result/real` status failed, error.step repair 도달. 첫 run 은 수신기가 닿지 않던 때라 재시도 뒤 36초 만에 `CALLBACK_FAILED` 이벤트 |
+| 내부 키 | 수신기 기록을 읽다 키 값이 세션 기록에 찍혀 새 값으로 회전. 비밀 파일, 59 `.env`, `.env.runner-3plgw`, api 재기동(16초) 반영. 3PLGW 는 59 반영 전에 그 파일을 다시 읽어야 한다 |
+
+남은 것: GH_TOKEN 도착 뒤 `./deploy.sh be`, `./deploy.sh agent-3plgw`, 3PLGW 59 반영 뒤 실제 연동(제안 전달, BO2 승인, 적용, 회신). 시험 흔적: 시험 워크플로우와 연결은 지웠고, 수신기 컨테이너 `cr174-receiver` 는 멈춤 상태로 남아 있다(지우기: `docker container rm cr174-receiver`). run 기록 5건은 bp_3plgw 테넌트에 남는다.
+
 ## 8. 진행 기록
 
 | 일시 | 한 일 |
@@ -257,3 +274,4 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | 2026-11-09 15:45 | 로컬 확인 7.1 전부 통과. 승인 대기 외래키 결함을 찾아 V76 로 고침(4.3.4). 컨타에 GitHub 토큰 순서와 둘 자리 알림 |
 | 2026-11-09 16:05 | 설치 스크립트 59 배치 분기(커밋 0e827c8). 59 설치 7.2 토큰 앞 단계까지 끝. 계정 폴더는 공용으로(컨타 회신 16:03) |
 | 2026-11-09 17:50 | 컨타 질의 회신: 웹훅은 X-Tenant-Id 필수(59 실측 키만 400, 헤더 넣으면 200). 계약 문서 인증 줄을 "없어도 된다" 에서 "함께 보낸다" 로 고침 |
+| 2026-11-09 18:28 | 컨타 결정(18:09)으로 59 토큰 없는 범위 시험 7.3: 승인 거절, 시한, 실패 회신 통과. 내부 키 회전, api 재기동. 실제 수리 단계는 계정 폴더 배포 전이라 Not logged in |
