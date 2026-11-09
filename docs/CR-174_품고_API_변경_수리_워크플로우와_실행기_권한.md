@@ -206,6 +206,8 @@ CLI 자율 주행 응답의 본문은 도구를 쓰는 동안의 진행 설명�
 
 받음(2026-11-09 15:05, 3PLGW `docs/AI-SDLC/T3-2_API_설계.md` CR-3PLGW-094 2절): 1 `POST /api/v1/internal/poomgo-repair/changes/{change_id}/proposals`(201, 같은 run 재전송 200, 검증 실패 422), 2 `POST .../changes/{change_id}/activate`, 3 `POST .../changes/{change_id}/result`, 4 머리글 `X-Internal-Service-Key`, 실행기 환경변수 `TPLGW_INTERNAL_KEY`, 5 59 `http://59.8.160.12:8187`, 운영 `http://bp-3plgw:8187`. 3PLGW 가 바라는 것(1-4) 셋, 승인 시한 72시간, `last_good_url` 404 허용, 회신 `result.pr.title`, 은 전부 받았다. 3PLGW 1-1 의 `repo.url` 기본값 `bp-3plgw.git` 은 실제 레포 `therecommerce-develop/3plgw.git` 과 다르다(회신으로 알린다).
 
+받음(2026-11-10 07:44, 3PLGW CR-3PLGW-094 0ef4d4b): 6 `GET /api/v1/internal/poomgo-repair/contracts/active`(내부 키). `data` 는 배열 `[{id, sourceCode, sourceName, version, status, origin, spec, createdAt, activatedAt}]` 원천 코드 순, `source` 를 주면 한 건. 3PLGW 는 웹훅 `contract.all_active_url` 에 `{callback-base-url}` 을 붙인 이 주소를 실어 보낸다. Aimbase 쪽은 지시문이 이미 배열을 기대하므로 바꿀 것이 없다.
+
 ## 6. 영향 설계서
 
 | 문서 | 바뀌는 것 |
@@ -323,3 +325,4 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-10 06:05 | 3PLGW 가 59 수리 창구를 전용 키로 분리(새 컨테이너 06:04). 실행기에서 Aimbase 키로 확인: 모르는 change_id 의 proposals, result 는 404(키 없이는 403), 실제 change_id 에 빈 본문은 400(run_id 와 proposal 필요). 제안 전달과 종료 회신 모두 키가 다시 통함. 그 사이(04:50~06:04) 는 키 있어도 403 이었음. Aimbase 쪽 변경 없음, 운영 반영 대기 |
 | 2026-11-10 07:40 | 사용자 결정(07:31, 컨타 전달 ①): 수정안의 값 변환표 표기를 모든 원천의 기존 표기와 맞춘다(SAME_DAY 는 운송장 「당일」, 「당일배송」 아님). 59 활성 계약(INVOICE 판 1) valueMaps 와 3PLGW cr-3plgw-094 확인: 원천별 활성 계약 조회 `/contracts/active?source=` 는 있고 전체 목록은 없음(source 없으면 500). 수리 지시문에 규칙과 목록 주소 `contract.all_active_url`(없으면 레포 SourceCode 로 원천별 조회) 추가, 전체 목록 창구는 컨타 경유로 3PLGW 에 요청 |
 | 2026-11-10 07:45 | 59 워크플로우 재등록 200(07:38, `chaws-bootstrap.sh workflow 3plgw`), 조회로 지시문에 표기 규칙, `contract.all_active_url`, 원천별 대체 조회 문구 확인. 컨타(07:38): all_active_url 요청을 3PLGW 에 전달, 응답 모양은 컨타가 전한다. 효과는 다음 3PLGW 수리 요청의 valueMaps 표기로 본다 |
+| 2026-11-10 07:50 | 3PLGW 회신(컨타 07:44): `contract.all_active_url` = `{callback}/api/v1/internal/poomgo-repair/contracts/active`, data 배열 원천 코드 순, source 주면 한 건. 3PLGW 0ef4d4b 59 재배포 뒤 실측은 컨타가 전한다. Aimbase 지시문은 배열을 기대하므로 변경 없음, 59 재등록 불필요 |
