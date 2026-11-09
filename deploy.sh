@@ -72,6 +72,10 @@ deploy_be() {
   scp_send "$FAT_JAR" "$SERVER:$REMOTE/backend/platform-core/build/libs/platform-core.jar"
   scp_send backend/platform-core/Dockerfile "$SERVER:$REMOTE/backend/platform-core/Dockerfile"
   scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
+  # 설치 스크립트와 워크플로우 정의는 서버 폴더에서 bash build/chaws-bootstrap.sh <단계> <대상> 으로 돌린다(CR-174)
+  ssh_run "mkdir -p $REMOTE/build"
+  scp_send scripts/chaws-bootstrap.sh "$SERVER:$REMOTE/build/chaws-bootstrap.sh"
+  scp_send scripts/poomgo-change-repair.workflow.json "$SERVER:$REMOTE/build/poomgo-change-repair.workflow.json"
   ssh_run "cd $REMOTE && docker compose build api && docker compose up -d --force-recreate api"
   echo "✅ BE 완료 → $REMOTE/backend/platform-core/build/libs/platform-core.jar"
 }
