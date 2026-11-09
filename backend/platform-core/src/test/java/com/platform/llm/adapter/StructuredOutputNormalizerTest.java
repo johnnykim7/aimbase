@@ -29,6 +29,32 @@ class StructuredOutputNormalizerTest {
     }
 
     @Test
+    @DisplayName("CR-174: 중괄호가 섞인 진행 설명 뒤의 마지막 JSON 객체를 Structured 로 부착")
+    void narrationWithBracesBeforeFinalJson() {
+        var content = List.<ContentBlock>of(
+                new ContentBlock.Text("레포를 받습니다.표본 대조: orderSheet {orderCode -> orderNo} 가 바뀜.\n"
+                        + "{\"name\": \"aimbase\", \"result_kind\": \"CONTRACT\"}"));
+        var result = StructuredOutputNormalizer.normalize(content, SCHEMA);
+        assertThat(structuredData(result)).containsEntry("result_kind", "CONTRACT");
+    }
+
+    @Test
+    @DisplayName("CR-174: JSON 펜스 뒤에 코드 펜스가 더 있어도 객체로 읽히는 쪽을 고른다")
+    void codeFenceAfterJsonFence() {
+        var content = List.<ContentBlock>of(
+                new ContentBlock.Text("```json\n{\"name\": \"aimbase\"}\n```\n설명\n```java\nif (a) { b(); }\n```"));
+        var result = StructuredOutputNormalizer.normalize(content, SCHEMA);
+        assertThat(structuredData(result)).containsEntry("name", "aimbase");
+    }
+
+    @Test
+    @DisplayName("CR-174: 객체가 둘이면 뒤의 것을 고른다")
+    void lastObjectWins() {
+        assertThat(StructuredOutputNormalizer.stripFence("{\"name\": \"first\"} 그리고 {\"name\": \"second\"}"))
+                .isEqualTo("{\"name\": \"second\"}");
+    }
+
+    @Test
     @DisplayName("```json 펜스로 감싼 응답 → Structured 부착")
     void fencedJson() {
         var content = List.<ContentBlock>of(

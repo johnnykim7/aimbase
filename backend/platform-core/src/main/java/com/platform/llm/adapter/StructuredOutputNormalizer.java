@@ -87,14 +87,28 @@ public final class StructuredOutputNormalizer {
     }
 
     /**
-     * ```json 펜스 제거 + 앞뒤 설명문이 섞인 경우 첫 '{'~마지막 '}' 구간만 추출.
+     * ```json 펜스 제거 + 앞뒤 설명문이 섞인 경우 JSON 객체 구간만 추출.
+     * CR-174: CLI 자율 주행 응답은 도구를 쓰는 동안의 진행 설명이 앞에 이어 붙어 오고, 그 설명에
+     * 중괄호가 섞이면 첫 '{' 부터 자른 구간은 JSON 이 아니다. 마지막 펜스 안, 그다음 글 전체에서
+     * 뒤에서부터 객체로 읽히는 '{...}' 를 고른다. 둘 다 없으면 예전처럼 첫 '{'~마지막 '}' 로 돌아간다.
      * (배열 최상위는 현재 structured_data Map 계약상 미지원 — object 만 추출.)
      */
     public static String stripFence(String text) {
         String t = text.trim();
         Matcher m = FENCE.matcher(t);
-        if (m.find()) {
-            t = m.group(1).trim();
+        String lastFence = null;
+        while (m.find()) {
+            lastFence = m.group(1).trim();
+        }
+        if (lastFence != null) {
+            String fenced = lastObject(lastFence);
+            if (fenced != null) {
+                return fenced;
+            }
+        }
+        String whole = lastObject(t);
+        if (whole != null) {
+            return whole;
         }
         int objStart = t.indexOf('{');
         int objEnd = t.lastIndexOf('}');
@@ -102,6 +116,29 @@ public final class StructuredOutputNormalizer {
             return t.substring(objStart, objEnd + 1);
         }
         return t;
+    }
+
+    /**
+     * 글 뒤쪽의 '}' 마다 중괄호 짝이 맞는 '{' 를 거슬러 찾아 객체로 읽히는 가장 뒤의 구간을 돌려준다.
+     * 문자열 안에 짝이 안 맞는 중괄호가 있으면 그 후보는 건너뛴다. 없으면 null.
+     */
+    static String lastObject(String t) {
+        for (int end = t.lastIndexOf('}'); end >= 0; end = t.lastIndexOf('}', end - 1)) {
+            int depth = 0;
+            for (int i = end; i >= 0; i--) {
+                char c = t.charAt(i);
+                if (c == '}') {
+                    depth++;
+                } else if (c == '{' && --depth == 0) {
+                    String candidate = t.substring(i, end + 1);
+                    if (parseToMap(candidate) != null) {
+                        return candidate;
+                    }
+                    break;
+                }
+            }
+        }
+        return null;
     }
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
