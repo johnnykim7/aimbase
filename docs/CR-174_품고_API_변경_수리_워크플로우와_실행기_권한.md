@@ -264,6 +264,21 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 
 남은 것: GH_TOKEN 도착 뒤 `./deploy.sh be`, `./deploy.sh agent-3plgw`, 3PLGW 59 반영 뒤 실제 연동(제안 전달, BO2 승인, 적용, 회신). 시험 흔적: 시험 워크플로우와 연결은 지웠고, 수신기 컨테이너 `cr174-receiver` 는 멈춤 상태로 남아 있다(지우기: `docker container rm cr174-receiver`). run 기록 5건은 bp_3plgw 테넌트에 남는다.
 
+### 7.4 59 토큰 반영과 실행기 로그인 확인 (2026-11-09 23:47)
+
+GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 을 `.env.runner-3plgw` 에, `GITHUB_TOKEN_3PLGW` 를 `.env` 에 넣고 `./deploy.sh be`, `./deploy.sh agent-3plgw` 를 돌렸다. 값은 비밀 파일에서 읽어 ssh 표준입력으로만 옮겼다.
+
+| 확인 | 결과 |
+|---|---|
+| api, 실행기 | 둘 다 healthy. 실행기 마운트가 공용 `./claude-accounts` 로 바뀜(work01, work02, work03 에 자격 파일 있음) |
+| gh | `gh auth status` 로그인 OK(GH_TOKEN). api env 에 `GITHUB_TOKEN_3PLGW` 있음 |
+| smoke | 워크플로우, 연결 3개, 연결 그룹 200, 실행기 health ok, `TPLGW_INTERNAL_KEY` 있음 |
+| 실행기 로그인 | AGENT_CALL 한 단계짜리 시험 워크플로우(연결 그룹 `cli-runner-bp-3plgw-rr`, HYBRID)가 4.6초 만에 `OK` 로 `completed`. 7.3 의 `Not logged in` 이 풀렸다. 시험 워크플로우는 지움 |
+| 연결 시험 API | `POST /connections/{id}/test` 는 닿지 않는 `bp-3plgw` 에도 `ok, latencyMs 0` 을 돌려준다. 실제 호출을 하지 않으므로 로그인 확인 근거로 쓰지 않는다 |
+| CLI 한도 | 실행기 기록에 `rate_limit_event seven_day allowed_warning`. 공용 계정의 주간 한도가 가까워지고 있다 |
+
+남은 것: 3plgw PR #60 반영 뒤 `bp-3plgw` 이름이 풀리면 컨타가 부르는 3PLGW 재시도(건 3)로 실제 연동(제안 전달, BO2 승인, 적용, 회신). 59 의 빈 전용 계정 폴더는 사용자가 지운다: `docker run --rm -v /home/therecommerce/aimbase:/w alpine:latest sh -c "cd /w && rmdir claude-accounts-3plgw/work01 claude-accounts-3plgw/work02 claude-accounts-3plgw/work03 claude-accounts-3plgw"`.
+
 ## 8. 진행 기록
 
 | 일시 | 한 일 |
@@ -277,3 +292,4 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | 2026-11-09 18:28 | 컨타 결정(18:09)으로 59 토큰 없는 범위 시험 7.3: 승인 거절, 시한, 실패 회신 통과. 내부 키 회전, api 재기동. 실제 수리 단계는 계정 폴더 배포 전이라 Not logged in |
 | 2026-11-09 19:42 | 컨타 알림(19:34)대로 3PLGW 연결 bp-3plgw baseUrl 을 59 도 http://bp-3plgw:8187 로(설치 스크립트 http 단계 재실행, 응답 200, 조회로 확인). 계약 문서, 운용 가이드, 스크립트 안내문 같은 값으로 |
 | 2026-11-09 23:29 | 사용자 승인(컨타 전달) ①: GitHub 토큰 파일이 올 때까지 기다렸다 be, agent-3plgw 배포와 수리 단계 확인 뒤 완료. 토큰 도착은 컨타가 알린다 |
+| 2026-11-09 23:50 | 토큰 반영 7.4: be, agent-3plgw 배포, 공용 계정 폴더 전환, gh 로그인, 실행기 AGENT_CALL 시험 OK(4.6초). 컨타에 알림, 3PLGW 재시도(건 3) 대기 |
