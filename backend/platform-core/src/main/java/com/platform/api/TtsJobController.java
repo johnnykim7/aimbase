@@ -26,7 +26,7 @@ import java.util.UUID;
  * CR-166: 같은 목소리 음성 생성 작업 맡기기와 조회(T3-2, 계약 docs/협업/계약_CR-166_같은_목소리_음성_생성_창구.md).
  *
  * <pre>
- *   POST /api/v1/speech/tts-jobs            {voice, text} 를 맡기고 job_id 를 바로 받는다
+ *   POST /api/v1/speech/tts-jobs            {voice, text, take} 를 맡기고 job_id 를 바로 받는다
  *   GET  /api/v1/speech/tts-jobs/{job_id}   상태와 끝난 소리
  * </pre>
  */
@@ -35,7 +35,8 @@ import java.util.UUID;
 @Tag(name = "TTS Jobs", description = "CR-166 같은 목소리 음성 생성")
 public class TtsJobController {
 
-    public record SubmitRequest(String voice, String text) {}
+    /** take 는 같은 글 다시 만들기 차례이고 빠지면 0 이다(CR-176). */
+    public record SubmitRequest(String voice, String text, Integer take) {}
 
     private final TtsJobService jobService;
 
@@ -47,13 +48,14 @@ public class TtsJobController {
     @Operation(summary = "음성 생성 작업 맡기기 (비동기)")
     public ResponseEntity<ApiResponse<Map<String, Object>>> submit(@RequestBody(required = false) SubmitRequest req) {
         TtsJobService.SubmitResult result = req == null
-                ? jobService.submit(null, null, currentUser())
-                : jobService.submit(req.voice(), req.text(), currentUser());
+                ? jobService.submit(null, null, null, currentUser())
+                : jobService.submit(req.voice(), req.text(), req.take(), currentUser());
         TtsJobEntity job = result.job();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("job_id", job.getJobId().toString());
         body.put("status", job.getStatus());
         body.put("voice", job.getVoice());
+        body.put("take", job.getTake());
         body.put("reused", result.reused());
         body.put("created_at", format(job.getCreatedAt()));
         return ResponseEntity.accepted().body(ApiResponse.ok(body));
@@ -83,6 +85,7 @@ public class TtsJobController {
         body.put("status", job.getStatus());
         body.put("voice", job.getVoice());
         body.put("text", job.getText());
+        body.put("take", job.getTake());
         body.put("created_at", format(job.getCreatedAt()));
         if (job.getStartedAt() != null) body.put("started_at", format(job.getStartedAt()));
         if (job.getFinishedAt() != null) body.put("finished_at", format(job.getFinishedAt()));

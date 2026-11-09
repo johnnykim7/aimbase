@@ -231,6 +231,8 @@ aimbase:
     retention-days: ${AIMBASE_TTS_RETENTION_DAYS:7}
     # CR-171: 이보다 짧게 끝난 작업은 같은 글을 다시 맡겨도 돌려주지 않는다
     min-reusable-duration-sec: ${AIMBASE_TTS_MIN_REUSABLE_DURATION_SEC:0.25}
+    # CR-176: 같은 글 다시 만들기 차례 상한. 차례마다 생성기 씨앗이 시도 횟수만큼 옮겨진다
+    max-take: ${AIMBASE_TTS_MAX_TAKE:10}
   # CR-132: CLI 산출물(out/) 다운로드 유예 시간. TTL 초과 mtime 파일은 GC 가 삭제.
   artifact:
     ttl-hours: ${AIMBASE_ARTIFACT_TTL_HOURS:24}

@@ -90,10 +90,11 @@ public class TtsSidecarClient {
         }
     }
 
-    public Synthesis synthesize(String voice, String text) {
-        Map<String, String> body = new LinkedHashMap<>();
+    public Synthesis synthesize(String voice, String text, int take) {
+        Map<String, Object> body = new LinkedHashMap<>();
         body.put("voice", voice);
         body.put("text", text);
+        body.put("take", take);
         HttpRequest req;
         try {
             req = HttpRequest.newBuilder(URI.create(baseUrl + "/synthesize"))

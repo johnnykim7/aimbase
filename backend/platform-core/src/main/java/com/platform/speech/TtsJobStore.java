@@ -34,10 +34,11 @@ public class TtsJobStore {
         return repository.findByJobId(jobId);
     }
 
-    /** 같은 음색, 같은 글의 가장 최근 작업. 실패한 작업은 다시 맡길 수 있어야 하므로 고르지 않는다(BIZ-134). */
+    /** 같은 음색, 같은 글, 같은 차례의 가장 최근 작업. 실패한 작업은 다시 맡길 수 있어야 하므로 고르지 않는다(BIZ-134). */
     @Transactional(readOnly = true)
-    public Optional<TtsJobEntity> findReusable(String voice, String text) {
-        return repository.findFirstByVoiceAndTextAndStatusNotOrderByCreatedAtDesc(voice, text, TtsJobEntity.FAILED);
+    public Optional<TtsJobEntity> findReusable(String voice, String text, int take) {
+        return repository.findFirstByVoiceAndTextAndTakeAndStatusNotOrderByCreatedAtDesc(
+                voice, text, take, TtsJobEntity.FAILED);
     }
 
     @Transactional(readOnly = true)

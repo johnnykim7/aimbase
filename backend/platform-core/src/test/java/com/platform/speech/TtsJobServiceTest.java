@@ -30,7 +30,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * CR-166: 음성 생성 작업 맡기기, 차례, 상태 테스트. TC-TTS-101 ~ 115(T3-5).
+ * CR-166: 음성 생성 작업 맡기기, 차례, 상태 테스트. TC-TTS-101 부터 115, 117(CR-171), 118, 119(CR-176)(T3-5).
  *
  * <p>저장은 테넌트마다 따로 둔 메모리 저장소로 바꿔 끼워, 작업 스레드가 맡긴 테넌트의 DB 에 쓰는지 본다(BIZ-003).
  */
@@ -59,7 +59,7 @@ class TtsJobServiceTest {
     }
 
     private TtsJobService newService(int maxPending) {
-        return new TtsJobService(store, sidecar, clock, 200, maxPending, 7, 0.25, false);
+        return new TtsJobService(store, sidecar, clock, 200, maxPending, 7, 0.25, 10, false);
     }
 
     private static TtsSidecarClient.Synthesis mp3() {
@@ -78,34 +78,34 @@ class TtsJobServiceTest {
     @Test
     @DisplayName("TC-TTS-101 맡기면 대기 작업이 생기고 차례에 들어간다")
     void submit() {
-        TtsJobService.SubmitResult r = service.submit(VOICE, "검수대 3번으로 이동하세요.", "bp-wms");
+        TtsJobService.SubmitResult r = service.submit(VOICE, "검수대 3번으로 이동하세요.", null, "bp-wms");
 
         assertFalse(r.reused());
         assertEquals(TtsJobEntity.PENDING, r.job().getStatus());
         assertEquals(OffsetDateTime.parse("2026-10-31T01:00:00Z"), r.job().getCreatedAt());
         assertEquals(1, store.rows("tenant_a").size());
         assertEquals(1, service.queued());
-        verify(sidecar, never()).synthesize(any(), any());
+        verify(sidecar, never()).synthesize(any(), any(), anyInt());
     }
 
     @Test
     @DisplayName("TC-TTS-102 빈 글, 공백만 있는 글, 음색 없음은 400 이고 행을 만들지 않는다")
     void blankText() {
-        assertEquals("text_required", code(() -> service.submit(VOICE, null, "u")));
-        assertEquals("text_required", code(() -> service.submit(VOICE, " \n\t ", "u")));
-        assertEquals("voice_required", code(() -> service.submit(" ", "1번.", "u")));
-        assertEquals(400, status(() -> service.submit(VOICE, "", "u")));
+        assertEquals("text_required", code(() -> service.submit(VOICE, null, null, "u")));
+        assertEquals("text_required", code(() -> service.submit(VOICE, " \n\t ", null, "u")));
+        assertEquals("voice_required", code(() -> service.submit(" ", "1번.", null, "u")));
+        assertEquals(400, status(() -> service.submit(VOICE, "", null, "u")));
         assertTrue(store.rows("tenant_a").isEmpty());
     }
 
     @Test
     @DisplayName("TC-TTS-103 글 길이는 글자(코드 포인트)로 200자까지")
     void textLength() {
-        service.submit(VOICE, "가".repeat(200), "u");
+        service.submit(VOICE, "가".repeat(200), null, "u");
         // 이모지는 UTF-16 으로 두 칸이지만 한 글자다.
-        service.submit(VOICE, "😀".repeat(200), "u");
+        service.submit(VOICE, "😀".repeat(200), null, "u");
 
-        TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit(VOICE, "가".repeat(201), "u"));
+        TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit(VOICE, "가".repeat(201), null, "u"));
         assertEquals(400, e.getStatus());
         assertEquals("text_too_long:max=200", e.getCode());
         assertEquals(2, store.rows("tenant_a").size());
@@ -115,19 +115,19 @@ class TtsJobServiceTest {
     @DisplayName("TC-TTS-104 글을 다듬지 않고 그대로 생성기에 보낸다")
     void textUnchanged() {
         String text = "  \"3번\" 칸,\n세 개.  ";
-        when(sidecar.synthesize(eq(VOICE), anyString())).thenReturn(mp3());
+        when(sidecar.synthesize(eq(VOICE), anyString(), anyInt())).thenReturn(mp3());
 
-        service.submit(VOICE, text, "u");
+        service.submit(VOICE, text, null, "u");
         service.runNext();
 
-        verify(sidecar).synthesize(VOICE, text);
+        verify(sidecar).synthesize(VOICE, text, 0);
         assertEquals(text, store.rows("tenant_a").get(0).getText());
     }
 
     @Test
     @DisplayName("TC-TTS-105 생성기에 없는 음색은 404 이고 행을 만들지 않는다")
     void unknownVoice() {
-        TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit("field-voice-99", "1번.", "u"));
+        TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit("field-voice-99", "1번.", null, "u"));
         assertEquals(404, e.getStatus());
         assertEquals("voice_not_found:field-voice-99", e.getCode());
         assertTrue(store.rows("tenant_a").isEmpty());
@@ -138,7 +138,7 @@ class TtsJobServiceTest {
     void generatorDown() {
         when(sidecar.voices()).thenThrow(new TtsSidecarClient.UnavailableException("refused", null));
 
-        TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit(VOICE, "1번.", "u"));
+        TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit(VOICE, "1번.", null, "u"));
         assertEquals(503, e.getStatus());
         assertEquals("tts_generator_unavailable", e.getCode());
         assertTrue(store.rows("tenant_a").isEmpty());
@@ -147,10 +147,10 @@ class TtsJobServiceTest {
     @Test
     @DisplayName("TC-TTS-107 같은 음색 같은 글은 대기, 진행, 완료 어느 때나 같은 작업을 돌려준다")
     void reuse() {
-        when(sidecar.synthesize(any(), any())).thenReturn(mp3());
-        UUID first = service.submit(VOICE, "1번.", "u").job().getJobId();
+        when(sidecar.synthesize(any(), any(), anyInt())).thenReturn(mp3());
+        UUID first = service.submit(VOICE, "1번.", null, "u").job().getJobId();
 
-        TtsJobService.SubmitResult pending = service.submit(VOICE, "1번.", "u");
+        TtsJobService.SubmitResult pending = service.submit(VOICE, "1번.", null, "u");
         assertTrue(pending.reused());
         assertEquals(first, pending.job().getJobId());
         assertEquals(1, service.queued());
@@ -158,7 +158,7 @@ class TtsJobServiceTest {
         service.runNext();
         // 시험 스레드에서 차례를 돌렸으므로 작업이 비운 테넌트를 되돌린다.
         TenantContext.setTenantId("tenant_a");
-        TtsJobService.SubmitResult done = service.submit(VOICE, "1번.", "u");
+        TtsJobService.SubmitResult done = service.submit(VOICE, "1번.", null, "u");
         assertTrue(done.reused());
         assertEquals(TtsJobEntity.COMPLETED, done.job().getStatus());
         assertEquals(1, store.rows("tenant_a").size());
@@ -166,23 +166,70 @@ class TtsJobServiceTest {
     }
 
     @Test
+    @DisplayName("TC-TTS-118 차례가 빠지면 0, 0 과 상한은 맡기고, 음수와 상한 넘음은 400 이며 행을 만들지 않는다")
+    void takeRange() {
+        assertEquals(0, service.submit(VOICE, "1번.", null, "u").job().getTake());
+        assertEquals(0, service.submit(VOICE, "2번.", 0, "u").job().getTake());
+        assertEquals(10, service.submit(VOICE, "3번.", 10, "u").job().getTake());
+        assertEquals(3, store.rows("tenant_a").size());
+
+        for (int bad : new int[]{-1, 11}) {
+            TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit(VOICE, "4번.", bad, "u"));
+            assertEquals(400, e.getStatus());
+            assertEquals("take_out_of_range:max=10", e.getCode());
+        }
+        assertEquals(3, store.rows("tenant_a").size());
+        assertEquals(3, service.queued());
+    }
+
+    @Test
+    @DisplayName("TC-TTS-119 같은 글도 차례가 다르면 새 작업으로 만들고, 같은 차례는 앞 작업을 돌려준다")
+    void takeIsPartOfReuseKey() {
+        when(sidecar.synthesize(any(), any(), anyInt())).thenReturn(mp3());
+        UUID take0 = service.submit(VOICE, "에스, 팔십이번", 0, "u").job().getJobId();
+        service.runNext();
+        TenantContext.setTenantId("tenant_a");
+
+        TtsJobService.SubmitResult take1 = service.submit(VOICE, "에스, 팔십이번", 1, "u");
+        assertFalse(take1.reused());
+        assertNotEquals(take0, take1.job().getJobId());
+        assertEquals(1, take1.job().getTake());
+        service.runNext();
+        TenantContext.setTenantId("tenant_a");
+        verify(sidecar).synthesize(VOICE, "에스, 팔십이번", 1);
+
+        TtsJobService.SubmitResult take1Again = service.submit(VOICE, "에스, 팔십이번", 1, "u");
+        assertTrue(take1Again.reused());
+        assertEquals(take1.job().getJobId(), take1Again.job().getJobId());
+
+        TtsJobService.SubmitResult take2 = service.submit(VOICE, "에스, 팔십이번", 2, "u");
+        assertFalse(take2.reused());
+        assertNotEquals(take1.job().getJobId(), take2.job().getJobId());
+
+        TtsJobService.SubmitResult take0Again = service.submit(VOICE, "에스, 팔십이번", null, "u");
+        assertTrue(take0Again.reused());
+        assertEquals(take0, take0Again.job().getJobId());
+        assertEquals(3, store.rows("tenant_a").size());
+    }
+
+    @Test
     @DisplayName("TC-TTS-117 기준보다 짧게 끝난 작업은 돌려주지 않고 새 작업을 만들며, 새 작업은 다시 돌려준다")
     void emptyAudioIsNotReused() {
-        when(sidecar.synthesize(any(), any()))
+        when(sidecar.synthesize(any(), any(), anyInt()))
                 .thenReturn(new TtsSidecarClient.Synthesis(new byte[]{1}, "audio/mpeg", 0.168, 15.5, 1))
                 .thenReturn(mp3());
-        UUID empty = service.submit(VOICE, "일", "u").job().getJobId();
+        UUID empty = service.submit(VOICE, "일", null, "u").job().getJobId();
         service.runNext();
         TenantContext.setTenantId("tenant_a");
         clock.plus(Duration.ofSeconds(1));
 
-        TtsJobService.SubmitResult again = service.submit(VOICE, "일", "u");
+        TtsJobService.SubmitResult again = service.submit(VOICE, "일", null, "u");
         assertFalse(again.reused());
         assertNotEquals(empty, again.job().getJobId());
 
         service.runNext();
         TenantContext.setTenantId("tenant_a");
-        TtsJobService.SubmitResult third = service.submit(VOICE, "일", "u");
+        TtsJobService.SubmitResult third = service.submit(VOICE, "일", null, "u");
         assertTrue(third.reused());
         assertEquals(again.job().getJobId(), third.job().getJobId());
         assertEquals(1.2, third.job().getDurationSec());
@@ -191,12 +238,12 @@ class TtsJobServiceTest {
     @Test
     @DisplayName("TC-TTS-108 같은 글이 실패로만 남아 있으면 새 작업을 만든다")
     void failedIsNotReused() {
-        when(sidecar.synthesize(any(), any())).thenThrow(new TtsSidecarClient.FailedException("generation_failed:silent_audio"));
-        UUID first = service.submit(VOICE, "1번.", "u").job().getJobId();
+        when(sidecar.synthesize(any(), any(), anyInt())).thenThrow(new TtsSidecarClient.FailedException("generation_failed:silent_audio"));
+        UUID first = service.submit(VOICE, "1번.", null, "u").job().getJobId();
         service.runNext();
         TenantContext.setTenantId("tenant_a");
 
-        TtsJobService.SubmitResult again = service.submit(VOICE, "1번.", "u");
+        TtsJobService.SubmitResult again = service.submit(VOICE, "1번.", null, "u");
         assertFalse(again.reused());
         assertNotEquals(first, again.job().getJobId());
         assertEquals(2, store.rows("tenant_a").size());
@@ -206,35 +253,35 @@ class TtsJobServiceTest {
     @DisplayName("TC-TTS-109 테넌트마다 대기와 진행 중이 상한이면 429, 다른 테넌트는 맡겨진다")
     void queueFull() {
         service = newService(2);
-        service.submit(VOICE, "1번.", "u");
-        service.submit(VOICE, "2번.", "u");
+        service.submit(VOICE, "1번.", null, "u");
+        service.submit(VOICE, "2번.", null, "u");
 
-        TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit(VOICE, "3번.", "u"));
+        TtsJobException e = assertThrows(TtsJobException.class, () -> service.submit(VOICE, "3번.", null, "u"));
         assertEquals(429, e.getStatus());
         assertEquals("tts_queue_full:max=2", e.getCode());
         // 같은 글 다시 맡기기는 행이 늘지 않으므로 상한에 걸리지 않는다.
-        assertTrue(service.submit(VOICE, "1번.", "u").reused());
+        assertTrue(service.submit(VOICE, "1번.", null, "u").reused());
 
         TenantContext.setTenantId("tenant_b");
-        assertFalse(service.submit(VOICE, "3번.", "u").reused());
+        assertFalse(service.submit(VOICE, "3번.", null, "u").reused());
     }
 
     @Test
     @DisplayName("TC-TTS-110 테넌트를 가리지 않고 맡긴 시각 순서대로 만든다")
     void fifoAcrossTenants() {
         List<String> order = Collections.synchronizedList(new ArrayList<>());
-        when(sidecar.synthesize(any(), any())).thenAnswer(inv -> {
+        when(sidecar.synthesize(any(), any(), anyInt())).thenAnswer(inv -> {
             order.add(TenantContext.getTenantId() + ":" + inv.getArgument(1));
             return mp3();
         });
 
-        service.submit(VOICE, "a1", "u");
+        service.submit(VOICE, "a1", null, "u");
         clock.plus(Duration.ofSeconds(1));
         TenantContext.setTenantId("tenant_b");
-        service.submit(VOICE, "b1", "u");
+        service.submit(VOICE, "b1", null, "u");
         clock.plus(Duration.ofSeconds(1));
         TenantContext.setTenantId("tenant_a");
-        service.submit(VOICE, "a2", "u");
+        service.submit(VOICE, "a2", null, "u");
 
         while (service.runNext()) {
             // 차례가 빌 때까지
@@ -248,17 +295,17 @@ class TtsJobServiceTest {
         AtomicInteger active = new AtomicInteger();
         AtomicInteger maxActive = new AtomicInteger();
         AtomicInteger done = new AtomicInteger();
-        when(sidecar.synthesize(any(), any())).thenAnswer(inv -> {
+        when(sidecar.synthesize(any(), any(), anyInt())).thenAnswer(inv -> {
             maxActive.accumulateAndGet(active.incrementAndGet(), Math::max);
             Thread.sleep(100);
             active.decrementAndGet();
             done.incrementAndGet();
             return mp3();
         });
-        TtsJobService running = new TtsJobService(store, sidecar, clock, 200, 500, 7, 0.25, true);
+        TtsJobService running = new TtsJobService(store, sidecar, clock, 200, 500, 7, 0.25, 10, true);
         try {
             for (int i = 0; i < 4; i++) {
-                running.submit(VOICE, "문장 " + i, "u");
+                running.submit(VOICE, "문장 " + i, null, "u");
             }
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while (done.get() < 4 && System.nanoTime() < deadline) {
@@ -275,11 +322,11 @@ class TtsJobServiceTest {
     @DisplayName("TC-TTS-111 작업 스레드는 맡긴 테넌트의 DB 에 쓰고 끝나면 테넌트를 비운다")
     void tenantPropagation() {
         List<String> seen = new ArrayList<>();
-        when(sidecar.synthesize(any(), any())).thenAnswer(inv -> {
+        when(sidecar.synthesize(any(), any(), anyInt())).thenAnswer(inv -> {
             seen.add(TenantContext.getTenantId());
             return mp3();
         });
-        service.submit(VOICE, "1번.", "u");
+        service.submit(VOICE, "1번.", null, "u");
 
         TenantContext.setTenantId("tenant_b");
         service.runNext();
@@ -293,8 +340,8 @@ class TtsJobServiceTest {
     @Test
     @DisplayName("TC-TTS-112 생성기가 소리를 주면 완료와 소리, 길이, 걸린 시간을 남긴다")
     void completed() {
-        when(sidecar.synthesize(any(), any())).thenReturn(mp3());
-        UUID id = service.submit(VOICE, "1번.", "u").job().getJobId();
+        when(sidecar.synthesize(any(), any(), anyInt())).thenReturn(mp3());
+        UUID id = service.submit(VOICE, "1번.", null, "u").job().getJobId();
         clock.plus(Duration.ofSeconds(3));
         service.runNext();
 
@@ -321,8 +368,8 @@ class TtsJobServiceTest {
         int i = 0;
         for (Map.Entry<RuntimeException, String> c : cases.entrySet()) {
             String text = "문장 " + (i++);
-            when(sidecar.synthesize(VOICE, text)).thenThrow(c.getKey());
-            UUID id = service.submit(VOICE, text, "u").job().getJobId();
+            when(sidecar.synthesize(VOICE, text, 0)).thenThrow(c.getKey());
+            UUID id = service.submit(VOICE, text, null, "u").job().getJobId();
             service.runNext();
             TenantContext.setTenantId("tenant_a");
 
@@ -337,26 +384,26 @@ class TtsJobServiceTest {
     @DisplayName("TC-TTS-114 api 가 다시 떠 차례를 잃은 대기, 진행 작업은 조회 때 맡긴 시각 그대로 다시 넣는다")
     void requeueAfterRestart() {
         List<String> order = new ArrayList<>();
-        when(sidecar.synthesize(any(), any())).thenAnswer(inv -> {
+        when(sidecar.synthesize(any(), any(), anyInt())).thenAnswer(inv -> {
             order.add(inv.getArgument(1));
             return mp3();
         });
-        UUID older = service.submit(VOICE, "먼저", "u").job().getJobId();
+        UUID older = service.submit(VOICE, "먼저", null, "u").job().getJobId();
         clock.plus(Duration.ofSeconds(1));
-        UUID wasRunning = service.submit(VOICE, "진행중", "u").job().getJobId();
+        UUID wasRunning = service.submit(VOICE, "진행중", null, "u").job().getJobId();
         store.find(wasRunning).orElseThrow().setStatus(TtsJobEntity.RUNNING);
 
         // 다시 뜬 api. 메모리의 차례는 비어 있다.
         TtsJobService restarted = newService(500);
         clock.plus(Duration.ofSeconds(1));
-        restarted.submit(VOICE, "새로", "u");
+        restarted.submit(VOICE, "새로", null, "u");
         assertEquals(1, restarted.queued());
 
         restarted.find(wasRunning);
         restarted.find(wasRunning);
         assertEquals(TtsJobEntity.PENDING, store.find(wasRunning).orElseThrow().getStatus());
         assertNull(store.find(wasRunning).orElseThrow().getStartedAt());
-        assertTrue(restarted.submit(VOICE, "먼저", "u").reused());
+        assertTrue(restarted.submit(VOICE, "먼저", null, "u").reused());
         assertEquals(3, restarted.queued());
 
         while (restarted.runNext()) {
@@ -377,7 +424,7 @@ class TtsJobServiceTest {
                 OffsetDateTime.parse("2026-10-30T00:00:00Z"), OffsetDateTime.parse("2026-10-30T00:00:10Z"));
         TtsJobEntity otherTenant = store.put("tenant_b", "옛 완료", TtsJobEntity.COMPLETED, old, old);
 
-        service.submit(VOICE, "새 글", "u");
+        service.submit(VOICE, "새 글", null, "u");
 
         List<UUID> left = store.rows("tenant_a").stream().map(TtsJobEntity::getJobId).toList();
         assertFalse(left.contains(oldDone.getJobId()));
@@ -433,9 +480,9 @@ class TtsJobServiceTest {
         }
 
         @Override
-        public Optional<TtsJobEntity> findReusable(String voice, String text) {
+        public Optional<TtsJobEntity> findReusable(String voice, String text, int take) {
             return current().stream()
-                    .filter(j -> j.getVoice().equals(voice) && j.getText().equals(text))
+                    .filter(j -> j.getVoice().equals(voice) && j.getText().equals(text) && j.getTake() == take)
                     .filter(j -> !TtsJobEntity.FAILED.equals(j.getStatus()))
                     .max(Comparator.comparing(TtsJobEntity::getCreatedAt));
         }
