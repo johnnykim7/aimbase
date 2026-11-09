@@ -209,9 +209,9 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 | `be8dc23` | origin/dev | OpenAI 키가 비면 임베딩을 만들지 않고 응답 캐시 의미 비교를 건너뛴다(12절) |
 | `4c1975c` | origin/chaws-cr173-embed | `be8dc23` 을 운영 api 판 `0e8fdae`(CR-171, 로컬 가지 `chaws-cr171`) 위에 얹었다 |
 | `2b6c990` | origin/dev | 세션 없는 요청은 답한 뒤 CLI 실행기 프로세스를 닫는다(13절) |
-| `e5c75e2` | origin/chaws-cr173-oneshot | `2b6c990` 의 코드와 시험만 `4c1975c` 위에 얹었다. 지금 운영 api 판이다. 다음 운영 api 반영은 이 가지 위에서 한다 |
+| `e5c75e2` | origin/chaws-cr173-oneshot | `2b6c990` 의 코드와 시험만 `4c1975c` 위에 얹었다 |
 | `0df152b` | origin/dev | 실행기 전체 Claude 프로세스 상한과 줄서기, 59 compose 상한, `deploy.sh agent-wes-cs`(14절) |
-| `4b6a4b0` | origin/chaws-cr173-oneshot | 14절의 실행기 상한(CR-161 계정 폴더 닫기 없이), 묶음 요청 닫기, 운영 compose 상한, 시험 |
+| `4b6a4b0` | origin/chaws-cr173-oneshot | 14절의 실행기 상한(CR-161 계정 폴더 닫기 없이), 묶음 요청 닫기, 운영 compose 상한, 시험. 지금 운영 api 와 CS 실행기 판이다. 다음 운영 반영은 이 가지 위에서 한다 |
 
 ## 10. 남은 것
 
@@ -219,7 +219,7 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 2. bp-infra 의 bp-wes AI 켜기(`a801e19`)는 설계 7절 9번 차례에 합친다. 그 가지 `cr-wes-368-cs-prod` 의 `757f2e0` 은 옛 주소라 main `72025a8` 이 대신하므로, 합칠 때 `a801e19` 만 담는다
 3. 운영 CS 상세 화면에서 사람이 위젯 대화를 여는 확인(공개 주소 스트림은 6.3 에서 확인)
 4. 13절 실행기 메모리 수정의 운영 api 반영. 2026-11-09 16:19 끝
-5. 14절 운영 반영(CS 실행기, api)과 반영 뒤 14건 동시 확인
+5. 14절 운영 반영(CS 실행기, api)과 반영 뒤 14건 동시 확인. 2026-11-09 23:33 끝
 
 ## 11. 경과
 
@@ -383,8 +383,12 @@ CR-162 `61a1ac1`(운영 가지에서는 `3de6f47`)을 함께 싣는 까닭: 이 
 
 시험 문장이 같으면 응답 캐시가 답해 프로세스가 뜨지 않는다(23:11 의 한 번). 요청마다 문장을 달리했다.
 
-**운영 반영**(컨타와 사용자 승인 뒤): 운영 가지 `chaws-cr173-oneshot` 의 `4b6a4b0` 으로 CS 실행기를 먼저, api 를 다음에 올린다. 실행기만 올라가도 묶음 요청이 닫히지 않는 동안 자리 내기가 상한을 지킨다.
+**운영 반영**(사용자 23:29 승인, 컨타 전달): 운영 가지 `chaws-cr173-oneshot` 의 `4b6a4b0` 으로 CS 실행기를 먼저, api 를 다음에 올렸다. 실행기만 올라가도 묶음 요청이 닫히지 않는 동안 자리 내기가 상한을 지킨다. 새 실행기는 지금 운영 실행기 판 `991309b` 와 실행기 코드, compose, Dockerfile 이 같고 이 수정만 더해졌다.
 
-1. `CHAWS_COMMIT=4b6a4b0 ./deploy.sh chaws-agent-wes-cs`
-2. `CHAWS_COMMIT=4b6a4b0 ./deploy.sh chaws-be`(api 만 다시 만든다)
-3. 같은 14건 동시 요청으로 프로세스 수와 메모리를 본다
+| 순번 | 무엇 | 결과 |
+|---|---|---|
+| 1 | `CHAWS_COMMIT=4b6a4b0 ./deploy.sh chaws-agent-wes-cs`(23:29:59 부터) | 반영 기록 `20261109-232959 aimbase-agent-wes-cs 4b6a4b0`. healthy, 기동 기록 `CR-173: process limit 2 per runner, queue timeout PT5M`, 등록 2초째 성공. 다른 실행기, api 는 그대로 |
+| 2 | `CHAWS_COMMIT=4b6a4b0 ./deploy.sh chaws-be`(23:31:07 부터) | api 만 다시 만들었다. db, redis, 실행기 둘, tts 는 그대로. api healthy |
+| 3 | 반영 뒤 운영 api 로 CS 묶음 세션 없는 짧은 요청 14건 동시(23:33) | 모두 200, 전체 42초. 실행기가 띄운 claude 최대 2(0.2초 표본 181개 가운데 3 이상 0). 메모리 처음 340MiB, 최대 794MiB/1.5GiB. 생성 14, 요청 뒤 닫힘 14(묶음 요청도 닫힌다), 줄서기 12, 자리 내기 1, 대기 초과 0. 끝난 뒤 claude 0, 488MiB. 실행기 재시작 0, api ERROR 0 |
+
+되돌리기는 반영 기록에 남은 이미지 꼬리표로 한다(`aimbase-aimbase-agent-wes-cs:pre-20261109-232959`, `aimbase-api:pre-20261109-233107`).
