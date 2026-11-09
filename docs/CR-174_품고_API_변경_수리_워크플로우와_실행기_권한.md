@@ -275,6 +275,7 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | smoke | 워크플로우, 연결 3개, 연결 그룹 200, 실행기 health ok, `TPLGW_INTERNAL_KEY` 있음 |
 | 실행기 로그인 | AGENT_CALL 한 단계짜리 시험 워크플로우(연결 그룹 `cli-runner-bp-3plgw-rr`, HYBRID)가 4.6초 만에 `OK` 로 `completed`. 7.3 의 `Not logged in` 이 풀렸다. 시험 워크플로우는 지움 |
 | 연결 시험 API | `POST /connections/{id}/test` 는 닿지 않는 `bp-3plgw` 에도 `ok, latencyMs 0` 을 돌려준다. 실제 호출을 하지 않으므로 로그인 확인 근거로 쓰지 않는다 |
+| 작업 폴더 경고 | 실행기 기록의 `workingDirectory /data/workspace/bp_3plgw/runs/<run> is not a directory, using default cwd` 는 격리 NONE 이라 run 폴더를 만들지 않아서다. 수리 프롬프트는 절대 경로 `/data/workspace/bp-3plgw`(마운트 `./workspace-3plgw`, uid 999 소유)를 쓰므로 영향 없다 |
 | CLI 한도 | 실행기 기록에 `rate_limit_event seven_day allowed_warning`. 공용 계정의 주간 한도가 가까워지고 있다 |
 
 남은 것: 3plgw PR #60 반영 뒤 `bp-3plgw` 이름이 풀리면 컨타가 부르는 3PLGW 재시도(건 3)로 실제 연동(제안 전달, BO2 승인, 적용, 회신). 59 의 빈 전용 계정 폴더는 사용자가 지운다: `docker run --rm -v /home/therecommerce/aimbase:/w alpine:latest sh -c "cd /w && rmdir claude-accounts-3plgw/work01 claude-accounts-3plgw/work02 claude-accounts-3plgw/work03 claude-accounts-3plgw"`.
