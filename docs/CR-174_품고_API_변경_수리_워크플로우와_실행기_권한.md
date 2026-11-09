@@ -113,13 +113,17 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 - `V76__cr174_pending_approvals_drop_action_log_fk.sql`: 두 외래키를 지우고 `action_log_id` 에 인덱스를 둔다. 열과 값의 뜻은 그대로다
 - 59 는 api 기동 때 테넌트 마이그레이션이 돌아 `./deploy.sh be` 로 적용된다. 로컬은 `POST /api/v1/platform/tenants/migrate` 로 따로 돌린다
 
+#### 4.3.5 CLI 응답에서 마지막 JSON 객체 추출 (2026-11-10, 59 건 3 실패로 추가)
+
+CLI 자율 주행 응답의 본문은 도구를 쓰는 동안의 진행 설명과 마지막 JSON 이 이어 붙은 글이다. 어댑터 출구의 정규화는 첫 `{` 부터 마지막 `}` 까지를 잘라 JSON 으로 읽었으므로 진행 설명에 중괄호가 섞이면 실패해 `structured_data` 가 비고, `submit` 본문의 `proposal` 이 null 이 되어 3PLGW 가 400 을 냈다(run be3907d1). 고친 것: 마지막 펜스 안, 그다음 글 전체에서 뒤에서부터 객체로 읽히는 `{...}` 를 고르고, 둘 다 없으면 예전 방식으로 돌아간다(`StructuredOutputNormalizer.stripFence`, `lastObject`). 채팅 경로와 LLM_CALL 도 같은 출구를 지나지만 잘 읽히던 응답은 결과가 같다(시험 11건). 수리 단계는 `response_schema` 를 선언해야 이 길을 탄다(4.4).
+
 ### 4.4 워크플로우 정의 `poomgo-change-repair` (PRD-366)
 
 테넌트 `bp_3plgw` 에 둔다. `graphMode: cyclic`, `entry_step: repair`, `error_handling: {retryMaxAttempts: 0}`(같은 변경에 수리는 한 번, BIZ-146), `output_schema` 없음.
 
 | 단계 | 종류 | 설정 |
 |---|---|---|
-| `repair` | AGENT_CALL | `connection_group_id: cli-runner-bp-3plgw-rr`, `isolation: NONE`, `timeout_ms`(기본 1800000), `require_text_output: true`, `tools` 칸은 두지 않는다(빈 허용 목록은 도구를 전부 막는다. Aimbase 도구 노출은 연결 `exposed_tools` 가 정한다), 프롬프트는 4.4.1. `onSuccess: submit` |
+| `repair` | AGENT_CALL | `connection_group_id: cli-runner-bp-3plgw-rr`, `isolation: NONE`, `timeout_ms`(기본 1800000), `require_text_output: true`, `response_schema`(4.4.1 의 JSON 모양. 이것이 있어야 CLI 응답이 `structured_data` 로 들어간다. 2026-11-10 추가), `tools` 칸은 두지 않는다(빈 허용 목록은 도구를 전부 막는다. Aimbase 도구 노출은 연결 `exposed_tools` 가 정한다), 프롬프트는 4.4.1. `onSuccess: submit` |
 | `submit` | TOOL_CALL `http_request` | 연결 `bp-3plgw`, `POST /api/v1/internal/poomgo-repair/changes/{{input.change_id}}/proposals`(3PLGW T3-2 2-1). 본문: `run_id {{run.id}}`, `change_id`, `proposal {{repair.structured_data}}`. 201 등록, 200 같은 run 재전송, 422 검증 실패와 404, 409 는 단계 실패(4xx, 5xx). `onSuccess: approval` |
 | `approval` | HUMAN_INPUT | `message: "품고 변경 수리 제안 {{input.change_id}}"`, `reason: {{input.summary}}`, `timeoutMs`(기본 259200000, 72시간. 3PLGW 승인 시한 4시간보다 길게, 3PLGW 1-4). `onSuccess: apply` |
 | `apply` | ROUTER | `routes: [{when: "{{repair.structured_data.result_kind}} equals 'CONTRACT'", to: activate}, {when: "{{repair.structured_data.result_kind}} equals 'CODE'", to: merge}]`. 둘 다 아니면 실패 |
@@ -135,7 +139,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 3. 이름만 바뀐 것(키 이름, 상태값, 선택자 글자)이면 코드를 고치지 않고 계약 spec 과 같은 모양(sourceCode, envelope, fields, valueMaps, screen)의 새 판을 `contract_proposal` 에 낸다. 레포에 표본 재생 시험 도구가 있으면 어긋난 표본을 새 판으로 돌려 필수 칸 채움률을 잰다
 4. 구조나 화면이 바뀐 것이면 코드를 고치고 단위 시험과 표본 재생 시험을 통과시킨 뒤 가지를 밀어 올리고 `gh pr create --base {{input.repo.base_branch}} --label <pr_labels>` 로 PR 을 만든다
 5. 운영 DB, 운영 서버, 다른 레포에 손대지 않는다. force push, merge, 가지 삭제를 하지 않는다. 비밀값을 출력에 적지 않는다
-6. 마지막 줄에 JSON 한 덩이만 낸다
+6. 마지막 응답은 JSON 한 덩이만 낸다(펜스 없이, 뒤에 글을 붙이지 않는다). 진행 설명이 앞에 붙어도 엔진이 마지막 JSON 객체를 고른다(4.3.5)
 
 ```json
 {"result_kind": "CONTRACT | CODE | NONE",
@@ -214,6 +218,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | T3-2 | 실행 입력 `_callback`, 회신 본문, 단계 변수 `{{run.*}}`, 승인 API 를 소비앱 키로 부르는 길, HUMAN_INPUT `timeoutMs` |
 | T3-3, T3-4 | 영향 없음(화면 없음. 승인 화면은 BO2 다) |
 | T3-5 | TC-WF-034 부터 TC-WF-041 |
+| CR-143 설계서 | 어댑터 출구 정규화 행: 첫 `{`~마지막 `}` 가 아니라 글 끝의 마지막 JSON 객체(4.3.5) |
 | API 가이드 | 4-4 실행 입력 `_callback`, 4-6 상태(승인 시한 초과), 승인 API 소비앱 호출. v3.28.0 |
 | 운용 가이드 | 2-13 「bp-3plgw 수리 실행기」. v3.23.0 |
 
@@ -280,6 +285,15 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 
 남은 것: 3plgw PR #60 반영 뒤 `bp-3plgw` 이름이 풀리면 컨타가 부르는 3PLGW 재시도(건 3)로 실제 연동(제안 전달, BO2 승인, 적용, 회신). 59 의 빈 전용 계정 폴더는 사용자가 지운다: `docker run --rm -v /home/therecommerce/aimbase:/w alpine:latest sh -c "cd /w && rmdir claude-accounts-3plgw/work01 claude-accounts-3plgw/work02 claude-accounts-3plgw/work03 claude-accounts-3plgw"`.
 
+### 7.5 59 건 3 실패와 수정 (2026-11-10 00:04 컨타 승인 ①)
+
+| 확인 | 결과 |
+|---|---|
+| 건 3 run be3907d1 | `repair` 는 completed 인데 `structured_data` 없음. `submit` 본문 `proposal` null, 3PLGW 400 `run_id 와 proposal 이 필요합니다`(3PLGW 동작은 맞다) |
+| 원인 | 수리 단계에 `response_schema` 가 없어 CLI 응답이 글로만 남았고, 있었더라도 진행 설명의 중괄호 때문에 첫 `{`~마지막 `}` 추출이 JSON 이 아니었다(4.3.5) |
+| 고침 | 워크플로우 정의에 `response_schema`, 출력 지시 문구 보강. 엔진 추출기는 마지막 JSON 객체. 단위 시험 11건 통과(새 3건 포함) |
+| 59 반영 | 아래 8 기록 |
+
 ## 8. 진행 기록
 
 | 일시 | 한 일 |
@@ -294,3 +308,4 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-09 19:42 | 컨타 알림(19:34)대로 3PLGW 연결 bp-3plgw baseUrl 을 59 도 http://bp-3plgw:8187 로(설치 스크립트 http 단계 재실행, 응답 200, 조회로 확인). 계약 문서, 운용 가이드, 스크립트 안내문 같은 값으로 |
 | 2026-11-09 23:29 | 사용자 승인(컨타 전달) ①: GitHub 토큰 파일이 올 때까지 기다렸다 be, agent-3plgw 배포와 수리 단계 확인 뒤 완료. 토큰 도착은 컨타가 알린다 |
 | 2026-11-09 23:50 | 토큰 반영 7.4: be, agent-3plgw 배포, 공용 계정 폴더 전환, gh 로그인, 실행기 AGENT_CALL 시험 OK(4.6초). 컨타에 알림, 3PLGW 재시도(건 3) 대기 |
+| 2026-11-10 00:20 | 건 3(run be3907d1) 실패 원인: 수리 단계 response_schema 없음 + 진행 설명 중괄호로 첫 { 추출 실패(7.5). 컨타 승인 ①(00:04)로 워크플로우 정의에 response_schema, 엔진 추출기는 마지막 JSON 객체(4.3.5). 단위 시험 11건 통과. 59 api 재배포와 워크플로우 재등록으로 간다 |
