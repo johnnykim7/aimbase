@@ -75,6 +75,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | `detected_at` | 예 | 감지 시각. UTC 오프셋 붙은 ISO-8601 |
 | `repo` | 예 | `url`(https 주소), `base_branch`(PR 의 바탕 가지), `commit`(감지 시점 수집기 커밋) |
 | `contract` | 예 | `version`(지금 활성 계약 판), `url`(계약 내용 조회 주소) |
+| `contract.all_active_url` | 아니오 | 모든 원천의 활성 계약 목록 주소. 값 변환표 표기를 원천끼리 맞추는 데 쓴다(2026-11-10 07:31 결정). 없으면 실행기가 원천별 활성 계약 조회로 대신한다 |
 | `samples` | 예 | `broken_url`(어긋난 응답), `last_good_url`(마지막 정상 응답), `dom_dump_url`(화면 변경 때, 없으면 null). 모두 개인정보 제거본. 작은 JSON 은 `broken`, `last_good` 에 본문을 실어도 된다 |
 | `summary` | 아니오 | 3PLGW 감지기가 쓴 한 줄 |
 | `pr_labels` | 아니오 | PR 에 붙일 라벨. 없으면 `["deploy-59"]`(bp-infra CR-INFRA-008 59 배포 신호) |
@@ -136,7 +137,7 @@ CLI 자율 주행 응답의 본문은 도구를 쓰는 동안의 진행 설명�
 
 1. 작업장 `/data/workspace/bp-3plgw` 에 레포가 없으면 `git clone {{input.repo.url}}`, 있으면 `git fetch`. `{{input.repo.commit}}` 에서 가지 `fix/poomgo-{{input.change_id}}` 를 만든다. 자격은 `GH_TOKEN`. git 은 이미지에 박은 `credential.helper = gh auth git-credential` 이 그 토큰을 낸다
 2. 계약 `{{input.contract.url}}` 과 표본(과 DOM 덤프)을 머리글 `X-Internal-Service-Key: $TPLGW_INTERNAL_KEY` 로 curl 해 대조해 어긋난 자리를 찾는다. `last_good_url` 이 404 면(그 원천의 첫 감지) 어긋난 표본과 계약만으로 간다
-3. 이름만 바뀐 것(키 이름, 상태값, 선택자 글자)이면 코드를 고치지 않고 계약 spec 과 같은 모양(sourceCode, envelope, fields, valueMaps, screen)의 새 판을 `contract_proposal` 에 낸다. 레포에 표본 재생 시험 도구가 있으면 어긋난 표본을 새 판으로 돌려 필수 칸 채움률을 잰다
+3. 이름만 바뀐 것(키 이름, 상태값, 선택자 글자)이면 코드를 고치지 않고 계약 spec 과 같은 모양(sourceCode, envelope, fields, valueMaps, screen)의 새 판을 `contract_proposal` 에 낸다. 레포에 표본 재생 시험 도구가 있으면 어긋난 표본을 새 판으로 돌려 필수 칸 채움률을 잰다 값 변환표 표기는 새로 짓지 않고 모든 원천의 활성 계약에서 같은 원문 값의 표기를 가져다 쓴다(SAME_DAY 는 운송장의 「당일」, 「당일배송」 아님).
 4. 구조나 화면이 바뀐 것이면 코드를 고치고 단위 시험과 표본 재생 시험을 통과시킨 뒤 가지를 밀어 올리고 `gh pr create --base {{input.repo.base_branch}} --label <pr_labels>` 로 PR 을 만든다
 5. 운영 DB, 운영 서버, 다른 레포에 손대지 않는다. force push, merge, 가지 삭제를 하지 않는다. 비밀값을 출력에 적지 않는다
 6. 마지막 응답은 JSON 한 덩이만 낸다(펜스 없이, 뒤에 글을 붙이지 않는다). 진행 설명이 앞에 붙어도 엔진이 마지막 JSON 객체를 고른다(4.3.5)
@@ -201,6 +202,7 @@ CLI 자율 주행 응답의 본문은 도구를 쓰는 동안의 진행 설명�
 | 3 | 회신 수신 API 경로(`_callback.path` 에 실어 보낸다) | 4.3.1 본문을 받는다 |
 | 4 | 표본 조회 주소의 인증 방식 | repair 단계의 CLI 가 curl 로 받는다. 머리글 토큰이면 환경변수 이름을 정한다 |
 | 5 | 3PLGW 안쪽 주소(망 `aimbase-apps`)와 59 주소 | HTTP 연결 `baseUrl` |
+| 6 | 모든 원천의 활성 계약 목록 주소(`contract.all_active_url`). `/contracts/active` 에서 `source` 생략 시 전체 배열 | repair 단계가 값 변환표 표기를 맞춘다. 2026-11-10 07:31 사용자 결정, 컨타 경유로 요청 |
 
 받음(2026-11-09 15:05, 3PLGW `docs/AI-SDLC/T3-2_API_설계.md` CR-3PLGW-094 2절): 1 `POST /api/v1/internal/poomgo-repair/changes/{change_id}/proposals`(201, 같은 run 재전송 200, 검증 실패 422), 2 `POST .../changes/{change_id}/activate`, 3 `POST .../changes/{change_id}/result`, 4 머리글 `X-Internal-Service-Key`, 실행기 환경변수 `TPLGW_INTERNAL_KEY`, 5 59 `http://59.8.160.12:8187`, 운영 `http://bp-3plgw:8187`. 3PLGW 가 바라는 것(1-4) 셋, 승인 시한 72시간, `last_good_url` 404 허용, 회신 `result.pr.title`, 은 전부 받았다. 3PLGW 1-1 의 `repo.url` 기본값 `bp-3plgw.git` 은 실제 레포 `therecommerce-develop/3plgw.git` 과 다르다(회신으로 알린다).
 
@@ -319,3 +321,4 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-10 05:00 | dev 푸시 준비(컨타 ② 04:52, 충돌 처리 ① 04:55): origin/dev 위 임시 작업 사본에 CR-174 커밋 22건만 cherry-pick. 설치 스크립트는 CR-173 구조(wms, wes-cs, widget 단계, 라벨, 태그 변수) 위에 3plgw 대상과 59 분리 배치 판별, 비밀값 파일 참조를 얹어 다시 만들고 wes-cs 줄은 그대로 둠. deploy.sh 와 compose 는 양쪽 추가, 운용 가이드 2-13 은 v3.25.0 으로 번호 재부여. 다른 CR 의 미푸시 커밋 12건은 손대지 않음(담당자에게 맡김) |
 | 2026-11-10 05:05 | origin/dev 32724a6..0e6923f 로 fast-forward 푸시(CR-174 23건). 병합한 설치 스크립트를 59 build/ 에 올려 smoke 3plgw: 워크플로우, 커넥션 2건, 그룹 모두 200, 실행기 health ok, gh 로그인 유지, TPLGW_INTERNAL_KEY 있음, 종료 코드 0. 컨타에 커밋 범위와 결과 알림 |
 | 2026-11-10 06:05 | 3PLGW 가 59 수리 창구를 전용 키로 분리(새 컨테이너 06:04). 실행기에서 Aimbase 키로 확인: 모르는 change_id 의 proposals, result 는 404(키 없이는 403), 실제 change_id 에 빈 본문은 400(run_id 와 proposal 필요). 제안 전달과 종료 회신 모두 키가 다시 통함. 그 사이(04:50~06:04) 는 키 있어도 403 이었음. Aimbase 쪽 변경 없음, 운영 반영 대기 |
+| 2026-11-10 07:40 | 사용자 결정(07:31, 컨타 전달 ①): 수정안의 값 변환표 표기를 모든 원천의 기존 표기와 맞춘다(SAME_DAY 는 운송장 「당일」, 「당일배송」 아님). 59 활성 계약(INVOICE 판 1) valueMaps 와 3PLGW cr-3plgw-094 확인: 원천별 활성 계약 조회 `/contracts/active?source=` 는 있고 전체 목록은 없음(source 없으면 500). 수리 지시문에 규칙과 목록 주소 `contract.all_active_url`(없으면 레포 SourceCode 로 원천별 조회) 추가, 전체 목록 창구는 컨타 경유로 3PLGW 에 요청 |
