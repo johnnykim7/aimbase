@@ -3011,7 +3011,7 @@ cap 32000
 `POST /api/v1/workflows/{id}/run` 등 모든 실행 입력에 실을 수 있다. run 이 completed, failed, cancelled 어느 쪽으로 끝나든 그 연결의 그 경로로 결과를 한 번 POST 한다(BIZ-143).
 
 ```json
-{"_callback": {"connection_id": "bp-3plgw", "path": "/api/v1/poomgo/repairs/ord-1/result", "result_step": "repair"}}
+{"_callback": {"connection_id": "bp-3plgw", "path": "/api/v1/internal/poomgo-repair/changes/ord-1/result", "result_step": "repair"}}
 ```
 
 | 칸 | 필수 | 값 |
@@ -3037,7 +3037,7 @@ cap 32000
 ### HUMAN_INPUT 단계 `timeoutMs` 와 승인 시한 [PRD-364]
 
 ```json
-{"id": "approval", "type": "HUMAN_INPUT", "timeoutMs": 14400000, "config": {"message": "품고 변경 수리 제안 {{input.change_id}}", "reason": "{{input.summary}}"}}
+{"id": "approval", "type": "HUMAN_INPUT", "timeoutMs": 259200000, "config": {"message": "품고 변경 수리 제안 {{input.change_id}}", "reason": "{{input.summary}}"}}
 ```
 
 - `timeoutMs` 가 있으면 `pending_approvals.timeout_at = now + timeoutMs`. 감시기(`aimbase.workflow.approval-timeout.sweep-ms`, 기본 60000)가 지난 것을 `timeout` 으로 닫고 run 을 `failed`, `error = {reason: approval_timeout, detail: <timeout_at>}` 로 끝낸다(BIZ-144)
@@ -3053,16 +3053,16 @@ cap 32000
 
 ### 품고 변경 수리 워크플로우 `poomgo-change-repair` [PRD-366]
 
-테넌트 `bp_3plgw`. 웹훅 입력, 승인 전달, 회신, 조회는 `협업/계약_CR-174_품고_변경_수리_요청_웹훅.md` 가 정본이다. 단계는 repair(AGENT_CALL, 묶음 `cli-runner-bp-3plgw-rr`) 에서 submit(http_request, 3PLGW 제안 제출) 로, approval(HUMAN_INPUT) 에서 apply(ROUTER, `result_kind`) 로, activate(http_request, 3PLGW 계약 활성화) 또는 merge(http_request, GitHub `PUT /repos/therecommerce-develop/3plgw/pulls/{{steps.repair.output.pr.number}}/merge`) 로 끝난다. `error_handling.retryMaxAttempts = 0`(BIZ-146). 정의 JSON 은 `scripts/chaws-bootstrap.sh` 대상 `3plgw` 의 workflow 단계가 넣는다.
+테넌트 `bp_3plgw`. 웹훅 입력, 승인 전달, 회신, 조회는 `협업/계약_CR-174_품고_변경_수리_요청_웹훅.md` 가 정본이다. 단계는 repair(AGENT_CALL, 묶음 `cli-runner-bp-3plgw-rr`) 에서 submit(http_request, 3PLGW 제안 제출) 로, approval(HUMAN_INPUT) 에서 apply(ROUTER, `result_kind`) 로, activate(http_request, 3PLGW 계약 활성화) 또는 merge(http_request, GitHub `PUT /repos/{{repair.structured_data.pr.repo}}/pulls/{{repair.structured_data.pr.number}}/merge`) 로 끝난다. submit 은 `POST /api/v1/internal/poomgo-repair/changes/{{input.change_id}}/proposals`, activate 는 같은 자리의 `/activate`(3PLGW T3-2, CR-3PLGW-094). 단계 이음은 `onSuccess`, 앞 단계 값은 `{{repair.structured_data.*}}`, approval `timeoutMs` 259200000(72시간). `error_handling.retryMaxAttempts = 0`(BIZ-146). 정의 JSON 은 `scripts/chaws-bootstrap.sh` 대상 `3plgw` 의 workflow 단계가 넣는다.
 
 repair 단계 출력(구조화 JSON):
 
 ```json
 {"result_kind": "CONTRACT | CODE | NONE", "summary": "한 줄",
- "changed": [{"where": "orders.items[].sku", "before": "itemCode", "after": "item_code"}],
- "contract_proposal": {"base_version": 12, "changes": []},
- "pr": {"number": 57, "url": "https://github.com/therecommerce-develop/3plgw/pull/57", "branch": "fix/poomgo-ord-1"},
- "tests": {"unit": "passed | failed | skipped", "replay_fill_rate": 0.98},
+ "changed": [{"kind": "FIELD_PATH | VALUE | REQUIRED | SCREEN", "name": "주문 번호", "before": "orderSheet.orderCode", "after": "orderSheet.orderNo", "change": "RENAMED | ADDED | REMOVED | MOVED"}],
+ "contract_proposal": {"sourceCode": "ORDER", "envelope": {}, "fields": [], "valueMaps": {}, "screen": {}},
+ "pr": {"number": 57, "url": "https://github.com/therecommerce-develop/3plgw/pull/57", "branch": "fix/poomgo-ord-1", "title": "fix: 품고 ORDER 변경 대응 (ord-1)", "repo": "therecommerce-develop/3plgw"},
+ "tests": {"unit": "passed | failed | skipped", "unit_passed": 41, "unit_total": 41, "replay_fill_rate": 0.98},
  "failure_reason": null}
 ```
 

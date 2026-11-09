@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.24.0** | 2026-11-09 | Aimbase v8.18.0 기준
+> **v3.25.0** | 2026-11-09 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -673,6 +673,52 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 - **생성 중 다른 서비스가 느리다**: `cpus`, `cpu_shares` 를 낮춘다(`docker-compose.prod.yml` 의 `tts-sidecar`)
 - **맡기기가 503 이고 `/health` 가 `backoff`**: 모델 프로세스가 죽어 쉬는 중이다. `error` 가 `model process exited: -9` 면 메모리 상한에 걸려 끝난 것이다. `retry_after` 초가 지나면 다음 문장에 다시 싣는다. 쉬는 동안 맡긴 작업은 FAILED `tts_generator_unavailable` 이 되고 bp-wms 가 다음에 다시 맡긴다. 되풀이되면 `mem_limit` 을 본다
 - **일이 없는데 메모리를 계속 쓴다**: `/health` 의 `model` 이 `ready` 면 아직 쉬는 시간이 지나지 않았거나 작업이 남은 것이다. api 로그의 `tts-job` 줄로 남은 작업을 본다
+
+---
+
+### 2-13. bp-3plgw 품고 수리 실행기 [CR-174]
+
+3PL 게이트웨이(bp-3plgw)가 품고 API, 화면 변경을 감지하면 Aimbase 워크플로우 `poomgo-change-repair`(테넌트 `bp_3plgw`)를 부릅니다. 전용 실행기 `aimbase-agent-3plgw`(실행기 이름 `cli-runner-bp-3plgw`, 일꾼 1, 포트 8304, MCP 8305)가 코드 레포를 받아 계약 판 제안 또는 수정 PR 을 만들고, 3PLGW 에 제안을 넣어 BO2 승인을 기다린 뒤 계약 활성화 또는 PR 머지로 끝냅니다. 웹훅 입력과 회신 모양은 `docs/협업/계약_CR-174_품고_변경_수리_요청_웹훅.md` 가 정본입니다.
+
+**다른 실행기와 다른 점**: GitHub 토큰이 이 컨테이너에만 있고, 계정 폴더(`claude-accounts-3plgw`)와 작업장(`workspace-3plgw`)을 bp_wms 실행기와 나눕니다. 운영 DB 자격은 주지 않습니다(PG 환경변수 없음, DB 도구 미노출). 도구 모드는 HYBRID 입니다. 같은 변경 지문에 수리는 한 번이고 Aimbase 는 실패한 run 을 스스로 다시 돌리지 않습니다.
+
+**비밀값**:
+
+| 자리 | 변수 | 뜻 |
+|---|---|---|
+| 실행기 env(59 `.env.runner-3plgw`, chaws `agent-3plgw.env`) | `GH_TOKEN` | GitHub fine-grained 토큰. 3plgw 레포 contents, pull_requests 쓰기. git 은 이미지의 `gh auth git-credential` 이 이 토큰을 낸다 |
+| 실행기 env | `TPLGW_INTERNAL_KEY` | 3PLGW 내부 API 키. 실행기의 CLI 가 계약과 표본을 curl 로 받을 때 머리글 `X-Internal-Service-Key` 에 넣는다 |
+| 실행기 env | `AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY` | `bp_3plgw` 실행기 전용 키(59 는 `.env` 의 `BP_3PLGW_SERVER_MCP_API_KEY`) |
+| api env(59 `.env`, chaws `api.env`) | `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` | HTTP 연결 `bp-3plgw`, `github-bp-3plgw` 의 `auth.value_env` 가 api 프로세스 env 에서 읽는다. 제안 등록, 계약 활성화, 회신, PR 머지에 쓴다 |
+
+**세우기** (`bootstrap <단계> 3plgw`. chaws 는 § 2-10 과 같이 `build/chaws-bootstrap.sh`, 59 는 작업 폴더의 `scripts/chaws-bootstrap.sh`):
+1. 위 비밀값을 env 파일에 넣는다. api 가 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 새로 읽어야 하면 api 를 다시 올린다
+2. `admin 3plgw`: CLI 허용 테넌트에 `bp_3plgw` 를 더한다
+3. `tenant 3plgw`: 테넌트 `bp_3plgw`, 실행기 전용 키, 소비앱 키(`secrets/bp-3plgw-api-key`, 3PLGW 에 전한다). env 에 빠진 비밀값을 경고로 찍는다
+4. 실행기 기동. 59 는 `./deploy.sh agents`(모든 실행기), chaws 는 `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-3plgw`. 기록에 `Agent registered successfully: name=cli-runner-bp-3plgw` 가 나오면 된 것
+5. 계정 로그인: `claude-accounts-3plgw/<계정>/` 에 work01, work02, work03 로그인 파일(§ 2-10 과 같은 방법, 폴더만 다르다)
+6. `connections 3plgw`: 계정마다 CLI 연결 `cli-runner-bp-3plgw-<계정>`(HYBRID)과 묶음 `cli-runner-bp-3plgw-rr`
+7. `TPLGW_BASE_URL=<3PLGW 주소> bootstrap http 3plgw`: HTTP 연결 `bp-3plgw`(59 `http://59.8.160.12:8187`, 운영 `http://bp-3plgw:8187`)와 `github-bp-3plgw`
+8. `workflow 3plgw`: `scripts/poomgo-change-repair.workflow.json` 을 등록하거나 고친다(chaws 는 `build/` 에 같이 올라간다)
+9. `smoke 3plgw`: 워크플로우, 연결, 묶음, 실행기 건강, git, gh, 토큰 로그인, 내부 키 유무를 찍는다
+
+**설정값** (코드에 없다): 승인 시한은 워크플로우 정의 HUMAN_INPUT `timeoutMs`(72시간), 수리 단계 시한은 AGENT_CALL `timeout_ms`(30분), 모델과 도구 모드는 연결 config, PR 라벨은 입력 `pr_labels`(없으면 `deploy-59`). 회신 재시도와 시한 감시는 api 설정이다.
+
+| 설정 | 환경변수 | 기본값 | 의미 |
+|---|---|---|---|
+| `aimbase.workflow.callback.retry-max-attempts` | `AIMBASE_WORKFLOW_CALLBACK_RETRY_MAX_ATTEMPTS` | 3 | 회신이 2xx 가 아닐 때 다시 보내는 횟수 |
+| `aimbase.workflow.callback.retry-delay-ms` | `AIMBASE_WORKFLOW_CALLBACK_RETRY_DELAY_MS` | 5000 | 다시 보내기 간격 |
+| `aimbase.workflow.approval-timeout.sweep-ms` | `AIMBASE_WORKFLOW_APPROVAL_TIMEOUT_SWEEP_MS` | 60000 | 승인 시한 감시 주기 |
+| `aimbase.workflow.approval-timeout.initial-delay-ms` | `AIMBASE_WORKFLOW_APPROVAL_TIMEOUT_INITIAL_DELAY_MS` | 30000 | 기동 뒤 첫 감시까지 |
+
+**장애 대응**:
+
+- **run 이 `failed`, 회신 `error.reason` 이 `cli_account_limited:` 로 시작**: 세 계정이 다 한도다. 리셋 뒤 3PLGW 가 `change_id-r{n}` 으로 다시 부른다
+- **submit 단계 실패(4xx)**: 3PLGW 가 제안을 거부한 것(422 검증 실패, 409 변경 상태 불일치). 회신 `error` 에 단계 실패 메시지가 실린다. 3PLGW 쪽 변경 상태를 본다
+- **실행기 기록에 `gh: not logged in`, `could not read Username`**: `GH_TOKEN` 이 비었거나 권한이 모자란다. `docker compose exec aimbase-agent-3plgw gh auth status`
+- **계약, 표본 curl 이 401**: 실행기 env `TPLGW_INTERNAL_KEY` 가 3PLGW 의 내부 키와 다르다
+- **회신이 안 온다**: 실행 이벤트에 `CALLBACK_FAILED` 가 있으면 3PLGW 가 2xx 를 주지 않은 것. 3PLGW 는 `GET /api/v1/workflows/runs/{run_id}` 로 당겨 본다
+- **승인 대기가 시한을 지나도 안 끝난다**: api 가 돌고 있는지, `approval-timeout.sweep-ms` 를 본다. 감시기는 기동 30초 뒤부터 1분마다 돈다
 
 ---
 
@@ -1878,6 +1924,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.25.0 | 2026-11-09 | **CR-174 bp-3plgw 품고 수리 실행기** (§ 2-13). 전용 실행기 `aimbase-agent-3plgw`, 비밀값 자리, 설치 단계(`bootstrap <단계> 3plgw`), 회신 재시도와 승인 시한 감시 설정, 장애 대응 |
 | v3.24.0 | 2026-11-09 | **CR-173 CS 실행기 프로세스 상한** (§ 2-10). `AIMBASE_RUNNER_MAX_PROCESSES`, `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS`, 줄서기와 자리 내기 기록, 59 의 `./deploy.sh agent-wes-cs` |
 | v3.23.1 | 2026-11-09 | **CR-173 위젯 공개 주소 정정** (§ 2-10). 운영은 `ai.banpoom.co.kr`, 서버 nginx 설정 파일과 인증서 갱신 |
 | v3.23.0 | 2026-11-09 | **CR-173 운영 chaws bp-wes CS 실행기와 위젯 공개 주소** (§ 2-10). 실행기 `aimbase-agent-wes-cs`, `./deploy.sh chaws-agent-wes-cs`, `chaws-bootstrap`, 설치 스크립트 대상 `wes-cs` 와 단계 `widget`, 위젯 통과 경로와 nginx 설정 |

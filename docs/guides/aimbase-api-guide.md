@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.27.1** | 2026-11-08 | Aimbase v8.18.0 기준
+> **v3.28.0** | 2026-11-09 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -528,6 +528,39 @@ curl -X POST "/api/v1/workflows/{id}/run?session_id=bp-office-work-7" \
 - 연결이 그림을 받지 않거나, PDF 를 그림으로도 글로도 읽지 못하면 단계가 실패한다
 - 재실행(`/runs/{runId}/rerun`)은 새 세션으로 돌아 첨부를 쓴 실행에는 쓸 수 없다. 새로 실행한다
 
+**실행이 끝나면 알려 받기 `_callback` (CR-174)**
+
+실행 입력에 `_callback` 을 실으면 run 이 `completed`, `failed`, `cancelled` 어느 쪽으로 끝나든 그 연결의 그 경로로 결과를 한 번 POST 합니다. § 4-5 폴링을 대신합니다.
+
+```bash
+curl -X POST /api/v1/workflows/{id}/run \
+  -d '{"change_id": "ord-1",
+       "_callback": {"connection_id": "bp-3plgw", "path": "/api/v1/internal/poomgo-repair/changes/ord-1/result", "result_step": "repair"}}'
+```
+
+| 칸 | 필수 | 뜻 |
+|---|---|---|
+| `connection_id` | 예 | 그 테넌트에 등록된 HTTP 연결 id. 주소는 연결 `baseUrl` + `path`, 머리글은 연결 `auth` 가 넣는다 |
+| `path` | 예 | `/` 로 시작하는 경로 |
+| `result_step` | 아니오 | 회신 `result` 에 실을 단계 id. 그 단계의 구조화 출력(structured_data), 없으면 output 글. 칸이 없으면 `result` 는 null |
+
+칸이 틀리면 run 을 만들지 않고 400 `callback_invalid:<칸>` 입니다. 회신 본문:
+
+```json
+{"run_id": "6c1f...", "workflow_id": "poomgo-change-repair", "status": "failed",
+ "error": {"reason": "approval_timeout", "detail": "2026-11-09T10:12:00Z"},
+ "result": {"result_kind": "CODE", "pr": {"number": 57}},
+ "completed_at": "2026-11-09T10:12:03.004Z", "duration_ms": 14403000}
+```
+
+- `status` 는 run 상태 그대로(§ 4-6). `error` 는 run 의 error, 없으면 null. 승인 거절은 `reason` 이 `Human approval rejected`, 승인 시한 초과는 `approval_timeout`
+- 2xx 가 아니면 설정 횟수(기본 3번, 5초 간격)까지 다시 보냅니다. 같은 `run_id` 회신이 두 번 올 수 있으니 받는 쪽이 한 번만 처리합니다
+- 자식 run(SUB_WORKFLOW)은 회신하지 않습니다
+
+**승인 시한 (CR-174)**: HUMAN_INPUT 단계에 `timeoutMs` 를 두면 그 시간 안에 `POST /api/v1/workflows/runs/{runId}/approve` 가 오지 않을 때 run 이 `failed`, `error.reason = approval_timeout`, `error.detail` 에 시한 시각으로 끝납니다. 없으면 시한이 없습니다. 시한이 지난 뒤의 승인은 409 입니다.
+
+**단계 틀 변수 `{{run.*}}` (CR-174)**: 단계 config 안에서 `{{run.id}}`(이 run 의 id), `{{run.workflow_id}}`, `{{run.session_id}}` 를 쓸 수 있습니다. 바깥 시스템에 run_id 를 넘겨 회신과 맞출 때 씁니다.
+
 ### 4-5. 결과 폴링
 
 워크플로우는 **비동기 실행**입니다. 결과를 얻으려면 폴링이 필요합니다.
@@ -593,6 +626,7 @@ run **단건** 조회 2종 — `GET /api/v1/workflows/{id}/runs/{runId}` 과 `GE
 | `running` | 실행 중 |
 | `completed` | 정상 완료 |
 | `failed` | 스텝 실행 실패 |
+| `failed` + `error.reason = approval_timeout` | HUMAN_INPUT 승인 시한 초과 (CR-174). `error.detail` 에 시한 시각 |
 | `pending_approval` | HUMAN_INPUT 승인 대기 |
 | `cancelled` | 중지됨 (사용자 요청) |
 
@@ -2472,6 +2506,7 @@ curl -X POST /api/v1/dev-work-items/W-1/status \
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.28.0 | 2026-11-09 | **CR-174 실행 종료 회신, 승인 시한, run 변수** (§ 4-4, § 4-6). 실행 입력 `_callback` 으로 run 이 끝나면 HTTP 연결로 결과를 POST 한다. HUMAN_INPUT `timeoutMs` 가 지나면 `failed(approval_timeout)`. 단계 틀 변수 `{{run.id}}` 등 |
 | v3.27.1 | 2026-11-08 | **CR-171 음성 생성 작업 재사용** (§ 27-2). 소리 길이가 0.25초보다 짧게 끝난 작업은 돌려주지 않고 새로 만든다. 요청과 응답 모양은 그대로다 |
 | v3.27.0 | 2026-11-08 | **CR-170 검색 결과 문서 ID 와 벡터 유사도** (§ 3). 결과 항목에 `documentId`, `vectorScore` 를 더한다. § 2-2 텍스트 학습이 같은 소스의 다른 문서를 지우던 결함을 고쳐 설명을 보정하고, 이 용도의 소스는 `api` 유형으로 만든다고 적는다 |
 | v3.26.5 | 2026-11-04 | **CR-168 실행기 연결 신호 전용 상한** (§ 14-4). 등록과 하트비트는 테넌트마다 분당 60번까지, 넘으면 429 |
