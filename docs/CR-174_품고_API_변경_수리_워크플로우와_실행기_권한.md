@@ -112,20 +112,20 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 
 | 단계 | 종류 | 설정 |
 |---|---|---|
-| `repair` | AGENT_CALL | `connection_group_id: cli-runner-bp-3plgw-rr`, `isolation: NONE`, `timeout_ms`(기본 1800000), `require_text_output: true`, `tools: []`(Aimbase 도구 없음, 네이티브만), 프롬프트는 4.4.1. `next_step: submit` |
-| `submit` | TOOL_CALL `http_request` | 연결 `bp-3plgw`, 3PLGW 「제안 제출」 경로(3PLGW 계약). 본문: `run_id {{run.id}}`, `change_id`, `proposal {{steps.repair.output}}`. 4xx, 5xx 는 단계 실패. `next_step: approval` |
-| `approval` | HUMAN_INPUT | `message: "품고 변경 수리 제안 {{input.change_id}}"`, `reason: {{input.summary}}`, `timeoutMs`(기본 14400000, 4시간). `next_step: apply` |
-| `apply` | ROUTER | `routes: [{when: "{{steps.repair.output.result_kind}} == CONTRACT", to: activate}, {when: "{{steps.repair.output.result_kind}} == CODE", to: merge}]`. 둘 다 아니면 실패 |
-| `activate` | TOOL_CALL `http_request` | 연결 `bp-3plgw`, 3PLGW 「계약 활성화」 경로(3PLGW 계약). 본문: `run_id`, `change_id`, `contract_proposal`. 끝 |
-| `merge` | TOOL_CALL `http_request` | 연결 `github-bp-3plgw`, `PUT /repos/therecommerce-develop/3plgw/pulls/{{steps.repair.output.pr.number}}/merge`, 본문 `{merge_method: "squash"}`. 끝 |
+| `repair` | AGENT_CALL | `connection_group_id: cli-runner-bp-3plgw-rr`, `isolation: NONE`, `timeout_ms`(기본 1800000), `require_text_output: true`, `tools` 칸은 두지 않는다(빈 허용 목록은 도구를 전부 막는다. Aimbase 도구 노출은 연결 `exposed_tools` 가 정한다), 프롬프트는 4.4.1. `onSuccess: submit` |
+| `submit` | TOOL_CALL `http_request` | 연결 `bp-3plgw`, `POST /api/v1/internal/poomgo-repair/changes/{{input.change_id}}/proposals`(3PLGW T3-2 2-1). 본문: `run_id {{run.id}}`, `change_id`, `proposal {{repair.structured_data}}`. 201 등록, 200 같은 run 재전송, 422 검증 실패와 404, 409 는 단계 실패(4xx, 5xx). `onSuccess: approval` |
+| `approval` | HUMAN_INPUT | `message: "품고 변경 수리 제안 {{input.change_id}}"`, `reason: {{input.summary}}`, `timeoutMs`(기본 259200000, 72시간. 3PLGW 승인 시한 4시간보다 길게, 3PLGW 1-4). `onSuccess: apply` |
+| `apply` | ROUTER | `routes: [{when: "{{repair.structured_data.result_kind}} equals 'CONTRACT'", to: activate}, {when: "{{repair.structured_data.result_kind}} equals 'CODE'", to: merge}]`. 둘 다 아니면 실패 |
+| `activate` | TOOL_CALL `http_request` | 연결 `bp-3plgw`, `POST /api/v1/internal/poomgo-repair/changes/{{input.change_id}}/activate`(3PLGW T3-2 2-2). 본문: `run_id`, `change_id`, `contract_proposal`. 200 `{contractId, version, alreadyActive}`(BO2 가 승인 때 먼저 활성화했으면 `alreadyActive` true). 끝 |
+| `merge` | TOOL_CALL `http_request` | 연결 `github-bp-3plgw`, `PUT /repos/{{repair.structured_data.pr.repo}}/pulls/{{repair.structured_data.pr.number}}/merge`, 머리글 `Accept: application/vnd.github+json`, 본문 `{merge_method: "squash"}`. 끝 |
 
 #### 4.4.1 repair 단계가 하는 일
 
 프롬프트는 워크플로우 정의 안에 둔다(코드가 아니다). 시키는 것은 아래다.
 
-1. 작업장 `/data/workspace/bp-3plgw` 에 레포가 없으면 `git clone {{input.repo.url}}`, 있으면 `git fetch`. `{{input.repo.commit}}` 에서 가지 `fix/poomgo-{{input.change_id}}` 를 만든다. 자격은 `GH_TOKEN` 과 `gh auth setup-git`
-2. 표본 둘(과 DOM 덤프)을 받아 계약 `{{input.contract.url}}` 과 대조해 어긋난 자리를 찾는다
-3. 이름만 바뀐 것(키 이름, 상태값, 선택자 글자)이면 코드를 고치지 않고 새 계약 판을 제안한다. 3PLGW 재생 시험 도구로 표본을 돌려 필수 칸이 채워지는지 본다
+1. 작업장 `/data/workspace/bp-3plgw` 에 레포가 없으면 `git clone {{input.repo.url}}`, 있으면 `git fetch`. `{{input.repo.commit}}` 에서 가지 `fix/poomgo-{{input.change_id}}` 를 만든다. 자격은 `GH_TOKEN`. git 은 이미지에 박은 `credential.helper = gh auth git-credential` 이 그 토큰을 낸다
+2. 계약 `{{input.contract.url}}` 과 표본(과 DOM 덤프)을 머리글 `X-Internal-Service-Key: $TPLGW_INTERNAL_KEY` 로 curl 해 대조해 어긋난 자리를 찾는다. `last_good_url` 이 404 면(그 원천의 첫 감지) 어긋난 표본과 계약만으로 간다
+3. 이름만 바뀐 것(키 이름, 상태값, 선택자 글자)이면 코드를 고치지 않고 계약 spec 과 같은 모양(sourceCode, envelope, fields, valueMaps, screen)의 새 판을 `contract_proposal` 에 낸다. 레포에 표본 재생 시험 도구가 있으면 어긋난 표본을 새 판으로 돌려 필수 칸 채움률을 잰다
 4. 구조나 화면이 바뀐 것이면 코드를 고치고 단위 시험과 표본 재생 시험을 통과시킨 뒤 가지를 밀어 올리고 `gh pr create --base {{input.repo.base_branch}} --label <pr_labels>` 로 PR 을 만든다
 5. 운영 DB, 운영 서버, 다른 레포에 손대지 않는다. force push, merge, 가지 삭제를 하지 않는다. 비밀값을 출력에 적지 않는다
 6. 마지막 줄에 JSON 한 덩이만 낸다
@@ -133,14 +133,14 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 ```json
 {"result_kind": "CONTRACT | CODE | NONE",
  "summary": "한 줄",
- "changed": [{"where": "orders.items[].sku", "before": "itemCode", "after": "item_code"}],
- "contract_proposal": {"base_version": 12, "changes": [...]},
- "pr": {"number": 57, "url": "https://github.com/.../pull/57", "branch": "fix/poomgo-..."},
- "tests": {"unit": "passed | failed | skipped", "replay_fill_rate": 0.98},
+ "changed": [{"kind": "FIELD_PATH | VALUE | REQUIRED | SCREEN", "name": "주문 번호", "before": "orderSheet.orderCode", "after": "orderSheet.orderNo", "change": "RENAMED | ADDED | REMOVED | MOVED"}],
+ "contract_proposal": {"sourceCode": "ORDER", "envelope": {}, "fields": [], "valueMaps": {}, "screen": {}},
+ "pr": {"number": 57, "url": "https://github.com/therecommerce-develop/3plgw/pull/57", "branch": "fix/poomgo-...", "title": "fix: 품고 ORDER 변경 대응 (ord-...)", "repo": "therecommerce-develop/3plgw"},
+ "tests": {"unit": "passed | failed | skipped", "unit_passed": 41, "unit_total": 41, "replay_fill_rate": 0.98},
  "failure_reason": null}
 ```
 
-`result_kind: NONE` 은 어긋남을 못 찾았거나 고칠 수 없다는 뜻이고, submit 단계가 그대로 보내 3PLGW 가 사람 처리로 남긴다.
+모양은 3PLGW T3-2 2-1 제안 본문과 같다. `CONTRACT` 면 `contract_proposal` 이 차고 `pr` 은 null, `CODE` 면 `pr` 이 차고 `contract_proposal` 은 null. `pr.title` 은 3PLGW 승인 화면에 보이고(3PLGW 1-4), `pr.repo`(GitHub owner/name)는 merge 단계 경로에 쓴다. `result_kind: NONE` 은 어긋남을 못 찾았거나 고칠 수 없다는 뜻이고, submit 단계가 그대로 보내 3PLGW 가 사람 처리로 남긴다.
 
 ### 4.5 실행기와 권한 (PRD-367, BIZ-145)
 
@@ -148,10 +148,10 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 |---|---|
 | 이미지 | `backend/aimbase-agent/Dockerfile` 에 git, gh, openssh-client 를 더한다. 모든 실행기가 같은 이미지라 다 갖게 되지만 토큰은 이 실행기에만 있다 |
 | 컨테이너 | `aimbase-agent-3plgw`. 59 `docker-compose.prod.yml`, chaws `docker-compose.chaws.yml`. 실행기 이름 `cli-runner-bp-3plgw`, 테넌트 `bp_3plgw`, 일꾼 1, 포트 8304(실행기), 8305(MCP), `mem_limit 1536m`(chaws) |
-| 환경 | `AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY` = `bp_3plgw` 실행기 전용 키(`BP_3PLGW_SERVER_MCP_API_KEY`), `GH_TOKEN` = GitHub 토큰(`GITHUB_TOKEN_3PLGW`). PG 환경변수 없음. 59 는 `.env`, chaws 는 `agent-3plgw.env` 에만 둔다 |
+| 환경 | 실행기: `AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY` = `bp_3plgw` 실행기 전용 키(`BP_3PLGW_SERVER_MCP_API_KEY`), `GH_TOKEN`(GitHub 토큰), `TPLGW_INTERNAL_KEY`(3PLGW 내부 키. 계약과 표본 curl). PG 환경변수 없음. 59 는 `.env.runner-3plgw`, chaws 는 `agent-3plgw.env`. api: HTTP 연결 `value_env` 는 api 프로세스 env 를 읽으므로 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 59 `.env`, chaws `api.env` 에도 둔다 |
 | 볼륨 | `claude-accounts-3plgw`(work01, work02, work03 로그인 파일 복사. 다른 실행기 폴더의 지난 대화를 읽지 못하게 나눈다), `workspace-3plgw` |
 | 연결 | `cli-runner-bp-3plgw-work01`, `-work02`, `-work03`: `anthropic-cli`, `tool_mode HYBRID`, `config_dir` 그 계정, `agent_name cli-runner-bp-3plgw`, `exposed_tools ["get_current_time"]`, `model claude-sonnet-4-5`(설정). 묶음 `cli-runner-bp-3plgw-rr` ROUND_ROBIN |
-| HTTP 연결 | `bp-3plgw`: `baseUrl` 3PLGW 안쪽 주소(망 `aimbase-apps`), `auth` 는 3PLGW 계약대로, 값은 `value_env BP_3PLGW_INBOUND_TOKEN`. `github-bp-3plgw`: `baseUrl https://api.github.com`, `auth {type: BEARER, value_env: GITHUB_TOKEN_3PLGW}` |
+| HTTP 연결 | `bp-3plgw`: `baseUrl` 59 `http://59.8.160.12:8187`, 운영 `http://bp-3plgw:8187`(망 `aimbase-apps`. 3PLGW 컨테이너를 붙이는 일은 bp-infra CR-INFRA-008), `auth {type: API_KEY, in: header, name: X-Internal-Service-Key, value_env: TPLGW_INTERNAL_KEY}`, `readTimeoutMs 30000`. `github-bp-3plgw`: `baseUrl https://api.github.com`, `auth {type: BEARER, value_env: GITHUB_TOKEN_3PLGW}` |
 | 운영 DB | 자격을 주지 않는다. 실행기에 PG 환경변수가 없고, 연결에 DB 도구를 노출하지 않는다 |
 | 설치 | `scripts/chaws-bootstrap.sh` 대상 `3plgw`. 단계 admin(허용 테넌트에 `bp_3plgw`), tenant(테넌트, `agent-3plgw.env`, `secrets/bp-3plgw-api-key`), connections(CLI 연결 셋과 묶음), http(HTTP 연결 둘), workflow(`poomgo-change-repair`), smoke. 59 도 같은 스크립트로 세운다 |
 
@@ -165,7 +165,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 
 | 값 | 자리 | 기본 |
 |---|---|---|
-| 승인 시한 | 워크플로우 정의 HUMAN_INPUT `timeoutMs` | 4시간 |
+| 승인 시한 | 워크플로우 정의 HUMAN_INPUT `timeoutMs` | 72시간(3PLGW 승인 시한 4시간보다 길게, 3PLGW 1-4) |
 | 수리 단계 시한 | 워크플로우 정의 AGENT_CALL `timeout_ms` | 30분 |
 | 회신 재시도 횟수, 간격 | `aimbase.workflow.callback.retry-max-attempts`, `retry-delay-ms` | 3, 5000 |
 | 시한 감시 주기 | `aimbase.workflow.approval-timeout.sweep-ms` | 60000 |
@@ -190,6 +190,8 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | 3 | 회신 수신 API 경로(`_callback.path` 에 실어 보낸다) | 4.3.1 본문을 받는다 |
 | 4 | 표본 조회 주소의 인증 방식 | repair 단계의 CLI 가 curl 로 받는다. 머리글 토큰이면 환경변수 이름을 정한다 |
 | 5 | 3PLGW 안쪽 주소(망 `aimbase-apps`)와 59 주소 | HTTP 연결 `baseUrl` |
+
+받음(2026-11-09 15:05, 3PLGW `docs/AI-SDLC/T3-2_API_설계.md` CR-3PLGW-094 2절): 1 `POST /api/v1/internal/poomgo-repair/changes/{change_id}/proposals`(201, 같은 run 재전송 200, 검증 실패 422), 2 `POST .../changes/{change_id}/activate`, 3 `POST .../changes/{change_id}/result`, 4 머리글 `X-Internal-Service-Key`, 실행기 환경변수 `TPLGW_INTERNAL_KEY`, 5 59 `http://59.8.160.12:8187`, 운영 `http://bp-3plgw:8187`. 3PLGW 가 바라는 것(1-4) 셋, 승인 시한 72시간, `last_good_url` 404 허용, 회신 `result.pr.title`, 은 전부 받았다. 3PLGW 1-1 의 `repo.url` 기본값 `bp-3plgw.git` 은 실제 레포 `therecommerce-develop/3plgw.git` 과 다르다(회신으로 알린다).
 
 ## 6. 영향 설계서
 
@@ -221,3 +223,4 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 |---|---|
 | 2026-11-09 14:02 | 착수. 브리핑, 공통 규칙, 결정 메모, T1 초안 원문 읽음. 3PLcore 브리핑 커밋 01a91176 |
 | 2026-11-09 14:30 | 2절 실측, 설계 캐스케이드, 계약 문서 |
+| 2026-11-09 15:20 | 엔진 커밋 37b671e(회신, 시한 감시, run 변수, 시험 10건 통과). 실행기 이미지(git, gh), compose 둘, deploy.sh, 설치 스크립트 대상 3plgw, 워크플로우 정의 JSON. 3PLGW 계약 반영(경로, 머리글, 72시간, pr.title, last_good 404) |
