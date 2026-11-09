@@ -71,6 +71,9 @@ public class WorkflowEngine {
     /** CR-147: 단계 지정 스킬 고정. 미주입 환경(일부 단위 테스트)이면 고정하지 않고 실행기가 스스로 해석한다. */
     private final com.platform.skill.StepSkillService stepSkills;
 
+    /** CR-174: 실행 입력 _callback 의 칸을 run 을 만들기 전에 검사한다. 회신 자체는 RunCompleted 를 받아 보낸다. */
+    private final com.platform.workflow.callback.RunCompletionCallback runCallback;
+
     public WorkflowEngine(WorkflowRepository workflowRepository,
                           WorkflowRunRepository workflowRunRepository,
                           PendingApprovalRepository pendingApprovalRepository,
@@ -84,7 +87,8 @@ public class WorkflowEngine {
                           org.springframework.beans.factory.ObjectProvider<com.platform.agent.ActiveCliWorkerRegistry> activeCliWorkerRegistryProvider,
                           org.springframework.beans.factory.ObjectProvider<com.platform.llm.ConnectionAdapterFactory> connectionAdapterFactoryProvider,
                           org.springframework.beans.factory.ObjectProvider<WorkflowCancellationRegistry> cancelRegistryProvider,
-                          org.springframework.beans.factory.ObjectProvider<com.platform.skill.StepSkillService> stepSkillsProvider) {
+                          org.springframework.beans.factory.ObjectProvider<com.platform.skill.StepSkillService> stepSkillsProvider,
+                          org.springframework.beans.factory.ObjectProvider<com.platform.workflow.callback.RunCompletionCallback> runCallbackProvider) {
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.pendingApprovalRepository = pendingApprovalRepository;
@@ -104,6 +108,7 @@ public class WorkflowEngine {
         WorkflowCancellationRegistry cr = cancelRegistryProvider != null ? cancelRegistryProvider.getIfAvailable() : null;
         this.cancelRegistry = cr != null ? cr : new WorkflowCancellationRegistry();
         this.stepSkills = stepSkillsProvider != null ? stepSkillsProvider.getIfAvailable() : null;
+        this.runCallback = runCallbackProvider != null ? runCallbackProvider.getIfAvailable() : null;
         log.info("WorkflowEngine initialized with executors: {}", this.executors.keySet());
     }
 
@@ -314,6 +319,8 @@ public class WorkflowEngine {
         run.setSessionId(resolveSessionId(sessionId));
         run.setStatus("running");
         Map<String, Object> effectiveInput = input != null ? input : Map.of();
+        // CR-174 BIZ-143: 칸이 틀린 _callback 도 run 을 만들기 전에 막는다
+        if (runCallback != null) runCallback.validate(effectiveInput);
         run.setInputData(effectiveInput);
         run.setStepResults(new LinkedHashMap<>());
         // 디버그: inputData 키 및 값 길이 로깅
@@ -365,6 +372,7 @@ public class WorkflowEngine {
         run.setWorkflowId(proxy.getId());
         run.setSessionId(resolveSessionId(sessionId));
         run.setStatus("running");
+        if (runCallback != null) runCallback.validate(input != null ? input : Map.of());
         run.setInputData(input != null ? input : Map.of());
         run.setStepResults(new LinkedHashMap<>());
         WorkflowRunEntity saved = workflowRunRepository.save(run);

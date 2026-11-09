@@ -176,6 +176,16 @@ public class WorkflowRunEventRecorder {
 
     // ── 내부 ──
 
+    /** CR-174 BIZ-143: 실행 종료 회신을 끝내 보내지 못했다. 단계가 아니라 run 에 붙는 이벤트라 stepId 가 없다. */
+    public void callbackFailed(UUID runId, String connectionId, String path, int attempts, String error) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("connection_id", connectionId);
+        payload.put("path", path);
+        payload.put("attempts", attempts);
+        if (error != null) payload.put("error", truncate(error, 500));
+        publish(buildEvent(runId, null, null, EventType.CALLBACK_FAILED, null, null, payload, null, null));
+    }
+
     private WorkflowRunEventEntity buildEvent(UUID runId, String stepId, Integer iteration,
                                               EventType type, String toolName, Long durationMs,
                                               Map<String, Object> payload,
