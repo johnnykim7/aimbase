@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.8 | 최종 수정: 2026-11-08 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171
+> 설계 버전: 7.9 | 최종 수정: 2026-11-09 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -688,6 +688,8 @@
 |------|------|------|------|
 | approved | boolean | ✅ | 승인 여부 (true/false) |
 | reason | String | 선택 | 승인/거부 사유 |
+
+소비앱 키(`X-API-Key`)로도 부를 수 있다. 승인 대기가 아니면 409, run 이 없으면 404. 거절은 run 을 `failed`(`error.reason = Human approval rejected`)로 끝낸다. 승인 시한이 지나 감시기가 먼저 닫았으면 409 이다(PRD-364, CR-174)
 
 ### 워크플로우 출력 스키마 (v2.5, CR-007)
 
@@ -3001,6 +3003,68 @@ cap 32000
 | POST | `http://tts-sidecar:8310/synthesize` | `{voice, text}` 를 MP3 로. 머리값 `X-Duration-Sec`, `X-Elapsed-Sec`, `X-Attempt`. 없는 음색 404, 빈 글 400, 검사 3번 실패 422 `{"error":"generation_failed:<까닭>"}` |
 
 ---
+
+## 워크플로우 실행 종료 회신과 승인 시한 [v7.9, CR-174]
+
+### 워크플로우 실행 입력 `_callback` [PRD-363]
+
+`POST /api/v1/workflows/{id}/run` 등 모든 실행 입력에 실을 수 있다. run 이 completed, failed, cancelled 어느 쪽으로 끝나든 그 연결의 그 경로로 결과를 한 번 POST 한다(BIZ-143).
+
+```json
+{"_callback": {"connection_id": "bp-3plgw", "path": "/api/v1/poomgo/repairs/ord-1/result", "result_step": "repair"}}
+```
+
+| 칸 | 필수 | 값 |
+|---|---|---|
+| connection_id | ✅ | 그 테넌트의 HTTP 연결 id. 주소는 연결 `baseUrl` + `path`, 머리글은 연결 `auth` |
+| path | ✅ | `/` 로 시작하는 경로 |
+| result_step | 선택 | 회신 `result` 에 output 을 실을 단계 id. 없으면 `result` 는 null |
+
+- 칸이 틀리면 run 을 만들지 않고 400 `callback_invalid:<칸>`
+- 회신 본문
+
+```json
+{"run_id": "6c1f...", "workflow_id": "poomgo-change-repair", "status": "failed",
+ "error": {"reason": "approval_timeout", "detail": "2026-11-09T10:12:00Z"},
+ "result": {"result_kind": "CODE", "pr": {"number": 57}},
+ "completed_at": "2026-11-09T10:12:03.004Z", "duration_ms": 14403000}
+```
+
+- `status` 는 run 상태 그대로. `error` 는 run 의 error(없으면 null). 승인 거절은 `reason = Human approval rejected`, 시한 초과는 `approval_timeout`
+- 2xx 가 아니면 `aimbase.workflow.callback.retry-max-attempts`(기본 3) 번까지 `retry-delay-ms`(기본 5000) 간격으로 다시 보낸다. 끝내 실패하면 run 이벤트 `CALLBACK_FAILED` 만 남긴다
+- 기록의 auth 머리글은 `***` 로 가린다(BIZ-132)
+
+### HUMAN_INPUT 단계 `timeoutMs` 와 승인 시한 [PRD-364]
+
+```json
+{"id": "approval", "type": "HUMAN_INPUT", "timeoutMs": 14400000, "config": {"message": "품고 변경 수리 제안 {{input.change_id}}", "reason": "{{input.summary}}"}}
+```
+
+- `timeoutMs` 가 있으면 `pending_approvals.timeout_at = now + timeoutMs`. 감시기(`aimbase.workflow.approval-timeout.sweep-ms`, 기본 60000)가 지난 것을 `timeout` 으로 닫고 run 을 `failed`, `error = {reason: approval_timeout, detail: <timeout_at>}` 로 끝낸다(BIZ-144)
+- 없으면 시한이 없다. 워크플로우 수정 API 로 바꾸고 재기동은 없다
+
+### 단계 틀 변수 `{{run.*}}` [PRD-365]
+
+| 변수 | 값 |
+|---|---|
+| `{{run.id}}` | 이 run 의 id |
+| `{{run.workflow_id}}` | 워크플로우 id |
+| `{{run.session_id}}` | 세션 id. 없으면 빈 글 |
+
+### 품고 변경 수리 워크플로우 `poomgo-change-repair` [PRD-366]
+
+테넌트 `bp_3plgw`. 웹훅 입력, 승인 전달, 회신, 조회는 `협업/계약_CR-174_품고_변경_수리_요청_웹훅.md` 가 정본이다. 단계는 repair(AGENT_CALL, 묶음 `cli-runner-bp-3plgw-rr`) 에서 submit(http_request, 3PLGW 제안 제출) 로, approval(HUMAN_INPUT) 에서 apply(ROUTER, `result_kind`) 로, activate(http_request, 3PLGW 계약 활성화) 또는 merge(http_request, GitHub `PUT /repos/therecommerce-develop/bp-3plgw/pulls/{{steps.repair.output.pr.number}}/merge`) 로 끝난다. `error_handling.retryMaxAttempts = 0`(BIZ-146). 정의 JSON 은 `scripts/chaws-bootstrap.sh` 대상 `3plgw` 의 workflow 단계가 넣는다.
+
+repair 단계 출력(구조화 JSON):
+
+```json
+{"result_kind": "CONTRACT | CODE | NONE", "summary": "한 줄",
+ "changed": [{"where": "orders.items[].sku", "before": "itemCode", "after": "item_code"}],
+ "contract_proposal": {"base_version": 12, "changes": []},
+ "pr": {"number": 57, "url": "https://github.com/therecommerce-develop/bp-3plgw/pull/57", "branch": "fix/poomgo-ord-1"},
+ "tests": {"unit": "passed | failed | skipped", "replay_fill_rate": 0.98},
+ "failure_reason": null}
+```
 
 ## 작성 가이드
 

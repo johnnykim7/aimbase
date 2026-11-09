@@ -1,6 +1,6 @@
 # T1-5. FSM 상태 정의서
 
-> 설계 버전: 1.3 | 최종 수정: 2026-11-03 | 관련 CR: CR-001, CR-164, CR-166, CR-167
+> 설계 버전: 1.4 | 최종 수정: 2026-11-09 | 관련 CR: CR-001, CR-164, CR-166, CR-167, CR-174
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -15,7 +15,7 @@
 | MCPServer | `disconnected`, `connected` |
 | KnowledgeSource | `idle`, `syncing`, `completed`, `error` |
 | WorkflowRun | `running`, `pending_approval`, `completed`, `failed` |
-| PendingApproval | `pending`, `approved`, `rejected` |
+| PendingApproval | `pending`, `approved`, `rejected`, `timeout` |
 | DevWorkItem | `IN_PROGRESS`, `COMPLETED`, `FAILED`, `CANCELLED` |
 | Tenant | `provisioning`, `active`, `suspended`, `deleted` |
 | User | `active`, `inactive` |
@@ -137,6 +137,7 @@ stateDiagram-v2
     running --> failed : 스텝 실행 실패 (재시도 소진)
     pending_approval --> running : 승인 (approved=true)
     pending_approval --> failed : 거부 (approved=false)
+    pending_approval --> failed : 승인 시한 초과 (감시기, CR-174)
 ```
 
 ### running | 실행 중
@@ -148,9 +149,9 @@ stateDiagram-v2
 ### pending_approval | 승인 대기
 - **설명**: HUMAN_INPUT 스텝에서 승인을 기다리는 상태
 - **진입 조건**: HUMAN_INPUT 타입 스텝 도달
-- **허용 다음 상태**: `running` (승인), `failed` (거부)
-- **관련 기능 ID**: PRD-046
-- **비고**: PendingApprovalEntity 자동 생성
+- **허용 다음 상태**: `running` (승인), `failed` (거부, 승인 시한 초과)
+- **관련 기능 ID**: PRD-046, PRD-364
+- **비고**: PendingApprovalEntity 자동 생성. 단계 `timeoutMs` 가 있으면 `timeout_at` 이 적히고 감시기가 지난 것을 `failed`(사유 `approval_timeout`)로 닫는다 [CR-174]
 
 ### completed | 완료
 - **설명**: 모든 스텝이 성공적으로 완료된 상태
@@ -159,8 +160,8 @@ stateDiagram-v2
 - **관련 기능 ID**: PRD-044
 
 ### failed | 실패
-- **설명**: 스텝 실행 실패 또는 승인 거부로 종료된 상태
-- **진입 조건**: 재시도 횟수 초과 / 승인 거부
+- **설명**: 스텝 실행 실패, 승인 거부, 승인 시한 초과로 종료된 상태
+- **진입 조건**: 재시도 횟수 초과 / 승인 거부 / 승인 시한 초과(`error.reason = approval_timeout`, CR-174)
 - **허용 다음 상태**: 없음 (종결 상태)
 - **관련 기능 ID**: PRD-044
 
@@ -214,13 +215,14 @@ stateDiagram-v2
     [*] --> pending : 승인 요청 생성
     pending --> approved : 승인
     pending --> rejected : 거부
+    pending --> timeout : 시한 초과 (감시기, CR-174)
 ```
 
 ### pending | 대기
 - **설명**: 승인을 기다리는 상태
 - **진입 조건**: HUMAN_INPUT 스텝 도달 또는 REQUIRE_APPROVAL 정책 트리거
-- **허용 다음 상태**: `approved`, `rejected`
-- **관련 기능 ID**: PRD-063
+- **허용 다음 상태**: `approved`, `rejected`, `timeout`
+- **관련 기능 ID**: PRD-063, PRD-364
 
 ### approved | 승인됨
 - **설명**: 관리자가 승인한 상태
@@ -233,6 +235,12 @@ stateDiagram-v2
 - **진입 조건**: 거부 처리 (POST /reject)
 - **허용 다음 상태**: 없음 (종결 상태)
 - **관련 기능 ID**: PRD-065
+
+### timeout | 시한 초과 [CR-174]
+- **설명**: `timeout_at` 이 지나도록 승인도 거부도 없어 감시기가 닫은 상태
+- **진입 조건**: 승인 시한 감시기(PRD-364). `approval_channel = workflow` 인 줄만
+- **허용 다음 상태**: 없음 (종결 상태). 그 run 은 `failed`
+- **관련 기능 ID**: PRD-364
 
 ---
 
