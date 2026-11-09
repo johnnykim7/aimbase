@@ -51,6 +51,15 @@ public class ConnectionGroupSelector {
      * 실패 시 그룹 내 다른 커넥션으로 자동 폴백한다.
      */
     public LLMResponse executeWithGroup(String groupId, LLMRequest request) {
+        return executeWithGroup(groupId, request, adapter -> { });
+    }
+
+    /**
+     * CR-173: {@code calledAdapter} 는 실제로 부른 멤버 어댑터마다 부른다(폴백으로 넘어간 것까지).
+     * 호출자는 세션 없는 요청이 끝나면 이 어댑터들에 세션 정리를 보내 CLI 실행기 프로세스를 닫는다.
+     */
+    public LLMResponse executeWithGroup(String groupId, LLMRequest request,
+                                        java.util.function.Consumer<LLMAdapter> calledAdapter) {
         ConnectionGroupEntity group = groupRepository.findById(groupId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Connection group not found: " + groupId));
@@ -90,6 +99,7 @@ public class ConnectionGroupSelector {
                 String model = adapterFactory.resolveModel(connectionId, request.model());
                 LLMRequest adaptedRequest = request.withModel(model);
 
+                calledAdapter.accept(adapter);
                 LLMResponse response = adapter.chat(adaptedRequest).get();
                 cb.recordSuccess();
                 incrementUsage(connectionId);

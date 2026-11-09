@@ -252,6 +252,155 @@ class ClaudeCliWorkerPoolTest {
         pool.shutdownForRun("run-K");
     }
 
+    @Test
+    void cr173_process_limit_queues_a_new_run_until_a_slot_frees() throws Exception {
+        ClaudeCliWorkerPool pool = newPool(5);
+        pool.setProcessLimit(1, Duration.ofSeconds(5));
+        ClaudeCliWorker a = pool.getOrCreateMain("run-A", null, null);
+
+        java.util.concurrent.CompletableFuture<ClaudeCliWorker> b =
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> pool.getOrCreateMain("run-B", null, null));
+        Thread.sleep(300);
+        assertThat(b).isNotDone();
+        assertThat(pool.processCount()).isEqualTo(1);
+
+        pool.shutdownForRun("run-A");
+        ClaudeCliWorker bw = b.get(3, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(bw.isAlive()).isTrue();
+        assertThat(a.isAlive()).isFalse();
+        assertThat(pool.processCount()).isEqualTo(1);
+
+        pool.shutdownForRun("run-B");
+        assertThat(pool.processCount()).isZero();
+    }
+
+    @Test
+    void cr173_process_limit_wait_times_out_when_every_process_is_in_use() {
+        ClaudeCliWorkerPool pool = newPool(5);
+        pool.setProcessLimit(1, Duration.ofMillis(500));
+        pool.getOrCreateMain("run-A", null, null);
+
+        assertThatThrownBy(() -> pool.getOrCreateMain("run-B", null, null))
+                .isInstanceOf(ClaudeCliException.class)
+                .hasMessageContaining("process slot wait timeout");
+        assertThat(pool.processCount()).isEqualTo(1);
+        assertThat(pool.activeWorkerCount("run-B")).isZero();
+
+        pool.shutdownForRun("run-A");
+        assertThat(pool.processCount()).isZero();
+    }
+
+    @Test
+    void cr173_idle_session_worker_is_closed_to_make_room_and_respawns_fresh() throws Exception {
+        ClaudeCliWorkerPool pool = newPool(5);
+        pool.setProcessLimit(2, Duration.ofSeconds(5));
+        ClaudeCliWorker a = pool.getOrCreateMain("run-A", null, null);
+        assertThat(a.claimFirstTurn()).isTrue();
+        a.unlease();
+        Thread.sleep(20);
+        ClaudeCliWorker b = pool.getOrCreateMain("run-B", null, null);
+        b.unlease();
+
+        ClaudeCliWorker c = pool.getOrCreateMain("run-C", null, null);
+
+        awaitDead(a);
+        assertThat(a.isAlive()).isFalse();
+        assertThat(b.isAlive()).isTrue();
+        assertThat(c.isAlive()).isTrue();
+        assertThat(pool.processCount()).isEqualTo(2);
+
+        // 닫힌 세션의 다음 턴은 새 워커가 받아 대화 전체를 다시 넣는다.
+        ClaudeCliWorker a2 = pool.getOrCreateMain("run-A", null, null);
+        assertThat(a2).isNotSameAs(a);
+        assertThat(a2.claimFirstTurn()).isTrue();
+        assertThat(b.isAlive()).isFalse();
+        assertThat(pool.processCount()).isEqualTo(2);
+
+        pool.shutdownForRun("run-A");
+        pool.shutdownForRun("run-B");
+        pool.shutdownForRun("run-C");
+        assertThat(pool.processCount()).isZero();
+    }
+
+    @Test
+    void cr173_same_run_reuses_its_worker_without_another_slot() {
+        ClaudeCliWorkerPool pool = newPool(5);
+        pool.setProcessLimit(1, Duration.ofMillis(500));
+        ClaudeCliWorker a = pool.getOrCreateMain("run-A", null, null);
+        ClaudeCliWorker again = pool.getOrCreateMain("run-A", null, null);
+
+        assertThat(again).isSameAs(a);
+        assertThat(a.isLeased()).isTrue();
+        assertThat(pool.processCount()).isEqualTo(1);
+        pool.shutdownForRun("run-A");
+    }
+
+    @Test
+    void cr173_dead_main_gives_its_slots_back_on_respawn() {
+        ClaudeCliWorkerPool pool = newPool(1);
+        pool.setProcessLimit(1, Duration.ofMillis(500));
+        ClaudeCliWorker a = pool.getOrCreateMain("run-A", null, null);
+        ProcessHandle.of(a.pid()).ifPresent(ProcessHandle::destroyForcibly);
+        awaitDead(a);
+
+        ClaudeCliWorker a2 = pool.getOrCreateMain("run-A", null, null);
+
+        assertThat(a2).isNotSameAs(a);
+        assertThat(a2.isAlive()).isTrue();
+        assertThat(pool.processCount()).isEqualTo(1);
+        pool.shutdownForRun("run-A");
+        assertThat(pool.processCount()).isZero();
+    }
+
+    @Test
+    void cr173_burst_of_14_one_shot_runs_never_exceeds_the_limit() throws Exception {
+        ClaudeCliWorkerPool pool = newPool(5);
+        pool.setProcessLimit(2, Duration.ofSeconds(30));
+        java.util.Queue<ClaudeCliWorker> spawned = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        java.util.concurrent.atomic.AtomicInteger peakHeld = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger peakAlive = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicBoolean sampling = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Thread sampler = new Thread(() -> {
+            while (sampling.get()) {
+                peakHeld.accumulateAndGet(pool.processCount(), Math::max);
+                int alive = (int) spawned.stream().filter(ClaudeCliWorker::isAlive).count();
+                peakAlive.accumulateAndGet(alive, Math::max);
+                try { Thread.sleep(5); } catch (InterruptedException e) { return; }
+            }
+        });
+        sampler.start();
+
+        java.util.concurrent.ExecutorService requests = java.util.concurrent.Executors.newFixedThreadPool(14);
+        List<java.util.concurrent.Future<?>> done = new java.util.ArrayList<>();
+        for (int i = 0; i < 14; i++) {
+            String runId = "burst-" + i;
+            done.add(requests.submit(() -> {
+                ClaudeCliWorker w = pool.getOrCreateMain(runId, null, null);
+                spawned.add(w);
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    w.unlease();
+                }
+                // api 가 세션 없는 요청에 답한 뒤 보내는 닫기 신호
+                pool.shutdownForRun(runId);
+                return null;
+            }));
+        }
+        for (java.util.concurrent.Future<?> f : done) f.get(60, java.util.concurrent.TimeUnit.SECONDS);
+        requests.shutdown();
+        sampling.set(false);
+        sampler.join();
+
+        assertThat(spawned).hasSize(14);
+        assertThat(peakHeld.get()).isLessThanOrEqualTo(2);
+        assertThat(peakAlive.get()).isLessThanOrEqualTo(2);
+        assertThat(pool.processCount()).isZero();
+        assertThat(pool.activeRunCount()).isZero();
+    }
+
     private ClaudeCliWorkerPool newPool(int max) {
         // reaper 비활성(interval=0) — 일반 테스트가 reaper 간섭 없이 결정적으로 돌도록.
         return new ClaudeCliWorkerPool(

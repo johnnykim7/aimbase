@@ -13,7 +13,6 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
@@ -30,8 +29,6 @@ public class RunnerService {
     private final ClaudeCliWorkerPool workerPool;
     private final String defaultModel;
 
-    /** runId → 첫 턴이 끝났는지. */
-    private final ConcurrentHashMap<String, Boolean> firstTurnDone = new ConcurrentHashMap<>();
 
     public RunnerService(ClaudeCliWorkerPool workerPool, String defaultModel) {
         this.workerPool = workerPool;
@@ -95,7 +92,6 @@ public class RunnerService {
         if (runId == null || runId.isBlank()) return false;
         try {
             workerPool.shutdownForRun(runId);
-            firstTurnDone.remove(runId);
             return true;
         } catch (Exception e) {
             log.warn("cancel({}) 실패: {}", runId, e.getMessage());
@@ -113,7 +109,6 @@ public class RunnerService {
         if (runIdPrefix == null || runIdPrefix.isBlank()) return 0;
         try {
             int closed = workerPool.shutdownForRunPrefix(runIdPrefix);
-            firstTurnDone.keySet().removeIf(k -> k != null && k.startsWith(runIdPrefix));
             if (closed > 0) log.info("cancelByPrefix({}): {} run 워커 그룹 종료", runIdPrefix, closed);
             return closed;
         } catch (Exception e) {
@@ -147,7 +142,9 @@ public class RunnerService {
                 runId, model, configDir, systemPromptOverride, toolMode, allowedTools,
                 request.workingDirectory(), disallowSubagent, request.skillSet());
 
-        boolean isFirst = firstTurnDone.putIfAbsent(runId, Boolean.TRUE) == null;
+        // CR-173: 첫 턴 여부는 워커에 묶는다. 유휴 회수나 실행기 전체 상한의 자리 내기로 워커가 새로 뜨면
+        // 그 워커는 앞 대화를 모르므로 api 가 보낸 대화 전체를 다시 넣어야 한다.
+        boolean isFirst = worker.claimFirstTurn();
         List<UnifiedMessage> messages = request.messages();
 
         try {
@@ -171,8 +168,9 @@ public class RunnerService {
             } catch (Exception ce) {
                 log.warn("runTurn 예외 정리 중 shutdownForRun({}) 실패: {}", runId, ce.getMessage());
             }
-            firstTurnDone.remove(runId);
             throw e;
+        } finally {
+            worker.unlease();
         }
     }
 

@@ -51,6 +51,19 @@ public class ClaudeCliWorkerPool {
 
     private final Map<String, RunWorkers> runs = new ConcurrentHashMap<>();
 
+    /**
+     * CR-173: 실행기 전체 Claude 프로세스 상한. maxWorkersPerRun 은 run 하나 안의 상한이라
+     * 세션 없는 요청이 몰리면 실행기 전체 수가 끝없이 늘어 컨테이너 메모리 한도를 넘었다.
+     * null 이면 상한을 두지 않는다(설정 0).
+     */
+    private volatile Semaphore processSlots;
+    private volatile int maxProcesses;
+    private volatile Duration processQueueTimeout = Duration.ZERO;
+    /** 실행기 전체 자리를 쥐고 있는 워커. 닫힐 때 한 번만 돌려주려고 둔다. */
+    private final java.util.Set<ClaudeCliWorker> processHolders = ConcurrentHashMap.newKeySet();
+    /** 줄 선 요청이 쉬는 워커가 생겼는지 다시 보는 간격. 자리가 나면 이 간격을 기다리지 않고 바로 받는다. */
+    private static final long IDLE_RECHECK_MS = 1000;
+
     // CR-121: 좀비 reaper — idle 워커 자동 회수. sweep 주기/idle 임계는 생성자 인자(설정).
     private final Duration reaperInterval;
     private final Duration reaperIdleThreshold;
@@ -88,6 +101,121 @@ public class ClaudeCliWorkerPool {
      */
     public void setSealedNativeTools(List<String> toolNames) {
         this.sealedNativeTools = (toolNames == null || toolNames.isEmpty()) ? null : List.copyOf(toolNames);
+    }
+
+    /**
+     * CR-173: 실행기 전체 Claude 프로세스 상한과 줄 선 요청이 기다리는 상한. 풀을 쓰기 전에 한 번 부른다.
+     * 상한에 닿으면 새 요청은 줄을 서고, 기다리는 동안 요청이 쥐고 있지 않은 워커(세션을 이어 쓰려고 남겨 둔 것)가
+     * 있으면 가장 오래 쉰 것을 닫아 자리를 낸다. 닫힌 세션은 다음 턴에 새 워커가 대화 전체를 받아 이어 간다.
+     */
+    public void setProcessLimit(int max, Duration queueTimeout) {
+        this.maxProcesses = Math.max(max, 0);
+        this.processQueueTimeout = queueTimeout != null && !queueTimeout.isNegative() ? queueTimeout : Duration.ZERO;
+        this.processSlots = max > 0 ? new Semaphore(max, true) : null;
+        if (max > 0) {
+            log.info("CR-173: process limit {} per runner, queue timeout {}", max, this.processQueueTimeout);
+        }
+    }
+
+    public int processCount() {
+        return processHolders.size();
+    }
+
+    /** 자리가 비어 있으면 바로 잡는다. 줄 선 요청이 있으면 앞지르지 않는다. 상한이 없으면 늘 true. */
+    private boolean tryTakeProcessSlot() {
+        Semaphore s = processSlots;
+        if (s == null) return true;
+        try {
+            return s.tryAcquire(0, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ClaudeCliException("interrupted waiting for a process slot");
+        }
+    }
+
+    /** 자리가 날 때까지 줄을 선다. 기다리는 동안 쉬는 워커를 닫아 자리를 낸다. */
+    private void waitForProcessSlot(String runId) {
+        Semaphore s = processSlots;
+        if (s == null) return;
+        long startNs = System.nanoTime();
+        long deadlineNs = startNs + processQueueTimeout.toNanos();
+        log.info("Run '{}': waiting for a process slot (max={}, held={}, queued={})",
+                runId, maxProcesses, processHolders.size(), s.getQueueLength());
+        try {
+            while (true) {
+                closeIdleWorkerForSlot(runId);
+                long remainingNs = deadlineNs - System.nanoTime();
+                if (remainingNs <= 0) {
+                    throw new ClaudeCliException("Run '" + runId + "': process slot wait timeout (max="
+                            + maxProcesses + ", waited=" + processQueueTimeout.toSeconds() + "s)");
+                }
+                long waitNs = Math.min(remainingNs, TimeUnit.MILLISECONDS.toNanos(IDLE_RECHECK_MS));
+                if (s.tryAcquire(waitNs, TimeUnit.NANOSECONDS)) {
+                    log.info("Run '{}': process slot acquired after {} ms", runId,
+                            TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs));
+                    return;
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ClaudeCliException("Run '" + runId + "': interrupted waiting for a process slot");
+        }
+    }
+
+    /** 잡은 자리를 막 띄운 워커에 넘긴다. 워커가 닫히면 자리를 돌려받는다. */
+    private void handProcessSlotTo(ClaudeCliWorker worker) {
+        processHolders.add(worker);
+        worker.setCloseListener(() -> releaseProcessSlot(worker));
+    }
+
+    private void releaseProcessSlot(ClaudeCliWorker worker) {
+        if (processHolders.remove(worker)) returnProcessSlot();
+    }
+
+    /** 워커에 넘기지 못한 자리를 돌려준다. */
+    private void returnProcessSlot() {
+        Semaphore s = processSlots;
+        if (s != null) s.release();
+    }
+
+    /**
+     * 요청이 쥐고 있지 않고 fork 도 없는 메인 워커 가운데 가장 오래 쉰 것을 닫는다.
+     * run 항목은 남겨 두어 같은 run 의 다음 턴이 새 워커를 띄우게 한다(빈 항목은 reaper 가 치운다).
+     */
+    private boolean closeIdleWorkerForSlot(String requesterRunId) {
+        String victimRunId = null;
+        RunWorkers victimRw = null;
+        long oldest = Long.MAX_VALUE;
+        for (Map.Entry<String, RunWorkers> e : runs.entrySet()) {
+            RunWorkers rw = e.getValue();
+            synchronized (rw) {
+                if (!isIdleMainOnly(rw)) continue;
+                long last = rw.main.lastActivityMs();
+                if (last < oldest) {
+                    oldest = last;
+                    victimRunId = e.getKey();
+                    victimRw = rw;
+                }
+            }
+        }
+        if (victimRw == null) return false;
+        ClaudeCliWorker victim;
+        synchronized (victimRw) {
+            if (!isIdleMainOnly(victimRw)) return false;
+            victim = victimRw.main;
+            victimRw.main = null;
+            victimRw.forks.remove(victim);
+            victimRw.slots.release();
+        }
+        victim.close();
+        log.info("Run '{}': idle worker closed to free a process slot for run '{}' (pid={})",
+                victimRunId, requesterRunId, victim.pid());
+        return true;
+    }
+
+    private static boolean isIdleMainOnly(RunWorkers rw) {
+        ClaudeCliWorker m = rw.main;
+        return m != null && !m.isLeased() && rw.forks.size() == 1 && rw.branchWorkers.isEmpty();
     }
 
     /** CR-121: idle 좀비 워커를 주기적으로 회수하는 데몬 스레드 시작. interval<=0 이면 비활성. */
@@ -229,49 +357,98 @@ public class ClaudeCliWorkerPool {
                                             String workingDirectory,
                                             boolean disallowSubagent,
                                             List<SkillRef> skillSet) {
-        RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
-        synchronized (rw) {
-            if (rw.main != null && rw.main.isAlive()) return rw.main;
-
-            acquireSlot(rw, runId);
-            try {
-                ClaudeCliWorker worker = workerFactory.create(model, null, false, configDir);
-                if (systemPrompt != null && !systemPrompt.isBlank()) {
-                    worker.setSystemPromptOverride(systemPrompt);
+        // CR-173: 돌려주는 워커는 lease 된 상태다. 호출자는 턴을 마치면 unlease 한다(그동안 자리 내기 대상이 아니다).
+        // 실행기 전체 자리는 run 잠금 밖에서 기다린다. 잠금을 쥔 채 기다리면 자리 내기가 다른 run 잠금을 잡다 서로 막힌다.
+        boolean slotHeld = false;
+        try {
+            while (true) {
+                RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
+                synchronized (rw) {
+                    // reaper 가 빈 항목을 치웠으면 지금 항목으로 다시 한다.
+                    if (runs.get(runId) != rw) continue;
+                    ClaudeCliWorker live = liveMain(rw, runId);
+                    if (live != null) {
+                        live.lease();
+                        return live;
+                    }
+                    if (!slotHeld && tryTakeProcessSlot()) slotHeld = true;
+                    if (slotHeld) {
+                        ClaudeCliWorker worker = spawnMain(rw, runId, model, configDir, systemPrompt, toolMode,
+                                allowedTools, workingDirectory, disallowSubagent, skillSet);
+                        handProcessSlotTo(worker);
+                        slotHeld = false;
+                        worker.lease();
+                        return worker;
+                    }
                 }
-                ClaudeCliCommandBuilder.ToolMode effectiveMode = toolMode != null ? toolMode : defaultToolMode;
-                if (effectiveMode != null) {
-                    worker.setToolMode(effectiveMode);
-                }
-                worker.setSealedNativeTools(sealedNativeTools); // CR-126: null 이면 빌더 기본 상수
-                if (allowedTools != null && !allowedTools.isEmpty()) {
-                    worker.setAllowedTools(allowedTools);
-                }
-                if (workingDirectory != null && !workingDirectory.isBlank()) {
-                    worker.setWorkingDirectory(workingDirectory);
-                }
-                if (disallowSubagent) {
-                    worker.setDisallowSubagent(true); // CR-117: CLI 본체 Agent 서브에이전트 차단
-                }
-                if (skillSet != null && !skillSet.isEmpty()) {
-                    worker.setSkillSet(skillSet);
-                }
-                worker.start();
-                rw.main = worker;
-                rw.forks.add(worker); // slot 추적용 (main 도 전체 리스트에 포함)
-                log.info("Run '{}': main worker spawned (systemPrompt={}, toolMode={})",
-                        runId,
-                        systemPrompt != null ? "override(" + systemPrompt.length() + " chars)" : "default",
-                        effectiveMode != null ? effectiveMode : "AIMBASE(builder default)");
-                return worker;
-            } catch (IOException e) {
-                rw.slots.release();
-                throw new ClaudeCliException("Failed to spawn main worker for run " + runId, e);
-            } catch (RuntimeException e) {
-                // CR-147: 기동 전 설정 검사 실패(스킬 통로 없음 등)도 잡은 자리를 돌려줘야 다음 호출이 대기하지 않는다.
-                rw.slots.release();
-                throw e;
+                waitForProcessSlot(runId);
+                slotHeld = true;
             }
+        } finally {
+            if (slotHeld) returnProcessSlot();
+        }
+    }
+
+    /** 이어 쓸 수 있는 메인 워커. 프로세스가 죽었으면 닫고 null 이다. rw 잠금 안에서 부른다. */
+    private ClaudeCliWorker liveMain(RunWorkers rw, String runId) {
+        ClaudeCliWorker current = rw.main;
+        if (current == null) return null;
+        if (current.isAlive()) return current;
+        // 죽은 메인을 남겨 두면 run 자리와 실행기 전체 자리를 계속 쥐고 있게 된다.
+        rw.main = null;
+        rw.forks.remove(current);
+        rw.slots.release();
+        current.close();
+        log.info("Run '{}': dead main worker closed before respawn (pid={})", runId, current.pid());
+        return null;
+    }
+
+    /** rw 잠금 안에서 부른다. */
+    private ClaudeCliWorker spawnMain(RunWorkers rw, String runId, String model, String configDir,
+                                      String systemPrompt,
+                                      ClaudeCliCommandBuilder.ToolMode toolMode,
+                                      List<String> allowedTools,
+                                      String workingDirectory,
+                                      boolean disallowSubagent,
+                                      List<SkillRef> skillSet) {
+        acquireSlot(rw, runId);
+        try {
+            ClaudeCliWorker worker = workerFactory.create(model, null, false, configDir);
+            if (systemPrompt != null && !systemPrompt.isBlank()) {
+                worker.setSystemPromptOverride(systemPrompt);
+            }
+            ClaudeCliCommandBuilder.ToolMode effectiveMode = toolMode != null ? toolMode : defaultToolMode;
+            if (effectiveMode != null) {
+                worker.setToolMode(effectiveMode);
+            }
+            worker.setSealedNativeTools(sealedNativeTools); // CR-126: null 이면 빌더 기본 상수
+            if (allowedTools != null && !allowedTools.isEmpty()) {
+                worker.setAllowedTools(allowedTools);
+            }
+            if (workingDirectory != null && !workingDirectory.isBlank()) {
+                worker.setWorkingDirectory(workingDirectory);
+            }
+            if (disallowSubagent) {
+                worker.setDisallowSubagent(true); // CR-117: CLI 본체 Agent 서브에이전트 차단
+            }
+            if (skillSet != null && !skillSet.isEmpty()) {
+                worker.setSkillSet(skillSet);
+            }
+            worker.start();
+            rw.main = worker;
+            rw.forks.add(worker); // slot 추적용 (main 도 전체 리스트에 포함)
+            log.info("Run '{}': main worker spawned (systemPrompt={}, toolMode={})",
+                    runId,
+                    systemPrompt != null ? "override(" + systemPrompt.length() + " chars)" : "default",
+                    effectiveMode != null ? effectiveMode : "AIMBASE(builder default)");
+            return worker;
+        } catch (IOException e) {
+            rw.slots.release();
+            throw new ClaudeCliException("Failed to spawn main worker for run " + runId, e);
+        } catch (RuntimeException e) {
+            // CR-147: 기동 전 설정 검사 실패(스킬 통로 없음 등)도 잡은 자리를 돌려줘야 다음 호출이 대기하지 않는다.
+            rw.slots.release();
+            throw e;
         }
     }
 
@@ -290,8 +467,9 @@ public class ClaudeCliWorkerPool {
                                                    String parentSessionId,
                                                    String model, String configDir) {
         RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
+        ClaudeCliWorker existing;
         synchronized (rw) {
-            ClaudeCliWorker existing = rw.branchWorkers.get(branchKey);
+            existing = rw.branchWorkers.get(branchKey);
             if (existing != null && existing.isAlive()) return existing;
             // 죽은 워커가 있으면 슬롯/맵 정리
             if (existing != null) {
@@ -300,6 +478,8 @@ public class ClaudeCliWorkerPool {
                 rw.slots.release();
             }
         }
+        // CR-173: 죽은 워커도 닫아야 실행기 전체 자리를 돌려받는다.
+        if (existing != null) existing.close();
         ClaudeCliWorker spawned = spawnForkedWorker(runId, parentSessionId, model, configDir);
         synchronized (rw) {
             rw.branchWorkers.put(branchKey, spawned);
@@ -333,19 +513,28 @@ public class ClaudeCliWorkerPool {
                     "Cannot fork — parent session_id not available (main turn not completed)");
         }
         RunWorkers rw = runs.computeIfAbsent(runId, id -> new RunWorkers(maxWorkersPerRun));
-        acquireSlot(rw, runId);
+        if (!tryTakeProcessSlot()) waitForProcessSlot(runId);
+        boolean slotHeld = true;
         try {
-            ClaudeCliWorker worker = workerFactory.create(model, parentSessionId, true, configDir);
-            worker.setSealedNativeTools(sealedNativeTools); // CR-126: main 과 동일 봉인 정책 적용
-            worker.start();
-            synchronized (rw) {
-                rw.forks.add(worker);
+            acquireSlot(rw, runId);
+            try {
+                ClaudeCliWorker worker = workerFactory.create(model, parentSessionId, true, configDir);
+                worker.setSealedNativeTools(sealedNativeTools); // CR-126: main 과 동일 봉인 정책 적용
+                worker.start();
+                // run 에 올리기 전에 넘겨야, 그 사이 run 종료로 닫혀도 자리가 돌아온다.
+                handProcessSlotTo(worker);
+                slotHeld = false;
+                synchronized (rw) {
+                    rw.forks.add(worker);
+                }
+                log.info("Run '{}': fork worker spawned (parent session={})", runId, parentSessionId);
+                return worker;
+            } catch (IOException e) {
+                rw.slots.release();
+                throw new ClaudeCliException("Failed to spawn fork worker for run " + runId, e);
             }
-            log.info("Run '{}': fork worker spawned (parent session={})", runId, parentSessionId);
-            return worker;
-        } catch (IOException e) {
-            rw.slots.release();
-            throw new ClaudeCliException("Failed to spawn fork worker for run " + runId, e);
+        } finally {
+            if (slotHeld) returnProcessSlot();
         }
     }
 

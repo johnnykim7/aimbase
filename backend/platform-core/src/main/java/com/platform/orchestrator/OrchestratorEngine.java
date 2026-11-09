@@ -51,9 +51,10 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -177,17 +178,18 @@ public class OrchestratorEngine {
         String sessionId = request.sessionId() != null
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
-        AtomicReference<LLMAdapter> calledAdapter = new AtomicReference<>();
+        // CR-173: 연결 묶음은 멤버를 고르고 폴백까지 묶음 안에서 하므로, 실제로 부른 어댑터를 모아 둔다.
+        Set<LLMAdapter> calledAdapters = ConcurrentHashMap.newKeySet();
         try {
-            return chatSingle(request, sessionId, calledAdapter);
+            return chatSingle(request, sessionId, calledAdapters);
         } finally {
             // 구조화 출력 재시도까지 같은 프로세스를 쓰므로, 응답을 다 만든 뒤에 닫는다.
-            releaseOneShotWorker(request, sessionId, calledAdapter.get());
+            releaseOneShotWorker(request, sessionId, calledAdapters);
         }
     }
 
     private ChatResponse chatSingle(ChatRequest request, String sessionId,
-                                    AtomicReference<LLMAdapter> calledAdapter) {
+                                    Set<LLMAdapter> calledAdapters) {
         // CR-047 PRD-299: Memory prefetch — assemble() 합류 전까지 백그라운드 진행
         contextAssemblyEngine.prefetchMemory(sessionId, request.userId());
 
@@ -343,7 +345,7 @@ public class OrchestratorEngine {
         }
 
         // 5. LLM 호출 (Phase 2: actionsEnabled=true 시 tool use 루프)
-        calledAdapter.set(adapter);
+        if (adapter != null) calledAdapters.add(adapter);
         // CR-030: connection config에서 ModelConfig 구성 (extended_thinking 등)
         ModelConfig modelConfig = (request.connectionId() != null && !request.connectionId().isBlank())
                 ? connectionAdapterFactory.resolveModelConfig(request.connectionId())
@@ -383,7 +385,7 @@ public class OrchestratorEngine {
                     if (useConnectionGroup) {
                         // CR-015: 커넥션 그룹 기반 호출 — 그룹 전략 + 커넥션 레벨 폴백
                         llmResponse = connectionGroupSelector.executeWithGroup(
-                                request.connectionGroupId(), llmRequest);
+                                request.connectionGroupId(), llmRequest, calledAdapters::add);
                     } else if (request.connectionId() == null || request.connectionId().isBlank()) {
                         // CR-082: CLI adapter 는 fallback chain 우회 — 다른 provider 로 떨어지면
                         // 소비앱이 401/403 같은 정체불명 에러를 받게 되어 진단 불가.
@@ -748,7 +750,7 @@ public class OrchestratorEngine {
                 }
             }
             cancellationRegistry.clear(sessionId);
-            releaseOneShotWorker(request, sessionId, adapter);
+            releaseOneShotWorker(request, sessionId, adapter != null ? Set.of(adapter) : Set.of());
         }
     }
 
@@ -757,9 +759,11 @@ public class OrchestratorEngine {
      * 실행기의 유휴 회수(15분)까지 요청마다 하나씩 남아, 문의가 몰리면 실행기 메모리 한도를 넘는다(CR-173 13절).
      * CLI 가 아닌 어댑터는 cleanupSession 이 아무것도 하지 않는다.
      */
-    private void releaseOneShotWorker(ChatRequest request, String sessionId, LLMAdapter adapter) {
-        if (request.sessionId() != null || adapter == null) return;
-        adapter.cleanupSession(sessionId);
+    private void releaseOneShotWorker(ChatRequest request, String sessionId, Set<LLMAdapter> adapters) {
+        if (request.sessionId() != null) return;
+        for (LLMAdapter adapter : adapters) {
+            adapter.cleanupSession(sessionId);
+        }
     }
 
     /**

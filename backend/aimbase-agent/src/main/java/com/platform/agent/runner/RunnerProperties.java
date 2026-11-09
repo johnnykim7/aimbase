@@ -26,6 +26,15 @@ public class RunnerProperties {
     /** 최대 동시 워커 수 (BIZ-100). */
     private int maxWorkers = 5;
 
+    /**
+     * CR-173: 실행기 전체 Claude 프로세스 상한. maxWorkers 는 run(요청 세션) 하나 안의 상한이라 실행기 전체 수는
+     * 막지 못한다. 0 이면 두지 않는다. 넘는 요청은 줄을 서고, 쉬고 있는 세션 프로세스는 닫아 자리를 낸다.
+     */
+    private int maxProcesses = 0;
+
+    /** CR-173: 실행기 전체 상한에 걸린 요청이 줄에서 기다리는 상한(초). api 가 실행기를 기다리는 시간보다 길 까닭이 없다. */
+    private int processQueueTimeoutSeconds = 300;
+
     /** CR-106: CLI turn 타임아웃(초). 장기 AGENT_CALL(다수 PDF 적재) 대응 설정화. 기본 300s. */
     private int turnTimeoutSeconds = 300;
 
@@ -76,6 +85,10 @@ public class RunnerProperties {
     public void setClaudeBinary(String claudeBinary) { this.claudeBinary = claudeBinary; }
     public int getMaxWorkers() { return maxWorkers; }
     public void setMaxWorkers(int maxWorkers) { this.maxWorkers = maxWorkers; }
+    public int getMaxProcesses() { return maxProcesses; }
+    public void setMaxProcesses(int maxProcesses) { this.maxProcesses = maxProcesses; }
+    public int getProcessQueueTimeoutSeconds() { return processQueueTimeoutSeconds; }
+    public void setProcessQueueTimeoutSeconds(int processQueueTimeoutSeconds) { this.processQueueTimeoutSeconds = processQueueTimeoutSeconds; }
     public int getTurnTimeoutSeconds() { return turnTimeoutSeconds; }
     public void setTurnTimeoutSeconds(int turnTimeoutSeconds) { this.turnTimeoutSeconds = turnTimeoutSeconds; }
     public int getMcpConnectTimeoutSeconds() { return mcpConnectTimeoutSeconds; }

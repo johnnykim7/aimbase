@@ -151,6 +151,8 @@ services:
       AIMBASE_RUNNER_ENABLED: "true"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "2"
+      # 실행기 전체 Claude 프로세스 상한(CR-173 14절). 하나에 170MB 부터 300MB 라 java 와 합쳐 메모리 한도 안에 둔다.
+      AIMBASE_RUNNER_MAX_PROCESSES: "2"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
       AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes-cs"

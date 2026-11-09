@@ -1,5 +1,8 @@
 package com.platform.orchestrator;
 
+import com.platform.domain.ConnectionGroupEntity;
+import com.platform.repository.ConnectionGroupRepository;
+import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.action.ActionExecutor;
 import com.platform.config.WorkspaceProperties;
@@ -94,9 +97,13 @@ class OrchestratorOneShotWorkerTest {
                 "r1", "claude-cli/sonnet", List.of(new ContentBlock.Text("답")), List.of(),
                 new TokenUsage(10, 5), LLMResponse.FinishReason.END, 0, 0)));
 
-        engine = new OrchestratorEngine(
+        engine = newEngine(mock(ConnectionGroupSelector.class));
+    }
+
+    private OrchestratorEngine newEngine(ConnectionGroupSelector groupSelector) {
+        return new OrchestratorEngine(
                 mock(ModelRouter.class), mock(FallbackChainExecutor.class), factory,
-                mock(ConnectionGroupSelector.class), mock(SessionStore.class), contextWindow,
+                groupSelector, mock(SessionStore.class), contextWindow,
                 mock(PolicyEngine.class), mock(ActionExecutor.class), mock(AuditLogger.class),
                 mock(UsageLogRepository.class), mock(ToolCallHandler.class), mock(ToolRegistry.class),
                 mock(RAGService.class), mock(MCPSafetyClient.class), mock(PlatformMetrics.class),
@@ -120,6 +127,57 @@ class OrchestratorOneShotWorkerTest {
         verify(adapter).chat(sent.capture());
         assertThat(sent.getValue().sessionId()).isEqualTo(resp.sessionId());
         verify(adapter).cleanupSession(resp.sessionId());
+    }
+
+    /**
+     * 운영 bp-wes 의 판별과 초안은 연결 묶음으로 온다. 묶음은 멤버를 안에서 고르고 폴백까지 하므로
+     * 어댑터를 모른 채 끝나 닫기가 빠졌다(CR-173 14절). 실제로 부른 멤버 모두에 닫기를 보낸다.
+     */
+    @Test
+    void 연결_묶음으로_온_세션_없는_요청도_실제로_부른_멤버의_프로세스를_모두_닫는다() {
+        String group = "cli-runner-bp-wes-cs-rr";
+        String conn2 = "cli-runner-bp-wes-cs-work02";
+        LLMAdapter adapter2 = mock(LLMAdapter.class);
+        when(factory.getAdapter(conn2)).thenReturn(adapter2);
+        when(factory.resolveModel(eq(conn2), any())).thenReturn("claude-cli/sonnet");
+        when(adapter.chat(any())).thenReturn(CompletableFuture.failedFuture(new RuntimeException("account limited")));
+        when(adapter2.chat(any())).thenReturn(CompletableFuture.completedFuture(new LLMResponse(
+                "r2", "claude-cli/sonnet", List.of(new ContentBlock.Text("답")), List.of(),
+                new TokenUsage(10, 5), LLMResponse.FinishReason.END, 0, 0)));
+        ConnectionGroupEntity entity = new ConnectionGroupEntity();
+        entity.setId(group);
+        entity.setStrategy("PRIORITY");
+        entity.setMembers(new java.util.ArrayList<>(List.of(
+                Map.of("connection_id", CONN, "priority", 1),
+                Map.of("connection_id", conn2, "priority", 2))));
+        ConnectionGroupRepository groups = mock(ConnectionGroupRepository.class);
+        when(groups.findById(group)).thenReturn(Optional.of(entity));
+        OrchestratorEngine groupEngine = newEngine(new ConnectionGroupSelector(groups, factory));
+
+        ChatResponse resp = groupEngine.chat(new ChatRequest(null, null,
+                List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "주문 상태 알려줘")),
+                false, false, null, null, null, null, null, null, group, null));
+
+        verify(adapter).cleanupSession(resp.sessionId());
+        verify(adapter2).cleanupSession(resp.sessionId());
+    }
+
+    @Test
+    void 연결_묶음으로_온_세션이_있는_요청은_프로세스를_남긴다() {
+        String group = "cli-runner-bp-wes-cs-rr";
+        ConnectionGroupEntity entity = new ConnectionGroupEntity();
+        entity.setId(group);
+        entity.setMembers(new java.util.ArrayList<>(List.of(Map.of("connection_id", CONN, "priority", 1))));
+        ConnectionGroupRepository groups = mock(ConnectionGroupRepository.class);
+        when(groups.findById(group)).thenReturn(Optional.of(entity));
+        OrchestratorEngine groupEngine = newEngine(new ConnectionGroupSelector(groups, factory));
+
+        groupEngine.chat(new ChatRequest(null, "widget-s-2",
+                List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "주문 상태 알려줘")),
+                false, false, null, null, null, null, null, null, group, null));
+
+        verify(adapter).chat(any());
+        verify(adapter, never()).cleanupSession(anyString());
     }
 
     @Test
