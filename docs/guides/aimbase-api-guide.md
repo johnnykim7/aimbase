@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.28.0** | 2026-11-09 | Aimbase v8.18.0 기준
+> **v3.29.0** | 2026-11-10 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2455,30 +2455,33 @@ curl -X POST /api/v1/dev-work-items/W-1/status \
 **맡기기** `POST /api/v1/speech/tts-jobs`
 
 ```json
-{ "voice": "field-voice-07", "text": "검수대 3번으로 이동하세요." }
+{ "voice": "field-voice-07", "text": "검수대 3번으로 이동하세요.", "take": 0 }
 ```
 
 | 칸 | 필수 | 설명 |
 |---|---|---|
 | voice | 예 | 생성기에 등록된 음색 이름. 지금은 `field-voice-07` 하나 |
 | text | 예 | 1 ~ 200자(유니코드 문자 수). 공백만 있으면 빈 글. 글자를 바꾸지 않고 그대로 읽는다. 숫자로 쓴 날짜, 시각(`2026-10-31 14:00`)은 못 읽으니 읽는 말로 바꿔 보낸다 |
+| take | 아니오 | 차례. 0 이상 10 이하의 정수, 빠지면 0. 같은 글을 다른 소리로 다시 만들 때 1 씩 올려 보낸다 |
 
 202 와 작업을 바로 돌려줍니다.
 
 ```json
 { "success": true,
-  "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07",
+  "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07", "take": 0,
             "reused": false, "created_at": "2026-10-31T01:40:00Z" } }
 ```
 
-같은 테넌트에 같은 음색, 같은 글의 작업이 이미 있으면(FAILED 제외, 보관 기간 안) 새로 만들지 않고 그 작업을 돌려줍니다. 이때 `reused` 가 true 이고 `status` 는 그 작업의 지금 상태입니다(이미 COMPLETED 일 수 있다). 소리 길이가 0.25초보다 짧게 끝난 작업은 빈 소리로 보아 돌려주지 않고 새 작업을 만듭니다(`reused` 가 false).
+같은 테넌트에 같은 음색, 같은 글, 같은 차례의 작업이 이미 있으면(FAILED 제외, 보관 기간 안) 새로 만들지 않고 그 작업을 돌려줍니다. 이때 `reused` 가 true 이고 `status` 는 그 작업의 지금 상태입니다(이미 COMPLETED 일 수 있다). 소리 길이가 0.25초보다 짧게 끝난 작업은 빈 소리로 보아 돌려주지 않고 새 작업을 만듭니다(`reused` 가 false).
+
+같은 글은 같은 차례면 언제 만들어도 같은 소리입니다. 사람이 들어 보고 애매하다고 한 소리는 글을 바꾸지 말고 `take` 를 하나 올려 맡깁니다. 생성기가 다른 씨앗으로 만들어 다른 소리가 나고, 그 차례로 다시 맡기면 그 소리를 돌려줍니다. 차례 0(빠짐)은 차례 칸이 생기기 전과 같은 소리이고 그때 만든 작업을 그대로 돌려줍니다. 어느 차례의 소리를 쓸지는 부르는 쪽이 정해 기억합니다.
 
 **조회** `GET /api/v1/speech/tts-jobs/{job_id}`
 
 ```json
 { "success": true,
   "data": { "job_id": "9f3c1a20-...", "status": "COMPLETED", "voice": "field-voice-07",
-            "text": "검수대 3번으로 이동하세요.",
+            "text": "검수대 3번으로 이동하세요.", "take": 0,
             "created_at": "...", "started_at": "...", "finished_at": "...",
             "mime_type": "audio/mpeg", "audio_base64": "SUQzBAAAAA...",
             "duration_sec": 2.21, "elapsed_sec": 21.7 } }
@@ -2493,6 +2496,7 @@ curl -X POST /api/v1/dev-work-items/W-1/status \
 | HTTP | 코드 | 때 |
 |---|---|---|
 | 400 | `voice_required`, `text_required`, `text_too_long:max=200`, `invalid_job_id` | 칸이 비었거나 길거나 작업 번호 모양이 틀림 |
+| 400 | `take_out_of_range:max=10` | 차례가 0 보다 작거나 10 보다 큼 |
 | 404 | `voice_not_found:<이름>` | 없는 음색 |
 | 404 | `job_not_found` | 없는 작업, 보관 기간이 지나 지운 작업, 다른 테넌트의 작업 |
 | 429 | `tts_queue_full:max=500` | 그 테넌트의 대기, 진행 중 작업이 500개 |
@@ -2506,6 +2510,7 @@ curl -X POST /api/v1/dev-work-items/W-1/status \
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.29.0 | 2026-11-10 | **CR-176 같은 글 다른 차례** (§ 27-2). 맡기기에 `take`(0 이상 10 이하, 빠지면 0)를 받아 같은 글을 다른 소리로 다시 만든다. 같은 글 돌려주기는 같은 차례일 때만. 응답에 `take`, 오류 `take_out_of_range`. 차례 0 은 전과 같은 소리다 |
 | v3.28.0 | 2026-11-09 | **CR-174 실행 종료 회신, 승인 시한, run 변수** (§ 4-4, § 4-6). 실행 입력 `_callback` 으로 run 이 끝나면 HTTP 연결로 결과를 POST 한다. HUMAN_INPUT `timeoutMs` 가 지나면 `failed(approval_timeout)`. 단계 틀 변수 `{{run.id}}` 등 |
 | v3.27.1 | 2026-11-08 | **CR-171 음성 생성 작업 재사용** (§ 27-2). 소리 길이가 0.25초보다 짧게 끝난 작업은 돌려주지 않고 새로 만든다. 요청과 응답 모양은 그대로다 |
 | v3.27.0 | 2026-11-08 | **CR-170 검색 결과 문서 ID 와 벡터 유사도** (§ 3). 결과 항목에 `documentId`, `vectorScore` 를 더한다. § 2-2 텍스트 학습이 같은 소스의 다른 문서를 지우던 결함을 고쳐 설명을 보정하고, 이 용도의 소스는 `api` 유형으로 만든다고 적는다 |

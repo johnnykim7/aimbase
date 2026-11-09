@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.25.0** | 2026-11-09 | Aimbase v8.18.0 기준
+> **v3.26.0** | 2026-11-10 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -653,6 +653,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | `aimbase.tts.max-text-length` | `AIMBASE_TTS_MAX_TEXT_LENGTH` | 200 | 글 상한(문자 수) |
 | `aimbase.tts.max-pending-per-tenant` | `AIMBASE_TTS_MAX_PENDING_PER_TENANT` | 500 | 테넌트마다 대기, 진행 중 작업 상한. 넘으면 429 |
 | `aimbase.tts.min-reusable-duration-sec` | `AIMBASE_TTS_MIN_REUSABLE_DURATION_SEC` | 0.25 | 이보다 짧게 끝난 작업은 같은 글을 다시 맡겨도 돌려주지 않고 새로 만든다 |
+| `aimbase.tts.max-take` | `AIMBASE_TTS_MAX_TAKE` | 10 | 같은 글 다시 만들기 차례(`take`)의 상한. 넘으면 400 `take_out_of_range`. 차례마다 생성기 씨앗이 시도 횟수만큼 옮겨진다(CR-176) |
 | `aimbase.tts.retention-days` | `AIMBASE_TTS_RETENTION_DAYS` | 7 | 끝난 작업 보관 일수. 그 테넌트에 새 작업이 올 때 지난 것을 지운다 |
 
 **생성기 설정** (compose 의 `tts-sidecar` 환경변수. 1 이상의 정수가 아니면 기동하지 않는다):
@@ -663,7 +664,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | `TTS_LOAD_RETRY_SECONDS` | 600 | 모델 프로세스가 죽은 뒤 다시 싣기까지 쉬는 시간 |
 | `TTS_THREADS` | 8 | 연산 스레드 |
 
-**음색 늘리기, 바꾸기**: `tts-sidecar/voices/<이름>/` 에 `ref.wav`(견본 소리)와 `voice.json`(견본 글, 언어, 씨앗, 시도 횟수, 무음 기준 `silent_peak_db`, 생성 상한, 생성값, 뒤처리)을 두고 `./deploy.sh tts` 를 돌린다. 무음 기준은 뒤처리 전 최대 음량(dB)이고 뒤처리 `silenceremove` 기준보다 높게 둔다. 낮으면 뒤처리에서 전부 잘릴 소리가 합격해 빈 파일이 남는다. 폴더 이름이 음색 이름이다. 생성값이나 씨앗을 바꾸면 같은 글도 소리가 달라지므로, 이미 만든 소리와 맞춰야 하면 새 이름으로 등록한다.
+**음색 늘리기, 바꾸기**: `tts-sidecar/voices/<이름>/` 에 `ref.wav`(견본 소리)와 `voice.json`(견본 글, 언어, 씨앗, 시도 횟수, 무음 기준 `silent_peak_db`, 생성 상한, 생성값, 뒤처리)을 두고 `./deploy.sh tts` 를 돌린다. 무음 기준은 뒤처리 전 최대 음량(dB)이고 뒤처리 `silenceremove` 기준보다 높게 둔다. 낮으면 뒤처리에서 전부 잘릴 소리가 합격해 빈 파일이 남는다. 폴더 이름이 음색 이름이다. 생성값이나 씨앗을 바꾸면 같은 글도 소리가 달라지므로, 이미 만든 소리와 맞춰야 하면 새 이름으로 등록한다. 차례(`take`)마다 씨앗을 시도 횟수만큼 옮기므로 시도 횟수를 바꾸면 차례 1 이상의 소리도 달라진다(CR-176).
 
 **장애 대응**:
 
@@ -1927,6 +1928,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.26.0 | 2026-11-10 | **CR-176 같은 글 다른 차례** (§ 2-12). 설정 `aimbase.tts.max-take`(기본 10). 생성기와 api 를 함께 바꿀 때는 생성기를 먼저 올린다 |
 | v3.25.0 | 2026-11-09 | **CR-174 bp-3plgw 품고 수리 실행기** (§ 2-13). 전용 실행기 `aimbase-agent-3plgw`, 비밀값 자리, 설치 단계(`bootstrap <단계> 3plgw`), 회신 재시도와 승인 시한 감시 설정, 장애 대응 |
 | v3.24.0 | 2026-11-09 | **CR-173 CS 실행기 프로세스 상한** (§ 2-10). `AIMBASE_RUNNER_MAX_PROCESSES`, `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS`, 줄서기와 자리 내기 기록, 59 의 `./deploy.sh agent-wes-cs` |
 | v3.23.1 | 2026-11-09 | **CR-173 위젯 공개 주소 정정** (§ 2-10). 운영은 `ai.banpoom.co.kr`, 서버 nginx 설정 파일과 인증서 갱신 |

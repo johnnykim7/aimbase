@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.9 | 최종 수정: 2026-11-09 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174
+> 설계 버전: 7.10 | 최종 수정: 2026-11-10 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -2949,23 +2949,25 @@ cap 32000
 
 **Request Body**:
 ```json
-{ "voice": "field-voice-07", "text": "검수대 3번으로 이동하세요." }
+{ "voice": "field-voice-07", "text": "검수대 3번으로 이동하세요.", "take": 0 }
 ```
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
 | voice | string | ✅ | 음색 이름 |
 | text | string | ✅ | 1 ~ 200자. 바꾸지 않고 그대로 읽는다 |
+| take | integer | ❌ | 차례. 0 이상 `aimbase.tts.max-take`(기본 10) 이하, 빠지면 0. 같은 글을 다른 소리로 다시 만들 때 올린다(BIZ-134, CR-176) |
 
 **Response 202**:
 ```json
 { "success": true,
-  "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07",
+  "data": { "job_id": "9f3c1a20-...", "status": "PENDING", "voice": "field-voice-07", "take": 0,
             "reused": false, "created_at": "2026-10-31T01:40:00Z" } }
 ```
 
-- 같은 테넌트에 같은 음색, 같은 글의 작업이 있으면(FAILED 제외) 그 작업을 돌려준다. `reused=true`, `status` 는 그 작업의 지금 상태(BIZ-134)
+- 같은 테넌트에 같은 음색, 같은 글, 같은 차례의 작업이 있으면(FAILED 제외) 그 작업을 돌려준다. `reused=true`, `status` 는 그 작업의 지금 상태(BIZ-134)
 - 소리 길이가 `aimbase.tts.min-reusable-duration-sec`(기본 0.25초)보다 짧게 끝난 작업은 돌려주지 않고 새 작업을 만든다. `reused=false`. 요청과 응답 모양은 그대로다(CR-171)
+- 차례를 올리면 생성기가 시도 씨앗 시작값을 `씨앗 + 차례 * 시도 횟수` 로 옮겨 같은 글을 다른 소리로 만든다. 차례 0 은 CR-176 전과 같은 소리이고 쌓인 작업은 차례 0 이다(CR-176)
 
 ### GET `/api/v1/speech/tts-jobs/{job_id}` 🔒 [PRD-354]
 **설명**: 작업 상태와 결과.
@@ -2974,7 +2976,7 @@ cap 32000
 ```json
 { "success": true,
   "data": { "job_id": "9f3c1a20-...", "status": "COMPLETED", "voice": "field-voice-07",
-            "text": "검수대 3번으로 이동하세요.",
+            "text": "검수대 3번으로 이동하세요.", "take": 0,
             "created_at": "...", "started_at": "...", "finished_at": "...",
             "mime_type": "audio/mpeg", "audio_base64": "SUQzBAAAAA...",
             "duration_sec": 2.21, "elapsed_sec": 21.7 } }
@@ -2990,6 +2992,7 @@ cap 32000
 | HTTP | 코드 | 때 |
 |------|------|-----|
 | 400 | `voice_required`, `text_required`, `text_too_long:max=200`, `invalid_job_id` | 칸이 비었거나 길거나 작업 번호 모양이 틀림 |
+| 400 | `take_out_of_range:max=10` | 차례가 0 보다 작거나 상한보다 큼(CR-176) |
 | 404 | `voice_not_found:<이름>` | 없는 음색 |
 | 404 | `job_not_found` | 없는 작업, 보관 기간이 지나 지운 작업, 다른 테넌트의 작업 |
 | 429 | `tts_queue_full:max=500` | 테넌트의 대기, 진행 중 작업이 상한(BIZ-133) |
@@ -3000,7 +3003,7 @@ cap 32000
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | GET | `http://tts-sidecar:8310/health` | 200 `{"status":"ok","voices":[...],"model":"unloaded"\|"loading"\|"ready"}`. 모델이 내려가 있어도 200 이다. 503 `{"status":"downloading"}`, `{"status":"failed","error":...}`, `{"status":"backoff","error":...,"retry_after":초}` (CR-167) |
-| POST | `http://tts-sidecar:8310/synthesize` | `{voice, text}` 를 MP3 로. 머리값 `X-Duration-Sec`, `X-Elapsed-Sec`, `X-Attempt`. 없는 음색 404, 빈 글 400, 검사 3번 실패 422 `{"error":"generation_failed:<까닭>"}` |
+| POST | `http://tts-sidecar:8310/synthesize` | `{voice, text, take}` 를 MP3 로. `take` 는 빠지면 0 이고 시도 씨앗 시작값을 `씨앗 + take * 시도 횟수` 로 옮긴다(CR-176). 머리값 `X-Duration-Sec`, `X-Elapsed-Sec`, `X-Attempt`. 없는 음색 404, 빈 글 400, 음수 차례 400 `take_out_of_range`, 검사 3번 실패 422 `{"error":"generation_failed:<까닭>"}` |
 
 ---
 

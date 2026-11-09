@@ -159,4 +159,26 @@ dict(id='IT-05-014', flow='음성 생성 작업', kind='예외', title='빈 소�
      pair={1: [1]},
      req=['PRD-354'], src=['CR-171']),
 
+dict(id='IT-05-015', flow='음성 생성 작업', kind='정상', title='같은 글을 차례만 올려 맡기면 글은 그대로이고 다른 소리가 온다',
+     pre='개발기 bp-wms 테넌트의 API 키, 생성기가 떠 있는 상태(GET /health 200), 「에스, 팔십이번」 이 차례 없이 맡겨져 COMPLETED 로 있는 상태',
+     steps='1. 「에스, 팔십이번」 을 take 0, 1, 2 로 하나씩 맡기고(POST /api/v1/speech/tts-jobs, 본문 voice "field-voice-07") 세 작업이 COMPLETED 가 될 때까지 조회한다\n'
+           '2. take 1 로 한 번 더 맡긴다\n'
+           '3. 받은 소리 셋을 듣는다',
+     expect='1. take 0 은 reused true 이고 앞서 맡긴 작업 번호와 소리(md5)가 같다. take 1, 2 는 reused false, 새 작업 번호이고 세 소리의 md5 가 서로 다르다. 응답의 take 가 보낸 값과 같다\n'
+            '2. reused true 이고 1 의 take 1 작업 번호가 온다\n'
+            '3. 세 소리 모두 「에스, 팔십이번」 으로 들린다',
+     judge=['서버', '서버', '합동'],
+     pair={1: [1], 2: [2], 3: [3]},
+     req=['PRD-354', 'PRD-355'], src=['CR-176'], pri='High'),
+
+dict(id='IT-05-016', flow='음성 생성 작업', kind='예외', title='차례가 0 보다 작거나 상한보다 크면 맡기지 않는다',
+     pre='개발기 bp-wms 테넌트의 API 키',
+     steps='1. 「에스, 팔십이번」 을 take -1 로 맡긴다\n'
+           '2. take 11 로 맡긴다',
+     expect='1. 400 take_out_of_range:max=10 이고 작업이 생기지 않는다\n'
+            '2. 400 take_out_of_range:max=10 이고 작업이 생기지 않는다',
+     judge=['단위', '단위'],
+     pair={1: [1], 2: [2]},
+     req=['PRD-354'], src=['CR-176']),
+
 ]
