@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -186,7 +187,17 @@ public class OrchestratorEngine {
         String sessionId = request.sessionId() != null
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
+        AtomicReference<LLMAdapter> calledAdapter = new AtomicReference<>();
+        try {
+            return chatSingle(request, sessionId, calledAdapter);
+        } finally {
+            // 구조화 출력 재시도까지 같은 프로세스를 쓰므로, 응답을 다 만든 뒤에 닫는다.
+            releaseOneShotWorker(request, sessionId, calledAdapter.get());
+        }
+    }
 
+    private ChatResponse chatSingle(ChatRequest request, String sessionId,
+                                    AtomicReference<LLMAdapter> calledAdapter) {
         // CR-047 PRD-299: Memory prefetch — assemble() 합류 전까지 백그라운드 진행
         contextAssemblyEngine.prefetchMemory(sessionId, request.userId());
 
@@ -337,6 +348,7 @@ public class OrchestratorEngine {
         }
 
         // 5. LLM 호출 (Phase 2: actionsEnabled=true 시 tool use 루프)
+        calledAdapter.set(adapter);
         // CR-030: connection config에서 ModelConfig 구성 (extended_thinking 등)
         ModelConfig modelConfig = (request.connectionId() != null && !request.connectionId().isBlank())
                 ? connectionAdapterFactory.resolveModelConfig(request.connectionId())
@@ -760,7 +772,18 @@ public class OrchestratorEngine {
                 }
             }
             cancellationRegistry.clear(sessionId);
+            releaseOneShotWorker(request, sessionId, adapter);
         }
+    }
+
+    /**
+     * 세션 없이 온 요청은 같은 세션으로 다시 오지 않는다. 답한 뒤 CLI 실행기의 프로세스를 닫지 않으면
+     * 실행기의 유휴 회수(15분)까지 요청마다 하나씩 남아, 문의가 몰리면 실행기 메모리 한도를 넘는다(CR-173 13절).
+     * CLI 가 아닌 어댑터는 cleanupSession 이 아무것도 하지 않는다.
+     */
+    private void releaseOneShotWorker(ChatRequest request, String sessionId, LLMAdapter adapter) {
+        if (request.sessionId() != null || adapter == null) return;
+        adapter.cleanupSession(sessionId);
     }
 
     /**
