@@ -186,6 +186,26 @@ deploy_agent_wes_cs() {
   echo "[agent-wes-cs] 완료"
 }
 
+# CR-174 품고 수리 실행기만 다시 올린다(GitHub 토큰, env 를 바꿨을 때). api 와 다른 실행기는 건드리지 않는다.
+# 실행기 jar 가 바뀌었으면 agents 로 전체를 올린다(한 서비스만 빌드하면 나머지는 옛 이미지로 남는다).
+deploy_agent_3plgw() {
+  if ! ssh_run "grep -Eq '^GH_TOKEN=.+' $REMOTE/.env.runner-3plgw && grep -Eq '^BP_3PLGW_SERVER_MCP_API_KEY=.+' $REMOTE/.env"; then
+    echo "59 $REMOTE/.env.runner-3plgw 에 GH_TOKEN 이 없거나 .env 에 BP_3PLGW_SERVER_MCP_API_KEY 가 없습니다. 운용 가이드 § 2-13 대로 넣은 뒤 다시 실행하세요."
+    exit 1
+  fi
+  echo "━━━ Agent(Runner) 빌드 ━━━"
+  cd backend
+  ./gradlew aimbase-agent:bootJar
+  cd ..
+  ssh_run "mkdir -p $REMOTE/backend/aimbase-agent/build/libs"
+  AGENT_JAR=$(find backend/aimbase-agent/build/libs -name '*.jar' ! -name '*plain*')
+  scp_send "$AGENT_JAR" "$SERVER:$REMOTE/backend/aimbase-agent/build/libs/$(basename "$AGENT_JAR")"
+  scp_send backend/aimbase-agent/Dockerfile "$SERVER:$REMOTE/backend/aimbase-agent/Dockerfile"
+  scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
+  ssh_run "cd $REMOTE && docker compose build aimbase-agent-3plgw && docker compose up -d --no-deps --force-recreate aimbase-agent-3plgw"
+  echo "✅ Agent 3plgw 완료 → aimbase-agent-3plgw"
+}
+
 # CR-124: MCP transport 변경은 BE 와 러너가 함께 올라가야 한다.
 # 순서 = BE 먼저(서버가 새 엔드포인트를 열어둔 뒤 러너가 붙도록).
 deploy_mcp() {
@@ -506,11 +526,12 @@ case "$TARGET" in
   agent)  deploy_agent ;;
   agent-wes-cs) deploy_agent_wes_cs ;;
   agents) deploy_agents ;;
+  agent-3plgw) deploy_agent_3plgw ;;
   mcp)    deploy_mcp ;;
   sandbox) deploy_sandbox ;;
   tts)    deploy_tts ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agent-wes-cs|agents|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-agent-wes-cs|chaws-agent-3plgw|chaws-bootstrap|chaws-tts|chaws]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agent-wes-cs|agents|agent-3plgw|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-agent-wes-cs|chaws-agent-3plgw|chaws-bootstrap|chaws-tts|chaws]"; exit 1 ;;
 esac
 
 echo ""

@@ -697,7 +697,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 1. 위 비밀값을 env 파일에 넣는다. api 가 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 새로 읽어야 하면 api 를 다시 올린다
 2. `admin 3plgw`: CLI 허용 테넌트에 `bp_3plgw` 를 더한다
 3. `tenant 3plgw`: 테넌트 `bp_3plgw`, 실행기 전용 키, 소비앱 키(`secrets/bp-3plgw-api-key`, 3PLGW 에 전한다). env 에 빠진 비밀값을 경고로 찍는다
-4. 실행기 기동. 59 는 `./deploy.sh agents`(모든 실행기), chaws 는 `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-3plgw`. 기록에 `Agent registered successfully: name=cli-runner-bp-3plgw` 가 나오면 된 것
+4. 실행기 기동. 59 는 처음에 `./deploy.sh agents`(모든 실행기), 토큰이나 env 만 바꿨으면 `./deploy.sh agent-3plgw`(이 실행기만, api 와 다른 실행기는 그대로), chaws 는 `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-3plgw`. 기록에 `Agent registered successfully: name=cli-runner-bp-3plgw` 가 나오면 된 것
 5. 계정 로그인: 공용 `claude-accounts/<계정>/` 에 이미 로그인된 work01, work02, work03 을 그대로 쓴다. 없으면 § 2-10 과 같은 방법으로 로그인한다
 6. `connections 3plgw`: 계정마다 CLI 연결 `cli-runner-bp-3plgw-<계정>`(HYBRID)과 묶음 `cli-runner-bp-3plgw-rr`
 7. `TPLGW_BASE_URL=<3PLGW 주소> bootstrap http 3plgw`: HTTP 연결 `bp-3plgw`(59 `http://59.8.160.12:8187`, 운영 `http://bp-3plgw:8187`)와 `github-bp-3plgw`
