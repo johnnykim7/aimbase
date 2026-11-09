@@ -186,6 +186,52 @@ services:
   # 같은 목소리 음성 생성기(CR-166, CR-167). 모델은 문장이 있을 때만 싣고 일이 없으면 내린다.
   # 운영 3PL 보다 CPU 를 늦게 받는다. 코어 2개와 8개의 문장 시간이 같고, 메모리는 긴 문장까지 8.7GB 다(CR-167 7절).
   # 상한에 걸리면 모델 프로세스만 죽고 창구가 503 으로 답한다(BIZ-140). ./deploy.sh chaws-tts 로 올린다.
+  # CR-174 품고 API 변경 수리 실행기. 테넌트 bp_3plgw 전용(BIZ-145). 운영 3PL 의 bp-3plgw 가 부른다.
+  # GitHub 토큰(GH_TOKEN), 3PLGW 내부 키(TPLGW_INTERNAL_KEY), 실행기 전용 키는 agent-3plgw.env 에만 둔다. 계정 폴더와 작업장을 bp_wms 실행기와 나눈다.
+  # 운영 DB 자격은 주지 않는다. 일꾼 1, 턴 시한은 수리 단계 시한(30분)과 같다.
+  aimbase-agent-3plgw:
+    image: aimbase-aimbase-agent:latest
+    build:
+      context: ./build/backend
+      dockerfile: aimbase-agent/Dockerfile
+    init: true
+    restart: unless-stopped
+    env_file: agent-3plgw.env
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "1"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "1800"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-3plgw"
+      SERVER_PORT: "8304"
+      AGENT_NAME: "cli-runner-bp-3plgw"
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_TENANT_ID: "bp_3plgw"
+      AGENT_MCP_PORT: "8305"
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-3plgw:8304"
+      GIT_AUTHOR_NAME: "${REPAIR_GIT_NAME:-aimbase-repair}"
+      GIT_AUTHOR_EMAIL: "${REPAIR_GIT_EMAIL:-aimbase-repair@therecommerce.co.kr}"
+      GIT_COMMITTER_NAME: "${REPAIR_GIT_NAME:-aimbase-repair}"
+      GIT_COMMITTER_EMAIL: "${REPAIR_GIT_EMAIL:-aimbase-repair@therecommerce.co.kr}"
+    mem_limit: 1536m
+    volumes:
+      - ./claude-accounts-3plgw:/home/appuser/.claude-accounts
+      - ./workspace-3plgw:/data/workspace
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8304/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # 같은 목소리 음성 생성기(CR-166, CR-167). 모델은 문장이 있을 때만 싣고 일이 없으면 내린다.
+  # 운영 3PL 보다 CPU 를 늦게 받는다. 코어 2개와 8개의 문장 시간이 같고, 메모리는 긴 문장까지 8.7GB 다(CR-167 7절).
+  # 상한에 걸리면 모델 프로세스만 죽고 창구가 503 으로 답한다(BIZ-140). ./deploy.sh chaws-tts 로 올린다.
   tts-sidecar:
     image: aimbase-tts-sidecar:latest
     build:
