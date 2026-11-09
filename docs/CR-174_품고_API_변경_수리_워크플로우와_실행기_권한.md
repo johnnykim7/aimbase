@@ -294,6 +294,7 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 고침 | 워크플로우 정의에 `response_schema`, 출력 지시 문구 보강. 엔진 추출기는 마지막 JSON 객체. 단위 시험 11건 통과(새 3건 포함) |
 | 59 반영 | 00:11 api 재생성(healthy), 00:12 워크플로우 재등록 200. 조회로 repair config 에 response_schema(필수 7칸)와 출력 지시 확인 |
 | 재시도 run 10793e47(건 3, 00:13) | `repair` completed, `structured_data` 7칸(result_kind CONTRACT, 요약 "orderSheet.orderCode 를 orderSheet.orderNo 로"). `submit` 201(00:16, 33ms). run `pending_approval`(BO2 승인 단계). 승인은 사용자 합동 시험, 시한 04:16. 반영(activate)과 종료 회신은 감시 스크립트(`build/cr174_watch_run.sh`)로 지켜본다 |
+| 승인 뒤(사용자 합동 시험 04:43) | approve 호출 04:43:23, ROUTER 가 CONTRACT 로 `activate`: POST `/changes/inv-20261109-e9d7aa3a/activate` 200(10ms), run completed(5 단계 결과). 종료 회신 POST `/changes/inv-20261109-e9d7aa3a/result` 200(6ms, 1회차, api 로그). 59 E2E 전 구간 통과 |
 
 ## 8. 진행 기록
 
@@ -313,3 +314,4 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-10 00:14 | 59 api 재배포(deploy.sh be), 워크플로우 재등록 200, 조회로 response_schema 확인(7.5). 컨타에 알림, 3PLGW 재시도(건 3) 대기 |
 | 2026-11-10 00:24 | 3PLGW 재시도 run 10793e47: 수리 단계 structured_data 생성, 제안 전달 201, 승인 대기 진입(7.5). 컨타 승인 ①(00:21): 승인 뒤 반영과 회신 결과 알림 후 완료 보고, 운영 반영 전 완처리 없음 |
 | 2026-11-10 04:25 | run 10793e47 은 04:21 현재 pending_approval 그대로(BO2 승인 미처리). 3PLGW 쪽 승인 시한 04:16 이 지났지만 Aimbase 승인 시한은 정의대로 72시간(11-12 00:16)이라 run 은 열려 있다. 감시 240분 창이 끝나 24시간으로 다시 걸었다. 컨타에 알림 |
+| 2026-11-10 04:47 | 사용자 합동 시험 승인으로 run 10793e47 completed: activate 200, 종료 회신 200(7.5). 컨타에 알림, 완료 보고. 운영 반영은 별도 승인, 59 잔재(cr174-receiver 컨테이너, 빈 계정 폴더)는 사용자가 지운다(7.3, 7.4) |
