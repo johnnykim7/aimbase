@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 3.13 | 최종 수정: 2026-11-10 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176
+> 설계 버전: 3.14 | 최종 수정: 2026-11-10 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -680,6 +680,19 @@ flowchart LR
 | PRD-367 | 실행기 이미지 git, gh, openssh-client. 수리 실행기 env 에만 GitHub 토큰 | CR-173 | 59 실행기에서 git, gh 버전, PR 생성 | 실행기 | 설계중 |
 | PRD-366 | 테넌트 `bp_3plgw`, 실행기 `aimbase-agent-3plgw`(59, chaws), CLI 연결 셋과 묶음, HTTP 연결 둘, 워크플로우 `poomgo-change-repair`, 설치 스크립트 대상 `3plgw` | CR-161, CR-173, 위 셋, 3PLGW API 계약 | 59 에서 가짜 품고 변경 웹훅부터 제안, PR, 승인, 반영 요청, 회신까지. 거절과 시한 초과 회신. 3PLcore 시험항목 | BE, 인프라 | 설계중 |
 
+
+### CR-175: 채팅 위젯 대화 기본기와 모델 고르기 (BE + 관리 화면 + 위젯) [v3.13, CR-175]
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-369 | 메시지 순번 부분 고유 인덱스, turn_id, delete_reason, 되감기, done 칸(turn_id, user_seq, model) | CR-083 | 단위시험 TC-CHT-001 ~ 005, 로컬 | BE | 설계중 |
+| PRD-370 | message_feedback, 평가 남기기, 취소, 관리 목록 API | PRD-369 | 단위시험 TC-CHT-006 ~ 008 | BE | 설계중 |
+| PRD-371 | 연결 config models 검사, `llm.default-model` 이전, thinking 칸과 supportsThinking, 위젯 설정 조회 | CR-040 | 단위시험 TC-CHT-009 ~ 011, CLI 생각 깊이 실측 | BE | 설계중 |
+| PRD-372 | 후속 질문과 제목 API, 프롬프트 틀, title_source | PRD-369, CR-036 | 단위시험 TC-CHT-012 ~ 014 | BE | 설계중 |
+| FE-042 | 연결 편집 「위젯에서 고를 모델」 칸 | PRD-371 | 로컬 화면 | FE | 설계중 |
+| FE-043 | 답 평가 목록 화면 | PRD-370 | 로컬 화면 | FE | 설계중 |
+| PRD-368, PRD-373, PRD-374, PRD-375 | 위젯 화면 전부(멈추기, 다시 만들기, 질문 고치기, 평가, 모델 고르기, 후속 질문, 첫 화면, 읽기 편의, 무채색, 글자 크기) | 위 BE 전부 | 통합 시험항목 1 ~ 17 (CR-175 설계 9.2) | 위젯 | 설계중 |
+| (레포 간) | bp-backoffice2 CS 문의 상세: scopes 전달, 추천 질문과 안내, 글자 크기 기본값 | 위젯 | 백오피스2 화면에서 마이크, 추천 질문 확인 | bp-backoffice2 | 요청 전 |
 ---
 
 ## Sprint 분리 원칙

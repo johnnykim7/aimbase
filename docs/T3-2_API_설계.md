@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.10 | 최종 수정: 2026-11-10 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176
+> 설계 버전: 7.11 | 최종 수정: 2026-11-10 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3068,6 +3068,94 @@ repair 단계 출력(구조화 JSON):
  "tests": {"unit": "passed | failed | skipped", "unit_passed": 41, "unit_total": 41, "replay_fill_rate": 0.98},
  "failure_reason": null}
 ```
+
+
+---
+
+## 채팅 위젯 대화 기본기와 모델 고르기 [v7.10, CR-175]
+
+설계 상세: [CR-175_채팅_위젯_대화_기본기와_모델_고르기.md](CR-175_채팅_위젯_대화_기본기와_모델_고르기.md) 3절, 6절. 권한은 모두 `chat:stream` 위젯 토큰 또는 로그인. 평가 목록만 로그인 사용자 전용.
+
+### 대화 요청 칸 추가 [PRD-369, PRD-371]
+
+`POST /api/v1/chat/completions`
+
+| 칸 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| rewind_from_seq | 정수 | 선택 | 그 순번의 질문부터 뒤를 지운 표시하고 이번 질문으로 답한다(BIZ-148) |
+| thinking | `on`, `off` | 선택 | 깊게 생각하기. 비우면 연결 config 그대로. 어댑터가 지원하지 않는데 `on` 이면 400 `thinking_not_supported` |
+| model | 글 | 선택 | 기존 칸. 연결 config `models` 가 있으면 그 목록 안이어야 한다. 아니면 400 `model_not_allowed`(BIZ-150) |
+
+| 오류 | 경우 |
+|---|---|
+| 409 `session_busy` | 되감기 요청인데 그 세션에 답이 도는 중 |
+| 400 `rewind_invalid:not_user_message` | 그 순번이 없거나 질문 메시지가 아님 |
+| 409 `rewind_before_compaction` | 그 순번이 마지막 압축 경계보다 앞 |
+
+끝 이벤트(done) 추가 칸: `turn_id`(답 번호), `user_seq`(이번 질문 순번), `model`(실제로 답한 모델).
+
+```
+event: done
+data: {"done": true, "turn_id": "0b6f2c1e-...", "user_seq": 4, "model": "claude-sonnet-5-5", "rag_used": false}
+```
+
+### 위젯 설정 조회 [PRD-371]
+
+`GET /api/v1/chat/widget-settings?connection_id={id}`
+
+```json
+{"models": [{"id": "claude-sonnet-5-5", "label": "Sonnet 5.5"}, {"id": "claude-opus-5-5", "label": "Opus 5.5"}],
+ "default_model": "claude-sonnet-5-5", "thinking_supported": true,
+ "feedback_reasons": [{"code": "WRONG_INFO", "label": "틀린 정보"}],
+ "feedback_comment_max_chars": 500, "follow_ups_enabled": true}
+```
+
+- 연결 config `models` 가 없으면 `model` 하나. `connection_id` 가 없으면 `llm.default-model` 하나
+- 그 테넌트에 없는 연결이면 404
+
+### 답 평가 [PRD-370]
+
+| 방법 | 경로 | 뜻 |
+|---|---|---|
+| PUT | /api/v1/chat/feedback | 남기기, 바꾸기 (turn_id, user_ref 로 하나) |
+| DELETE | /api/v1/chat/feedback?turn_id= | 취소 |
+| GET | /api/v1/chat/feedback?rating=&from=&to=&model=&page=&size= | 관리 화면 목록. 로그인 사용자만, 위젯 토큰은 403 |
+
+남기기 본문:
+
+```json
+{"session_id": "cs-9471-...", "turn_id": "0b6f2c1e-...", "rating": "DOWN", "reason_codes": ["NO_LOOKUP"], "comment": "출고 이력을 안 봤어요"}
+```
+
+| 칸 | 필수 | 값 |
+|---|---|---|
+| session_id | 예 | 요청한 사람의 세션 |
+| turn_id | 예 | 그 세션의 답 번호(지운 답 포함) |
+| rating | 예 | `UP`, `DOWN` |
+| reason_codes | 선택 | `DOWN` 일 때만. `widget.feedback-reasons` 의 code |
+| comment | 선택 | `widget.feedback-comment-max-chars` 까지 |
+
+- 400 `feedback_invalid:<칸>`, 그 세션에 없는 답이거나 남의 세션이면 404
+- 응답 `{id, turn_id, rating, reason_codes, comment, updated_at}`
+- 목록 행: `{id, created_at, updated_at, rating, reasons:[{code, label}], comment, model, session_id, question_excerpt, answer_excerpt, answer_deleted}`
+
+### 후속 질문과 대화 제목 [PRD-372]
+
+`POST /api/v1/chat/sessions/{session_id}/follow-ups` 본문 `{"turn_id": "...", "connection_id": "..."}`
+
+```json
+{"follow_ups": ["13박스 중 몇 박스가 출고됐나요?", "택배사 조회 결과도 보여 주세요", "고객 답변 초안을 다시 써 주세요"], "title": "라이프러버 13박스 누락 문의"}
+```
+
+- `title` 은 세션 첫 답이고 `title_source` 가 `USER` 가 아닐 때만 있다. 그때 세션 제목을 바꾸고 `GENERATED` 로 둔다
+- 409 `follow_ups_disabled`(설정 꺼짐), 404(세션, 답 없음), 502 `follow_ups_failed`(모델 호출 실패, 시간 초과, JSON 아님)
+- 대화 기록에 넣지 않고 도구를 쓰지 않는다(BIZ-151)
+
+### 대화 meta 제목 고치기 (기존 경로 동작 추가)
+
+`PUT /api/v1/conversations/{sessionId}/meta` 에 `title` 이 있으면 `title_source = USER` 로 둔다.
+
+---
 
 ## 작성 가이드
 
