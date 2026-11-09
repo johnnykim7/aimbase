@@ -1,6 +1,7 @@
 """CR-166 같은 목소리 음성 생성기(tts-sidecar). api 만 부른다(CR-166 3.1, 3.2).
 
-음색 하나는 voices/<이름>/ 폴더 하나이고, 같은 음색 같은 글이면 씨앗 순서가 같아 다시 만들어도 같은 소리가 난다(BIZ-134).
+음색 하나는 voices/<이름>/ 폴더 하나이고, 같은 음색 같은 글 같은 차례면 씨앗 순서가 같아 다시 만들어도 같은 소리가 난다(BIZ-134).
+차례를 올리면 씨앗 시작값을 시도 횟수만큼 옮겨 같은 글을 다른 소리로 만든다(CR-176).
 한 번에 한 문장만 만든다(BIZ-133). api 가 한 작업씩 보내지만 생성기 안에서도 잠가 둔다.
 
 CR-167: 창구 프로세스와 모델 프로세스로 나눈다. 모델은 만들 문장이 있을 때만 싣고, 일이 없으면 모델 프로세스를 끝내
@@ -218,20 +219,22 @@ class Engine:
             self.load_error = f"{type(e).__name__}: {e}"
             log.exception("model load failed")
 
-    def synthesize(self, voice_name, text):
+    def synthesize(self, voice_name, text, take=0):
         voice = self.voices[voice_name]
         token_limit = max_new_tokens(text, voice)
+        # 차례마다 시도 횟수만큼 건너뛰어야 한 차례의 다시 만들기 씨앗이 다른 차례의 씨앗과 겹치지 않는다.
+        first_seed = voice.seed + take * voice.attempts
         with self._lock:
             started = time.monotonic()
             reason = None
             for attempt in range(1, voice.attempts + 1):
-                seed_everything(voice.seed + attempt - 1)
+                seed_everything(first_seed + attempt - 1)
                 wavs, sample_rate = self._model.generate_voice_clone(
                     text=text, language=voice.language, voice_clone_prompt=self._prompts[voice_name],
                     max_new_tokens=token_limit, **voice.generation)
                 wav = wavs[0] if wavs else np.zeros(0, dtype=np.float32)
                 reason = check_audio(wav, sample_rate, token_limit, self._samples_per_token, voice.silent_peak)
-                log.info("voice=%s attempt=%d samples=%d tokens=%.1f limit=%d", voice_name, attempt,
+                log.info("voice=%s take=%d attempt=%d samples=%d tokens=%.1f limit=%d", voice_name, take, attempt,
                          np.asarray(wav).size, np.asarray(wav).size / self._samples_per_token, token_limit)
                 if reason is None:
                     audio, duration = self._encoder(wav, sample_rate, voice.postprocess)
@@ -255,11 +258,11 @@ def model_process(conn, voices_dir, model_path, model_loader=load_model, encoder
     conn.send(("ready", None))
     while True:
         try:
-            voice_name, text = conn.recv()
+            voice_name, text, take = conn.recv()
         except EOFError:
             return
         try:
-            conn.send(("ok", engine.synthesize(voice_name, text)))
+            conn.send(("ok", engine.synthesize(voice_name, text, take)))
         except GenerationFailed as e:
             conn.send(("rejected", e.reason))
         except Exception:
@@ -325,7 +328,7 @@ class ModelHost:
             self._prepare_failed = True
             log.exception("model files not ready")
 
-    def synthesize(self, voice_name, text):
+    def synthesize(self, voice_name, text, take=0):
         # 싣거나 만드는 동안 온 문장은 이 잠금 앞에서 기다린다(BIZ-133, BIZ-139).
         with self._lock:
             # 앞 문장이 모델 프로세스를 죽였으면 기다리던 문장도 다시 싣지 않고 끝난다(BIZ-140).
@@ -334,7 +337,7 @@ class ModelHost:
             try:
                 if self._process is None:
                     self._load()
-                self._conn.send((voice_name, text))
+                self._conn.send((voice_name, text, take))
                 kind, detail = self._conn.recv()
             except (EOFError, OSError) as e:
                 reason = self._exit_reason(e)
@@ -406,6 +409,7 @@ class ModelHost:
 class SynthesizeRequest(BaseModel):
     voice: str = ""
     text: str = ""
+    take: int = 0
 
 
 def _error(status, code):
@@ -443,8 +447,11 @@ def create_app(host, start_in_background=True):
             return _error(404, f"voice_not_found:{req.voice}")
         if not req.text.strip():
             return _error(400, "text_required")
+        # 상한은 api 가 설정으로 막는다. 생성기는 씨앗이 음색 씨앗보다 작아지는 음수만 막는다.
+        if req.take < 0:
+            return _error(400, "take_out_of_range")
         try:
-            result = host.synthesize(req.voice, req.text)
+            result = host.synthesize(req.voice, req.text, req.take)
         except ModelUnavailable:
             return _error(503, "tts_generator_unavailable")
         except GenerationFailed as e:

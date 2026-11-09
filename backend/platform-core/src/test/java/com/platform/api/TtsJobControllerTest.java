@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-/** CR-166: 음성 생성 작업 조회 응답과 오류 코드. TC-TTS-116(T3-5). */
+/** CR-166: 음성 생성 작업 맡기기, 조회 응답과 오류 코드. TC-TTS-116(T3-5). */
 class TtsJobControllerTest {
 
     private TtsJobService service;
@@ -62,6 +62,7 @@ class TtsJobControllerTest {
         Map<String, Object> body = controller.get(pending.getJobId().toString()).getBody().data();
         assertEquals("2026-10-31T01:40:00Z", body.get("created_at"));
         assertEquals("1번.", body.get("text"));
+        assertEquals(0, body.get("take"));
         assertFalse(body.containsKey("audio_base64"));
         assertFalse(body.containsKey("error"));
 
@@ -83,5 +84,22 @@ class TtsJobControllerTest {
         body = controller.get(failed.getJobId().toString()).getBody().data();
         assertEquals("generation_failed:silent_audio", body.get("error"));
         assertFalse(body.containsKey("audio_base64"));
+    }
+
+    @Test
+    @DisplayName("TC-TTS-116 맡기기는 차례를 넘기고 응답에 차례를 싣는다(CR-176). 본문이 없으면 차례도 없다")
+    void submitCarriesTake() {
+        TtsJobEntity j = job(TtsJobEntity.PENDING);
+        j.setTake(2);
+        when(service.submit("field-voice-07", "1번.", 2, "anonymous"))
+                .thenReturn(new TtsJobService.SubmitResult(j, false));
+        ResponseEntity<ApiResponse<Map<String, Object>>> resp =
+                controller.submit(new TtsJobController.SubmitRequest("field-voice-07", "1번.", 2));
+        assertEquals(202, resp.getStatusCode().value());
+        assertEquals(2, resp.getBody().data().get("take"));
+        assertEquals(false, resp.getBody().data().get("reused"));
+
+        when(service.submit(null, null, null, "anonymous")).thenThrow(new TtsJobException(400, "voice_required"));
+        assertThrows(TtsJobException.class, () -> controller.submit(null));
     }
 }

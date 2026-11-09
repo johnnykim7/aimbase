@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -69,7 +70,7 @@ DIE_TEXT = "죽는 문장"
 
 
 class ProcessFakeModel(FakeModel):
-    """모델 프로세스 안에서 도는 가짜. 만든 글을 파일에 남긴다."""
+    """모델 프로세스 안에서 도는 가짜. 만든 글과, 씨앗을 맞힌 직후 첫 난수를 파일에 남긴다."""
 
     def __init__(self, outputs, delay, text_log):
         super().__init__(outputs, delay)
@@ -80,6 +81,9 @@ class ProcessFakeModel(FakeModel):
             os._exit(9)
         with open(self.text_log, "a", encoding="utf-8") as f:
             f.write(json.dumps(kwargs["text"], ensure_ascii=False) + "\n")
+        # 씨앗은 모델 프로세스 안에서 맞추므로 시험 프로세스에서 가로챌 수 없다. 그 씨앗의 첫 난수로 확인한다.
+        with open(self.text_log + ".draws", "a", encoding="utf-8") as f:
+            f.write(repr(random.random()) + "\n")
         return super().generate_voice_clone(**kwargs)
 
 
@@ -192,6 +196,19 @@ class EngineTest(unittest.TestCase):
         with self.assertRaises(server.GenerationFailed) as ctx:
             engine.synthesize("field-voice-07", "1번.")
         self.assertEqual(ctx.exception.reason, "silent_audio")
+
+    def test_167_take_moves_seed(self):
+        engine, _ = self.make([np.zeros(SR), tone(1.0)])
+        with mock.patch.object(server, "seed_everything") as seeded:
+            result = engine.synthesize("field-voice-07", "에스, 팔십이번", take=1)
+        self.assertEqual([c.args[0] for c in seeded.call_args_list], [20261034, 20261035])
+        self.assertEqual(result.attempt, 2)
+
+    def test_167_take_zero_keeps_seed(self):
+        engine, _ = self.make([tone(1.0)])
+        with mock.patch.object(server, "seed_everything") as seeded:
+            engine.synthesize("field-voice-07", "에스, 팔십이번", take=0)
+        self.assertEqual([c.args[0] for c in seeded.call_args_list], [20261031])
 
     def test_153_model_silence_retries_with_next_seed(self):
         engine, _ = self.make([tone(0.56, peak=MODEL_SILENCE_PEAK), tone(1.0)])
@@ -414,6 +431,24 @@ class AppTest(HostCase):
         self.assertEqual(resp.headers["x-attempt"], "1")
         self.assertEqual(resp.headers["x-duration-sec"], "1.0")
         self.assertEqual(self.texts(), [" \"3번\"\n "])
+
+    def draws(self):
+        with open(self.marker + ".texts.draws", encoding="utf-8") as f:
+            return [float(line) for line in f]
+
+    def test_167_take_reaches_model_process(self):
+        client = self.client()
+        resp = client.post("/synthesize", json={"voice": "field-voice-07", "text": "에스, 팔십이번"})
+        self.assertEqual(resp.status_code, 200)
+        resp = client.post("/synthesize", json={"voice": "field-voice-07", "text": "에스, 팔십이번", "take": 2})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.draws(), [random.Random(20261031).random(), random.Random(20261037).random()])
+
+    def test_167_negative_take(self):
+        client = self.client()
+        resp = client.post("/synthesize", json={"voice": "field-voice-07", "text": "에스, 팔십이번", "take": -1})
+        self.assertEqual((resp.status_code, resp.json()), (400, {"error": "take_out_of_range"}))
+        self.assertEqual(self.loads(), 0)
 
     def test_synthesize_errors(self):
         client = self.client(too_short=True)

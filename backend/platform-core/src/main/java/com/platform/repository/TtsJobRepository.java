@@ -18,8 +18,8 @@ public interface TtsJobRepository extends JpaRepository<TtsJobEntity, Long> {
 
     Optional<TtsJobEntity> findByJobId(UUID jobId);
 
-    Optional<TtsJobEntity> findFirstByVoiceAndTextAndStatusNotOrderByCreatedAtDesc(
-            String voice, String text, String status);
+    Optional<TtsJobEntity> findFirstByVoiceAndTextAndTakeAndStatusNotOrderByCreatedAtDesc(
+            String voice, String text, int take, String status);
 
     long countByStatusIn(Collection<String> statuses);
 

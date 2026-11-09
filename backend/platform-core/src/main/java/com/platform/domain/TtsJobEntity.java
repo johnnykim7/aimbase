@@ -37,6 +37,10 @@ public class TtsJobEntity {
     @Column(columnDefinition = "text", nullable = false)
     private String text;
 
+    /** 같은 글을 다른 소리로 다시 만들 때 올리는 차례. 재사용 열쇠의 하나다(BIZ-134, CR-176). */
+    @Column(nullable = false)
+    private int take;
+
     @Column(length = 30, nullable = false)
     private String status = PENDING;
 
@@ -76,6 +80,8 @@ public class TtsJobEntity {
     public void setVoice(String voice) { this.voice = voice; }
     public String getText() { return text; }
     public void setText(String text) { this.text = text; }
+    public int getTake() { return take; }
+    public void setTake(int take) { this.take = take; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public byte[] getAudio() { return audio; }

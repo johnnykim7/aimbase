@@ -51,6 +51,7 @@ public class TtsJobService {
     private final int maxPendingPerTenant;
     private final int retentionDays;
     private final double minReusableDurationSec;
+    private final int maxTake;
 
     private final PriorityBlockingQueue<Queued> queue = new PriorityBlockingQueue<>(64,
             Comparator.comparing(Queued::createdAt).thenComparingLong(Queued::seq));
@@ -66,14 +67,15 @@ public class TtsJobService {
                          @Value("${aimbase.tts.max-text-length:200}") int maxTextLength,
                          @Value("${aimbase.tts.max-pending-per-tenant:500}") int maxPendingPerTenant,
                          @Value("${aimbase.tts.retention-days:7}") int retentionDays,
-                         @Value("${aimbase.tts.min-reusable-duration-sec:0.25}") double minReusableDurationSec) {
+                         @Value("${aimbase.tts.min-reusable-duration-sec:0.25}") double minReusableDurationSec,
+                         @Value("${aimbase.tts.max-take:10}") int maxTake) {
         this(store, sidecar, Clock.systemUTC(), maxTextLength, maxPendingPerTenant, retentionDays,
-                minReusableDurationSec, true);
+                minReusableDurationSec, maxTake, true);
     }
 
     TtsJobService(TtsJobStore store, TtsSidecarClient sidecar, Clock clock,
                   int maxTextLength, int maxPendingPerTenant, int retentionDays,
-                  double minReusableDurationSec, boolean startWorker) {
+                  double minReusableDurationSec, int maxTake, boolean startWorker) {
         this.store = store;
         this.sidecar = sidecar;
         this.clock = clock;
@@ -81,6 +83,7 @@ public class TtsJobService {
         this.maxPendingPerTenant = maxPendingPerTenant;
         this.retentionDays = retentionDays;
         this.minReusableDurationSec = minReusableDurationSec;
+        this.maxTake = maxTake;
         this.worker = new Thread(this::loop, "tts-job");
         this.worker.setDaemon(true);
         if (startWorker) {
@@ -88,8 +91,11 @@ public class TtsJobService {
         }
     }
 
-    /** 글은 손대지 않고 그대로 생성기에 보낸다(BIZ-135). */
-    public SubmitResult submit(String voice, String text, String createdBy) {
+    /**
+     * 글은 손대지 않고 그대로 생성기에 보낸다(BIZ-135). 차례가 없으면 0 이고, 차례를 올리면 같은 글을 다른 소리로
+     * 다시 만든다(BIZ-134, CR-176).
+     */
+    public SubmitResult submit(String voice, String text, Integer take, String createdBy) {
         if (voice == null || voice.isBlank()) {
             throw new TtsJobException(400, "voice_required");
         }
@@ -98,6 +104,10 @@ public class TtsJobService {
         }
         if (text.codePointCount(0, text.length()) > maxTextLength) {
             throw new TtsJobException(400, "text_too_long:max=" + maxTextLength);
+        }
+        int takeValue = take == null ? 0 : take;
+        if (takeValue < 0 || takeValue > maxTake) {
+            throw new TtsJobException(400, "take_out_of_range:max=" + maxTake);
         }
 
         List<String> voices;
@@ -117,7 +127,7 @@ public class TtsJobService {
             log.info("[CR-166] 보관 기간 지난 작업 {}건 삭제 tenant={}", deleted, TenantContext.getTenantId());
         }
 
-        Optional<TtsJobEntity> reusable = store.findReusable(voice, text).filter(this::hasUsableAudio);
+        Optional<TtsJobEntity> reusable = store.findReusable(voice, text, takeValue).filter(this::hasUsableAudio);
         if (reusable.isPresent()) {
             requeueIfLost(reusable.get());
             return new SubmitResult(reusable.get(), true);
@@ -131,13 +141,14 @@ public class TtsJobService {
         job.setJobId(UUID.randomUUID());
         job.setVoice(voice);
         job.setText(text);
+        job.setTake(takeValue);
         job.setStatus(TtsJobEntity.PENDING);
         job.setCreatedBy(createdBy);
         job.setCreatedAt(now);
         TtsJobEntity saved = store.save(job);
         enqueue(saved);
-        log.info("[CR-166] 음성 작업 맡김 job_id={} voice={} {}자 tenant={} 차례 {}건",
-                saved.getJobId(), voice, text.codePointCount(0, text.length()), TenantContext.getTenantId(),
+        log.info("[CR-166] 음성 작업 맡김 job_id={} voice={} take={} {}자 tenant={} 차례 {}건",
+                saved.getJobId(), voice, takeValue, text.codePointCount(0, text.length()), TenantContext.getTenantId(),
                 queue.size());
         return new SubmitResult(saved, false);
     }
@@ -210,7 +221,7 @@ public class TtsJobService {
             }
             TtsJobEntity job = running.get();
             try {
-                TtsSidecarClient.Synthesis s = sidecar.synthesize(job.getVoice(), job.getText());
+                TtsSidecarClient.Synthesis s = sidecar.synthesize(job.getVoice(), job.getText(), job.getTake());
                 store.markCompleted(item.jobId(), s, OffsetDateTime.now(clock));
                 log.info("[CR-166] 음성 작업 완료 job_id={} 소리 {}초, 생성 {}초, {}번째 시도",
                         item.jobId(), s.durationSec(), s.elapsedSec(), s.attempt());
