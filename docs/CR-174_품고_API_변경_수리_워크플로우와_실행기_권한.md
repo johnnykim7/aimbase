@@ -106,6 +106,13 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 
 `StepContext` 틀 치환에 `run` 이름 공간을 더한다. `{{run.id}}`, `{{run.workflow_id}}`, `{{run.session_id}}`. 제안 제출 단계가 run_id 를 3PLGW 에 실어 보내고, 3PLGW 가 그 값으로 승인 API 를 부른다.
 
+#### 4.3.4 승인 대기 행의 외래키 제거 (V76)
+
+로컬 확인에서 HUMAN_INPUT 단계가 승인 대기 행을 저장하지 못하고 run 이 `failed` 로 끝났다. `pending_approvals.action_log_id` 와 `policy_id` 는 워크플로우 승인에서 run id 와 단계 id 를 담는 칸인데(4.3.2, `handleHumanInput`), `action_logs`, `policies` 로만 묶인 외래키가 남아 있어 어느 테넌트에서도 워크플로우 승인 대기가 만들어진 적이 없었다(59 의 활성 테넌트 DB 전부 외래키 있음, 워크플로우 승인 대기 행 0건으로 확인). 이 CR 이전부터 있던 결함이고 승인 단계를 쓰는 첫 워크플로우가 이 CR 이라 여기서 고친다.
+
+- `V76__cr174_pending_approvals_drop_action_log_fk.sql`: 두 외래키를 지우고 `action_log_id` 에 인덱스를 둔다. 열과 값의 뜻은 그대로다
+- 59 는 api 기동 때 테넌트 마이그레이션이 돌아 `./deploy.sh be` 로 적용된다. 로컬은 `POST /api/v1/platform/tenants/migrate` 로 따로 돌린다
+
 ### 4.4 워크플로우 정의 `poomgo-change-repair` (PRD-366)
 
 테넌트 `bp_3plgw` 에 둔다. `graphMode: cyclic`, `entry_step: repair`, `error_handling: {retryMaxAttempts: 0}`(같은 변경에 수리는 한 번, BIZ-146), `output_schema` 없음.
@@ -203,7 +210,7 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | T1-6 | 수신 「품고 변경 수리 요청」(외부), 발신 「실행 종료 회신」(외부), 「수리 제안 제출」(외부) |
 | T1-7 | CR-174 작업 단위 |
 | T2-1, T2-2 | 영향 없음(새 라이브러리 없음. 실행기 이미지에 OS 패키지 git, gh 가 늘지만 기술 스택 결정서는 패키지 목록을 두지 않는다. 구현 규약 변화 없음) |
-| T3-1 | `pending_approvals.status` 값에 `timeout`. 테이블 변경 없음 |
+| T3-1 | `pending_approvals.status` 값에 `timeout`. `action_log_id`, `policy_id` 외래키 제거(V76) |
 | T3-2 | 실행 입력 `_callback`, 회신 본문, 단계 변수 `{{run.*}}`, 승인 API 를 소비앱 키로 부르는 길, HUMAN_INPUT `timeoutMs` |
 | T3-3, T3-4 | 영향 없음(화면 없음. 승인 화면은 BO2 다) |
 | T3-5 | TC-WF-034 부터 TC-WF-041 |
@@ -214,6 +221,20 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 
 - 단위시험 TC-WF-034 부터 TC-WF-041(T3-5)
 - 로컬: api 를 로컬로 띄워 `_callback` 검사와 회신, 시한 감시, `{{run.id}}` 치환을 가짜 HTTP 수신기(로컬 포트)로 본다
+
+### 7.1 로컬 확인 결과 (2026-11-09 15:40, 테넌트 cr160_local, 수신기 127.0.0.1:18174)
+
+| 본 것 | 결과 |
+|---|---|
+| `_callback` 검사 | `path` 가 `/` 로 안 시작, 없는 `connection_id`, `connection_id` 빠짐, 객체 아님 네 경우 모두 400 `callback_invalid:<칸>`, run 생성 없음 |
+| `{{run.id}}`, `{{run.workflow_id}}` | 첫 단계 본문에 run id, 워크플로우 id 가 들어가 수신기에 닿음 |
+| 승인 | HUMAN_INPUT 에서 `pending_approval`, approve 뒤 다음 단계 실행, 회신 `status completed`, `error null`, `result` 는 `result_step` 단계 출력, 연결 `auth` 머리글 `X-Internal-Service-Key` 실림 |
+| 거절 | 회신 `status failed`, `error {reason: "Human approval rejected", detail: "no"}` |
+| 시한 초과(40초) | 감시기가 닫음. 회신 `status failed`, `error {reason: "approval_timeout", detail: "<timeout_at>"}`, 승인 대기 행 `timeout`. 늦은 approve 는 409 |
+| 회신 재시도 | 첫 503 뒤 1초 만에 다시 보내 200 |
+| V76 | 적용 전에는 네 run 모두 HUMAN_INPUT 에서 외래키 위반으로 `failed`. 적용 뒤 위 결과 |
+
+59 와 3PLGW 를 잇는 확인은 컨타 신호 뒤에 한다.
 - 59: 3PLGW 창이 가짜 품고에서 변경을 내면 3PLGW 가 웹훅을 부르고, 제안 또는 PR 이 나오고, BO2 승인이 들어오면 활성화 요청 또는 머지가 나가고, 회신이 3PLGW 에 닿는 것까지 본다. 거절과 시한 초과 회신도 본다
 - 3PLcore `tools/testbook` 에 시험항목을 더한다(`/시험항목`)
 
@@ -224,3 +245,4 @@ run 이 끝나면(completed, failed, cancelled) _callback 으로 3PLGW 에 결�
 | 2026-11-09 14:02 | 착수. 브리핑, 공통 규칙, 결정 메모, T1 초안 원문 읽음. 3PLcore 브리핑 커밋 01a91176 |
 | 2026-11-09 14:30 | 2절 실측, 설계 캐스케이드, 계약 문서 |
 | 2026-11-09 15:20 | 엔진 커밋 37b671e(회신, 시한 감시, run 변수, 시험 10건 통과). 실행기 이미지(git, gh), compose 둘, deploy.sh, 설치 스크립트 대상 3plgw, 워크플로우 정의 JSON. 3PLGW 계약 반영(경로, 머리글, 72시간, pr.title, last_good 404) |
+| 2026-11-09 15:45 | 로컬 확인 7.1 전부 통과. 승인 대기 외래키 결함을 찾아 V76 로 고침(4.3.4). 컨타에 GitHub 토큰 순서와 둘 자리 알림 |

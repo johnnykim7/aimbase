@@ -721,6 +721,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 - **계약, 표본 curl 이 401**: 실행기 env `TPLGW_INTERNAL_KEY` 가 3PLGW 의 내부 키와 다르다
 - **회신이 안 온다**: 실행 이벤트에 `CALLBACK_FAILED` 가 있으면 3PLGW 가 2xx 를 주지 않은 것. 3PLGW 는 `GET /api/v1/workflows/runs/{run_id}` 로 당겨 본다
 - **승인 대기가 시한을 지나도 안 끝난다**: api 가 돌고 있는지, `approval-timeout.sweep-ms` 를 본다. 감시기는 기동 30초 뒤부터 1분마다 돈다
+- **승인 단계에서 run 이 바로 `failed`, api 기록에 `pending_approvals_action_log_id_fkey`**: 테넌트 DB 에 V76 이 안 돌았다. 59 는 api 기동 때 돌고, 로컬은 `POST /api/v1/platform/tenants/migrate` 로 돌린다
 
 ---
 
