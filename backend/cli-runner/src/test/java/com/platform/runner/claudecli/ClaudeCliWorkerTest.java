@@ -698,6 +698,86 @@ class ClaudeCliWorkerTest {
         assertThat(readers).hasSize(2).allMatch(t -> !t.isVirtual() && t.isDaemon());
     }
 
+    /** CR-175 TC-CHT-015: 생각 신호는 값이 바뀔 때만 질문 줄보다 먼저 나가고, 같은 프로세스가 이어 답한다. */
+    @Test
+    void thinking_control_is_written_before_question_only_when_changed() throws IOException {
+        Path stdinDump = tempDir.resolve("stdin-think-" + System.nanoTime() + ".txt");
+        worker = new ClaudeCliWorker(thinkingStub(stdinDump, "success").toString(), null, null, false, null,
+                Duration.ofSeconds(10));
+        worker.start();
+        long pid = worker.pid();
+
+        worker.turnStream(question("q1"), true, d -> {}, null, t -> {}, false);
+        worker.turnStream(question("q2"), false, d -> {}, null, t -> {}, false);
+        worker.turnStream(question("q3"), false, d -> {}, null, t -> {}, true);
+        worker.turnStream(question("q4"), false, d -> {}, null, t -> {}, null);
+
+        List<String> lines = Files.readAllLines(stdinDump);
+        assertThat(lines).hasSize(6);
+        assertThat(lines.get(0)).contains("set_max_thinking_tokens").contains("\"max_thinking_tokens\":0");
+        assertThat(lines.get(1)).contains("q1");
+        assertThat(lines.get(2)).contains("q2");
+        assertThat(lines.get(3)).contains("set_max_thinking_tokens").contains("\"max_thinking_tokens\":null");
+        assertThat(lines.get(4)).contains("q3");
+        assertThat(lines.get(5)).contains("q4");
+        assertThat(worker.isAlive()).isTrue();
+        assertThat(worker.pid()).isEqualTo(pid);
+    }
+
+    /** CR-175 TC-CHT-015: CLI 가 생각 신호를 거절하면 그 턴은 실패다. */
+    @Test
+    void rejected_thinking_control_fails_the_turn() throws IOException {
+        Path stdinDump = tempDir.resolve("stdin-think-" + System.nanoTime() + ".txt");
+        worker = new ClaudeCliWorker(thinkingStub(stdinDump, "error").toString(), null, null, false, null,
+                Duration.ofSeconds(10));
+        worker.start();
+
+        assertThatThrownBy(() -> worker.turnStream(question("q1"), true, d -> {}, null, t -> {}, false))
+                .isInstanceOf(ClaudeCliException.class)
+                .hasMessageContaining("thinking control rejected");
+    }
+
+    /** CR-175 TC-CHT-016: 생각 블록은 생각 소비자로만 가고 답 글에 섞이지 않는다. */
+    @Test
+    void thinking_block_goes_to_thinking_consumer_only() throws IOException {
+        Path stdinDump = tempDir.resolve("stdin-think-" + System.nanoTime() + ".txt");
+        worker = new ClaudeCliWorker(thinkingStub(stdinDump, "success").toString(), null, null, false, null,
+                Duration.ofSeconds(10));
+        worker.start();
+        List<String> deltas = new java.util.ArrayList<>();
+        List<String> thoughts = new java.util.ArrayList<>();
+
+        LLMResponse resp = worker.turnStream(question("q1"), true, deltas::add, null, thoughts::add, null);
+
+        assertThat(thoughts).containsExactly("think-text");
+        assertThat(deltas).containsExactly("answer-text");
+        assertThat(resp.textContent()).isEqualTo("answer-text");
+    }
+
+    private static List<UnifiedMessage> question(String text) {
+        return List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, text));
+    }
+
+    /** 받은 줄을 모두 적고, 생각 신호에는 {@code controlResult} 로 답하고, 질문에는 생각 블록, 답 블록, 끝을 낸다. */
+    private Path thinkingStub(Path stdinDump, String controlResult) throws IOException {
+        return writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-think"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo "$line" >> '%s'
+                  case "$line" in
+                    *'"control_request"'*)
+                      echo '{"type":"control_response","response":{"subtype":"%s","request_id":"x","error":"unsupported"}}' ;;
+                    *)
+                      echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"think-text","signature":"s"}]}}'
+                      echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"answer-text"}]}}'
+                      echo '{"type":"result","subtype":"success","result":"answer-text","session_id":"sess-think","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}' ;;
+                  esac
+                done
+                """.formatted(stdinDump.toString(), controlResult));
+    }
+
     private Path writeStub(String body) throws IOException {
         Path p = tempDir.resolve("claude-stub-" + System.nanoTime() + ".sh");
         Files.writeString(p, body);

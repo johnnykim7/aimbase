@@ -140,6 +140,11 @@ public class ClaudeCliWorker implements AutoCloseable {
     private volatile String sessionId;       // CLI `system/init` 이벤트에서 추출
     private volatile boolean firstTurnSent;
 
+    // CR-175: 이 CLI 프로세스에 마지막으로 보낸 깊게 생각하기 값. CLI 는 한 번 바꾼 값을 다음 질문에도 쓰므로
+    // 요청 값이 이것과 다를 때만 신호를 보낸다. turnLock 안에서만 읽고 쓴다.
+    private Boolean appliedThinking;
+    static final String THINKING_CONTROL_SUBTYPE = "set_max_thinking_tokens";
+
     // CR-173: 실행기 전체 상한에 걸리면 풀이 쉬고 있는 워커를 닫아 자리를 낸다. 요청이 쥐고 있는 워커는 닫지 않는다.
     private final java.util.concurrent.atomic.AtomicInteger leases = new java.util.concurrent.atomic.AtomicInteger();
     // CR-173: 첫 턴(대화 전체 주입) 여부를 워커에 묶는다. 유휴 회수나 자리 내기로 새 워커가 되면 다시 첫 턴이다.
@@ -312,6 +317,16 @@ public class ClaudeCliWorker implements AutoCloseable {
         return turnInternal(messages, true);
     }
 
+    /** CR-175: 첫 턴. {@code thinking} 이 null 이 아니면 질문 앞에 깊게 생각하기를 맞춘다. */
+    public LLMResponse turnFirst(List<UnifiedMessage> messages, Boolean thinking) {
+        return turnInternal0(messages, true, null, null, null, thinking);
+    }
+
+    /** CR-175: 이후 턴. {@code thinking} 이 null 이 아니면 질문 앞에 깊게 생각하기를 맞춘다. */
+    public LLMResponse turn(UnifiedMessage lastUser, Boolean thinking) {
+        return turnInternal0(List.of(lastUser), false, null, null, null, thinking);
+    }
+
     /** 이후 턴: 마지막 user 메시지만 주입 (CLI가 이전 맥락 유지). */
     public LLMResponse turn(UnifiedMessage lastUser) {
         return turnInternal(List.of(lastUser), false);
@@ -323,7 +338,7 @@ public class ClaudeCliWorker implements AutoCloseable {
      */
     public LLMResponse turnStream(List<UnifiedMessage> messages, boolean first,
                                    Consumer<String> deltaConsumer) {
-        return turnInternal0(messages, first, deltaConsumer, null);
+        return turnInternal0(messages, first, deltaConsumer, null, null, null);
     }
 
     /**
@@ -334,7 +349,18 @@ public class ClaudeCliWorker implements AutoCloseable {
     public LLMResponse turnStream(List<UnifiedMessage> messages, boolean first,
                                    Consumer<String> deltaConsumer,
                                    Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
-        return turnInternal0(messages, first, deltaConsumer, observeConsumer);
+        return turnInternal0(messages, first, deltaConsumer, observeConsumer, null, null);
+    }
+
+    /**
+     * CR-175: 깊게 생각하기를 맞추고 생각 내용을 {@code thinkingConsumer} 로 흘리는 스트리밍 턴.
+     * {@code thinking} 이 null 이면 CLI 생각 설정에 손대지 않는다.
+     */
+    public LLMResponse turnStream(List<UnifiedMessage> messages, boolean first,
+                                   Consumer<String> deltaConsumer,
+                                   Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer,
+                                   Consumer<String> thinkingConsumer, Boolean thinking) {
+        return turnInternal0(messages, first, deltaConsumer, observeConsumer, thinkingConsumer, thinking);
     }
 
     public String getSessionId() {
@@ -423,12 +449,13 @@ public class ClaudeCliWorker implements AutoCloseable {
     // ─── 내부 ────────────────────────────────────────────────────────────
 
     private LLMResponse turnInternal(List<UnifiedMessage> messages, boolean first) {
-        return turnInternal0(messages, first, null, null);
+        return turnInternal0(messages, first, null, null, null, null);
     }
 
     private LLMResponse turnInternal0(List<UnifiedMessage> messages, boolean first,
                                        Consumer<String> deltaConsumer,
-                                       Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
+                                       Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer,
+                                       Consumer<String> thinkingConsumer, Boolean thinking) {
         if (process == null || !process.isAlive()) {
             throw new ClaudeCliException("Worker not running");
         }
@@ -444,10 +471,11 @@ public class ClaudeCliWorker implements AutoCloseable {
             }
 
             eventQueue.clear();
+            writeThinkingControlIfChanged(thinking);
             writeUserMessages(first ? messages : trimToCurrentTurn(messages));
             if (first) firstTurnSent = true;
 
-            return awaitResult(start, deltaConsumer, observeConsumer);
+            return awaitResult(start, deltaConsumer, observeConsumer, thinkingConsumer);
         } catch (IOException e) {
             throw new ClaudeCliException("stdin write failed: " + e.getMessage(), e);
         } finally {
@@ -553,6 +581,26 @@ public class ClaudeCliWorker implements AutoCloseable {
         stdin.flush();
     }
 
+    /**
+     * CR-175: 깊게 생각하기를 질문 줄보다 먼저 맞춘다. CLI 는 stdin 을 순서대로 읽으므로 답을 기다리지 않고
+     * 질문을 이어 써도 이 질문부터 적용되고, 답(control_response)은 awaitResult 가 받는다. 끔은 한도 0, 켬은
+     * 한도를 지워 CLI 기본 생각으로 돌린다. 새 예산 수치를 만들지 않는다(BIZ-150).
+     */
+    private void writeThinkingControlIfChanged(Boolean thinking) throws IOException {
+        if (thinking == null || thinking.equals(appliedThinking)) return;
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("subtype", THINKING_CONTROL_SUBTYPE);
+        request.put("max_thinking_tokens", thinking ? null : 0);
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("type", "control_request");
+        event.put("request_id", "thinking-" + UUID.randomUUID());
+        event.put("request", request);
+        stdin.write(MAPPER.writeValueAsString(event));
+        stdin.newLine();
+        appliedThinking = thinking;
+        log.info("[CLI-STDIN] thinking {}", thinking ? "on" : "off");
+    }
+
     private void writeUserLine(String text) throws IOException {
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("type", "user");
@@ -654,7 +702,8 @@ public class ClaudeCliWorker implements AutoCloseable {
     }
 
     private LLMResponse awaitResult(long startMs, Consumer<String> deltaConsumer,
-                                     Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer) {
+                                     Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer,
+                                     Consumer<String> thinkingConsumer) {
         long deadline = startMs + turnTimeout.toMillis();
         StringBuilder assistantBuffer = new StringBuilder();
         TokenUsage usage = new TokenUsage(0, 0);
@@ -718,6 +767,11 @@ public class ClaudeCliWorker implements AutoCloseable {
                     }
                 }
                 case "assistant" -> {
+                    // CR-175: 생각 블록은 답 글에 섞지 않고 따로 흘린다. 한도 거절 뒤에는 다음 계정이 다시 답하므로 버린다.
+                    String thought = extractBlockText(json, "thinking", "thinking");
+                    if (thinkingConsumer != null && rejection == null && !thought.isEmpty()) {
+                        thinkingConsumer.accept(thought);
+                    }
                     String delta = extractAssistantText(json);
                     if (delta != null && !delta.isEmpty()) {
                         assistantBuffer.append(delta);
@@ -831,6 +885,13 @@ public class ClaudeCliWorker implements AutoCloseable {
                             observedTools.isEmpty() ? null : java.util.List.copyOf(observedTools)
                     );
                 }
+                case "control_response" -> {
+                    // CR-175: 깊게 생각하기 신호가 거절되면 바라는 설정으로 답할 수 없으므로 턴을 끊는다.
+                    if (json.get("response") instanceof Map<?, ?> r && "error".equals(r.get("subtype"))) {
+                        appliedThinking = null;
+                        throw new ClaudeCliException("thinking control rejected: " + r.get("error"));
+                    }
+                }
                 case "rate_limit_event" -> {
                     log.warn("CLI rate_limit_event: {}", json);
                     RateLimitRejection r = rateLimitRejection(json);
@@ -844,14 +905,19 @@ public class ClaudeCliWorker implements AutoCloseable {
     @SuppressWarnings("unchecked")
     private String extractAssistantText(Map<String, Object> event) {
         Object message = event.get("message");
-        if (!(message instanceof Map<?, ?> msg)) return null;
-        Object content = msg.get("content");
-        if (!(content instanceof List<?> list)) return null;
+        if (!(message instanceof Map<?, ?>)) return null;
+        return extractBlockText(event, "text", "text");
+    }
+
+    /** assistant 이벤트 content[] 중 {@code blockType} 블록의 {@code field} 글을 이어 붙인다. 없으면 빈 글. */
+    private static String extractBlockText(Map<String, Object> event, String blockType, String field) {
         StringBuilder sb = new StringBuilder();
-        for (Object b : list) {
-            if (b instanceof Map<?, ?> block && "text".equals(block.get("type"))) {
-                Object t = block.get("text");
-                if (t != null) sb.append(t);
+        if (event.get("message") instanceof Map<?, ?> msg && msg.get("content") instanceof List<?> list) {
+            for (Object b : list) {
+                if (b instanceof Map<?, ?> block && blockType.equals(block.get("type"))) {
+                    Object t = block.get(field);
+                    if (t != null) sb.append(t);
+                }
             }
         }
         return sb.toString();

@@ -24,7 +24,7 @@ class RunnerControllerCliFailureTest {
         props.setEnabled(true);
         props.setApiKey("secret-test-key");
         String limited = "cli_account_limited:resets_at=1793082000:type=five_hour:CLI result reported is_error=true";
-        when(service.chat(any(), any(), any(), any(), any(), anyBoolean())).thenThrow(new ClaudeCliException(limited));
+        when(service.chat(any(), any(), any(), any(), any(), anyBoolean(), any())).thenThrow(new ClaudeCliException(limited));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(new RunnerController(service, props)).build();
 
         mvc.perform(post("/v1/chat")

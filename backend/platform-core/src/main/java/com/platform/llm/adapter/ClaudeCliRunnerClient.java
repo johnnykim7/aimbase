@@ -295,6 +295,9 @@ public class ClaudeCliRunnerClient {
         // CR-117: subagent OFF 일 때만 차단 신호 전송 — 기본(true)이면 미전송 = 현행 동작(Agent 허용).
         if (!subagentEnabled) body.put("disallow_subagent", true);
         if (configDir != null && !configDir.isBlank()) body.put("config_dir", configDir);
+        // CR-175: 연결 config 나 요청이 생각 설정을 정했을 때만 싣는다. 안 실으면 CLI 기본이라 워크플로우 동작이 그대로다.
+        Boolean thinking = request.config() != null ? request.config().explicitThinking() : null;
+        if (thinking != null) body.put("thinking", thinking);
         if (systemPromptOverride != null && !systemPromptOverride.isBlank()) {
             body.put("system_prompt_override", systemPromptOverride);
         }
@@ -543,13 +546,17 @@ public class ClaudeCliRunnerClient {
         }
     }
 
+    // visible for testing
     @SuppressWarnings("unchecked")
-    private static void handleStreamEvent(Map<String, Object> evt, String runId, String model,
+    static void handleStreamEvent(Map<String, Object> evt, String runId, String model,
                                             Consumer<LLMStreamChunk> consumer) {
         Object type = evt.get("type");
         if ("delta".equals(type)) {
             String delta = String.valueOf(evt.getOrDefault("delta", ""));
             consumer.accept(LLMStreamChunk.text(runId, model, delta));
+        } else if ("thinking".equals(type)) {
+            // CR-175: CLI 생각 블록. 답 글과 섞지 않고 위젯 생각 접기로 보낸다.
+            consumer.accept(LLMStreamChunk.thinking(runId, model, String.valueOf(evt.getOrDefault("delta", ""))));
         } else if ("tool_use".equals(type) || "tool_result".equals(type)) {
             // CR-108: CLI 내부 도구 관찰을 turn 도중 실시간 운반 — observedToolUse/Result chunk.
             Object input = evt.get("input");

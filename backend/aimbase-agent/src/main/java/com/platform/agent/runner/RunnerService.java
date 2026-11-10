@@ -50,7 +50,15 @@ public class RunnerService {
     public LLMResponse chat(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                             String configDir, String systemPromptOverride, List<String> allowedTools,
                             boolean disallowSubagent) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, null, allowedTools, null, disallowSubagent);
+        return chat(request, toolMode, configDir, systemPromptOverride, allowedTools, disallowSubagent, null);
+    }
+
+    /** CR-175: 깊게 생각하기(null 이면 손대지 않음) 전달 오버로드. */
+    public LLMResponse chat(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
+                            String configDir, String systemPromptOverride, List<String> allowedTools,
+                            boolean disallowSubagent, Boolean thinking) {
+        return runTurn(request, toolMode, configDir, systemPromptOverride, null, allowedTools, null,
+                disallowSubagent, thinking, null);
     }
 
     public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
@@ -63,7 +71,8 @@ public class RunnerService {
     public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
                                   String configDir, String systemPromptOverride,
                                   Consumer<String> deltaConsumer, List<String> allowedTools) {
-        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools, null, false);
+        return runTurn(request, toolMode, configDir, systemPromptOverride, deltaConsumer, allowedTools, null, false,
+                null, null);
     }
 
     /** CR-108: 도구 관찰 실시간 콜백(observeConsumer) 전달 오버로드. */
@@ -81,8 +90,18 @@ public class RunnerService {
                                   Consumer<String> deltaConsumer, List<String> allowedTools,
                                   Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer,
                                   boolean disallowSubagent) {
+        return chatStream(request, toolMode, configDir, systemPromptOverride,
+                deltaConsumer, allowedTools, observeConsumer, disallowSubagent, null, null);
+    }
+
+    /** CR-175: 깊게 생각하기(null 이면 손대지 않음)와 생각 내용 콜백 전달 오버로드. */
+    public LLMResponse chatStream(LLMRequest request, ClaudeCliCommandBuilder.ToolMode toolMode,
+                                  String configDir, String systemPromptOverride,
+                                  Consumer<String> deltaConsumer, List<String> allowedTools,
+                                  Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer,
+                                  boolean disallowSubagent, Boolean thinking, Consumer<String> thinkingConsumer) {
         return runTurn(request, toolMode, configDir, systemPromptOverride,
-                deltaConsumer, allowedTools, observeConsumer, disallowSubagent);
+                deltaConsumer, allowedTools, observeConsumer, disallowSubagent, thinking, thinkingConsumer);
     }
 
     /**
@@ -127,7 +146,7 @@ public class RunnerService {
                                 String configDir, String systemPromptOverride,
                                 Consumer<String> deltaConsumer, List<String> allowedTools,
                                 Consumer<com.platform.llm.model.LLMStreamChunk.ObservedTool> observeConsumer,
-                                boolean disallowSubagent) {
+                                boolean disallowSubagent, Boolean thinking, Consumer<String> thinkingConsumer) {
         String runId = request.sessionId();
         if (runId == null || runId.isBlank()) {
             throw new IllegalArgumentException("run_id (sessionId) required");
@@ -150,14 +169,14 @@ public class RunnerService {
         try {
             // CR-108: deltaConsumer 또는 observeConsumer 중 하나라도 있으면 스트림 경로
             // (observeConsumer 만 있어도 turn 도중 도구 관찰을 실시간 흘려야 하므로).
-            if (deltaConsumer != null || observeConsumer != null) {
-                return worker.turnStream(messages, isFirst, deltaConsumer, observeConsumer);
+            if (deltaConsumer != null || observeConsumer != null || thinkingConsumer != null) {
+                return worker.turnStream(messages, isFirst, deltaConsumer, observeConsumer, thinkingConsumer, thinking);
             }
             if (isFirst) {
-                return worker.turnFirst(messages);
+                return worker.turnFirst(messages, thinking);
             }
             UnifiedMessage lastUser = lastUserMessage(messages);
-            return worker.turn(lastUser);
+            return worker.turn(lastUser, thinking);
         } catch (RuntimeException e) {
             // CR-109: 예외(특히 turn timeout = ClaudeCliTimeoutException) 시 worker 를 닫는다.
             // 닫지 않으면 살아있는 claude CLI 프로세스가 누수된다(운영 좀비 누적). shutdownForRun 이

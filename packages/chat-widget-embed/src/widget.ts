@@ -530,6 +530,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       settings = await api.settings(options.connectionId);
       const ids = settings.models.map((m) => m.id);
       if (!selectedModel || !ids.includes(selectedModel)) selectedModel = settings.default_model;
+      thinkingOn = settings.thinking_default === true;
     } catch (e) {
       // 설정을 못 읽어도 대화는 된다. 붙이는 앱이 준 모델(또는 auto)로 묻는다.
       settings = null;
@@ -1010,7 +1011,8 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
           context: options.contextProvider?.(),
           attachments: turn.attachments,
           rewindFromSeq,
-          thinking: thinkingOn && settings?.thinking_supported ? "on" : undefined,
+          // 끔도 보낸다. Claude CLI 연결은 아무것도 안 보내면 생각하므로 단추를 끈 뜻이 전해지지 않는다.
+          thinking: settings?.thinking_supported ? (thinkingOn ? "on" : "off") : undefined,
         },
         (d) => onDelta(turn, version, d),
       );

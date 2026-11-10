@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.config.PlatformSettingsService;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.LLMAdapterRegistry;
+import com.platform.llm.adapter.LLMAdapter;
 import com.platform.repository.ConnectionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,6 +69,7 @@ public class ChatWidgetSettingsService {
         body.put("models", models);
         body.put("default_model", defaultModel);
         body.put("thinking_supported", thinkingSupported(connectionId, defaultModel));
+        body.put("thinking_default", thinkingDefault(connectionId, defaultModel));
         body.put("feedback_reasons", feedbackReasons());
         body.put("feedback_comment_max_chars", feedbackCommentMaxChars());
         body.put("follow_ups_enabled", followUpsEnabled());
@@ -79,15 +81,35 @@ public class ChatWidgetSettingsService {
      * OrchestratorEngine 의 어댑터 선택과 같은 순서로 본다: 연결, 테넌트 기본 CLI 연결, 모델.
      */
     public boolean thinkingSupported(String connectionId, String model) {
-        String connId = connectionId != null && !connectionId.isBlank()
-                ? connectionId : connectionAdapterFactory.findDefaultCliConnectionForCurrentTenant();
+        LLMAdapter adapter = adapterFor(effectiveConnection(connectionId), model);
+        return adapter != null && adapter.supportsThinkingOverride();
+    }
+
+    /**
+     * 깊게 생각하기 단추의 처음 상태(BIZ-150). 연결 config 에 생각 설정이 있으면 그 값, 없으면 어댑터 기본이다.
+     * 위젯은 단추 상태대로 on, off 를 늘 보내므로 이 값이 어긋나면 사용자가 손대지 않아도 동작이 바뀐다.
+     */
+    public boolean thinkingDefault(String connectionId, String model) {
+        String connId = effectiveConnection(connectionId);
         if (connId != null) {
-            return connectionAdapterFactory.getAdapter(connId).supportsThinkingOverride();
+            Boolean configured = connectionAdapterFactory.resolveModelConfig(connId).explicitThinking();
+            if (configured != null) return configured;
         }
+        LLMAdapter adapter = adapterFor(connId, model);
+        return adapter != null && adapter.thinksByDefault();
+    }
+
+    /** OrchestratorEngine 의 어댑터 선택과 같은 순서: 요청 연결, 테넌트 기본 CLI 연결. 둘 다 없으면 null(모델로 고른다). */
+    private String effectiveConnection(String connectionId) {
+        return connectionId != null && !connectionId.isBlank()
+                ? connectionId : connectionAdapterFactory.findDefaultCliConnectionForCurrentTenant();
+    }
+
+    private LLMAdapter adapterFor(String connId, String model) {
+        if (connId != null) return connectionAdapterFactory.getAdapter(connId);
         String modelId = model != null && !model.isBlank() && !"auto".equalsIgnoreCase(model)
                 ? model : connectionAdapterFactory.platformDefaultModel();
-        return adapterRegistry.hasAdapter(modelId)
-                && adapterRegistry.getAdapter(modelId).supportsThinkingOverride();
+        return adapterRegistry.hasAdapter(modelId) ? adapterRegistry.getAdapter(modelId) : null;
     }
 
     /** 아쉬워요 이유 [{code, label}]. 설정 값이 JSON 이 아니면 빈 목록(이유 없이 평가만 받는다). */

@@ -108,6 +108,18 @@ public class ClaudeCliAdapter implements LLMAdapter {
         return PROVIDER;
     }
 
+    /** CR-175: 실행기 작업자가 질문마다 CLI 생각 한도를 바꿔 떠 있는 채로 켜고 끈다. */
+    @Override
+    public boolean supportsThinkingOverride() {
+        return true;
+    }
+
+    /** CR-175: CLI 는 생각 설정이 없으면 생각한다(2.1.197 확인). 실행기에 아무것도 보내지 않으면 그대로다. */
+    @Override
+    public boolean thinksByDefault() {
+        return true;
+    }
+
     /** CR-159: Runner 가 그림, 문서 블록을 CLI stream-json 에 그대로 싣는다(CR-098, CR-099 실측). */
     @Override
     public AdapterCapability capabilities() {

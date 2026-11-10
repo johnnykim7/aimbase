@@ -75,7 +75,7 @@ public class RunnerController {
 
         LLMResponse resp = service.chat(llmRequest, toolMode, req.getConfigDir(),
                 req.getSystemPromptOverride(), req.getAllowedTools(),
-                Boolean.TRUE.equals(req.getDisallowSubagent())); // CR-117
+                Boolean.TRUE.equals(req.getDisallowSubagent()), req.getThinking()); // CR-117, CR-175
         return toResponse(req.getRunId(), resp);
     }
 
@@ -109,7 +109,10 @@ public class RunnerController {
                             if (observed.durationMs() != null) ev.put("duration_ms", observed.durationMs());
                             emitNdjsonUnchecked(out, ev);
                         },
-                        Boolean.TRUE.equals(req.getDisallowSubagent())); // CR-117
+                        Boolean.TRUE.equals(req.getDisallowSubagent()), // CR-117
+                        req.getThinking(),
+                        // CR-175: CLI 생각 블록을 답 글과 따로 흘려 위젯 생각 접기로 보낸다.
+                        thought -> emitNdjsonUnchecked(out, Map.of("type", "thinking", "delta", thought)));
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("type", "result");
                 done.put("run_id", req.getRunId());
