@@ -231,6 +231,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 40s
+    networks:
+      - default
+      - aimbase-apps
 
   # 같은 목소리 음성 생성기(CR-166, CR-167). 모델은 문장이 있을 때만 싣고 일이 없으면 내린다.
   # 운영 3PL 보다 CPU 를 늦게 받는다. 코어 2개와 8개의 문장 시간이 같고, 메모리는 긴 문장까지 8.7GB 다(CR-167 7절).
