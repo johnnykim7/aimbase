@@ -27,6 +27,7 @@ import {
   Sparkles,
   History,
   Package,
+  ThumbsUp,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,7 @@ const NAV_ITEMS: NavItemDef[] = [
   { path: "/documents", icon: FileText, label: "문서 생성" },
   { path: "/projects", icon: FolderOpen, label: "프로젝트" },
   { path: "/sessions", icon: MessageSquareText, label: "세션" },
+  { path: "/chat-feedback", icon: ThumbsUp, label: "응답 평가" },
   { path: "/chat", icon: MessageCircle, label: "Chat" },
   { path: "/context-recipes", icon: Layers, label: "Context Recipe" },
   { path: "/domain-configs", icon: Settings2, label: "도메인 설정" },

@@ -152,6 +152,20 @@ class ClaudeCliWorkerPoolTest {
     }
 
     @Test
+    void model_change_respawns_main_worker_and_closes_previous() {
+        ClaudeCliWorkerPool pool = newPool(5);
+        ClaudeCliWorker sonnet = pool.getOrCreateMain("run-model", "claude-sonnet-5-5", null);
+        ClaudeCliWorker sameAgain = pool.getOrCreateMain("run-model", "claude-sonnet-5-5", null);
+        ClaudeCliWorker opus = pool.getOrCreateMain("run-model", "claude-opus-5-5", null);
+
+        assertThat(sameAgain).isSameAs(sonnet);
+        assertThat(opus).isNotSameAs(sonnet);
+        assertThat(opus.getModel()).isEqualTo("claude-opus-5-5");
+        assertThat(sonnet.isAlive()).isFalse();
+        pool.shutdownForRun("run-model");
+    }
+
+    @Test
     void invalidateMain_allows_respawn() {
         ClaudeCliWorkerPool pool = newPool(5);
         ClaudeCliWorker first = pool.getOrCreateMain("run-I", null, null);

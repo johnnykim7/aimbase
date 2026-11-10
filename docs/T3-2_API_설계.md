@@ -3082,21 +3082,27 @@ repair 단계 출력(구조화 JSON):
 
 | 칸 | 타입 | 필수 | 뜻 |
 |---|---|---|---|
-| rewind_from_seq | 정수 | 선택 | 그 순번의 질문부터 뒤를 지운 표시하고 이번 질문으로 답한다(BIZ-148) |
-| thinking | `on`, `off` | 선택 | 깊게 생각하기. 비우면 연결 config 그대로. 어댑터가 지원하지 않는데 `on` 이면 400 `thinking_not_supported` |
-| model | 글 | 선택 | 기존 칸. 연결 config `models` 가 있으면 그 목록 안이어야 한다. 아니면 400 `model_not_allowed`(BIZ-150) |
+| rewind_from_seq | 정수 | 선택 | 앞 답의 `turn_seq`. 그 순번부터 뒤를 지운 표시하고 이번 질문으로 답한다(BIZ-148). `session_id` 가 있어야 한다 |
+| thinking | `on`, `off` | 선택 | 깊게 생각하기. 비우면 연결 config 그대로 |
+| model | 글 | 선택 | 기존 칸. `connection_id` 가 있고 연결 config `models` 가 있으면 그 목록 안이어야 한다(BIZ-150) |
 
 | 오류 | 경우 |
 |---|---|
+| 400 `rewind_invalid:no_session` | `rewind_from_seq` 가 있는데 `session_id` 가 없음 |
 | 409 `session_busy` | 되감기 요청인데 그 세션에 답이 도는 중 |
-| 400 `rewind_invalid:not_user_message` | 그 순번이 없거나 질문 메시지가 아님 |
-| 409 `rewind_before_compaction` | 그 순번이 마지막 압축 경계보다 앞 |
+| 400 `rewind_invalid:not_turn_start` | 그 순번이 없거나, 지운 행이거나, 대화 요청 한 번이 저장한 메시지 묶음의 첫 순번이 아님 |
+| 409 `rewind_before_compaction` | 그 순번보다 뒤에 압축 경계가 있음 |
+| 400 `thinking_invalid` | `thinking` 이 `on`, `off` 가 아님 |
+| 400 `thinking_not_supported` | 어댑터가 요청마다 생각 설정을 바꾸지 못하는데 `on` (Claude CLI 연결) |
+| 400 `model_not_allowed` | 연결 허용 모델 목록에 없는 모델 |
 
-끝 이벤트(done) 추가 칸: `turn_id`(답 번호), `user_seq`(이번 질문 순번), `model`(실제로 답한 모델).
+오류 본문은 기존 `ApiResponse` 형식이고 `error` 칸에 위 코드가 온다.
+
+끝 이벤트(done) 추가 칸: `turn_id`(답 번호), `turn_seq`(이번 요청이 저장한 메시지 묶음의 첫 순번, 다시 생성과 질문 수정의 `rewind_from_seq`), `model`(라우팅이 이 요청에 정한 모델. 도중 폴백은 반영하지 않음). 응답 중지(abort)로 멈춘 요청도 받은 데까지 저장하고 done 을 보낸다.
 
 ```
 event: done
-data: {"done": true, "turn_id": "0b6f2c1e-...", "user_seq": 4, "model": "claude-sonnet-5-5", "rag_used": false}
+data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-sonnet-5-5", "rag_used": false}
 ```
 
 ### 위젯 설정 조회 [PRD-371]
@@ -3111,15 +3117,16 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "user_seq": 4, "model": "claude-
 ```
 
 - 연결 config `models` 가 없으면 `model` 하나. `connection_id` 가 없으면 `llm.default-model` 하나
-- 그 테넌트에 없는 연결이면 404
+- 그 테넌트에 없는 연결이면 404 `connection_not_found`
+- `thinking_supported` 는 그 연결 어댑터가 요청마다 생각 설정을 바꿀 수 있는지다. Claude CLI 연결은 거짓
 
-### 답 평가 [PRD-370]
+### 응답 평가 [PRD-370]
 
 | 방법 | 경로 | 뜻 |
 |---|---|---|
 | PUT | /api/v1/chat/feedback | 남기기, 바꾸기 (turn_id, user_ref 로 하나) |
 | DELETE | /api/v1/chat/feedback?turn_id= | 취소 |
-| GET | /api/v1/chat/feedback?rating=&from=&to=&model=&page=&size= | 관리 화면 목록. 로그인 사용자만, 위젯 토큰은 403 |
+| GET | /api/v1/chat/feedback?rating=&from=&to=&model=&page=&size= | 관리 화면 목록. 로그인 사용자만, 위젯 토큰은 403 `feedback_list_forbidden`. `from`, `to` 는 시간대 오프셋을 붙인 ISO-8601(`2026-11-04T00:00:00+09:00`), `to` 시각은 넣지 않는다. 응답은 `ApiResponse.page`(data 목록, pagination) |
 
 남기기 본문:
 
@@ -3135,7 +3142,8 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "user_seq": 4, "model": "claude-
 | reason_codes | 선택 | `DOWN` 일 때만. `widget.feedback-reasons` 의 code |
 | comment | 선택 | `widget.feedback-comment-max-chars` 까지 |
 
-- 400 `feedback_invalid:<칸>`, 그 세션에 없는 답이거나 남의 세션이면 404
+- 400 `feedback_invalid:<칸>`(`rating`, `reason_codes`, `comment`, 목록의 `from`, `to`), 그 세션에 없는 답이거나 남의 세션이면 404 `turn_not_found`
+- 세션 주인은 위젯 대화를 처음 저장할 때 토큰의 `user_ref` 로 적힌다. 주인이 적힌 세션은 주인만 평가할 수 있다
 - 응답 `{id, turn_id, rating, reason_codes, comment, updated_at}`
 - 목록 행: `{id, created_at, updated_at, rating, reasons:[{code, label}], comment, model, session_id, question_excerpt, answer_excerpt, answer_deleted}`
 
@@ -3148,10 +3156,10 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "user_seq": 4, "model": "claude-
 ```
 
 - `title` 은 세션 첫 답이고 `title_source` 가 `USER` 가 아닐 때만 있다. 그때 세션 제목을 바꾸고 `GENERATED` 로 둔다
-- 409 `follow_ups_disabled`(설정 꺼짐), 404(세션, 답 없음), 502 `follow_ups_failed`(모델 호출 실패, 시간 초과, JSON 아님)
-- 대화 기록에 넣지 않고 도구를 쓰지 않는다(BIZ-151)
+- 409 `follow_ups_disabled`(설정 꺼짐), 404 `turn_not_found`(세션, 답 없음, 남의 세션), 502 `follow_ups_failed`(모델 호출 실패, 시간 초과, JSON 아님)
+- 대화 기록에 넣지 않고 도구 목록을 넘기지 않는다(BIZ-151). 별도 세션 `{session_id}:follow-ups:{turn_id}` 로 부르고 끝나면 닫는다. Claude CLI 연결은 실행기 도구를 요청마다 끌 수 없어 프롬프트 틀의 지시로 막는다
 
-### 대화 meta 제목 고치기 (기존 경로 동작 추가)
+### 대화 meta 제목 수정 (기존 경로 동작 추가)
 
 `PUT /api/v1/conversations/{sessionId}/meta` 에 `title` 이 있으면 `title_source = USER` 로 둔다.
 

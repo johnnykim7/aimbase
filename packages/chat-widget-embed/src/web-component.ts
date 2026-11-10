@@ -1,5 +1,19 @@
 import { createWidget } from "./widget";
-import type { WidgetHandle, WidgetOptions } from "./types";
+import type { FontSize, WidgetHandle, WidgetOptions } from "./types";
+
+const FONT_SIZES: FontSize[] = ["small", "medium", "large"];
+
+/** suggestions 속성은 JSON 글 배열이다. 깨진 값은 무시하고 첫 화면을 추천 질문 없이 보인다. */
+function parseSuggestions(raw: string | null): string[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : undefined;
+  } catch {
+    console.error("[aimbase-chat] suggestions attribute must be a JSON array of strings");
+    return undefined;
+  }
+}
 
 /**
  * <aimbase-chat> 커스텀 엘리먼트.
@@ -29,6 +43,10 @@ export class AimbaseChatElement extends HTMLElement {
       "connection-id",
       "actions-enabled",
       "model",
+      "suggestions",
+      "empty-title",
+      "empty-subtitle",
+      "font-size",
     ];
   }
 
@@ -67,6 +85,7 @@ export class AimbaseChatElement extends HTMLElement {
     const themeAttr = this.getAttribute("theme-mode") as "light" | "dark" | "auto" | null;
 
     const actionsAttr = this.getAttribute("actions-enabled");
+    const fontSizeAttr = this.getAttribute("font-size") as FontSize | null;
     const options: WidgetOptions = {
       baseUrl,
       authResolver: resolver,
@@ -79,6 +98,15 @@ export class AimbaseChatElement extends HTMLElement {
       target: displayAttr === "inline" ? (this as HTMLElement) : undefined,
       theme: themeAttr ? { mode: themeAttr } : undefined,
       contextProvider: this.contextProvider ?? undefined,
+      suggestions: parseSuggestions(this.getAttribute("suggestions")),
+      emptyTitle: this.getAttribute("empty-title") ?? undefined,
+      emptySubtitle: this.getAttribute("empty-subtitle") ?? undefined,
+      fontSize: fontSizeAttr && FONT_SIZES.includes(fontSizeAttr) ? fontSizeAttr : undefined,
+      on: {
+        // 붙이는 앱이 새 대화 번호를 따라가도록 엘리먼트 이벤트로 알린다.
+        onNewConversation: (detail) =>
+          this.dispatchEvent(new CustomEvent("new-conversation", { detail, bubbles: true, composed: true })),
+      },
     };
 
     this.handle = createWidget(options);

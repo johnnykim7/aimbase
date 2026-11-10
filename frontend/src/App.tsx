@@ -20,6 +20,7 @@ import Monitoring from "./pages/Monitoring";
 import Projects from "./pages/Projects";
 import Sessions from "./pages/Sessions";
 import SessionDetail from "./pages/SessionDetail";
+import ChatFeedback from "./pages/ChatFeedback";
 import Chat from "./pages/Chat";
 import ContextRecipes from "./pages/ContextRecipes";
 import DomainConfigs from "./pages/DomainConfigs";
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="auth" element={<Auth />} />
         <Route path="sessions" element={<Sessions />} />
         <Route path="sessions/:id" element={<SessionDetail />} />
+        <Route path="chat-feedback" element={<ChatFeedback />} />
         <Route path="chat" element={<Chat />} />
         <Route path="chat/:sessionId" element={<Chat />} />
         <Route path="context-recipes" element={<ContextRecipes />} />

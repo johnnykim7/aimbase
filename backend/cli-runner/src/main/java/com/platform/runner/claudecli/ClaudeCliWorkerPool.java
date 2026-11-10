@@ -366,7 +366,7 @@ public class ClaudeCliWorkerPool {
                 synchronized (rw) {
                     // reaper 가 빈 항목을 치웠으면 지금 항목으로 다시 한다.
                     if (runs.get(runId) != rw) continue;
-                    ClaudeCliWorker live = liveMain(rw, runId, configDir);
+                    ClaudeCliWorker live = liveMain(rw, runId, configDir, model);
                     if (live != null) {
                         live.lease();
                         return live;
@@ -390,14 +390,15 @@ public class ClaudeCliWorkerPool {
     }
 
     /**
-     * 이어 쓸 수 있는 메인 워커. 프로세스가 죽었거나 계정 폴더가 바뀌었으면 닫고 null 이다. rw 잠금 안에서 부른다.
+     * 이어 쓸 수 있는 메인 워커. 프로세스가 죽었거나 계정 폴더나 모델이 바뀌었으면 닫고 null 이다. rw 잠금 안에서 부른다.
      * 죽은 메인을 남겨 두면 run 자리와 실행기 전체 자리를 계속 쥐고 있게 된다.
      */
-    private ClaudeCliWorker liveMain(RunWorkers rw, String runId, String configDir) {
+    private ClaudeCliWorker liveMain(RunWorkers rw, String runId, String configDir, String model) {
         ClaudeCliWorker current = rw.main;
         if (current == null) return null;
         boolean alive = current.isAlive();
-        if (alive && sameConfigDir(current.getConfigDir(), configDir)) return current;
+        boolean sameAccount = sameConfigDir(current.getConfigDir(), configDir);
+        if (alive && sameAccount && sameModel(current.getModel(), model)) return current;
         rw.main = null;
         rw.forks.remove(current);
         rw.slots.release();
@@ -405,7 +406,9 @@ public class ClaudeCliWorkerPool {
         if (alive) {
             // CR-161: 연결 묶음이 같은 run 을 다른 계정 커넥션으로 보냈다. 이전 계정 프로세스를 계속 쓰면
             // api 기록의 커넥션과 실제로 쓴 계정이 어긋나고, 한도에 걸린 계정으로 다시 부른다.
-            log.info("Run '{}': main worker closed because the account folder changed", runId);
+            // CR-175: 위젯에서 모델을 바꿨다. CLI 는 실행 중에 모델을 못 바꾸므로 같은 이유로 새로 띄운다.
+            log.info("Run '{}': main worker closed because the {} changed", runId,
+                    sameAccount ? "model" : "account folder");
         } else {
             log.info("Run '{}': dead main worker closed before respawn (pid={})", runId, current.pid());
         }
@@ -638,6 +641,12 @@ public class ClaudeCliWorkerPool {
     }
 
     /** 비어 있는 계정 폴더는 CLI 기본 폴더 하나로 본다. */
+    private static boolean sameModel(String a, String b) {
+        String left = a == null || a.isBlank() ? null : a.trim();
+        String right = b == null || b.isBlank() ? null : b.trim();
+        return java.util.Objects.equals(left, right);
+    }
+
     private static boolean sameConfigDir(String a, String b) {
         String x = a == null || a.isBlank() ? null : a;
         String y = b == null || b.isBlank() ? null : b;

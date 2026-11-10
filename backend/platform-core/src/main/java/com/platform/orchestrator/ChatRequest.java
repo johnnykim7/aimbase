@@ -22,6 +22,7 @@ import java.util.Map;
  *                            null 이면 커넥션 config 값 사용(기존 동작).
  * @param skillSet           CR-147: 워크플로우 단계에 지정한 스킬과 판(BIZ-121). 도구 호출의 ToolContext 로 넘긴다.
  *                            null 이면 지정 없음(기존 동작).
+ * @param thinkingOverride   CR-175: 요청 단위 깊게 생각하기. true 켬, false 끔, null 이면 연결 설정 그대로(BIZ-150).
  */
 public record ChatRequest(
         String model,
@@ -42,8 +43,25 @@ public record ChatRequest(
         String subagentRunId,
         String toolModeOverride,
         String systemPromptOverride,
-        List<SkillRef> skillSet
+        List<SkillRef> skillSet,
+        Boolean thinkingOverride
 ) {
+    /** CR-175 이전 19-arg 호환 (깊게 생각하기 지정 없음) */
+    public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
+                       boolean stream, boolean actionsEnabled, String userId,
+                       String ragSourceId, String connectionId,
+                       ToolFilterContext toolFilter, String toolChoice,
+                       ResponseFormat responseFormat, String connectionGroupId,
+                       String workingDirectory,
+                       String workflowRunId, String workflowStepId, String subagentRunId,
+                       String toolModeOverride, String systemPromptOverride,
+                       List<SkillRef> skillSet) {
+        this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride,
+                skillSet, null);
+    }
+
     public ChatRequest(String model, List<UnifiedMessage> messages) {
         this(model, null, messages, false, false, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
@@ -127,14 +145,23 @@ public record ChatRequest(
     public ChatRequest withSkillSet(List<SkillRef> skillSet) {
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
-                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet);
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
+                thinkingOverride);
+    }
+
+    /** CR-175: 깊게 생각하기를 지정한 사본. */
+    public ChatRequest withThinkingOverride(Boolean on) {
+        return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet, on);
     }
 
     /** CR-161: 그룹이 고른 멤버로 단일 커넥션 요청을 만든다. 그룹은 지워 안에서 다시 고르지 않게 한다. */
     public ChatRequest withConnection(String memberConnectionId) {
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, memberConnectionId,
                 toolFilter, toolChoice, responseFormat, null, workingDirectory,
-                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet);
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
+                thinkingOverride);
     }
 
     public boolean hasConnectionGroup() {

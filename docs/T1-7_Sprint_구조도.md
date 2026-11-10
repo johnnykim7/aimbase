@@ -685,13 +685,13 @@ flowchart LR
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| PRD-369 | 메시지 순번 부분 고유 인덱스, turn_id, delete_reason, 되감기, done 칸(turn_id, user_seq, model) | CR-083 | 단위시험 TC-CHT-001 ~ 005, 로컬 | BE | 설계중 |
+| PRD-369 | 메시지 순번 부분 고유 인덱스, turn_id, delete_reason, 동기 저장과 순번 지정, 되감기와 CLI 작업자 닫기, done 칸(turn_id, turn_seq, model) | CR-083 | 단위시험 TC-CHT-001 ~ 005, 로컬 | BE | 설계중 |
 | PRD-370 | message_feedback, 평가 남기기, 취소, 관리 목록 API | PRD-369 | 단위시험 TC-CHT-006 ~ 008 | BE | 설계중 |
-| PRD-371 | 연결 config models 검사, `llm.default-model` 이전, thinking 칸과 supportsThinking, 위젯 설정 조회 | CR-040 | 단위시험 TC-CHT-009 ~ 011, CLI 생각 깊이 실측 | BE | 설계중 |
+| PRD-371 | 연결 config models 검사, `llm.default-model` 이전(연결 팩토리, 첨부 판정, 모델 라우터), thinking 칸과 supportsThinkingOverride, 위젯 설정 조회, 실행기 모델 바뀜 재기동과 대화 전체 재전달 | CR-040 | 단위시험 TC-CHT-009 ~ 011, 실행기 단위시험 | BE, 실행기 | 설계중 |
 | PRD-372 | 후속 질문과 제목 API, 프롬프트 틀, title_source | PRD-369, CR-036 | 단위시험 TC-CHT-012 ~ 014 | BE | 설계중 |
-| FE-042 | 연결 편집 「위젯에서 고를 모델」 칸 | PRD-371 | 로컬 화면 | FE | 설계중 |
-| FE-043 | 답 평가 목록 화면 | PRD-370 | 로컬 화면 | FE | 설계중 |
-| PRD-368, PRD-373, PRD-374, PRD-375 | 위젯 화면 전부(멈추기, 다시 만들기, 질문 고치기, 평가, 모델 고르기, 후속 질문, 첫 화면, 읽기 편의, 무채색, 글자 크기) | 위 BE 전부 | 통합 시험항목 1 ~ 17 (CR-175 설계 9.2) | 위젯 | 설계중 |
+| FE-042 | 연결 편집 「허용 모델」 칸 | PRD-371 | 로컬 화면 | FE | 설계중 |
+| FE-043 | 응답 평가 목록 화면 | PRD-370 | 로컬 화면 | FE | 설계중 |
+| PRD-368, PRD-373, PRD-374, PRD-375 | 위젯 화면 전부(응답 중지, 다시 생성, 질문 수정, 평가, 모델 선택, 후속 질문, 첫 화면, 읽기 편의, 무채색, 글자 크기) | 위 BE 전부 | 통합 시험항목 1 ~ 17 (CR-175 설계 9.2) | 위젯 | 설계중 |
 | (레포 간) | bp-backoffice2 CS 문의 상세: scopes 전달, 추천 질문과 안내, 글자 크기 기본값 | 위젯 | 백오피스2 화면에서 마이크, 추천 질문 확인 | bp-backoffice2 | 요청 전 |
 ---
 

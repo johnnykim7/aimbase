@@ -30,6 +30,14 @@ public interface LLMAdapter {
         return getProvider().equals(provider);
     }
 
+    /**
+     * CR-175 BIZ-150: 요청마다 깊게 생각하기를 켜고 끌 수 있는지. 기본은 못 한다.
+     * Claude CLI 어댑터는 실행기 작업자가 기동 때 정한 설정으로 계속 답하므로 거짓이다.
+     */
+    default boolean supportsThinkingOverride() {
+        return false;
+    }
+
     /** CR-061: 어댑터 멀티모달 지원 선언 (기본 NONE — 필요한 어댑터가 오버라이드). */
     default AdapterCapability capabilities() {
         return AdapterCapability.NONE;

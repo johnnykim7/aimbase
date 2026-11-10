@@ -12,6 +12,10 @@ import java.util.UUID;
 @Table(name = "conversation_sessions")
 public class ConversationSessionEntity {
 
+    public static final String TITLE_SOURCE_FIRST_MESSAGE = "FIRST_MESSAGE";
+    public static final String TITLE_SOURCE_GENERATED = "GENERATED";
+    public static final String TITLE_SOURCE_USER = "USER";
+
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     @Column(columnDefinition = "uuid")
@@ -25,6 +29,10 @@ public class ConversationSessionEntity {
 
     @Column(length = 500)
     private String title;
+
+    /** CR-175: 제목 출처. 사람이 고친 제목(USER)은 자동 제목이 덮지 않는다(BIZ-151). */
+    @Column(name = "title_source", length = 20, nullable = false)
+    private String titleSource = TITLE_SOURCE_FIRST_MESSAGE;
 
     @Column(length = 100)
     private String model;
@@ -96,6 +104,8 @@ public class ConversationSessionEntity {
     public void setUserId(String userId) { this.userId = userId; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
+    public String getTitleSource() { return titleSource; }
+    public void setTitleSource(String titleSource) { this.titleSource = titleSource; }
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public int getMessageCount() { return messageCount; }

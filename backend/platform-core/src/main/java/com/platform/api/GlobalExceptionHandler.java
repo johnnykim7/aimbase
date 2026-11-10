@@ -1,5 +1,6 @@
 package com.platform.api;
 
+import com.platform.session.ChatRejectedException;
 import com.platform.llm.adapter.CliAccountLimitedException;
 import com.platform.session.BlockingLimitException;
 import com.platform.skill.SkillNotFoundException;
@@ -16,6 +17,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(ChatRejectedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleChatRejected(ChatRejectedException ex) {
+        return ResponseEntity.status(ex.getStatus()).body(ApiResponse.error(ex.getMessage()));
+    }
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {

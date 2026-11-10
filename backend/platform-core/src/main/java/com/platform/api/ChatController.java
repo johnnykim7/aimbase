@@ -1,5 +1,6 @@
 package com.platform.api;
 
+import com.platform.session.ChatRejectedException;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.platform.attachment.AttachmentException;
 import com.platform.attachment.AttachmentService;
@@ -49,6 +50,9 @@ public class ChatController {
     private final PdfVisionResolver pdfVisionResolver;
     private final LLMAdapterRegistry adapterRegistry;
     private final com.platform.artifact.ArtifactService artifactService;
+    private final com.platform.llm.ConnectionAdapterFactory connectionAdapterFactory;
+    private final com.platform.session.ConversationRewindService rewindService;
+    private final com.platform.session.ChatWidgetSettingsService widgetSettings;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -57,7 +61,10 @@ public class ChatController {
                           PdfTextExtractor pdfTextExtractor,
                           PdfVisionResolver pdfVisionResolver,
                           LLMAdapterRegistry adapterRegistry,
-                          com.platform.artifact.ArtifactService artifactService) {
+                          com.platform.artifact.ArtifactService artifactService,
+                          com.platform.llm.ConnectionAdapterFactory connectionAdapterFactory,
+                          com.platform.session.ConversationRewindService rewindService,
+                          com.platform.session.ChatWidgetSettingsService widgetSettings) {
         this.orchestrator = orchestrator;
         this.workspaceProperties = workspaceProperties;
         this.cancellationRegistry = cancellationRegistry;
@@ -66,6 +73,9 @@ public class ChatController {
         this.pdfVisionResolver = pdfVisionResolver;
         this.adapterRegistry = adapterRegistry;
         this.artifactService = artifactService;
+        this.connectionAdapterFactory = connectionAdapterFactory;
+        this.rewindService = rewindService;
+        this.widgetSettings = widgetSettings;
     }
 
     /**
@@ -106,7 +116,12 @@ public class ChatController {
         // CR-045 L0: working_directory 화이트리스트 조기 차단 (400)
         validateWorkingDirectory(request.workingDirectory());
 
-        AdapterResolution resolved = resolveAdapter(request.model());
+        // CR-175: 모델, 깊게 생각하기 검사 뒤 되감기. 되감기는 스트림을 열기 전에 해야 오류를 HTTP 코드로 줄 수 있다.
+        validateModel(request);
+        Boolean thinkingOverride = parseThinking(request);
+        rewindIfRequested(request);
+
+        AdapterResolution resolved = resolveAdapter(request.model(), request.connectionId());
         List<UnifiedMessage> messages = request.messages().stream()
                 .map(dto -> toUnifiedMessage(dto, request.sessionId(), resolved))
                 .toList();
@@ -148,7 +163,7 @@ public class ChatController {
                 // CR-128(갭B): 요청 단위 CLI override 전달
                 request.toolMode(),
                 request.systemPromptOverride()
-        );
+        ).withThinkingOverride(thinkingOverride);
 
         if (request.stream()) {
             return streamResponse(chatRequest);
@@ -220,6 +235,10 @@ public class ChatController {
                             if (Boolean.TRUE.equals(d.ragUsed())) {
                                 donePayload.put("rag_used", true);
                             }
+                            // CR-175: 답 번호, 묶음 첫 순번, 답한 모델. 저장에 실패하면 순번이 없어 위젯이 다시 만들기를 숨긴다.
+                            if (d.turnId() != null) donePayload.put("turn_id", d.turnId());
+                            if (d.turnSeq() != null) donePayload.put("turn_seq", d.turnSeq());
+                            if (d.model() != null) donePayload.put("model", d.model());
                             // CR-132: CLI 가 out/ 에 만든 산출물을 done 에 실어 위젯이 다운로드 칩을 렌더한다.
                             // VT 에 TenantContext 전파돼 있어 getWorkspaceRef 가 테넌트 DB 로 라우팅됨.
                             List<Map<String, Object>> artifacts = scanArtifacts(chatRequest.sessionId());
@@ -314,6 +333,8 @@ public class ChatController {
             usageMap.put("cache_read_input_tokens", response.usage().cacheReadInputTokens());
         }
         result.put("usage", usageMap);
+        if (response.turnId() != null) result.put("turn_id", response.turnId());
+        if (response.turnSeq() != null) result.put("turn_seq", response.turnSeq());
         // CR-132: 비스트리밍 경로도 산출물 목록을 실어 소비앱/위젯이 다운로드할 수 있게 한다.
         List<Map<String, Object>> artifacts = scanArtifacts(response.sessionId());
         if (!artifacts.isEmpty()) {
@@ -338,7 +359,11 @@ public class ChatController {
             @JsonProperty("working_directory") String workingDirectory,
             // CR-128(갭B): CLI 어댑터 요청 단위 오버라이드. null 이면 커넥션 config 값 사용(기존 동작).
             @JsonProperty("tool_mode") String toolMode,
-            @JsonProperty("system_prompt_override") String systemPromptOverride
+            @JsonProperty("system_prompt_override") String systemPromptOverride,
+            // CR-175: 이 순번(끝 이벤트의 turn_seq)부터 뒤를 지우고 이번 질문으로 다시 답한다(BIZ-148)
+            @JsonProperty("rewind_from_seq") Integer rewindFromSeq,
+            // CR-175: on, off. 비우면 연결 설정 그대로(BIZ-150)
+            String thinking
     ) {}
 
     /** CR-006: 도구 필터링 DTO */
@@ -531,10 +556,19 @@ public class ChatController {
         }
     }
 
-    /** CR-061: 모델 문자열 → 어댑터 + capability. 모델 미지정("auto") 시 anthropic 기본값. */
-    private AdapterResolution resolveAdapter(String model) {
+    /**
+     * CR-061: 모델 문자열 → 어댑터 + capability.
+     * CR-175: 연결이 있으면 그 연결 어댑터의 능력으로 정한다(실제로 답할 어댑터). 연결이 없고 모델도
+     * 미지정("auto")이면 런타임 설정 llm.default-model 로 정한다.
+     */
+    private AdapterResolution resolveAdapter(String model, String connectionId) {
+        if (connectionId != null && !connectionId.isBlank()) {
+            return new AdapterResolution(
+                    connectionAdapterFactory.resolveModel(connectionId, model),
+                    connectionAdapterFactory.getAdapter(connectionId).capabilities());
+        }
         String modelId = model != null && !model.isBlank() && !"auto".equalsIgnoreCase(model)
-                ? model : "anthropic/claude-sonnet-4-5";
+                ? model : connectionAdapterFactory.platformDefaultModel();
         if (!adapterRegistry.hasAdapter(modelId)) {
             // 등록되지 않은 모델이면 image/pdf 미지원으로 취급 — orchestrator 레이어에서 라우팅 재해석.
             return new AdapterResolution(modelId, com.platform.llm.adapter.AdapterCapability.NONE);
@@ -544,4 +578,45 @@ public class ChatController {
     }
 
     private record AdapterResolution(String modelId, com.platform.llm.adapter.AdapterCapability capability) {}
+
+    /** CR-175 BIZ-150: 연결 config 에 models 가 있으면 그 목록 밖의 모델은 받지 않는다. */
+    private void validateModel(ChatCompletionRequest request) {
+        if (request.connectionId() == null || request.connectionId().isBlank()) return;
+        if (!connectionAdapterFactory.isModelAllowed(request.connectionId(), request.model())) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "model_not_allowed");
+        }
+    }
+
+    /** CR-175 BIZ-150: thinking 칸. 켜기를 요청했는데 그 연결 어댑터가 요청마다 바꾸지 못하면 400. */
+    private Boolean parseThinking(ChatCompletionRequest request) {
+        String thinking = request.thinking();
+        if (thinking == null || thinking.isBlank()) return null;
+        Boolean on = switch (thinking.toLowerCase(java.util.Locale.ROOT)) {
+            case "on" -> Boolean.TRUE;
+            case "off" -> Boolean.FALSE;
+            default -> throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "thinking_invalid");
+        };
+        if (on && !widgetSettings.thinkingSupported(request.connectionId(), request.model())) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "thinking_not_supported");
+        }
+        return on;
+    }
+
+    /** CR-175 BIZ-148: rewind_from_seq 가 오면 그 순번부터 지우고 답한다. */
+    private void rewindIfRequested(ChatCompletionRequest request) {
+        if (request.rewindFromSeq() == null) return;
+        if (request.sessionId() == null || request.sessionId().isBlank()) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "rewind_invalid:no_session");
+        }
+        try {
+            rewindService.rewind(request.sessionId(), request.rewindFromSeq(),
+                    request.connectionId(), request.connectionGroupId());
+        } catch (com.platform.session.RewindRejectedException e) {
+            throw switch (e.getReason()) {
+                case SESSION_BUSY -> new ChatRejectedException(HttpStatus.CONFLICT, "session_busy");
+                case NOT_TURN_START -> new ChatRejectedException(HttpStatus.BAD_REQUEST, "rewind_invalid:not_turn_start");
+                case BEFORE_COMPACTION -> new ChatRejectedException(HttpStatus.CONFLICT, "rewind_before_compaction");
+            };
+        }
+    }
 }
