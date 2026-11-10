@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.26.0** | 2026-11-10 | Aimbase v8.18.0 기준
+> **v3.26.1** | 2026-11-10 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -704,6 +704,8 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 7. `TPLGW_BASE_URL=<3PLGW 주소> bootstrap http 3plgw`: HTTP 연결 `bp-3plgw`(59 도 운영도 `http://bp-3plgw:8187`. 59 는 3plgw compose 가 aimbase_default 망에 별칭 bp-3plgw 로 동승)와 `github-bp-3plgw`
 8. `workflow 3plgw`: `scripts/poomgo-change-repair.workflow.json` 을 등록하거나 고친다(chaws 는 `build/` 에 같이 올라간다)
 9. `smoke 3plgw`: 워크플로우, 연결, 묶음, 실행기 건강, git, gh, 토큰 로그인, 내부 키 유무를 찍는다
+
+**프로세스 상한** (운영 chaws, 2026-11-11): 수리 요청이 한꺼번에 오면 요청 수만큼 Claude 프로세스(각 약 320MB)가 떠 컨테이너 메모리 상한을 초과해 실행기가 다시 시작됩니다(11-11 04:52, 13건 동시 인입에 2회). 운영 compose 는 `AIMBASE_RUNNER_MAX_PROCESSES` 4, `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS` 600(api 의 실행기 대기 `ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS` 660 안), `mem_limit` 3g 로 둡니다. 상한을 초과하는 요청은 줄을 서고, 600초 안에 자리가 나지 않으면 그 건만 실패하므로 다시 보내면 됩니다. 수리 1건은 약 150초입니다. 59 는 두 상한이 없습니다(호스트 메모리를 그대로 씁니다).
 
 **설정값** (코드에 없다): 승인 시한은 워크플로우 정의 HUMAN_INPUT `timeoutMs`(72시간), 수리 단계 시한은 AGENT_CALL `timeout_ms`(30분), 모델과 도구 모드는 연결 config, PR 라벨은 입력 `pr_labels`(없으면 `deploy-59`). 회신 재시도와 시한 감시는 api 설정이다.
 
@@ -1928,6 +1930,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.26.1 | 2026-11-11 | **CR-174 수리 실행기 프로세스 상한** (§ 2-13). 운영 chaws 의 `aimbase-agent-3plgw` 에 `AIMBASE_RUNNER_MAX_PROCESSES` 4, 줄 대기 600초, `mem_limit` 3g. 수리 지시에 변환표 정규화 규칙(배송 속성 세 구분, 기존 구분 우선 매핑) |
 | v3.26.0 | 2026-11-10 | **CR-176 같은 글 다른 차례** (§ 2-12). 설정 `aimbase.tts.max-take`(기본 10). 생성기와 api 를 함께 바꿀 때는 생성기를 먼저 올린다 |
 | v3.25.0 | 2026-11-09 | **CR-174 bp-3plgw 품고 수리 실행기** (§ 2-13). 전용 실행기 `aimbase-agent-3plgw`, 비밀값 자리, 설치 단계(`bootstrap <단계> 3plgw`), 회신 재시도와 승인 시한 감시 설정, 장애 대응 |
 | v3.24.0 | 2026-11-09 | **CR-173 CS 실행기 프로세스 상한** (§ 2-10). `AIMBASE_RUNNER_MAX_PROCESSES`, `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS`, 줄서기와 자리 내기 기록, 59 의 `./deploy.sh agent-wes-cs` |

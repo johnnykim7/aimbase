@@ -306,7 +306,7 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 
 **전제**
 
-- 운영 커밋: 운영 가지 `origin/chaws-cr176`(33c58b2, 11-10 13:08 배포분) 위에 CR-174 만 얹은 `origin/chaws-cr174`(0197ff6 = e03f465 + 실행기 망 수정 1건). origin/dev 묶음 1307c15 를 그대로 올리지 않는다(운영 가지에만 있는 CR-173, CR-176 수정 6건이 사라진다). 공용 설계서와 가이드는 운영 가지에 넣지 않고 dev 가 정본이다. 커밋은 컨타가 정한다
+- 운영 커밋: 운영 가지 `origin/chaws-cr176`(33c58b2, 11-10 13:08 배포분) 위에 CR-174 만 얹은 `origin/chaws-cr174`(ea4d537 = e03f465 + 실행기 망 수정, 실행기 프로세스·메모리 상한, 수리 지시 정규화 규칙 3건. 04:26 api 는 e03f465, 05:09 실행기는 6240b8d, 05:22 워크플로우 정의는 ea4d537 로 반영). origin/dev 묶음 1307c15 를 그대로 올리지 않는다(운영 가지에만 있는 CR-173, CR-176 수정 6건이 사라진다). 공용 설계서와 가이드는 운영 가지에 넣지 않고 dev 가 정본이다. 커밋은 컨타가 정한다
 - chaws 에 `db.env`, `api.env`, `agent.env`, 망 `aimbase-apps` 가 있어야 한다. `deploy.sh` 가 먼저 확인하고 없으면 멈춘다(`chaws-init`)
 - 공용 계정 폴더 `claude-accounts/work01`, `work02`, `work03` 이 로그인 상태여야 한다(다른 실행기가 쓰는 것을 그대로 쓴다)
 - 3PLGW 운영 컨테이너가 망 `aimbase-apps` 에 별칭 `bp-3plgw` 로 붙어 있어야 한다(bp-infra CR-INFRA-008). 컨타가 확인한다
@@ -325,10 +325,10 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 **순서**
 
 1. `api.env` 에 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 넣는다(api 가 기동 때 읽는다)
-2. 컨타 `[승인]` 뒤 `CHAWS_COMMIT=0197ff6 LOCAL_SKIP="59 E2E 완료" ./deploy.sh chaws-be`: api 이미지 빌드와 재기동, `build/chaws-bootstrap.sh` 와 `build/poomgo-change-repair.workflow.json` 을 서버 `build/` 에 둔다. 기동 때 `[ProdTenantMigration]` 이 테넌트마다 V76 을 돈다. 출력의 되돌리기 명령(`pre-<stamp>` 태그)을 남겨 둔다
+2. 컨타 `[승인]` 뒤 `CHAWS_COMMIT=ea4d537 LOCAL_SKIP="59 E2E 완료" ./deploy.sh chaws-be`: api 이미지 빌드와 재기동, `build/chaws-bootstrap.sh` 와 `build/poomgo-change-repair.workflow.json` 을 서버 `build/` 에 둔다. 기동 때 `[ProdTenantMigration]` 이 테넌트마다 V76 을 돈다. 출력의 되돌리기 명령(`pre-<stamp>` 태그)을 남겨 둔다
 3. 서버에서 `bash build/chaws-bootstrap.sh admin 3plgw`, `bash build/chaws-bootstrap.sh tenant 3plgw`: CLI 허용 테넌트에 `bp_3plgw`, 테넌트 생성(V76 포함 마이그레이션), 실행기 키 생성, 소비앱 키 파일. `agent-3plgw.env` 에 `GH_TOKEN`, `TPLGW_INTERNAL_KEY` 가 없다는 경고가 나오면 4 에서 넣는다
 4. `agent-3plgw.env` 에 `GH_TOKEN`, `TPLGW_INTERNAL_KEY` 를 넣는다(권한 600)
-5. `CHAWS_COMMIT=0197ff6 ./deploy.sh chaws-agent-3plgw`: env 검사(`GH_TOKEN`, 전용 키) 뒤 실행기 이미지 빌드(git, gh 포함), `aimbase-agent-3plgw` 기동, healthy 대기
+5. `CHAWS_COMMIT=ea4d537 ./deploy.sh chaws-agent-3plgw`: env 검사(`GH_TOKEN`, 전용 키) 뒤 실행기 이미지 빌드(git, gh 포함), `aimbase-agent-3plgw` 기동, healthy 대기
 6. `bash build/chaws-bootstrap.sh connections 3plgw`: 로그인된 계정마다 CLI 연결과 묶음 `cli-runner-bp-3plgw-rr`
 7. `TPLGW_BASE_URL=http://bp-3plgw:8187 bash build/chaws-bootstrap.sh http 3plgw`: HTTP 연결 `bp-3plgw`, `github-bp-3plgw`
 8. `bash build/chaws-bootstrap.sh workflow 3plgw < build/poomgo-change-repair.workflow.json`(터미널이 아니면 stdin 을 읽으므로 파일을 넣어 준다): `build/` 의 정의(표기 규칙 판)를 등록한다
@@ -352,6 +352,8 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 **되돌리기**
 
 - 실행기만: `docker compose stop aimbase-agent-3plgw`. 웹훅은 3PLGW 가 멈추거나 워크플로우를 PUT 으로 `active false`
+- 실행기 설정(프로세스·메모리 상한): compose 를 상한 앞 커밋으로 두고 `CHAWS_COMMIT=0197ff6 ./deploy.sh chaws-agent-3plgw`. 상한 없이 돌아가면 동시 요청에 다시 OOM 이 난다(11-11 04:52)
+- 워크플로우 정의: 고치기 전 정의의 복사본 `deploy-backup/poomgo-change-repair.workflow.pre-<stamp>.json` 을 `bash build/chaws-bootstrap.sh workflow 3plgw < 그 파일` 로 다시 PUT(05:22 분은 `pre-20261111-052216`)
 - api: 2 의 출력에 남은 `docker tag aimbase-api:pre-<stamp> aimbase-api:latest && docker compose up -d --no-deps --force-recreate api`. V76 은 외래키 제거만이라 앞 판 api 도 그대로 돈다
 - 기록: 서버 `deploy-backup/deployed.log`(stamp, 서비스, 커밋)
 
@@ -411,3 +413,4 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-11 05:09 | 수정: `docker-compose.chaws.yml` 의 `aimbase-agent-3plgw` 에 `AIMBASE_RUNNER_MAX_PROCESSES 4`, `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS 600`(api 의 실행기 대기 660 안), `mem_limit 3g`(호스트 31GB 중 14GB 여유, 4개면 약 1.6GB). 운영 가지 6240b8d, dev 553b7da. `CHAWS_COMMIT=6240b8d ./deploy.sh chaws-agent-3plgw` 정상 종료. 실행기 healthy, 재시작 0, 로그 "process limit 4 per runner, queue timeout PT10M", api 재등록 20:09:50Z. 되돌림 0197ff6. 컨타에 원인과 13건 재전송 가능(4건씩 돌고 나머지 줄, 13번째는 약 7.5분 뒤 시작) 회신 |
 | 2026-11-11 05:17 | 컨타 요청(사용자 05:17 결정): 토스쇼핑 도착보장은 기존 「도착보장」 구분. 수리 지시에 규칙 추가(계약 spec 주석의 정규화 규칙 준수, 배송 속성 당일·도착보장·일반 세 구분, 새 값은 기존 구분 우선 매핑, 맞는 것이 없을 때만 새 구분을 이유와 함께). 운영 반영 뒤 되돌릴 버전과 함께 회신 |
 | 2026-11-11 05:22 | `scripts/poomgo-change-repair.workflow.json` 순서 3 에 규칙 추가(운영 가지 ea4d537, dev 36f6fd9). 운영: 반영 전 운영 정의와 서버 build 파일의 지시문 일치 확인(3302자), `deploy-backup/poomgo-change-repair.workflow.pre-20261111-052216.json` 에 복사, `chaws-bootstrap.sh workflow 3plgw` PUT 200, 반영 뒤 운영 정의 지시문 3458자에 규칙 확인. 되돌리기는 그 복사본을 같은 명령으로 다시 PUT. 컨타 회신 |
+| 2026-11-11 05:47 | 컨타 현황 요청에 회신. 7.6 전제의 운영 가지 커밋(ea4d537), 2·5단계 `CHAWS_COMMIT`, 되돌리기(실행기 상한 설정, 워크플로우 정의 복사본)를 오늘 반영분으로 갱신. 운용 가이드 § 2-13 에 프로세스 상한 문단과 v3.26.1 이력 추가. 남은 일 없음 |
