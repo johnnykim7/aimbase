@@ -687,7 +687,7 @@ flowchart LR
 |--------|---------|---------|---------|------|------|
 | PRD-369 | 메시지 순번 부분 고유 인덱스, turn_id, delete_reason, 동기 저장과 순번 지정, 되감기와 CLI 작업자 닫기, done 칸(turn_id, turn_seq, model) | CR-083 | 단위시험 TC-CHT-001 ~ 005, 로컬 | BE | 설계중 |
 | PRD-370 | message_feedback, 평가 남기기, 취소, 관리 목록 API | PRD-369 | 단위시험 TC-CHT-006 ~ 008 | BE | 설계중 |
-| PRD-371 | 연결 config models 검사, `llm.default-model` 이전(연결 팩토리, 첨부 판정, 모델 라우터), thinking 칸과 supportsThinkingOverride, 위젯 설정 조회, 실행기 모델 바뀜 재기동과 대화 전체 재전달 | CR-040 | 단위시험 TC-CHT-009 ~ 011, 실행기 단위시험 | BE, 실행기 | 설계중 |
+| PRD-371 | 연결 config models 검사, `llm.default-model` 이전(연결 팩토리, 첨부 판정, 모델 라우터), thinking 칸과 supportsThinkingOverride, 위젯 설정 조회, 실행기 모델 바뀜 재기동과 대화 전체 재전달, CLI 생각 켜고 끄기와 생각 내용 전달 | CR-040 | 단위시험 TC-CHT-009 ~ 011, 015 ~ 017, 실행기 단위시험 | BE, 실행기 | 설계중 |
 | PRD-372 | 후속 질문과 제목 API, 프롬프트 틀, title_source | PRD-369, CR-036 | 단위시험 TC-CHT-012 ~ 014 | BE | 설계중 |
 | FE-042 | 연결 편집 「허용 모델」 칸 | PRD-371 | 로컬 화면 | FE | 설계중 |
 | FE-043 | 응답 평가 목록 화면 | PRD-370 | 로컬 화면 | FE | 설계중 |

@@ -315,6 +315,10 @@
 
 실행기는 CLI 실패를 `{"error": "<메시지>"}` 본문으로 돌려준다(지금은 Spring 기본 오류 본문이라 메시지가 빠진다). 실시간 `/v1/chat/stream` 은 기존 `{"type":"error","message":...}` 그대로다.
 
+### 실행기 대화 요청의 생각 켜고 끄기 (CR-175)
+
+실행기 `/v1/chat`, `/v1/chat/stream` 본문에 `thinking`(참거짓, 선택)을 둔다. 있으면 작업자가 그 질문 전에 CLI 생각을 켜거나 끈다(BIZ-150). 없으면 CLI 기본 그대로다. 서버는 요청이나 연결 config 에 생각 설정이 있을 때만 싣는다. 실시간 `/v1/chat/stream` 은 CLI 생각 블록을 `{"type":"thinking","delta":"..."}` 로 보낸다.
+
 ### 검증 규칙
 - members 내 모든 connection_id는 동일 adapter 타입이어야 함 (크로스 프로바이더 불가)
 - is_default=true 그룹은 adapter당 1개만 허용
@@ -3093,7 +3097,7 @@ repair 단계 출력(구조화 JSON):
 | 400 `rewind_invalid:not_turn_start` | 그 순번이 없거나, 지운 행이거나, 대화 요청 한 번이 저장한 메시지 묶음의 첫 순번이 아님 |
 | 409 `rewind_before_compaction` | 그 순번보다 뒤에 압축 경계가 있음 |
 | 400 `thinking_invalid` | `thinking` 이 `on`, `off` 가 아님 |
-| 400 `thinking_not_supported` | 어댑터가 요청마다 생각 설정을 바꾸지 못하는데 `on` (Claude CLI 연결) |
+| 400 `thinking_not_supported` | 어댑터가 요청마다 생각 설정을 바꾸지 못하는데 `on` (OpenAI 호환 연결 등) |
 | 400 `model_not_allowed` | 연결 허용 모델 목록에 없는 모델 |
 
 오류 본문은 기존 `ApiResponse` 형식이고 `error` 칸에 위 코드가 온다.
@@ -3111,14 +3115,15 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 
 ```json
 {"models": [{"id": "claude-sonnet-5-5", "label": "Sonnet 5.5"}, {"id": "claude-opus-5-5", "label": "Opus 5.5"}],
- "default_model": "claude-sonnet-5-5", "thinking_supported": true,
+ "default_model": "claude-sonnet-5-5", "thinking_supported": true, "thinking_default": false,
  "feedback_reasons": [{"code": "WRONG_INFO", "label": "틀린 정보"}],
  "feedback_comment_max_chars": 500, "follow_ups_enabled": true}
 ```
 
 - 연결 config `models` 가 없으면 `model` 하나. `connection_id` 가 없으면 `llm.default-model` 하나
 - 그 테넌트에 없는 연결이면 404 `connection_not_found`
-- `thinking_supported` 는 그 연결 어댑터가 요청마다 생각 설정을 바꿀 수 있는지다. Claude CLI 연결은 거짓
+- `thinking_supported` 는 그 연결 어댑터가 요청마다 생각 설정을 바꿀 수 있는지다. Anthropic API 연결과 Claude CLI 연결은 참
+- `thinking_default` 는 깊게 생각하기 단추의 처음 상태다. 연결 config 에 생각 설정이 있으면 그 값, 없으면 어댑터 기본(Claude CLI 참, 그 밖 거짓)
 
 ### 응답 평가 [PRD-370]
 
