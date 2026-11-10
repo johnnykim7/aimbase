@@ -159,7 +159,7 @@ CLI 자율 주행 응답의 본문은 도구를 쓰는 동안의 진행 설명�
 | 항목 | 값 |
 |---|---|
 | 이미지 | `backend/aimbase-agent/Dockerfile` 에 git, gh, openssh-client 를 더한다. 모든 실행기가 같은 이미지라 다 갖게 되지만 토큰은 이 실행기에만 있다 |
-| 컨테이너 | `aimbase-agent-3plgw`. 59 `docker-compose.prod.yml`, chaws `docker-compose.chaws.yml`. 실행기 이름 `cli-runner-bp-3plgw`, 테넌트 `bp_3plgw`, 일꾼 1, 포트 8304(실행기), 8305(MCP), `mem_limit 1536m`(chaws) |
+| 컨테이너 | `aimbase-agent-3plgw`. 59 `docker-compose.prod.yml`, chaws `docker-compose.chaws.yml`. 실행기 이름 `cli-runner-bp-3plgw`, 테넌트 `bp_3plgw`, 일꾼 1, 포트 8304(실행기), 8305(MCP), `mem_limit 3g`(chaws. 11-11 05:09 까지는 1536m), 실행기 전체 Claude 프로세스 상한 4(`AIMBASE_RUNNER_MAX_PROCESSES`. 넘는 요청은 `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS` 600초까지 줄. chaws 만. 59 는 둘 다 없음) |
 | 환경 | 실행기: `AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY` = `bp_3plgw` 실행기 전용 키(`BP_3PLGW_SERVER_MCP_API_KEY`), `GH_TOKEN`(GitHub 토큰), `TPLGW_INTERNAL_KEY`(3PLGW 내부 키. 계약과 표본 curl). PG 환경변수 없음. 59 는 `.env.runner-3plgw`, chaws 는 `agent-3plgw.env`. api: HTTP 연결 `value_env` 는 api 프로세스 env 를 읽으므로 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 59 `.env`, chaws `api.env` 에도 둔다 |
 | 볼륨 | `claude-accounts`(다른 실행기와 같은 폴더의 work01, work02, work03. 토큰 갱신이 한 곳이어야 한다), `workspace-3plgw` |
 | 연결 | `cli-runner-bp-3plgw-work01`, `-work02`, `-work03`: `anthropic-cli`, `tool_mode HYBRID`, `config_dir` 그 계정, `agent_name cli-runner-bp-3plgw`, `exposed_tools ["get_current_time"]`, `model claude-sonnet-4-5`(설정). 묶음 `cli-runner-bp-3plgw-rr` ROUND_ROBIN |
@@ -364,7 +364,8 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 배포 명령 | `./deploy.sh be`, `./deploy.sh agent-3plgw` | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-be`, `chaws-agent-3plgw` |
 | 3PLGW 가 부르는 Aimbase 주소 | `http://59.8.160.12:8280` | `http://aimbase-api-1:8080`(망 `aimbase-apps`) |
 | `TPLGW_INTERNAL_KEY` | 59 전용 키 | 운영 전용 키(3PLGW 가 따로 준다) |
-| 메모리 상한 | 없음 | `mem_limit 1536m` |
+| 메모리 상한 | 없음 | `mem_limit 3g`(11-11 05:09 부터. 1536m 일 때 수리 요청 13건이 5초 간격으로 와 Claude 프로세스 7개가 동시에 떠 OOM) |
+| 실행기 전체 Claude 프로세스 | 상한 없음 | 4개, 넘는 요청은 600초까지 줄(`AIMBASE_RUNNER_MAX_PROCESSES`, `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS`). 일꾼 1 은 run 하나 안의 수라 전체 수를 막지 못한다 |
 
 ## 8. 진행 기록
 
@@ -405,3 +406,6 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-11 04:41 | 확인 항목 재점검(실행기 재배포 뒤): 실행기 망 aimbase-apps 합류, 실행기 안에서 `GET contracts/active` 키 있음 200(8022B 배열), 키 없음 403. bp_3plgw DB flyway 에 V76 성공 1행. 3PLGW 컨테이너에서 소비앱 키 + X-Tenant-Id 로 Aimbase 호출 200(앞서 403 은 시험 명령의 변수 전달 실수). 발견: 3PLGW 운영 웹훅이 04:37:07 과 04:37:19 에 같은 14건을 두 회차(실패 회신 직후 재요청) 보내 run 28건 전부 failed, 원인 `cli_runner_unreachable:EOFException`, 실행기 재생성(04:37:06~33) 과 겹침. 그 뒤 실패 0, api→실행기 health 200. 컨타 질의에 [회신]: 1 run = 1건, 재실행은 3PLGW 재시도(권장) 또는 `POST /workflows/runs/{id}/rerun` |
 | 2026-11-11 04:47 | 실행기 로그인 실측: 시험 워크플로우 `cr174-login-probe`(AGENT_CALL 한 단계, 묶음 `cli-runner-bp-3plgw-rr`) run 이 5초 만에 출력 `OK` 로 completed(입력 10, 출력 71 토큰). 시험 워크플로우 삭제 204, 조회 404. 7.6 확인 항목 중 「실제 연동」 만 남음(3PLGW 재시도 14건을 컨타 신호로 함께 본다). 컨타에 재시도 가능 [알림] |
 | 2026-11-11 04:50 | 운영 반영 결과: api 는 e03f465 이미지(되돌림 `aimbase-api:pre-20261111-042503`, 커밋 33c58b2), 실행기는 0197ff6(compose 망 수정). dev 에도 같은 compose 수정과 이 기록을 올림(13bbba1). 7.6 의 커밋 표기와 8단계 명령, 확인 항목 두 줄을 실측대로 고침 |
+| 2026-11-11 04:55 | 컨타 요청: 3PLGW 가 04:51:14 부터 13건을 5초 간격으로 보내자 실행기가 04:52:17 재기동(2회, docker 는 OOM 아님 표기)해 13건 모두 실패. 원인과 13건 재전송 가능 여부를 회신하라 |
+| 2026-11-11 05:05 | 원인(호스트 dmesg, docker inspect, 실행기·api 로그): 커널 memory cgroup OOM 2회(04:52:01, 04:52:40, usage = limit 1572864kB). 그때 Claude 프로세스 7개(각 243~322MB)와 java 319MB 로 2179MB. `MAX_WORKERS 1` 은 run 하나 안의 수라 실행기 전체는 상한이 없었다(`maxProcesses` 기본 0, CR-173). 헬스체크 실패·예외·docker OOMKilled 표기 없음(RestartCount 2, ExitCode 0). api 쪽 실패는 AGENT_OFFLINE 14, EOFException 12. 혼자 돈 첫 건(19:48:11Z)은 수리 단계 150316ms 로 pending_approval |
+| 2026-11-11 05:09 | 수정: `docker-compose.chaws.yml` 의 `aimbase-agent-3plgw` 에 `AIMBASE_RUNNER_MAX_PROCESSES 4`, `AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS 600`(api 의 실행기 대기 660 안), `mem_limit 3g`(호스트 31GB 중 14GB 여유, 4개면 약 1.6GB). 운영 가지 6240b8d, dev 553b7da. `CHAWS_COMMIT=6240b8d ./deploy.sh chaws-agent-3plgw` 정상 종료. 실행기 healthy, 재시작 0, 로그 "process limit 4 per runner, queue timeout PT10M", api 재등록 20:09:50Z. 되돌림 0197ff6. 컨타에 원인과 13건 재전송 가능(4건씩 돌고 나머지 줄, 13번째는 약 7.5분 뒤 시작) 회신 |
