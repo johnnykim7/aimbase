@@ -93,6 +93,7 @@ class FollowUpServiceTest {
         verify(adapter).chat(request.capture());
         assertThat(request.getValue().sessionId()).isNotEqualTo("s-1").startsWith("s-1:follow-ups:");
         assertThat(request.getValue().tools()).isNull();
+        assertThat(request.getValue().config().explicitThinking()).isFalse();
         verify(adapter).cleanupSession(request.getValue().sessionId());
         verify(usageLogRepository).save(any());
         verify(messageRepository, never()).save(any());
