@@ -71,7 +71,6 @@ class WorkflowEngineCallbackTest {
                 provider(mock(com.platform.llm.ConnectionAdapterFactory.class)),
                 provider(new WorkflowCancellationRegistry()),
                 null,
-                null,
                 provider(callback));
     }
 
