@@ -36,5 +36,23 @@
         "--rerun"
       ]
     }
+  },
+  "server": {
+    "api": {
+      "wes": "http://59.8.160.12:8280"
+    },
+    "guest": "wes",
+    "login": {
+      "token_cmd": "tools/testbook/dev_wes_token.sh {account}"
+    },
+    "db_cmd": "tools/testbook/dev_wes_db.sh",
+    "db": {
+      "readonly": "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;",
+      "null": "NULL"
+    },
+    "session_lost": {
+      "status": 401,
+      "codes": []
+    }
   }
 }

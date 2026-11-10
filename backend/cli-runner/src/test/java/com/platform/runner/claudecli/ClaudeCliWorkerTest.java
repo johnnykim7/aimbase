@@ -701,6 +701,7 @@ class ClaudeCliWorkerTest {
 
     /** CR-175 TC-CHT-015: 생각 신호는 값이 바뀔 때만 질문 줄보다 먼저 나가고, 같은 프로세스가 이어 답한다. */
     @Test
+    @DisplayName("IT-09-011 6 생각을_켜고_끌_때_작업자를_다시_띄우지_않고_한도_신호만_보낸다")
     void thinking_control_is_written_before_question_only_when_changed() throws IOException {
         Path stdinDump = tempDir.resolve("stdin-think-" + System.nanoTime() + ".txt");
         worker = new ClaudeCliWorker(thinkingStub(stdinDump, "success").toString(), null, null, false, null,
@@ -765,6 +766,7 @@ class ClaudeCliWorkerTest {
      * 쓴다. 줄마다 쓰면 CLI 가 줄마다 답하고 이 턴은 가장 오래된 질문의 답을 돌려준다.
      */
     @Test
+    @DisplayName("IT-09-023 4 새로_뜬_작업자는_지난_대화를_이번_질문_앞에_붙인_user_줄_하나로_받는다")
     void new_worker_gets_previous_conversation_in_one_line_ending_with_current_question() throws IOException {
         Path stdinDump = tempDir.resolve("stdin-history-" + System.nanoTime() + ".txt");
         worker = new ClaudeCliWorker(thinkingStub(stdinDump, "success").toString(), null, null, false, null,

@@ -15,6 +15,7 @@ import com.platform.repository.ConversationSessionRepository;
 import com.platform.repository.UsageLogRepository;
 import com.platform.service.PromptTemplateService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -72,6 +73,7 @@ class FollowUpServiceTest {
     }
 
     @Test
+    @DisplayName("IT-09-013 6 후속_질문은_별도_세션으로_묻고_대화_기록에_더하지_않는다")
     void first_answer_gets_follow_ups_and_generated_title() {
         // TC-CHT-012
         when(messageRepository.existsBySessionIdAndRoleAndSeqLessThanAndDeletedAtIsNull("s-1", "assistant", 4))
@@ -93,9 +95,12 @@ class FollowUpServiceTest {
         assertThat(request.getValue().tools()).isNull();
         verify(adapter).cleanupSession(request.getValue().sessionId());
         verify(usageLogRepository).save(any());
+        verify(messageRepository, never()).save(any());
+        verify(messageRepository, never()).saveAll(any());
     }
 
     @Test
+    @DisplayName("IT-09-013 5 사람이_고친_제목은_그대로다")
     void title_fixed_by_person_is_kept() {
         // TC-CHT-013
         session.setTitleSource(ConversationSessionEntity.TITLE_SOURCE_USER);
@@ -113,6 +118,7 @@ class FollowUpServiceTest {
     }
 
     @Test
+    @DisplayName("IT-09-014 2 후속_질문을_끄면_follow_ups_disabled")
     void disabled_setting_is_conflict() {
         // TC-CHT-014
         when(widgetSettings.followUpsEnabled()).thenReturn(false);
@@ -122,6 +128,7 @@ class FollowUpServiceTest {
     }
 
     @Test
+    @DisplayName("IT-09-014 3 JSON_이_아닌_답은_follow_ups_failed")
     void non_json_reply_is_bad_gateway() {
         // TC-CHT-014
         when(messageRepository.existsBySessionIdAndRoleAndSeqLessThanAndDeletedAtIsNull("s-1", "assistant", 4))
@@ -133,6 +140,7 @@ class FollowUpServiceTest {
     }
 
     @Test
+    @DisplayName("IT-09-014 3 늦은_답은_시간_한도에서_끊고_follow_ups_failed")
     void slow_reply_is_cut_at_timeout_and_session_is_cleaned() {
         // TC-CHT-014
         when(widgetSettings.followUpsTimeoutMs()).thenReturn(50L);
