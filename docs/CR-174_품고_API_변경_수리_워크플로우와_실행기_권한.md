@@ -306,7 +306,7 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 
 **전제**
 
-- 운영 커밋: 운영 가지 `origin/chaws-cr176`(33c58b2, 11-10 13:08 배포분) 위에 CR-174 만 얹은 `origin/chaws-cr174`(e03f465). origin/dev 묶음 1307c15 를 그대로 올리지 않는다(운영 가지에만 있는 CR-173, CR-176 수정 6건이 사라진다). 공용 설계서와 가이드는 운영 가지에 넣지 않고 dev 가 정본이다. 커밋은 컨타가 정한다
+- 운영 커밋: 운영 가지 `origin/chaws-cr176`(33c58b2, 11-10 13:08 배포분) 위에 CR-174 만 얹은 `origin/chaws-cr174`(0197ff6 = e03f465 + 실행기 망 수정 1건). origin/dev 묶음 1307c15 를 그대로 올리지 않는다(운영 가지에만 있는 CR-173, CR-176 수정 6건이 사라진다). 공용 설계서와 가이드는 운영 가지에 넣지 않고 dev 가 정본이다. 커밋은 컨타가 정한다
 - chaws 에 `db.env`, `api.env`, `agent.env`, 망 `aimbase-apps` 가 있어야 한다. `deploy.sh` 가 먼저 확인하고 없으면 멈춘다(`chaws-init`)
 - 공용 계정 폴더 `claude-accounts/work01`, `work02`, `work03` 이 로그인 상태여야 한다(다른 실행기가 쓰는 것을 그대로 쓴다)
 - 3PLGW 운영 컨테이너가 망 `aimbase-apps` 에 별칭 `bp-3plgw` 로 붙어 있어야 한다(bp-infra CR-INFRA-008). 컨타가 확인한다
@@ -325,10 +325,10 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 **순서**
 
 1. `api.env` 에 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 넣는다(api 가 기동 때 읽는다)
-2. 컨타 `[승인]` 뒤 `CHAWS_COMMIT=e03f465 LOCAL_SKIP="59 E2E 완료" ./deploy.sh chaws-be`: api 이미지 빌드와 재기동, `build/chaws-bootstrap.sh` 와 `build/poomgo-change-repair.workflow.json` 을 서버 `build/` 에 둔다. 기동 때 `[ProdTenantMigration]` 이 테넌트마다 V76 을 돈다. 출력의 되돌리기 명령(`pre-<stamp>` 태그)을 남겨 둔다
+2. 컨타 `[승인]` 뒤 `CHAWS_COMMIT=0197ff6 LOCAL_SKIP="59 E2E 완료" ./deploy.sh chaws-be`: api 이미지 빌드와 재기동, `build/chaws-bootstrap.sh` 와 `build/poomgo-change-repair.workflow.json` 을 서버 `build/` 에 둔다. 기동 때 `[ProdTenantMigration]` 이 테넌트마다 V76 을 돈다. 출력의 되돌리기 명령(`pre-<stamp>` 태그)을 남겨 둔다
 3. 서버에서 `bash build/chaws-bootstrap.sh admin 3plgw`, `bash build/chaws-bootstrap.sh tenant 3plgw`: CLI 허용 테넌트에 `bp_3plgw`, 테넌트 생성(V76 포함 마이그레이션), 실행기 키 생성, 소비앱 키 파일. `agent-3plgw.env` 에 `GH_TOKEN`, `TPLGW_INTERNAL_KEY` 가 없다는 경고가 나오면 4 에서 넣는다
 4. `agent-3plgw.env` 에 `GH_TOKEN`, `TPLGW_INTERNAL_KEY` 를 넣는다(권한 600)
-5. `CHAWS_COMMIT=e03f465 ./deploy.sh chaws-agent-3plgw`: env 검사(`GH_TOKEN`, 전용 키) 뒤 실행기 이미지 빌드(git, gh 포함), `aimbase-agent-3plgw` 기동, healthy 대기
+5. `CHAWS_COMMIT=0197ff6 ./deploy.sh chaws-agent-3plgw`: env 검사(`GH_TOKEN`, 전용 키) 뒤 실행기 이미지 빌드(git, gh 포함), `aimbase-agent-3plgw` 기동, healthy 대기
 6. `bash build/chaws-bootstrap.sh connections 3plgw`: 로그인된 계정마다 CLI 연결과 묶음 `cli-runner-bp-3plgw-rr`
 7. `TPLGW_BASE_URL=http://bp-3plgw:8187 bash build/chaws-bootstrap.sh http 3plgw`: HTTP 연결 `bp-3plgw`, `github-bp-3plgw`
 8. `bash build/chaws-bootstrap.sh workflow 3plgw < build/poomgo-change-repair.workflow.json`(터미널이 아니면 stdin 을 읽으므로 파일을 넣어 준다): `build/` 의 정의(표기 규칙 판)를 등록한다
@@ -345,7 +345,7 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 실행기에서 3PLGW | 실행기 안에서 내부 키로 `GET http://bp-3plgw:8187/api/v1/internal/poomgo-repair/contracts/active` | 200 배열(운영 활성 계약), 키 없이 403 |
 | 3PLGW 에서 Aimbase | 3PLGW 컨테이너에서 소비앱 키와 `X-Tenant-Id` 로 `GET /api/v1/workflows/poomgo-change-repair` | 200, active true, 6 단계 |
 | 웹훅 거절 길 | 잘못된 `_callback.path` 로 run 요청 | 400 `callback_invalid:path`, run 없음 |
-| 실행기 로그인 실측 | 7.4 와 같은 AGENT_CALL 한 단계 시험 워크플로우, 끝나면 지운다 | completed |
+| 실행기 로그인 실측 | 7.4 와 같은 AGENT_CALL 한 단계 시험 워크플로우(`triggerConfig` 필수, `connection_group_id` 는 묶음), 끝나면 `DELETE /workflows/{id}` | completed, 출력 OK |
 | 승인 시한 감시 | 기동 줄은 없다. 닫은 건이 있거나 실패했을 때만 `CR-174 tenant ... 승인 시한` 기록(첫 30초 뒤, 60초 주기, `aimbase.workflow.approval-timeout.*`) | 시한 넘긴 승인 대기가 없으면 기록 없음이 정상 |
 | 실제 연동 | 3PLGW 운영 감지 건으로 웹훅, 제안 전달, BO2 승인, activate 또는 merge, 종료 회신 | 컨타 신호로 함께 본다. 승인 전까지 run 은 `pending_approval` |
 
@@ -397,9 +397,11 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-11 04:08 | 운영 1단계: chaws `api.env` 에 `TPLGW_INTERNAL_KEY`(3PLGW 운영 키 파일을 서버 안에서 읽음), `GITHUB_TOKEN_3PLGW`, 새 `agent-3plgw.env`(600) 에 `GH_TOKEN`, `TPLGW_INTERNAL_KEY`. 전제(env 셋, 망, `bp-3plgw` 별칭, 계정 work01, work02 로그인) 확인 |
 | 2026-11-11 04:17 | 운영 api 는 origin/dev 가 아닌 운영 가지 `chaws-cr176`(33c58b2) 라 1307c15 를 그대로 올리면 CR-173, CR-176 운영 전용 수정 6건이 사라짐. [승인요청] 뒤 컨타 [승인] ①(사용자 위임): 운영 가지 위에 CR-174 만 얹은 `chaws-cr174` 로 |
 | 2026-11-11 04:25 | `chaws-cr174` = 33c58b2 + CR-174 29건(e30861a..1307c15 30건 중 공용 설계서만 바뀐 2건은 비어 생략, 시험 인자 수정 1건 추가) = e03f465, origin 푸시. 충돌 병합: WorkflowEngine 과 시험 6개는 dev 전용 CR-164 인자 제거, deploy.sh 는 사용법 줄과 59 전용 함수, 공용 설계서 9개와 가이드 2개는 운영판 유지. 컴파일 통과, 시험 workflow 282, normalizer 11, 실행기 18 통과. 운영 전용 6건의 추가 줄이 남아 있는지 diff 로 확인 |
-| 2026-11-11 04:26 | 운영 2단계: `CHAWS_COMMIT=e03f465 LOCAL_SKIP="59 E2E 완료" ./deploy.sh chaws-be` 정상 종료. deployed.log `20261111-042503 api e03f465`, 되돌림 이미지 `aimbase-api:pre-20261111-042503`, api healthy, 기동 로그 ERROR 0, 기존 테넌트 bp_wes, bp_wms 에 V76 적용(성공 2 실패 0), `build/chaws-bootstrap.sh` 와 워크플로우 정의 서버 도착, api 환경에 두 키 확인 |
+| 2026-11-11 04:26 | 운영 2단계: `CHAWS_COMMIT=0197ff6 LOCAL_SKIP="59 E2E 완료" ./deploy.sh chaws-be` 정상 종료. deployed.log `20261111-042503 api e03f465`, 되돌림 이미지 `aimbase-api:pre-20261111-042503`, api healthy, 기동 로그 ERROR 0, 기존 테넌트 bp_wes, bp_wms 에 V76 적용(성공 2 실패 0), `build/chaws-bootstrap.sh` 와 워크플로우 정의 서버 도착, api 환경에 두 키 확인 |
 | 2026-11-11 04:29 | 운영 3단계: `chaws-bootstrap.sh admin 3plgw`(CLI 허용 테넌트 bp_wms, bp_wes, bp_3plgw), `tenant 3plgw`(테넌트 생성 201, 실행기 호출 키와 전용 키를 `agent-3plgw.env` 에 덧붙임, 소비앱 키 `secrets/bp-3plgw-api-key` 600). 4단계는 1단계에서 먼저 넣음. 3PLGW 설정값(주소 `http://aimbase-api-1:8080`, 테넌트 `bp_3plgw`, callback `http://bp-3plgw:8187`, connection-id `bp-3plgw`, 키 파일 경로)을 컨타에 [알림] |
-| 2026-11-11 04:31 | 운영 5단계: `CHAWS_COMMIT=e03f465 ./deploy.sh chaws-agent-3plgw` 정상 종료(env 검사 통과, 실행기 이미지 빌드, `aimbase-agent-3plgw` healthy) |
+| 2026-11-11 04:31 | 운영 5단계: `CHAWS_COMMIT=0197ff6 ./deploy.sh chaws-agent-3plgw` 정상 종료(env 검사 통과, 실행기 이미지 빌드, `aimbase-agent-3plgw` healthy) |
 | 2026-11-11 04:34 | 운영 6~9단계: `connections 3plgw`(로그인 계정 work01, work02 연결 201, 묶음 `cli-runner-bp-3plgw-rr` 201), `TPLGW_BASE_URL=http://bp-3plgw:8187 http 3plgw`(`bp-3plgw`, `github-bp-3plgw` 201), `workflow 3plgw` 는 ssh 비대화형에서 stdin 이 비어 JSON 오류로 1회 실패, `< build/poomgo-change-repair.workflow.json` 으로 다시 돌려 201. `smoke 3plgw` 네 조회 200, 실행기 health ok, git 2.53, gh 2.103 로그인(GH_TOKEN), TPLGW_INTERNAL_KEY 있음 |
 | 2026-11-11 04:37 | 확인 항목: 실행기 healthy, 로그 ERROR 0, api 에 agents 하트비트 도착(등록됨), 테넌트 bp_3plgw DB flyway 78 success. 걸림: 실행기 안에서 `bp-3plgw` 이름이 안 풀림(curl 6). 원인은 `docker-compose.chaws.yml` 의 `aimbase-agent-3plgw` 만 `networks` 가 없어 default 망에만 붙음(api 는 `aimbase-apps` 에 붙어 풀림, 59 의 prod compose 와 다른 점). `networks: default, aimbase-apps` 를 더해 chaws-cr174 0197ff6 푸시, 실행기만 재배포. 승인 시한 감시는 기동 줄을 남기지 않고 닫은 건이나 실패 때만 기록하므로(코드 `@Scheduled` 60초, 첫 30초) 확인 항목의 기대를 고침 |
 | 2026-11-11 04:41 | 확인 항목 재점검(실행기 재배포 뒤): 실행기 망 aimbase-apps 합류, 실행기 안에서 `GET contracts/active` 키 있음 200(8022B 배열), 키 없음 403. bp_3plgw DB flyway 에 V76 성공 1행. 3PLGW 컨테이너에서 소비앱 키 + X-Tenant-Id 로 Aimbase 호출 200(앞서 403 은 시험 명령의 변수 전달 실수). 발견: 3PLGW 운영 웹훅이 04:37:07 과 04:37:19 에 같은 14건을 두 회차(실패 회신 직후 재요청) 보내 run 28건 전부 failed, 원인 `cli_runner_unreachable:EOFException`, 실행기 재생성(04:37:06~33) 과 겹침. 그 뒤 실패 0, api→실행기 health 200. 컨타 질의에 [회신]: 1 run = 1건, 재실행은 3PLGW 재시도(권장) 또는 `POST /workflows/runs/{id}/rerun` |
+| 2026-11-11 04:47 | 실행기 로그인 실측: 시험 워크플로우 `cr174-login-probe`(AGENT_CALL 한 단계, 묶음 `cli-runner-bp-3plgw-rr`) run 이 5초 만에 출력 `OK` 로 completed(입력 10, 출력 71 토큰). 시험 워크플로우 삭제 204, 조회 404. 7.6 확인 항목 중 「실제 연동」 만 남음(3PLGW 재시도 14건을 컨타 신호로 함께 본다). 컨타에 재시도 가능 [알림] |
+| 2026-11-11 04:50 | 운영 반영 결과: api 는 e03f465 이미지(되돌림 `aimbase-api:pre-20261111-042503`, 커밋 33c58b2), 실행기는 0197ff6(compose 망 수정). dev 에도 같은 compose 수정과 이 기록을 올림(13bbba1). 7.6 의 커밋 표기와 8단계 명령, 확인 항목 두 줄을 실측대로 고침 |
