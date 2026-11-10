@@ -300,6 +300,72 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 재시도 run 10793e47(건 3, 00:13) | `repair` completed, `structured_data` 7칸(result_kind CONTRACT, 요약 "orderSheet.orderCode 를 orderSheet.orderNo 로"). `submit` 201(00:16, 33ms). run `pending_approval`(BO2 승인 단계). 승인은 사용자 합동 시험, 시한 04:16. 반영(activate)과 종료 회신은 감시 스크립트(`build/cr174_watch_run.sh`)로 지켜본다 |
 | 승인 뒤(사용자 합동 시험 04:43) | approve 호출 04:43:23, ROUTER 가 CONTRACT 로 `activate`: POST `/changes/inv-20261109-e9d7aa3a/activate` 200(10ms), run completed(5 단계 결과). 종료 회신 POST `/changes/inv-20261109-e9d7aa3a/result` 200(6ms, 1회차, api 로그). 59 E2E 전 구간 통과 |
 
+### 7.6 운영 반영 절차 (chaws, 사용자 2026-11-10 10:15 결정 ①, 컨타 신호 뒤)
+
+운영은 `deploy.sh` 의 chaws(`CHAWS_SERVER`, 폴더 `CHAWS_REMOTE`)다. 비밀값은 값을 적지 않고 자리만 적는다. 값은 비밀 파일에서 읽어 ssh 표준입력으로만 옮긴다(7.4 와 같은 방법). 59 와 다른 점은 맨 아래 표다.
+
+**전제**
+
+- 운영 묶음 커밋: origin/dev `32724a6..1307c15`(CR-174 만 28건). `CHAWS_COMMIT=1307c15` 로 빌드한다. 그 뒤 origin/dev 의 CR-175, CR-176 은 이 묶음에 들지 않는다. 커밋은 컨타가 정한다
+- chaws 에 `db.env`, `api.env`, `agent.env`, 망 `aimbase-apps` 가 있어야 한다. `deploy.sh` 가 먼저 확인하고 없으면 멈춘다(`chaws-init`)
+- 공용 계정 폴더 `claude-accounts/work01`, `work02`, `work03` 이 로그인 상태여야 한다(다른 실행기가 쓰는 것을 그대로 쓴다)
+- 3PLGW 운영 컨테이너가 망 `aimbase-apps` 에 별칭 `bp-3plgw` 로 붙어 있어야 한다(bp-infra CR-INFRA-008). 컨타가 확인한다
+
+**비밀값 배치(값은 적지 않는다)**
+
+| 값 | 운영 자리 | 출처 | 넣는 때 |
+|---|---|---|---|
+| `GH_TOKEN` | chaws `agent-3plgw.env` | 맥 `~/.claude-secrets/github-3plgw-repair.env`(59 와 같은 토큰. fine-grained, 3plgw 레포 contents, pull_requests 쓰기) | 실행기 올리기 전 |
+| `GITHUB_TOKEN_3PLGW` | chaws `api.env` | 같은 파일 | api 올리기 전(HTTP 연결 `github-bp-3plgw` 의 `auth.value_env`) |
+| `TPLGW_INTERNAL_KEY` | chaws `agent-3plgw.env` 와 `api.env` 둘 다 | 3PLGW 운영 수리 창구 전용 키. 3PLGW 워커가 파일로 전한다(컨타 경유). 59 값과 다르다 | api 올리기 전 |
+| `AIMBASE_RUNNER_API_KEY`, `AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY` | chaws `agent-3plgw.env` | `chaws-bootstrap.sh tenant 3plgw` 가 만들어 넣는다 | tenant 단계 |
+| 소비앱 키 | chaws `secrets/bp-3plgw-api-key` | 같은 단계가 만든다. 3PLGW 운영에 전한다(컨타 경유) | tenant 단계 뒤 |
+| 관리자 비밀번호 | chaws `secrets/admin-password` | 있는 것 | bootstrap 로그인 |
+
+**순서**
+
+1. `api.env` 에 `TPLGW_INTERNAL_KEY`, `GITHUB_TOKEN_3PLGW` 를 넣는다(api 가 기동 때 읽는다)
+2. 컨타 `[승인]` 뒤 `CHAWS_COMMIT=1307c15 LOCAL_SKIP="59 E2E 완료" ./deploy.sh chaws-be`: api 이미지 빌드와 재기동, `build/chaws-bootstrap.sh` 와 `build/poomgo-change-repair.workflow.json` 을 서버 `build/` 에 둔다. 기동 때 `[ProdTenantMigration]` 이 테넌트마다 V76 을 돈다. 출력의 되돌리기 명령(`pre-<stamp>` 태그)을 남겨 둔다
+3. 서버에서 `bash build/chaws-bootstrap.sh admin 3plgw`, `bash build/chaws-bootstrap.sh tenant 3plgw`: CLI 허용 테넌트에 `bp_3plgw`, 테넌트 생성(V76 포함 마이그레이션), 실행기 키 생성, 소비앱 키 파일. `agent-3plgw.env` 에 `GH_TOKEN`, `TPLGW_INTERNAL_KEY` 가 없다는 경고가 나오면 4 에서 넣는다
+4. `agent-3plgw.env` 에 `GH_TOKEN`, `TPLGW_INTERNAL_KEY` 를 넣는다(권한 600)
+5. `CHAWS_COMMIT=1307c15 ./deploy.sh chaws-agent-3plgw`: env 검사(`GH_TOKEN`, 전용 키) 뒤 실행기 이미지 빌드(git, gh 포함), `aimbase-agent-3plgw` 기동, healthy 대기
+6. `bash build/chaws-bootstrap.sh connections 3plgw`: 로그인된 계정마다 CLI 연결과 묶음 `cli-runner-bp-3plgw-rr`
+7. `TPLGW_BASE_URL=http://bp-3plgw:8187 bash build/chaws-bootstrap.sh http 3plgw`: HTTP 연결 `bp-3plgw`, `github-bp-3plgw`
+8. `bash build/chaws-bootstrap.sh workflow 3plgw`: `build/` 의 정의(표기 규칙 판)를 등록한다
+9. `bash build/chaws-bootstrap.sh smoke 3plgw`
+10. 소비앱 키 파일을 컨타 경유로 3PLGW 운영에 전한다. 3PLGW 운영 설정은 Aimbase 주소 `http://aimbase-api-1:8080`(망 `aimbase-apps`), `X-Tenant-Id: bp_3plgw`, callback-base-url `http://bp-3plgw:8187`, connection-id `bp-3plgw`(계약 문서 1절, 7절)
+
+**확인 항목**
+
+| 확인 | 방법 | 기대 |
+|---|---|---|
+| api 기동과 마이그레이션 | `docker compose logs api` 의 `[ProdTenantMigration]` | 모든 테넌트 v76, `bp_3plgw` 는 생성 때 v76 |
+| 실행기 | `docker compose ps aimbase-agent-3plgw`, `docker compose exec aimbase-agent-3plgw gh auth status` | healthy, 로그인 |
+| smoke | 9 의 출력 | 워크플로우, 연결 2, 묶음 200, 실행기 health ok, git, gh, `TPLGW_INTERNAL_KEY` 있음 |
+| 실행기에서 3PLGW | 실행기 안에서 내부 키로 `GET http://bp-3plgw:8187/api/v1/internal/poomgo-repair/contracts/active` | 200 배열(운영 활성 계약), 키 없이 403 |
+| 3PLGW 에서 Aimbase | 3PLGW 컨테이너에서 소비앱 키와 `X-Tenant-Id` 로 `GET /api/v1/workflows/poomgo-change-repair` | 200, active true, 6 단계 |
+| 웹훅 거절 길 | 잘못된 `_callback.path` 로 run 요청 | 400 `callback_invalid:path`, run 없음 |
+| 실행기 로그인 실측 | 7.4 와 같은 AGENT_CALL 한 단계 시험 워크플로우, 끝나면 지운다 | completed |
+| 승인 시한 감시 | api 기록의 ApprovalTimeoutSweeper 기동 줄(기동 30초 뒤, 1분 주기) | 있음 |
+| 실제 연동 | 3PLGW 운영 감지 건으로 웹훅, 제안 전달, BO2 승인, activate 또는 merge, 종료 회신 | 컨타 신호로 함께 본다. 승인 전까지 run 은 `pending_approval` |
+
+**되돌리기**
+
+- 실행기만: `docker compose stop aimbase-agent-3plgw`. 웹훅은 3PLGW 가 멈추거나 워크플로우를 PUT 으로 `active false`
+- api: 2 의 출력에 남은 `docker tag aimbase-api:pre-<stamp> aimbase-api:latest && docker compose up -d --no-deps --force-recreate api`. V76 은 외래키 제거만이라 앞 판 api 도 그대로 돈다
+- 기록: 서버 `deploy-backup/deployed.log`(stamp, 서비스, 커밋)
+
+**59 와 다른 점**
+
+| 항목 | 59 | 운영 chaws |
+|---|---|---|
+| env 배치 | `.env` 하나와 `.env.runner-3plgw` | `api.env`, `agent-3plgw.env` 로 나뉨 |
+| 실행기 전용 키 이름 | `.env` 의 `BP_3PLGW_SERVER_MCP_API_KEY` | `agent-3plgw.env` 의 `AIMBASE_RUNNER_SERVER_MCP_API_KEY`, `AGENT_API_KEY` |
+| 배포 명령 | `./deploy.sh be`, `./deploy.sh agent-3plgw` | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-be`, `chaws-agent-3plgw` |
+| 3PLGW 가 부르는 Aimbase 주소 | `http://59.8.160.12:8280` | `http://aimbase-api-1:8080`(망 `aimbase-apps`) |
+| `TPLGW_INTERNAL_KEY` | 59 전용 키 | 운영 전용 키(3PLGW 가 따로 준다) |
+| 메모리 상한 | 없음 | `mem_limit 1536m` |
+
 ## 8. 진행 기록
 
 | 일시 | 한 일 |
@@ -327,3 +393,4 @@ GitHub 토큰 파일이 23:44 에 와서(사용자 승인 ① 23:29) `GH_TOKEN` 
 | 2026-11-10 07:45 | 59 워크플로우 재등록 200(07:38, `chaws-bootstrap.sh workflow 3plgw`), 조회로 지시문에 표기 규칙, `contract.all_active_url`, 원천별 대체 조회 문구 확인. 컨타(07:38): all_active_url 요청을 3PLGW 에 전달, 응답 모양은 컨타가 전한다. 효과는 다음 3PLGW 수리 요청의 valueMaps 표기로 본다 |
 | 2026-11-10 07:50 | 3PLGW 회신(컨타 07:44): `contract.all_active_url` = `{callback}/api/v1/internal/poomgo-repair/contracts/active`, data 배열 원천 코드 순, source 주면 한 건. 3PLGW 0ef4d4b 59 재배포 뒤 실측은 컨타가 전한다. Aimbase 지시문은 배열을 기대하므로 변경 없음, 59 재등록 불필요 |
 | 2026-11-10 07:55 | 3PLGW 0ef4d4b 59 재배포(07:43) 뒤 실행기에서 Aimbase 키로 `GET /contracts/active`: 200 배열 2건(INVOICE v1 ACTIVE 9칸 SAME_DAY 「당일」, ORDER v1 ACTIVE valueMaps status, deliveryAttr), `source=ORDER` 한 건(객체), 키 없이 403. 컨타에 알림. 다음 3PLGW 수리 요청이 `contract.all_active_url` 을 실어 오면 지시문이 그 목록으로 표기를 맞춘다 |
+| 2026-11-11 04:10 | 컨타(11-10 10:16): 운영 반영은 사용자 10:15 결정 ①, 밤에 컨타 신호. 운영 반영 절차(비밀값 자리, 순서, 확인 항목, 되돌리기, 59 와 다른 점)를 7.6 에 한 장으로 적음(값은 경로만). cr174-push 를 origin/dev 3c86518(CR-175, 176 포함)로 당긴 뒤 올림. 운영 묶음 커밋은 1307c15 그대로 |
