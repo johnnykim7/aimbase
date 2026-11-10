@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.26.1** | 2026-11-11 | Aimbase v8.18.0 기준
+> **v3.27.0** | 2026-11-11 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -725,6 +725,44 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 - **회신이 안 온다**: 실행 이벤트에 `CALLBACK_FAILED` 가 있으면 3PLGW 가 2xx 를 주지 않은 것. 3PLGW 는 `GET /api/v1/workflows/runs/{run_id}` 로 당겨 본다
 - **승인 대기가 시한을 지나도 안 끝난다**: api 가 돌고 있는지, `approval-timeout.sweep-ms` 를 본다. 감시기는 기동 30초 뒤부터 1분마다 돈다
 - **승인 단계에서 run 이 바로 `failed`, api 기록에 `pending_approvals_action_log_id_fkey`**: 테넌트 DB 에 V76 이 안 돌았다. 59 는 api 기동 때 돌고, 로컬은 `POST /api/v1/platform/tenants/migrate` 로 돌린다
+
+### 2-14. 채팅 위젯 대화 기본기 운영 [CR-175]
+
+위젯의 모델 선택, 깊게 생각하기, 응답 평가, 후속 질문을 운영자가 정하는 곳입니다. API 는 API 가이드 § 28.
+
+**모델 선택 (연결마다).** 테넌트 관리 「연결 관리」 편집의 「허용 모델」에 모델 id 와 이름을 넣습니다. 적은 순서가 위젯 목록 순서이고, 연결의 기본 모델이 처음 고른 모델입니다(목록에 없으면 첫 번째). 비워 두면 위젯은 기본 모델 하나로 답하고 모델 선택 칸을 숨깁니다. config 로는 `"models": [{"id": "claude-opus-4-5", "label": "Opus 4.5"}, ...]` 입니다.
+
+- Claude CLI 연결에는 그 실행기의 CLI 판이 받는 모델만 넣습니다. 2026-11-11 개발기 실행기(CLI 2.1.197)는 `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-sonnet-4-5`, `claude-opus-4-5` 를 받고 `claude-opus-5-5`, `claude-fable-5-1` 은 거부했습니다. 넣기 전에 그 실행기로 한 번 물어 봅니다.
+- CLI 연결에서 모델을 바꾸면 실행기가 그 대화의 작업자를 새 모델로 다시 띄우고 앞 질문과 답을 넘깁니다. 바꾼 뒤 첫 답은 몇 초 더 걸립니다.
+- 위젯이 이미 떠 있으면 허용 모델을 바꿔도 위젯을 다시 열어야 새 목록이 보입니다.
+
+**깊게 생각하기.** 연결이 요청마다 생각을 켜고 끌 수 있을 때(Anthropic API, Claude CLI)만 위젯에 단추가 보입니다. 처음 상태는 연결 config 의 생각 설정, 없으면 어댑터 기본입니다(Claude CLI 는 켜짐). 생각 예산은 연결의 기존 생각 설정을 따릅니다.
+
+**런타임 설정.** 사이드바 Super Admin 묶음 「런타임 설정」에서 재기동 없이 바꿉니다.
+
+| 키 | 처음 값 | 뜻 |
+|---|---|---|
+| `llm.default-model` | `anthropic/claude-sonnet-4-5` | 연결도 모델도 정해지지 않았을 때 쓰는 모델 |
+| `widget.feedback-reasons` | 틀린 정보, 조회를 안 함, 너무 김, 질문과 다름, 기타 | 아쉬워요 이유. `[{"code": ..., "label": ...}]`. 저장은 code 만 하므로 쓰던 code 는 지우지 말고 label 만 고칩니다 |
+| `widget.feedback-comment-max-chars` | 500 | 한 줄 의견 최대 글자 수 |
+| `widget.follow-ups-enabled` | true | 후속 질문과 대화 제목 만들기 |
+| `widget.follow-ups-count` | 3 | 후속 질문 개수 |
+| `widget.follow-ups-model` | (비움) | 후속 질문과 제목을 만들 모델. 비면 연결 기본 모델 |
+| `widget.follow-ups-timeout-ms` | 8000 | 후속 질문 호출 시간 한도 |
+
+**프롬프트 틀.** 후속 질문과 제목의 지시문은 테넌트 「프롬프트 템플릿」의 `widget.follow-ups` 입니다. 입력 칸은 `{{question}}`, `{{answer}}`, `{{count}}`, `{{need_title}}` 이고, 답은 `{"follow_ups": [...], "title": "..."}` JSON 이어야 합니다. Claude CLI 연결은 요청마다 도구를 끌 수 없어 이 틀의 지시로만 도구를 막습니다.
+
+**응답 평가 화면.** 테넌트 관리 왼쪽 메뉴 「응답 평가」. 기간, 평가, 모델로 거르고, 행을 누르면 그 대화의 세션 상세로 갑니다. 다시 생성이나 질문 수정으로 지운 답의 평가도 「삭제된 응답」 표시로 남습니다.
+
+**되감기.** 다시 생성과 질문 수정은 그 뒤 메시지를 지우지 않고 지운 표시(`delete_reason = REWIND`)만 남깁니다. 대화 압축 경계보다 앞 질문은 되감을 수 없습니다(409 `rewind_before_compaction`).
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 위젯에 모델 선택 칸이 없다 | 연결의 허용 모델이 비었거나 하나 | 「허용 모델」에 둘 이상 넣고 위젯을 다시 연다 |
+| 모델을 고르면 400 `model_not_allowed` | 위젯이 받은 목록과 연결 설정이 다르다(편집 뒤 위젯을 다시 열지 않음) | 위젯을 다시 연다 |
+| CLI 연결에서 한 모델만 답하지 못한다 | 실행기 CLI 판이 그 모델을 받지 않음 | 실행기로 물어 확인하고 목록에서 뺀다 |
+| 후속 질문 칩이 안 나온다 | `widget.follow-ups-enabled` 꺼짐, 또는 시간 한도를 넘김 | 설정을 확인하고, 실행기 연결이면 `widget.follow-ups-timeout-ms` 를 늘린다 |
+| CLI 연결에서 모델을 바꾼 뒤 앞 질문에 답한다 | 실행기가 2026-11-11 수정 전 판 | `./deploy.sh agents` 로 실행기를 다시 올린다 |
 
 ---
 
@@ -1930,6 +1968,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.27.0 | 2026-11-11 | **CR-175 채팅 위젯 대화 기본기** (§ 2-14). 연결 「허용 모델」, 깊게 생각하기 처음 상태, 런타임 설정 `llm.default-model` 과 `widget.feedback-*`, `widget.follow-ups-*`, 프롬프트 틀 `widget.follow-ups`, 「응답 평가」 화면, CLI 연결의 모델 바꾸기와 장애 대응 |
 | v3.26.1 | 2026-11-11 | **CR-174 수리 실행기 프로세스 상한** (§ 2-13). 운영 chaws 의 `aimbase-agent-3plgw` 에 `AIMBASE_RUNNER_MAX_PROCESSES` 4, 줄 대기 600초, `mem_limit` 3g. 수리 지시에 변환표 정규화 규칙(배송 속성 세 구분, 기존 구분 우선 매핑) |
 | v3.26.0 | 2026-11-10 | **CR-176 같은 글 다른 차례** (§ 2-12). 설정 `aimbase.tts.max-take`(기본 10). 생성기와 api 를 함께 바꿀 때는 생성기를 먼저 올린다 |
 | v3.25.0 | 2026-11-09 | **CR-174 bp-3plgw 품고 수리 실행기** (§ 2-13). 전용 실행기 `aimbase-agent-3plgw`, 비밀값 자리, 설치 단계(`bootstrap <단계> 3plgw`), 회신 재시도와 승인 시한 감시 설정, 장애 대응 |

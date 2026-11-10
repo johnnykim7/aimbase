@@ -255,10 +255,34 @@ const handle = createWidget({
 | `session-id` | string | auto UUID | 대화 세션 |
 | `rag-source-id` | string | — | RAG 소스 지정 시 citations 자동 표시 |
 | `theme-mode` | `light` \| `dark` \| `auto` | `auto` | 테마 |
+| `connection-id` | string | 테넌트 기본 | 쓸 연결. 모델 목록과 깊게 생각하기 단추가 이 연결을 따른다 |
+| `model` | string | 연결 기본 모델 | 처음 고른 모델. 연결의 허용 모델에 없으면 연결 기본 모델로 시작한다 |
+| `suggestions` | JSON 배열 | 없음 | 첫 화면 추천 질문, 최대 4개. 예 `'["고객이 원하는 것은?","답변 초안"]'` (CR-175) |
+| `empty-title` | string | 위젯 기본 문구 | 첫 화면 안내 제목 (CR-175) |
+| `empty-subtitle` | string | 없음 | 첫 화면 안내 한 줄 (CR-175) |
+| `font-size` | `small` \| `medium` \| `large` | `medium` | 글자 크기 기본값. 사용자가 더보기에서 바꾸면 그 브라우저에서는 그 값을 따른다 (CR-175) |
 
 JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - `contextProvider`: 현재 화면 컨텍스트(예: `{orderId}`)를 매 대화 자동 주입
 - `on.onMessage` / `on.onWorkflowStep` / `on.onApprovalRequired` / `on.onError` / `on.onTokenExpiring`
+- `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`: 위 속성과 같다 (CR-175)
+- `on.onNewConversation({previousSessionId, sessionId})`: 사용자가 새 대화를 시작했을 때. 엘리먼트로 붙였으면 `new-conversation` 이벤트(`detail` 에 같은 값). 앞 대화는 서버에 남는다 (CR-175)
+
+### 3-5. 위젯이 스스로 하는 것 (CR-175)
+
+붙이는 앱이 따로 만들 것 없이 위젯 안에 들어 있다.
+
+| 순번 | 기능 | 붙이는 앱이 할 일 |
+|---|---|---|
+| 1 | 응답 중지(Esc), 다시 생성, 질문 수정, 복사, 새 대화, 크게 보기 | 없음 |
+| 2 | 좋아요, 아쉬워요(이유와 한 줄 의견) | 없음. 운영자가 Aimbase 관리 화면 「응답 평가」에서 본다 |
+| 3 | 모델 선택 | 없음. 운영자가 연결의 「허용 모델」에 둘 이상 넣어야 보인다 |
+| 4 | 깊게 생각하기 | 없음. 연결이 지원할 때만 보인다 |
+| 5 | 후속 질문 칩과 대화 제목 | 없음. 운영자가 런타임 설정에서 끌 수 있다 |
+| 6 | 첫 화면 추천 질문 | `suggestions` 로 질문을 준다 |
+| 7 | 글자 크기 | 기본값만 `font-size` 로 줄 수 있다 |
+
+위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 서버 API 는 API 가이드 § 28, 운영 설정은 운용 가이드 § 2-14.
 
 ---
 
@@ -282,14 +306,18 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | `403` 가 간헐 발생 | 위젯 토큰 만료 | 위젯이 자동 갱신하지만 네트워크 오류 시 실패 가능. `on.onTokenExpiring` 콜백에서 재시도 |
 | `done` 이벤트에 citations 없음 | `rag-source-id` 미지정 또는 검색 결과 0건 | 속성/옵션에 `ragSourceId` 지정 + 해당 소스에 인제스트된 문서 확인 |
 | 워크플로우 subscribe 연결은 되는데 이벤트 없음 | 이미 종료된 run | `workflow.snapshot` + `workflow.done` 1회씩만 오고 close 되는 정상 동작 |
+| 모델 선택 칸이 없다 | 연결의 허용 모델이 비었거나 하나 | 운영자가 연결 「허용 모델」에 둘 이상 넣는다 (운용 가이드 § 2-14) |
+| 깊게 생각하기 단추가 없다 | 그 연결이 요청마다 생각을 바꾸지 못함 | Anthropic API 나 Claude CLI 연결을 쓴다 |
+| 다시 생성, 평가 단추가 없다 | Aimbase 서버가 CR-175 전 판이라 `done` 에 `turn_seq` 가 없음 | 서버를 올린다 |
+| 마이크 단추가 없다 | 위젯에 넘긴 토큰 scopes 에 `chat:stt` 가 없음 | BFF 가 받은 scopes 를 그대로 넘긴다 |
 
 ---
 
 ## 6. 서버 API 상세 (참고)
 
 상세한 엔드포인트 스펙·요청/응답 포맷은 별도 문서:
-- **API 레퍼런스**: `docs/guides/aimbase-api-guide.md` § 17
-- **운영 가이드**: `docs/guides/aimbase-ops-guide.md` § 2-5, 시나리오 N
+- **API 레퍼런스**: `docs/guides/aimbase-api-guide.md` § 17, § 28
+- **운영 가이드**: `docs/guides/aimbase-ops-guide.md` § 2-5, § 2-14, 시나리오 N
 - **위젯 패키지 README**: `packages/chat-widget-embed/README.md`
 
 ## 7. 빌드 산출물 (공개 URL)

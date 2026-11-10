@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.29.0** | 2026-11-10 | Aimbase v8.18.0 기준
+> **v3.30.0** | 2026-11-11 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1506,6 +1506,8 @@ data: {"done": true, "citations": [...], "rag_used": true}
 ```
 citations 가 비어 있거나 RAG 미사용 시 해당 필드는 생략(JSON_INCLUDE_NON_NULL).
 
+CR-175 부터 `done` 에 답 번호 `turn_id`, 묶음 첫 순번 `turn_seq`, 답한 모델 `model` 이 더 붙습니다. 다시 생성, 질문 수정, 응답 평가, 후속 질문은 § 28.
+
 ### 17-5. 청크 원문 조회 — `GET /api/v1/knowledge-sources/{sourceId}/chunks/{chunkId}`
 
 citation 클릭 시 위젯이 원문 미리보기 패널을 렌더하기 위해 호출.
@@ -2507,9 +2509,121 @@ curl -X POST /api/v1/dev-work-items/W-1/status \
 - 조회는 5 ~ 10초 간격이면 된다. Aimbase 가 다시 기동해도 조회가 오면 남은 작업을 이어 만든다
 - 같은 음색, 같은 글은 다시 만들어도 같은 소리다. 끝난 작업은 7일 둔다
 
+## 28. 채팅 위젯 대화 기본기 [CR-175]
+
+위젯의 다시 생성, 질문 수정, 응답 평가, 모델 선택, 깊게 생각하기, 후속 질문이 쓰는 API 입니다. 위젯 토큰(`chat:stream`) 또는 로그인으로 부릅니다. 위젯 없이 직접 붙이는 소비앱도 같은 칸을 쓸 수 있습니다. 응답은 모두 `ApiResponse` 의 `data` 안에 옵니다.
+
+### 28-1. 대화 요청에 더한 칸 (`POST /api/v1/chat/completions`)
+
+| 칸 | 타입 | 설명 |
+|---|---|---|
+| rewind_from_seq | 정수, 선택 | 그 순번의 메시지부터 뒤를 지우고 이번 질문으로 다시 답합니다. 값은 앞 답 `done` 의 `turn_seq` 입니다. 다시 생성은 같은 질문을, 질문 수정은 고친 질문을 보냅니다. `session_id` 가 있어야 합니다 |
+| thinking | `on`, `off`, 선택 | 깊게 생각하기. 비우면 연결 설정대로입니다 |
+| model | 글, 선택 | 기존 칸. 요청에 `connection_id` 가 있고 그 연결 config 에 `models` 가 있으면 그 목록의 id 만 받습니다. 비거나 `auto` 면 연결 기본 모델입니다 |
+
+지운 메시지는 행이 남고 지운 표시(`delete_reason = REWIND`)만 붙습니다. Claude CLI 연결이면 되감은 뒤 그 대화의 실행기 작업자를 닫고, 다음 요청에서 새 작업자가 남은 대화를 받습니다.
+
+**`done` 에 더한 칸** (스트림, 비스트림 모두):
+
+```
+event: done
+data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 7, "model": "claude-sonnet-4-5"}
+```
+
+| 칸 | 뜻 |
+|---|---|
+| turn_id | 이번 답 번호. 응답 평가와 후속 질문이 이 번호로 답을 가리킵니다 |
+| turn_seq | 이번 요청이 저장한 메시지 묶음의 첫 순번. 다시 생성, 질문 수정의 `rewind_from_seq` 로 씁니다 |
+| model | 이번 요청에 정한 모델 id. 답하는 도중 폴백으로 바뀐 모델은 반영하지 않습니다 |
+
+답 저장에 실패하면 `turn_seq` 가 빠집니다. 위젯은 이때 다시 생성과 질문 수정 단추를 숨깁니다. 응답 중지(abort)를 해도 서버는 받은 데까지 저장하고(글 앞에 `[중단됨] `) `done` 을 보내므로 중지한 답도 다시 생성할 수 있습니다.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `thinking_invalid` | `on`, `off` 밖의 값 |
+| 400 | `thinking_not_supported` | 그 연결이 요청마다 생각을 바꾸지 못하는데 `on` |
+| 400 | `model_not_allowed` | 연결의 허용 모델 목록에 없는 모델 |
+| 400 | `rewind_invalid:no_session` | `session_id` 없이 되감기 |
+| 400 | `rewind_invalid:not_turn_start` | 그 순번이 없거나, 이미 지운 행이거나, 묶음의 첫 순번이 아님 |
+| 409 | `session_busy` | 그 대화에 답이 도는 중 |
+| 409 | `rewind_before_compaction` | 그 순번 뒤에 대화 압축 경계가 있음 |
+
+### 28-2. 위젯 설정 (`GET /api/v1/chat/widget-settings?connection_id=`)
+
+위젯이 뜰 때 한 번 부릅니다.
+
+```json
+{
+  "models": [{"id": "claude-opus-4-5", "label": "Opus 4.5"}, {"id": "claude-sonnet-4-5", "label": "Sonnet 4.5"}],
+  "default_model": "claude-sonnet-4-5",
+  "thinking_supported": true,
+  "thinking_default": true,
+  "feedback_reasons": [{"code": "WRONG_INFO", "label": "틀린 정보"}],
+  "feedback_comment_max_chars": 500,
+  "follow_ups_enabled": true
+}
+```
+
+- `models` 는 연결 config `models` 그대로입니다. 없으면 기본 모델 하나이고, 위젯은 목록이 둘 이상일 때만 모델 선택 칸을 보입니다.
+- `connection_id` 가 없으면 런타임 설정 `llm.default-model` 하나입니다.
+- `thinking_default` 는 깊게 생각하기 단추의 처음 상태입니다. 연결 config 에 생각 설정이 있으면 그 값, 없으면 어댑터 기본(Claude CLI 는 켜짐)입니다.
+- 그 테넌트에 없는 연결이면 404 `connection_not_found`.
+
+### 28-3. 응답 평가 (`PUT`, `DELETE /api/v1/chat/feedback`)
+
+```bash
+curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"session_id": "cs-9471-...", "turn_id": "0b6f2c1e-...", "rating": "DOWN", "reason_codes": ["NO_LOOKUP"], "comment": "출고 이력을 안 봤어요"}'
+```
+
+응답은 `id`, `turn_id`, `rating`, `reason_codes`, `comment`, `updated_at` 입니다.
+
+- 한 사람(위젯 토큰 `user_ref`, 없으면 로그인 사용자 id)은 답 하나에 평가 하나만 남깁니다. 다시 보내면 바뀝니다.
+- 이유는 `DOWN` 일 때만, 런타임 설정 `widget.feedback-reasons` 의 code 만 받습니다.
+- 취소는 `DELETE /api/v1/chat/feedback?turn_id=...`. 응답 `{"turn_id": "...", "deleted": true}`.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `feedback_invalid:rating` | `UP`, `DOWN` 이 아님 |
+| 400 | `feedback_invalid:reason_codes` | 설정에 없는 code, 또는 `UP` 인데 이유가 있음 |
+| 400 | `feedback_invalid:comment` | `widget.feedback-comment-max-chars` 를 넘음 |
+| 404 | `turn_not_found` | 그 대화에 없는 답이거나 요청한 사람의 대화가 아님 |
+
+### 28-4. 후속 질문과 대화 제목 (`POST /api/v1/chat/sessions/{session_id}/follow-ups`)
+
+답이 끝난 뒤 부릅니다. 본문 `{"turn_id": "...", "connection_id": "..."}`.
+
+```json
+{"follow_ups": ["13박스 중 몇 박스가 출고됐나요?", "택배사 조회 결과도 보여 주세요", "고객 답변 초안을 다시 써 주세요"], "title": "라이프러버 13박스 누락 문의"}
+```
+
+- `title` 은 그 대화의 첫 답이고, 사람이 제목을 고치지 않았을 때만 옵니다. 서버가 대화 제목으로 저장합니다.
+- 대화 기록에 넣지 않고 별도 세션으로 부릅니다. 사용량은 평소처럼 기록합니다.
+- 실패해도 답에는 영향이 없습니다. 위젯은 칩을 보이지 않을 뿐입니다.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 404 | `turn_not_found` | 그 대화에 없는 답이거나 남의 대화 |
+| 409 | `follow_ups_disabled` | 런타임 설정 `widget.follow-ups-enabled` 가 꺼짐 |
+| 502 | `follow_ups_failed` | 모델 답이 JSON 이 아니거나 `widget.follow-ups-timeout-ms` 를 넘김 |
+
+### 28-5. 응답 평가 목록 (`GET /api/v1/chat/feedback`)
+
+관리 화면 「응답 평가」가 부릅니다. 로그인 사용자만 부를 수 있고 위젯 토큰은 403 `feedback_list_forbidden` 입니다.
+
+| 조건 | 뜻 |
+|---|---|
+| rating | `UP`, `DOWN` |
+| from, to | 시간대 오프셋을 붙인 ISO-8601(예 `2026-11-04T00:00:00+09:00`). `to` 시각은 넣지 않습니다. 형식이 틀리면 400 `feedback_invalid:from`, `feedback_invalid:to` |
+| model | 답한 모델 id |
+| page, size | 기본 0, 20 |
+
+행은 `id`, `created_at`, `updated_at`, `rating`, `reasons`(`code`, `label`), `comment`, `model`, `session_id`, `question_excerpt`, `answer_excerpt`, `answer_deleted`(되감기로 지운 답) 입니다.
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.30.0 | 2026-11-11 | **CR-175 채팅 위젯 대화 기본기** (§ 28). 대화 요청에 `rewind_from_seq`, `thinking`, 허용 모델 검사. `done` 에 `turn_id`, `turn_seq`, `model`. 위젯 설정 `GET /api/v1/chat/widget-settings`, 응답 평가 `PUT`/`DELETE /api/v1/chat/feedback`, 평가 목록 `GET /api/v1/chat/feedback`, 후속 질문과 제목 `POST /api/v1/chat/sessions/{session_id}/follow-ups` |
 | v3.29.0 | 2026-11-10 | **CR-176 같은 글 다른 차례** (§ 27-2). 맡기기에 `take`(0 이상 10 이하, 빠지면 0)를 받아 같은 글을 다른 소리로 다시 만든다. 같은 글 돌려주기는 같은 차례일 때만. 응답에 `take`, 오류 `take_out_of_range`. 차례 0 은 전과 같은 소리다 |
 | v3.28.0 | 2026-11-09 | **CR-174 실행 종료 회신, 승인 시한, run 변수** (§ 4-4, § 4-6). 실행 입력 `_callback` 으로 run 이 끝나면 HTTP 연결로 결과를 POST 한다. HUMAN_INPUT `timeoutMs` 가 지나면 `failed(approval_timeout)`. 단계 틀 변수 `{{run.id}}` 등 |
 | v3.27.1 | 2026-11-08 | **CR-171 음성 생성 작업 재사용** (§ 27-2). 소리 길이가 0.25초보다 짧게 끝난 작업은 돌려주지 않고 새로 만든다. 요청과 응답 모양은 그대로다 |
