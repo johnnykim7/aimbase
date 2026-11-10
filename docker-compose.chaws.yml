@@ -203,6 +203,10 @@ services:
       AIMBASE_RUNNER_ENABLED: "true"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "1"
+      # 수리 요청이 한꺼번에 오면 Claude 프로세스(약 320MB)가 그 수만큼 떠 메모리 상한을 넘겨 실행기가 죽는다.
+      # 실행기 전체 4개까지만 돌리고 나머지는 줄을 세운다. 줄 대기는 api 의 실행기 대기(660초) 안에 둔다.
+      AIMBASE_RUNNER_MAX_PROCESSES: "4"
+      AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS: "600"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "1800"
       AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-3plgw"
@@ -217,7 +221,7 @@ services:
       GIT_AUTHOR_EMAIL: "${REPAIR_GIT_EMAIL:-aimbase-repair@therecommerce.co.kr}"
       GIT_COMMITTER_NAME: "${REPAIR_GIT_NAME:-aimbase-repair}"
       GIT_COMMITTER_EMAIL: "${REPAIR_GIT_EMAIL:-aimbase-repair@therecommerce.co.kr}"
-    mem_limit: 1536m
+    mem_limit: 3g
     volumes:
       # 계정 폴더는 aimbase-agent 와 같이 쓴다. 토큰 갱신이 한 곳이어야 하고, 격리는 env 로 나눈 토큰과 키로 충분하다(CR-174)
       - ./claude-accounts:/home/appuser/.claude-accounts
