@@ -136,6 +136,10 @@ export default function Connections() {
       "System Prompt Override": (cfg.system_prompt_override as string) ?? "",
       // CR-117: CLI 본체 Agent 서브에이전트 허용 여부. 키 없음 = 기본 ON(현행).
       "Subagent Enabled": cfg.subagent_enabled === false || cfg.subagent_enabled === "false" ? "false" : "true",
+      // CR-129: CLI 에 노출할 도구 화이트리스트(CSV). 배열로 저장돼 있으면 CSV 로 펼쳐 보여준다.
+      "Exposed Tools": Array.isArray(cfg.exposed_tools)
+        ? (cfg.exposed_tools as string[]).join(",")
+        : ((cfg.exposed_tools as string) ?? ""),
     });
     setShowModal(true);
   };
@@ -175,6 +179,13 @@ export default function Connections() {
       system_prompt_override: form["System Prompt Override"],
       // CR-117: "false" 일 때만 차단 — 그 외(미설정 포함)는 true(현행 유지)
       subagent_enabled: form["Subagent Enabled"] === "false" ? false : true,
+      // CR-129: CSV 입력을 배열로 정규화해 저장. 비면 undefined → 키 미저장 = 전체 노출(기존 동작).
+      exposed_tools: (() => {
+        const raw = (form["Exposed Tools"] ?? "").trim();
+        if (!raw) return undefined;
+        const list = raw.split(",").map((t) => t.trim()).filter(Boolean);
+        return list.length > 0 ? list : undefined;
+      })(),
     };
 
     if (editingConn) {
@@ -385,6 +396,19 @@ export default function Connections() {
                 </FormField>
                 <FormField label="System Prompt Override (선택)">
                   <textarea style={{ ...inputStyle, minHeight: 80 }} placeholder="--append-system-prompt 로 주입할 추가 지침" value={form["System Prompt Override"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "System Prompt Override": e.target.value }))} />
+                </FormField>
+                {/* CR-129: 이 커넥션이 CLI 에 노출할 도구 화이트리스트. 비우면 전체(~110개) 노출(기존 동작). */}
+                <FormField label="Exposed Tools (선택)">
+                  <textarea
+                    style={{ ...inputStyle, minHeight: 60 }}
+                    placeholder="쉼표로 구분. 비우면 전체 노출 (예: get_progress,get_bottleneck,bash,get_current_time)"
+                    value={form["Exposed Tools"] ?? ""}
+                    onChange={(e) => setForm((p) => ({ ...p, "Exposed Tools": e.target.value }))}
+                  />
+                  <div style={{ fontSize: 12, color: "var(--tw-gray-600)", marginTop: 4 }}>
+                    비우면 서버 MCP 노출 도구 전체(~110개)가 CLI 에 실립니다. 소비앱이 실제 쓰는 도구만 지정하면
+                    CLI 가 도구를 고르기 쉬워지고 초기 지연도 줄어듭니다.
+                  </div>
                 </FormField>
                 {/* CR-117: CLI 본체 Agent 서브에이전트 허용 토글. 기본 ON(현행). OFF 면 --disallowedTools Agent 주입. */}
                 <FormField label="Subagent 허용">
