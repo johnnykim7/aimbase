@@ -1,0 +1,292 @@
+{
+ "run": "2차",
+ "results": {
+  "AIMBASE_09001": {
+   "testId": "AIMBASE_09001",
+   "result": "N/T",
+   "steps": [
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "comment": "서버 판정 기대결과 0/5개. 기대결과 3번 재료 없음",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:15",
+   "tester": "SERVER",
+   "evidence": {
+    "2": {
+     "q": "SELECT left(translate(a.content, E'\\n\\t', '  '), 6) AS head FROM conversation_messages a JOIN (SELECT session_id, turn_id FROM conversation_messages WHERE role = 'user' AND content LIKE '%이 문의의 처리 절차를 단계마다 자세히 써 주세요%' AND session_id = (SELECT session_id FROM conversation_messages WHERE role = 'user' AND content LIKE '%이 문의의 처리 절차를 단계마다 자세히 써 주세요%' ORDER BY created_at DESC LIMIT 1) ORDER BY seq LIMIT 1) q ON q.session_id = a.session_id AND q.turn_id = a.turn_id WHERE a.role = 'assistant' ORDER BY a.seq DESC LIMIT 1",
+     "r": "0행 []\nneed len(r[0]) > 0 -> False",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09002": {
+   "testId": "AIMBASE_09002",
+   "result": "N/T",
+   "steps": [
+    "",
+    "",
+    "",
+    "pass",
+    "pass"
+   ],
+   "comment": "서버 판정 기대결과 2/5개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:24",
+   "tester": "SERVER",
+   "evidence": {
+    "3": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358695347\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358695347\", \"rewind_from_seq\": 0}\nSELECT seq, role, turn_id, model, left(translate(content, E'\\n\\t', '  '), 6) AS head, deleted_at IS NOT NULL AS del, delete_reason FROM conversation_messages WHERE session_id = 'tb-cr175-1794358695347' ORDER BY seq, created_at",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358695347\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358695347\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"102f1307-5e13-41a3-83ac-f746f65bbbdb\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358695347\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358695347\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"be3127dc-d956-4754-bc47-6ae6c29d293e\"}}\n4행 [{\"seq\": \"0\", \"role\": \"user\", \"turn_id\": \"102f1307-5e13-41a3-83ac-f746f65bbbdb\", \"model\": null, \"head\": \"시험 질문입\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"0\", \"role\": \"user\", \"turn_id\": \"be3127dc-d956-4754-bc47-6ae6c29d293e\", \"model\": null, \"head\": \"시험 질문입\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"1\", \"role\": \"assistant\", \"turn_id\": \"102f1307-5e13-41a3-83ac-f746f65bbbdb\", \"model\": \"claude-sonnet-4-5\", \"head\": \"1\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"1\", \"role\": \"assistant\", \"turn_id\": \"be3127dc-d956-4754-bc47-6ae6c29d293e\", \"model\": \"claude-sonnet-4-5\", \"head\": \"1\", \"del\": \"f\", \"delete_reason\": null}]\ncheck len([x for x in r[2] if x['turn_id'] == r[0]['body']['data']['turn_id'] and x['role'] == 'assistant']) > 0 and all(x['del'] == 't' and x['delete_reason'] == 'REWIND' for x in [x for x in r[2] if x['turn_id'] == r[0]['body']['data']['turn_id'] and x['role'] == 'assistant']) -> True",
+     "at": "2026-11-11 09:58:14"
+    },
+    "4": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358700359\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358700359\", \"rewind_from_seq\": 0}\nSELECT seq, role, turn_id, model, left(translate(content, E'\\n\\t', '  '), 6) AS head, deleted_at IS NOT NULL AS del, delete_reason FROM conversation_messages WHERE session_id = 'tb-cr175-1794358700359' ORDER BY seq, created_at",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358700359\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358700359\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"36129cf8-86e6-40c1-a678-2f667f3cc214\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358700359\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358700359\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"cee6c2e8-1260-490f-9a09-c822f2e9bdca\"}}\n4행 [{\"seq\": \"0\", \"role\": \"user\", \"turn_id\": \"36129cf8-86e6-40c1-a678-2f667f3cc214\", \"model\": null, \"head\": \"시험 질문입\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"0\", \"role\": \"user\", \"turn_id\": \"cee6c2e8-1260-490f-9a09-c822f2e9bdca\", \"model\": null, \"head\": \"시험 질문입\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"1\", \"role\": \"assistant\", \"turn_id\": \"36129cf8-86e6-40c1-a678-2f667f3cc214\", \"model\": \"claude-sonnet-4-5\", \"head\": \"1\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"1\", \"role\": \"assistant\", \"turn_id\": \"cee6c2e8-1260-490f-9a09-c822f2e9bdca\", \"model\": \"claude-sonnet-4-5\", \"head\": \"1\", \"del\": \"f\", \"delete_reason\": null}]\ncheck len([x for x in r[2] if x['del'] == 'f' and x['role'] == 'user']) == 1 and len([x for x in r[2] if x['del'] == 'f' and x['role'] == 'assistant']) > 0 and all(x['turn_id'] == [u for u in r[2] if u['del'] == 'f' and u['role'] == 'user'][0]['turn_id'] for x in r[2] if x['del'] == 'f') -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09003": {
+   "testId": "AIMBASE_09003",
+   "result": "N/T",
+   "steps": [
+    "",
+    "",
+    "",
+    "pass",
+    "pass"
+   ],
+   "comment": "서버 판정 기대결과 2/5개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:39",
+   "tester": "SERVER",
+   "evidence": {
+    "3": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"system\", \"content\": \"화면 맥락: 서버 판정 시험\"}, {\"role\": \"user\", \"content\": \"시험 첫 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358704851\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"system\", \"content\": \"화면 맥락: 서버 판정 시험\"}, {\"role\": \"user\", \"content\": \"시험 둘째 질문입니다. 숫자 2 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358704851\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"system\", \"content\": \"화면 맥락: 서버 판정 시험\"}, {\"role\": \"user\", \"content\": \"시험 셋째 질문입니다. 숫자 3 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358704851\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"system\", \"content\": \"화면 맥락: 서버 판정 시험\"}, {\"role\": \"user\", \"content\": \"고친 첫 질문입니다. 숫자 4 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358704851\", \"rewind_from_seq\": 0}\nSELECT seq, role, turn_id, model, left(translate(content, E'\\n\\t', '  '), 6) AS head, deleted_at IS NOT NULL AS del, delete_reason FROM conversation_messages WHERE session_id = 'tb-cr175-1794358704851' ORDER BY seq, created_at",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358704851\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358704851\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"ca7353ad-d06e-493b-a7fb-ec7d244582ff\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358704851\", \"turn_seq\": 3, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358704851\", \"content\": [{\"text\": \"2\", \"type\": \"text\"}], \"turn_id\": \"c73c5dac-79ba-4419-90d0-827a05a34912\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358704851\", \"turn_seq\": 6, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358704851\", \"content\": [{\"text\": \"3\", \"type\": \"text\"}], \"turn_id\": \"9d348249-d9cc-420a-aae2-b551b5cd2ae2\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358704851\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358704851\", \"content\": [{\"text\": \"4\", \"type\": \"text\"}], \"turn_id\": \"49e8c014-0efb-457f-8e85-2b3c2bcfaa73\"}}\n12행 [{\"seq\": \"0\", \"role\": \"system\", \"turn_id\": \"ca7353ad-d06e-493b-a7fb-ec7d244582ff\", \"model\": null, \"head\": \"화면 맥락:\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"0\", \"role\": \"system\", \"turn_id\": \"49e8c014-0efb-457f-8e85-2b3c2bcfaa73\", \"model\": null, \"head\": \"화면 맥락:\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"1\", \"role\": \"user\", \"turn_id\": \"ca7353ad-d06e-493b-a7fb-ec7d244582ff\", \"model\": null, \"head\": \"시험 첫 질\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"1\", \"role\": \"user\", \"turn_id\": \"49e8c014-0efb-457f-8e85-2b3c2bcfaa73\", \"model\": null, \"head\": \"고친 첫 질\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"2\", \"role\": \"assistant\", \"turn_id\": \"ca7353ad-d06e-493b-a7fb-ec7d244582ff\", \"model\": \"claude-sonnet-4-5\", \"head\": \"1\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"2\", \"role\": \"assistant\", \"turn_id\": \"49e8c014-0efb-457f-8e85-2b3c2bcfaa73\", \"model\": \"claude-sonnet-4-5\", \"head\": \"4\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"3\", \"role\": \"system\", \"turn_id\": \"c73c5dac-79ba-4419-90d0-827a05a34912\", \"model\": null, \"head\": \"화면 맥락:\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"4\", \"role\": \"user\", \"turn_id\": \"c73c5dac-79ba-4419-90d0-827a05a34912\", \"model\": null, \"head\": \"시험 둘째 \", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"5\", \"role\": \"assistant\", \"turn_id\": \"c73c5dac-79ba-4419-90d0-827a05a34912\", \"model\": \"claude-sonnet-4-5\", \"head\": \"2\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"6\", \"role\": \"system\", \"turn_id\": \"9d348249-d9cc-420a-aae2-b551b5cd2ae2\", \"model\": null, \"head\": \"화면 맥락:\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}]\ncheck len([x for x in r[4] if x['turn_id'] == r[0]['body']['data']['turn_id'] and x['role'] == 'system']) == 1 and len([x for x in r[4] if x['turn_id'] in (r[0]['body']['data']['turn_id'], r[1]['body']['data']['turn_id'], r[2]['body']['data']['turn_id']) and x['role'] == 'assistant']) == 3 and all(x['del'] == 't' and x['delete_reason'] == 'REWIND' for x in r[4] if x['turn_id'] in (r[0]['body']['data']['turn_id'], r[1]['body']['data']['turn_id'], r[2]['body']['data']['turn_id'])) -> True",
+     "at": "2026-11-11 09:58:14"
+    },
+    "4": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"system\", \"content\": \"화면 맥락: 서버 판정 시험\"}, {\"role\": \"user\", \"content\": \"시험 첫 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358712337\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"system\", \"content\": \"화면 맥락: 서버 판정 시험\"}, {\"role\": \"user\", \"content\": \"시험 둘째 질문입니다. 숫자 2 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358712337\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"system\", \"content\": \"화면 맥락: 서버 판정 시험\"}, {\"role\": \"user\", \"content\": \"시험 셋째 질문입니다. 숫자 3 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358712337\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"system\", \"content\": \"화면 맥락: 서버 판정 시험\"}, {\"role\": \"user\", \"content\": \"고친 첫 질문입니다. 숫자 4 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358712337\", \"rewind_from_seq\": 0}\nSELECT seq, role, turn_id, model, left(translate(content, E'\\n\\t', '  '), 6) AS head, deleted_at IS NOT NULL AS del, delete_reason FROM conversation_messages WHERE session_id = 'tb-cr175-1794358712337' ORDER BY seq, created_at",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358712337\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358712337\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"8c45c8cf-eb15-4928-a817-44be09d6fdad\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358712337\", \"turn_seq\": 3, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358712337\", \"content\": [{\"text\": \"2\", \"type\": \"text\"}], \"turn_id\": \"531740fa-4697-4799-b1de-ca38505bdbed\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358712337\", \"turn_seq\": 6, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358712337\", \"content\": [{\"text\": \"3\", \"type\": \"text\"}], \"turn_id\": \"4dce0306-70e1-47b8-8537-a2630d288e9a\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358712337\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358712337\", \"content\": [{\"text\": \"4\", \"type\": \"text\"}], \"turn_id\": \"b4f4465c-73d6-4c25-83ad-bb0fc43c4c4b\"}}\n12행 [{\"seq\": \"0\", \"role\": \"system\", \"turn_id\": \"8c45c8cf-eb15-4928-a817-44be09d6fdad\", \"model\": null, \"head\": \"화면 맥락:\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"0\", \"role\": \"system\", \"turn_id\": \"b4f4465c-73d6-4c25-83ad-bb0fc43c4c4b\", \"model\": null, \"head\": \"화면 맥락:\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"1\", \"role\": \"user\", \"turn_id\": \"8c45c8cf-eb15-4928-a817-44be09d6fdad\", \"model\": null, \"head\": \"시험 첫 질\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"1\", \"role\": \"user\", \"turn_id\": \"b4f4465c-73d6-4c25-83ad-bb0fc43c4c4b\", \"model\": null, \"head\": \"고친 첫 질\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"2\", \"role\": \"assistant\", \"turn_id\": \"8c45c8cf-eb15-4928-a817-44be09d6fdad\", \"model\": \"claude-sonnet-4-5\", \"head\": \"1\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"2\", \"role\": \"assistant\", \"turn_id\": \"b4f4465c-73d6-4c25-83ad-bb0fc43c4c4b\", \"model\": \"claude-sonnet-4-5\", \"head\": \"4\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"3\", \"role\": \"system\", \"turn_id\": \"531740fa-4697-4799-b1de-ca38505bdbed\", \"model\": null, \"head\": \"화면 맥락:\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"4\", \"role\": \"user\", \"turn_id\": \"531740fa-4697-4799-b1de-ca38505bdbed\", \"model\": null, \"head\": \"시험 둘째 \", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"5\", \"role\": \"assistant\", \"turn_id\": \"531740fa-4697-4799-b1de-ca38505bdbed\", \"model\": \"claude-sonnet-4-5\", \"head\": \"2\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}, {\"seq\": \"6\", \"role\": \"system\", \"turn_id\": \"4dce0306-70e1-47b8-8537-a2630d288e9a\", \"model\": null, \"head\": \"화면 맥락:\", \"del\": \"t\", \"delete_reason\": \"REWIND\"}]\ncheck len([x for x in r[4] if x['turn_id'] == r[3]['body']['data']['turn_id'] and x['role'] == 'assistant']) > 0 and all(x['del'] == 'f' for x in r[4] if x['turn_id'] == r[3]['body']['data']['turn_id']) and min(int(x['seq']) for x in r[4] if x['turn_id'] == r[3]['body']['data']['turn_id']) == min(int(x['seq']) for x in r[4] if x['turn_id'] == r[0]['body']['data']['turn_id']) -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09005": {
+   "testId": "AIMBASE_09005",
+   "result": "N/T",
+   "steps": [
+    "pass",
+    "",
+    "",
+    ""
+   ],
+   "comment": "서버 판정 기대결과 1/4개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:39",
+   "tester": "SERVER",
+   "evidence": {
+    "0": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"rewind_from_seq\": 0}",
+     "r": "400 {\"success\": false, \"error\": \"rewind_invalid:no_session\"}\ncheck r[0]['status'] == 400 and r[0]['body']['error'] == 'rewind_invalid:no_session' -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09006": {
+   "testId": "AIMBASE_09006",
+   "result": "N/T",
+   "steps": [
+    "",
+    "",
+    "",
+    "pass",
+    "pass",
+    ""
+   ],
+   "comment": "서버 판정 기대결과 2/6개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:44",
+   "tester": "SERVER",
+   "evidence": {
+    "3": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358719810\"}\nPUT /api/v1/chat/feedback (wes:tb-cr175) {\"session_id\": \"tb-cr175-1794358719810\", \"turn_id\": \"1ce3ee29-3750-49d2-ab06-6ea39dd24943\", \"rating\": \"DOWN\", \"reason_codes\": [\"NO_LOOKUP\", \"TOO_LONG\"], \"comment\": \"서버 판정 시험\"}\nPUT /api/v1/chat/feedback (wes:tb-cr175) {\"session_id\": \"tb-cr175-1794358719810\", \"turn_id\": \"1ce3ee29-3750-49d2-ab06-6ea39dd24943\", \"rating\": \"UP\", \"reason_codes\": []}\nSELECT rating, reason_codes::text AS reasons FROM message_feedback WHERE turn_id = '1ce3ee29-3750-49d2-ab06-6ea39dd24943'",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358719810\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358719810\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"1ce3ee29-3750-49d2-ab06-6ea39dd24943\"}}\n200 {\"success\": true, \"data\": {\"id\": 10, \"turn_id\": \"1ce3ee29-3750-49d2-ab06-6ea39dd24943\", \"rating\": \"DOWN\", \"reason_codes\": [\"NO_LOOKUP\", \"TOO_LONG\"], \"comment\": \"서버 판정 시험\", \"updated_at\": \"2026-11-11T00:58:42.287912Z\"}}\n200 {\"success\": true, \"data\": {\"id\": 10, \"turn_id\": \"1ce3ee29-3750-49d2-ab06-6ea39dd24943\", \"rating\": \"UP\", \"reason_codes\": [], \"comment\": null, \"updated_at\": \"2026-11-11T00:58:42.310908Z\"}}\n1행 [{\"rating\": \"UP\", \"reasons\": \"[]\"}]\ncheck r[1]['status'] == 200 and r[2]['status'] == 200 and len(r[3]) == 1 and r[3][0]['rating'] == 'UP' and loads(r[3][0]['reasons']) == [] -> True",
+     "at": "2026-11-11 09:58:14"
+    },
+    "4": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358722593\"}\nPUT /api/v1/chat/feedback (wes:tb-cr175) {\"session_id\": \"tb-cr175-1794358722593\", \"turn_id\": \"98b29931-d17c-4a99-bb53-f9e2d0abff02\", \"rating\": \"UP\", \"reason_codes\": []}\nDELETE /api/v1/chat/feedback?turn_id=98b29931-d17c-4a99-bb53-f9e2d0abff02 (wes:tb-cr175)\nSELECT count(*) AS n FROM message_feedback WHERE turn_id = '98b29931-d17c-4a99-bb53-f9e2d0abff02'",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358722593\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358722593\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"98b29931-d17c-4a99-bb53-f9e2d0abff02\"}}\n200 {\"success\": true, \"data\": {\"id\": 12, \"turn_id\": \"98b29931-d17c-4a99-bb53-f9e2d0abff02\", \"rating\": \"UP\", \"reason_codes\": [], \"comment\": null, \"updated_at\": \"2026-11-11T00:58:44.33743Z\"}}\n200 {\"success\": true, \"data\": {\"deleted\": true, \"turn_id\": \"98b29931-d17c-4a99-bb53-f9e2d0abff02\"}}\n1행 [{\"n\": \"0\"}]\ncheck r[1]['status'] == 200 and r[2]['status'] == 200 and r[3][0]['n'] == '0' -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09007": {
+   "testId": "AIMBASE_09007",
+   "result": "N/T",
+   "steps": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "pass"
+   ],
+   "comment": "서버 판정 기대결과 1/6개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:44",
+   "tester": "SERVER",
+   "evidence": {
+    "5": {
+     "q": "GET /api/v1/chat/feedback (wes:tb-cr175)",
+     "r": "403 {\"success\": false, \"error\": \"feedback_list_forbidden\"}\ncheck r[0]['status'] == 403 and r[0]['body']['error'] == 'feedback_list_forbidden' -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09008": {
+   "testId": "AIMBASE_09008",
+   "result": "N/T",
+   "steps": [
+    "pass",
+    "",
+    "",
+    "pass",
+    ""
+   ],
+   "comment": "서버 판정 기대결과 2/5개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:47",
+   "tester": "SERVER",
+   "evidence": {
+    "0": {
+     "q": "GET /api/v1/chat/widget-settings?connection_id=cli-runner-bp-wes-cs-001 (wes:tb-cr175)",
+     "r": "200 {\"success\": true, \"data\": {\"models\": [{\"label\": \"Opus 4.5\", \"id\": \"claude-opus-4-5\"}, {\"label\": \"Sonnet 5.5\", \"id\": \"claude-sonnet-5-5\"}, {\"label\": \"Sonnet 4.5\", \"id\": \"claude-sonnet-4-5\"}, {\"label\": \"Haiku 5.5\", \"id\": \"claude-haiku-5-5\"}], \"default_model\": \"claude-sonnet-4-5\", \"thinking_supported\": true, \"thinking_default\": true, \"feedback_reasons\": [{\"code\": \"WRONG_INFO\", \"label\": \"틀린 정보\"}, {\"co\ncheck r[0]['status'] == 200 and [m['label'] for m in r[0]['body']['data']['models']] == ['Opus 4.5', 'Sonnet 5.5', 'Sonnet 4.5', 'Haiku 5.5'] and r[0]['body']['data']['default_model'] == 'claude-sonnet-4-5' -> True",
+     "at": "2026-11-11 09:58:14"
+    },
+    "3": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-opus-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358724651\"}\nSELECT seq, role, turn_id, model, left(translate(content, E'\\n\\t', '  '), 6) AS head, deleted_at IS NOT NULL AS del, delete_reason FROM conversation_messages WHERE session_id = 'tb-cr175-1794358724651' ORDER BY seq, created_at",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358724651\", \"turn_seq\": 0, \"model\": \"claude-opus-4-5\", \"id\": \"tb-cr175-1794358724651\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"18fa89c8-174d-424a-8f87-9cd77a361564\"}}\n2행 [{\"seq\": \"0\", \"role\": \"user\", \"turn_id\": \"18fa89c8-174d-424a-8f87-9cd77a361564\", \"model\": null, \"head\": \"시험 질문입\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"1\", \"role\": \"assistant\", \"turn_id\": \"18fa89c8-174d-424a-8f87-9cd77a361564\", \"model\": \"claude-opus-4-5\", \"head\": \"1\", \"del\": \"f\", \"delete_reason\": null}]\ncheck len([x for x in r[1] if x['turn_id'] == r[0]['body']['data']['turn_id'] and x['role'] == 'assistant']) > 0 and all(x['model'] == 'claude-opus-4-5' for x in [x for x in r[1] if x['turn_id'] == r[0]['body']['data']['turn_id'] and x['role'] == 'assistant']) -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09010": {
+   "testId": "AIMBASE_09010",
+   "result": "OK",
+   "steps": [
+    "pass",
+    "pass"
+   ],
+   "comment": "서버 판정 기대결과 2/2개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:49",
+   "tester": "SERVER",
+   "evidence": {
+    "0": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-opus-5-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358727427\"}",
+     "r": "400 {\"success\": false, \"error\": \"model_not_allowed\"}\ncheck r[0]['status'] == 400 and r[0]['body']['error'] == 'model_not_allowed' -> True",
+     "at": "2026-11-11 09:58:14"
+    },
+    "1": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"auto\", \"stream\": true, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358727445\"}",
+     "r": "200 \"event:delta\\ndata:{\\\"delta\\\":\\\"1\\\"}\\n\\nevent:done\\ndata:{\\\"turn_seq\\\":0,\\\"model\\\":\\\"claude-sonnet-4-5\\\",\\\"done\\\":true,\\\"turn_id\\\":\\\"3d573113-6cbf-4a09-b6c8-beff24074171\\\"}\\n\\n\"\ncheck r[0]['status'] == 200 and 'event:done' in r[0]['body'] and loads(r[0]['body'].split('event:done', 1)[1].split('data:', 1)[1].split('\\n', 1)[0])['model'] == 'claude-sonnet-4-5' -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09012": {
+   "testId": "AIMBASE_09012",
+   "result": "OK",
+   "steps": [
+    "pass",
+    "pass"
+   ],
+   "comment": "서버 판정 기대결과 2/2개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:49",
+   "tester": "SERVER",
+   "evidence": {
+    "0": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"maybe\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358729579\"}",
+     "r": "400 {\"success\": false, \"error\": \"thinking_invalid\"}\ncheck r[0]['status'] == 400 and r[0]['body']['error'] == 'thinking_invalid' -> True",
+     "at": "2026-11-11 09:58:14"
+    },
+    "1": {
+     "q": "SELECT id FROM connections WHERE adapter = 'openai_compatible' ORDER BY id LIMIT 1\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"qwen-vl-32b-mac-001\", \"stream\": false, \"thinking\": \"on\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}]}",
+     "r": "1행 [{\"id\": \"qwen-vl-32b-mac-001\"}]\n400 {\"success\": false, \"error\": \"thinking_not_supported\"}\ncheck r[1]['status'] == 400 and r[1]['body']['error'] == 'thinking_not_supported' -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09013": {
+   "testId": "AIMBASE_09013",
+   "result": "N/T",
+   "steps": [
+    "",
+    "",
+    "",
+    "pass",
+    "",
+    ""
+   ],
+   "comment": "서버 판정 기대결과 1/6개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:58:58",
+   "tester": "SERVER",
+   "evidence": {
+    "3": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"창고 재고 실사는 왜 하는지 한 문장으로 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358729959\"}\nPOST /api/v1/chat/sessions/tb-cr175-1794358729959/follow-ups (wes:tb-cr175) {\"turn_id\": \"2d2929de-f9ab-4355-85ef-ddadf6005a60\", \"connection_id\": \"cli-runner-bp-wes-cs-001\"}\nSELECT title, title_source FROM conversation_sessions WHERE session_id = 'tb-cr175-1794358729959'",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 72, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358729959\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358729959\", \"content\": [{\"text\": \"창고 재고 실사는 시스템상 기록된 재고 수량과 실제 물리적 재고 수량의 차이를 확인하고 정확성을 유지하기 위해 수행합니다.\", \"type\": \"text\"}], \"turn_id\": \"2d2929de-f9ab-4355-85ef-ddadf6005a60\"}}\n200 {\"success\": true, \"data\": {\"follow_ups\": [\"재고 실사는 얼마나 자주 하는 게 좋나요?\", \"재고 차이가 발생하는 주요 원인은 무엇인가요?\", \"효율적인 재고 실사 방법에는 어떤 것들이 있나요?\"], \"title\": \"창고 재고 실사의 목적\"}}\n1행 [{\"title\": \"창고 재고 실사의 목적\", \"title_source\": \"GENERATED\"}]\ncheck r[1]['status'] == 200 and len(r[2]) == 1 and r[2][0]['title_source'] == 'GENERATED' and len(r[2][0]['title'] or '') > 0 and r[2][0]['title'] == r[1]['body']['data'].get('title') -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09019": {
+   "testId": "AIMBASE_09019",
+   "result": "N/T",
+   "steps": [
+    "",
+    "pass",
+    ""
+   ],
+   "comment": "서버 판정 기대결과 1/3개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:59:03",
+   "tester": "SERVER",
+   "evidence": {
+    "1": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358738595\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 질문입니다. 숫자 2 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358741201\"}\nSELECT DISTINCT session_id FROM conversation_messages WHERE role = 'user' AND turn_id IN ('33def9d0-a682-4906-9c39-cc993d911dc6', '6d57ac8c-8988-4d6e-9034-15199dbef277')",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358738595\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358738595\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"33def9d0-a682-4906-9c39-cc993d911dc6\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358741201\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358741201\", \"content\": [{\"text\": \"2\", \"type\": \"text\"}], \"turn_id\": \"6d57ac8c-8988-4d6e-9034-15199dbef277\"}}\n2행 [{\"session_id\": \"tb-cr175-1794358738595\"}, {\"session_id\": \"tb-cr175-1794358741201\"}]\ncheck len(r[2]) == 2 -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  },
+  "AIMBASE_09023": {
+   "testId": "AIMBASE_09023",
+   "result": "N/T",
+   "steps": [
+    "",
+    "",
+    "pass",
+    ""
+   ],
+   "comment": "서버 판정 기대결과 1/4개",
+   "date": "2026-11-11",
+   "at": "2026-11-11 09:59:13",
+   "tester": "SERVER",
+   "evidence": {
+    "2": {
+     "q": "POST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 첫 질문입니다. 숫자 1 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358743874\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-sonnet-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"시험 둘째 질문입니다. 숫자 2 만 답해 주세요\"}], \"session_id\": \"tb-cr175-1794358743874\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-opus-4-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"고객에게 보낼 첫 인사 한 줄만 써 주세요\"}], \"session_id\": \"tb-cr175-1794358743874\"}\nPOST /api/v1/chat/completions (wes:tb-cr175) {\"connection_id\": \"cli-runner-bp-wes-cs-001\", \"model\": \"claude-haiku-5-5\", \"stream\": false, \"thinking\": \"off\", \"messages\": [{\"role\": \"user\", \"content\": \"고객에게 보낼 첫 인사 한 줄만 써 주세요\"}], \"session_id\": \"tb-cr175-1794358743874\"}\nSELECT seq, role, turn_id, model, left(translate(content, E'\\n\\t', '  '), 6) AS head, deleted_at IS NOT NULL AS del, delete_reason FROM conversation_messages WHERE session_id = 'tb-cr175-1794358743874' ORDER BY seq, created_at",
+     "r": "200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358743874\", \"turn_seq\": 0, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358743874\", \"content\": [{\"text\": \"1\", \"type\": \"text\"}], \"turn_id\": \"3378552f-8d1c-4035-9b7e-35ba24d1e94e\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 5, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358743874\", \"turn_seq\": 2, \"model\": \"claude-sonnet-4-5\", \"id\": \"tb-cr175-1794358743874\", \"content\": [{\"text\": \"2\", \"type\": \"text\"}], \"turn_id\": \"6fa994f5-eb62-4099-82b8-a72bd276ec8d\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 3, \"output_tokens\": 25, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358743874\", \"turn_seq\": 4, \"model\": \"claude-opus-4-5\", \"id\": \"tb-cr175-1794358743874\", \"content\": [{\"text\": \"안녕하세요, 무엇을 도와드릴까요?\", \"type\": \"text\"}], \"turn_id\": \"3b3a3f56-f6eb-451e-9516-c09d5fb9e661\"}}\n200 {\"success\": true, \"data\": {\"actions_executed\": [], \"usage\": {\"input_tokens\": 2579, \"output_tokens\": 139, \"cost_usd\": 0.0}, \"session_id\": \"tb-cr175-1794358743874\", \"turn_seq\": 6, \"model\": \"claude-haiku-5-5\", \"id\": \"tb-cr175-1794358743874\", \"content\": [{\"text\": \"안녕하세요, 고객님. 무엇을 도와드릴까요?\", \"type\": \"text\"}], \"turn_id\": \"9df214ce-725b-4f57-abb5-3e955d4e4780\"}}\n8행 [{\"seq\": \"0\", \"role\": \"user\", \"turn_id\": \"3378552f-8d1c-4035-9b7e-35ba24d1e94e\", \"model\": null, \"head\": \"시험 첫 질\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"1\", \"role\": \"assistant\", \"turn_id\": \"3378552f-8d1c-4035-9b7e-35ba24d1e94e\", \"model\": \"claude-sonnet-4-5\", \"head\": \"1\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"2\", \"role\": \"user\", \"turn_id\": \"6fa994f5-eb62-4099-82b8-a72bd276ec8d\", \"model\": null, \"head\": \"시험 둘째 \", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"3\", \"role\": \"assistant\", \"turn_id\": \"6fa994f5-eb62-4099-82b8-a72bd276ec8d\", \"model\": \"claude-sonnet-4-5\", \"head\": \"2\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"4\", \"role\": \"user\", \"turn_id\": \"3b3a3f56-f6eb-451e-9516-c09d5fb9e661\", \"model\": null, \"head\": \"고객에게 보\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"5\", \"role\": \"assistant\", \"turn_id\": \"3b3a3f56-f6eb-451e-9516-c09d5fb9e661\", \"model\": \"claude-opus-4-5\", \"head\": \"안녕하세요,\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"6\", \"role\": \"user\", \"turn_id\": \"9df214ce-725b-4f57-abb5-3e955d4e4780\", \"model\": null, \"head\": \"고객에게 보\", \"del\": \"f\", \"delete_reason\": null}, {\"seq\": \"7\", \"role\": \"assistant\", \"turn_id\": \"9df214ce-725b-4f57-abb5-3e955d4e4780\", \"model\": \"claude-haiku-5-5\", \"head\": \"안녕하세요,\", \"del\": \"f\", \"delete_reason\": null}]\ncheck len([x for x in r[4] if x['turn_id'] == r[2]['body']['data']['turn_id'] and x['role'] == 'assistant']) > 0 and all(x['model'] == 'claude-opus-4-5' for x in [x for x in r[4] if x['turn_id'] == r[2]['body']['data']['turn_id'] and x['role'] == 'assistant']) and len([x for x in r[4] if x['turn_id'] == r[3]['body']['data']['turn_id'] and x['role'] == 'assistant']) > 0 and all(x['model'] == 'claude-haiku-5-5' for x in [x for x in r[4] if x['turn_id'] == r[3]['body']['data']['turn_id'] and x['role'] == 'assistant']) -> True",
+     "at": "2026-11-11 09:58:14"
+    }
+   }
+  }
+ }
+}

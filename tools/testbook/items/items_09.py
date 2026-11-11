@@ -299,7 +299,7 @@ dict(id='IT-09-013', flow='후속 질문과 제목', kind='정상', title='첫 �
                    ('sql', "SELECT title, title_source FROM conversation_sessions WHERE session_id = '{val:0:data.session_id}'")],
               wait=180,
               check="r[1]['status'] == 200 and len(r[2]) == 1 and r[2][0]['title_source'] == 'GENERATED' "
-                    "and bool(r[2][0]['title']) and r[2][0]['title'] == r[1]['body']['data'].get('title')")},
+                    "and len(r[2][0]['title'] or '') > 0 and r[2][0]['title'] == r[1]['body']['data'].get('title')")},
      pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5], 6: [6]},
      req=['PRD-372'], src=['CR-175'], pri='Medium'),
 
