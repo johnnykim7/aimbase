@@ -66,6 +66,10 @@ public class ClaudeCliAdapter implements LLMAdapter {
      * 요청의 {@code tool_filter}(LLMRequest.tools)가 있으면 그쪽이 우선한다 — 더 좁은 쪽이 이긴다.
      */
     private final List<String> exposedTools;
+    // CR-175: 지금 답을 받고 있는 세션과 그 실행기. 멈춤은 답을 만드는 그 실행기로 가야 하고, 중지 요청은
+    // 다른 HTTP 요청이라 라우팅 정보(RequestContext)를 다시 얻을 수 없다.
+    private final java.util.concurrent.ConcurrentHashMap<String, AgentEndpoint> activeStreams =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     /** CR-129 이전 호환 생성자 (exposed_tools 없음 = 전체 노출). */
     public ClaudeCliAdapter(ClaudeCliRunnerClient runnerClient,
@@ -179,6 +183,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
     public void chatStream(LLMRequest request, Consumer<LLMStreamChunk> chunkConsumer) {
         AgentEndpoint endpoint = resolveEndpoint();
         LLMRequest effective = ensureModel(request);
+        String streamKey = effective.sessionId();
+        if (streamKey != null) activeStreams.put(streamKey, endpoint);
         try {
             runnerClient.chatStream(
                     endpoint, effective, effectiveToolMode(request), configDir, effectiveSystemPrompt(request), runnerApiKey,
@@ -191,7 +197,22 @@ public class ClaudeCliAdapter implements LLMAdapter {
             log.warn("CLI runner unreachable (stream): {} ({})", classified, re.getMessage());
             cancelIfTimeout(endpoint, effective, classified); // CR-109
             throw new RuntimeException("cli_runner_unreachable:" + classified + ":" + re.getMessage(), re);
+        } finally {
+            if (streamKey != null) activeStreams.remove(streamKey, endpoint);
         }
+    }
+
+    /**
+     * CR-175: 사용자가 응답을 멈췄다. 이 세션의 답을 받고 있으면 그 실행기에 멈춤을 알린다. 실행기는 CLI 에
+     * 멈춤 신호를 써 답을 그 자리에서 끝내고, 이 어댑터의 스트림도 곧 끝난다. 워커는 남아 대화가 이어진다.
+     */
+    @Override
+    public void interrupt(String sessionId) {
+        if (sessionId == null) return;
+        AgentEndpoint endpoint = activeStreams.get(sessionId);
+        if (endpoint == null) return;
+        boolean sent = runnerClient.interrupt(endpoint, sessionId, runnerApiKey);
+        log.info("CR-175: Runner interrupt (runId={}, interrupted={})", sessionId, sent);
     }
 
     /**

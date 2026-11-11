@@ -589,6 +589,27 @@ public class ClaudeCliWorkerPool {
     }
 
     /**
+     * CR-175: 그 실행에서 답하고 있는 워커에 멈춤 신호를 보낸다. 워커를 끄지 않아 대화가 이어진다.
+     * 사용자의 응답 중지용이다. 대화를 버릴 때는 {@link #shutdownForRun} 을 쓴다.
+     *
+     * @return 멈춤을 보낸 워커 수
+     */
+    public int interruptRun(String runId) {
+        RunWorkers rw = runs.get(runId);
+        if (rw == null) return 0;
+        List<ClaudeCliWorker> all;
+        synchronized (rw) {
+            all = new ArrayList<>(rw.forks);
+        }
+        int sent = 0;
+        for (ClaudeCliWorker w : all) {
+            if (w.interrupt()) sent++;
+        }
+        log.info("Run '{}': interrupt sent to {} of {} workers", runId, sent, all.size());
+        return sent;
+    }
+
+    /**
      * Run 종료 시 모든 워커 정리. 프로세스 누수 방지의 핵심.
      * WorkflowEngine try/finally 에서 반드시 호출.
      */

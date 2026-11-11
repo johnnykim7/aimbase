@@ -158,6 +158,18 @@ class RunnerServiceTest {
         verify(worker, times(1)).turn(any(), any());
     }
 
+    @Test
+    @DisplayName("CR-175: 응답 중지는 워커에 멈춤만 보내고 실행을 정리하지 않는다")
+    void interruptDoesNotShutdownRun() {
+        when(pool.interruptRun("run-1")).thenReturn(1);
+        when(pool.interruptRun("run-idle")).thenReturn(0);
+
+        org.assertj.core.api.Assertions.assertThat(service.interrupt("run-1")).isTrue();
+        org.assertj.core.api.Assertions.assertThat(service.interrupt("run-idle")).isFalse();
+        org.assertj.core.api.Assertions.assertThat(service.interrupt(" ")).isFalse();
+        verify(pool, org.mockito.Mockito.never()).shutdownForRun(any());
+    }
+
     private static LLMResponse okResponse() {
         return new LLMResponse(
                 "run-1", "claude-sonnet-4-5",
