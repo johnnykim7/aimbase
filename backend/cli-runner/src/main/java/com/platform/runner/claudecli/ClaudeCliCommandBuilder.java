@@ -93,6 +93,7 @@ public final class ClaudeCliCommandBuilder {
     private String prompt;                          // ClaudeCodeTool 경로 (-p 인자)
     private String outputFormat;                    // stream-json 모드 시 자동, 그 외 명시
     private boolean verbose = false;
+    private boolean includePartialMessages = false;  // stream-json 모드에서만 쓰인다
     private Integer maxTurns;                       // null 이면 미지정 (모델 자율)
 
     // 모델/세션
@@ -171,6 +172,15 @@ public final class ClaudeCliCommandBuilder {
 
     public ClaudeCliCommandBuilder verbose(boolean v) {
         this.verbose = v;
+        return this;
+    }
+
+    /**
+     * CR-175: 답을 블록이 끝날 때 통째로 받지 않고 만들어지는 대로 조각으로 받는다.
+     * 그래야 사용자가 답이 나오는 도중에 멈출 수 있다. stream-json 모드에서만 붙는다.
+     */
+    public ClaudeCliCommandBuilder includePartialMessages(boolean v) {
+        this.includePartialMessages = v;
         return this;
     }
 
@@ -269,6 +279,7 @@ public final class ClaudeCliCommandBuilder {
             cmd.add("stream-json");
             cmd.add("--output-format");
             cmd.add("stream-json");
+            if (includePartialMessages) cmd.add("--include-partial-messages");
         } else if (outputFormat != null && !outputFormat.isBlank()) {
             cmd.add("--output-format");
             cmd.add(outputFormat);

@@ -750,6 +750,11 @@ public class ClaudeCliWorker implements AutoCloseable {
         // api 의 연결 묶음이 이미 응답을 내보낸 것으로 보고 다음 계정으로 넘기지 못한다.
         RateLimitRejection rejection = null;
         List<String> heldDeltas = new ArrayList<>();
+        // CR-175: 조각으로 받은 글은 받는 즉시 넘긴다. 같은 블록이 끝날 때 assistant 이벤트로 통째로 한 번 더
+        // 오므로, 조각으로 받은 메시지의 그 종류 블록은 거기서 다시 넘기지 않는다.
+        String partialMessageId = null;
+        java.util.Set<String> textStreamed = new java.util.HashSet<>();
+        java.util.Set<String> thinkingStreamed = new java.util.HashSet<>();
 
         while (true) {
             long remaining = deadline - System.currentTimeMillis();
@@ -798,13 +803,37 @@ public class ClaudeCliWorker implements AutoCloseable {
                         }
                     }
                 }
+                case "stream_event" -> {
+                    // 하위 에이전트의 조각은 받지 않는다. 그 글은 지금처럼 assistant 이벤트로 받는다.
+                    if (json.get("parent_tool_use_id") == null && json.get("event") instanceof Map<?, ?> se) {
+                        if ("message_start".equals(se.get("type"))) {
+                            partialMessageId = se.get("message") instanceof Map<?, ?> m && m.get("id") != null
+                                    ? m.get("id").toString() : null;
+                        } else if ("content_block_delta".equals(se.get("type")) && se.get("delta") instanceof Map<?, ?> d) {
+                            if ("text_delta".equals(d.get("type")) && d.get("text") instanceof String text && !text.isEmpty()) {
+                                textStreamed.add(partialMessageId);
+                                assistantBuffer.append(text);
+                                if (deltaConsumer != null) {
+                                    if (rejection != null) heldDeltas.add(text);
+                                    else deltaConsumer.accept(text);
+                                }
+                            } else if ("thinking_delta".equals(d.get("type"))
+                                    && d.get("thinking") instanceof String thought && !thought.isEmpty()) {
+                                thinkingStreamed.add(partialMessageId);
+                                if (thinkingConsumer != null && rejection == null) thinkingConsumer.accept(thought);
+                            }
+                        }
+                    }
+                }
                 case "assistant" -> {
+                    String messageId = json.get("message") instanceof Map<?, ?> m && m.get("id") != null
+                            ? m.get("id").toString() : null;
                     // CR-175: 생각 블록은 답 글에 섞지 않고 따로 흘린다. 한도 거절 뒤에는 다음 계정이 다시 답하므로 버린다.
-                    String thought = extractBlockText(json, "thinking", "thinking");
+                    String thought = thinkingStreamed.contains(messageId) ? "" : extractBlockText(json, "thinking", "thinking");
                     if (thinkingConsumer != null && rejection == null && !thought.isEmpty()) {
                         thinkingConsumer.accept(thought);
                     }
-                    String delta = extractAssistantText(json);
+                    String delta = textStreamed.contains(messageId) ? null : extractAssistantText(json);
                     if (delta != null && !delta.isEmpty()) {
                         assistantBuffer.append(delta);
                         if (deltaConsumer != null) {
@@ -1290,6 +1319,7 @@ public class ClaudeCliWorker implements AutoCloseable {
                 .disallowedTools(disallowed)      // CR-117: null 이면 빌더가 무시
                 .streamJson(true)
                 .verbose(true)
+                .includePartialMessages(true)
                 .resume(resumeSessionId, forkSession)
                 .systemPromptOverride(systemPromptOverride)
                 .model(model)
