@@ -69,6 +69,24 @@ const ADAPTERS: Record<string, string[]> = {
   realtime: ["WebSocket", "SSE"],
 };
 
+const CLI_ADAPTER_VALUES = ["anthropic-cli", "claude-cli", "claude cli", "anthropic cli", "claude-max", "claude-pro"];
+const OPENAI_COMPATIBLE_HINTS = ["deepseek", "groq", "mistral", "openrouter", "together", "fireworks", "lm studio", "localai", "vllm"];
+
+// 저장된 어댑터 값은 서버 이름(anthropic-cli 등)이고 수정 창은 표시명으로 전용 칸을 고른다.
+// 서버 ConnectionAdapterFactory.normalizeAdapterType 과 같은 순서로 표시명을 찾고, 못 찾으면 저장값을 그대로 쓴다.
+function displayAdapter(type: string, stored: string): string {
+  if (type !== "llm") return stored;
+  const s = stored.toLowerCase();
+  if (CLI_ADAPTER_VALUES.includes(s)) return "Claude CLI";
+  if (s.includes("anthropic") || s.includes("claude")) return "Claude (Anthropic)";
+  if (s === "openai_compatible" || s === "openai compatible" || OPENAI_COMPATIBLE_HINTS.some((h) => s.includes(h))) return "OpenAI Compatible";
+  if (s.includes("openai") || s.includes("gpt")) return "OpenAI";
+  if (s.includes("ollama")) return "Ollama";
+  if (s.includes("bedrock") || s.includes("aws")) return "AWS Bedrock";
+  if (s.includes("vertex") || s.includes("google") || s.includes("gemini")) return "Vertex AI";
+  return stored;
+}
+
 const DB_FIELDS = ["연결 ID", "이름", "호스트", "포트", "데이터베이스", "사용자", "비밀번호"];
 
 export default function Connections() {
@@ -105,7 +123,7 @@ export default function Connections() {
   const openEditModal = (conn: Connection) => {
     setEditingConn(conn);
     setSelectedType(conn.type ?? "llm");
-    setSelectedAdapter(conn.adapter ?? "");
+    setSelectedAdapter(displayAdapter(conn.type ?? "llm", conn.adapter ?? ""));
     const cfg = conn.config ?? {};
     setWidgetModels(parseWidgetModels(cfg.models));
     setWidgetModelsErrors(undefined);
@@ -152,7 +170,9 @@ export default function Connections() {
         return;
       }
     }
+    // 서버는 설정을 통째로 바꿔 끼운다. 이 창에 칸이 없는 값(실행기를 고르는 agent_name 등)을 잃지 않게 기존 설정을 깔고 덮는다.
     const config: Record<string, unknown> = {
+      ...(editingConn?.config ?? {}),
       host: form["호스트"],
       port: form["포트"],
       database: form["데이터베이스"],
@@ -189,8 +209,11 @@ export default function Connections() {
     };
 
     if (editingConn) {
+      // 어댑터를 바꾸지 않았으면 저장값을 그대로 보낸다. 서버가 기본 CLI 연결을 adapter 원문으로 찾는다.
+      const storedAdapter = editingConn.adapter ?? "";
+      const adapter = displayAdapter(selectedType, storedAdapter) === selectedAdapter ? storedAdapter : selectedAdapter;
       updateConnection.mutate(
-        { id: editingConn.id, data: { id: editingConn.id, name: form["이름"] ?? editingConn.name, adapter: selectedAdapter, type: selectedType, config } },
+        { id: editingConn.id, data: { id: editingConn.id, name: form["이름"] ?? editingConn.name, adapter, type: selectedType, config } },
         { onSuccess: () => { setShowModal(false); setEditingConn(null); } },
       );
     } else {
