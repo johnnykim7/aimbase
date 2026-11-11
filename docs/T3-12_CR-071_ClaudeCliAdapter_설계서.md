@@ -5,7 +5,7 @@
 - **작성일**: 2026-04-27
 - **상태**: 📝 설계 작성 (검토 대기)
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR071_ClaudeCliAdapter_3경로통일_20260427.md`
-- **관련 CR**: CR-041 (Agent Registry), CR-042 (aimbase-agent), CR-044 (CLI 두뇌 + Aimbase 손발), CR-050 (ClaudeCliLlmAdapter), CR-067 (ToolResultRenderer), CR-068 (어댑터 동등화), CR-069 (CommandBuilder + ToolMode), CR-070 (ClaudeCodeTool 스트리밍)
+- **관련 CR**: CR-041 (Agent Registry), CR-042 (aimbase-agent), CR-044 (CLI 두뇌 + Aimbase 손발), CR-050 (ClaudeCliLlmAdapter), CR-067 (ToolResultRenderer), CR-068 (어댑터 동등화), CR-069 (CommandBuilder + ToolMode), CR-070 (ClaudeCodeTool 스트리밍), CR-175 (조각 전달과 응답 중지 `/v1/interrupt`)
 
 ---
 
@@ -98,7 +98,7 @@ ClaudeCodeTool: deprecated → 후속 CR에서 제거
 
 #### `ClaudeCliRunner` (별도 프로세스, 신규 — aimbase-agent 모듈에 모드 추가)
 
-- HTTP API 노출 (`/v1/chat`, `/v1/chat/stream`, `/v1/cancel`, `/v1/health`)
+- HTTP API 노출 (`/v1/chat`, `/v1/chat/stream`, `/v1/cancel`, `/v1/interrupt`, `/v1/health`)
 - 기존 `ClaudeCliWorkerPool`을 내부에서 보유 (BIZ-100 워커 상한 유지)
 - 요청 들어오면 worker pool에서 borrow → CLI 실행 → NDJSON 응답
 - aimbase-agent 등록 채널(STUN/TURN 위 SSE) 위에 동작
@@ -284,6 +284,23 @@ NDJSON 스트림 응답.
 
 **응답**: `{"cancelled": true}` 또는 `{"cancelled": false, "reason": "not_found"}`
 
+작업자를 끄므로 CLI 가 기억하던 대화도 사라진다. 서버는 세션을 지울 때만 부른다.
+
+#### POST `/v1/interrupt` (CR-175)
+
+그 실행에서 답하고 있는 작업자의 답만 멈춘다. 작업자는 살아 있고 대화를 이어 간다. 서버가 사용자의 응답 중지를 받으면 부른다.
+
+**요청 본문**:
+```json
+{ "run_id": "session-abc-123" }
+```
+
+**응답**: `{"interrupted": true}` 또는 `{"interrupted": false}`(답하는 작업자가 없음). API 키 검사는 `/v1/cancel` 과 같다.
+
+- 실행기는 답하는 작업자(main, fork, branch)의 CLI stdin 에 `{"type":"control_request","request_id":"interrupt-<uuid>","request":{"subtype":"interrupt"}}` 를 쓴다. 질문을 쓰는 것과 같은 잠금 안에서 써 두 글이 섞이지 않는다.
+- CLI 는 `control_response`(success) 를 낸 뒤 오류 끝(`result`, `is_error` 참, subtype `error_during_execution`)을 낸다. 실행기는 멈춤을 보낸 턴의 오류 끝을 오류로 올리지 않고 그때까지 받은 글을 정상 끝으로 돌려준다. `/v1/chat/stream` 의 마지막 `result` 도 그대로 나간다.
+- 멈춤에 대한 `control_response` 오류는 무시한다. 생각 한도 바꾸기의 거절(`thinking-` 으로 시작하는 request_id)과 섞지 않는다.
+
 #### GET `/v1/health`
 
 ```json
@@ -372,6 +389,7 @@ public final class RequestContext {
 | `system.init` | (무시) | Runner 측 로깅만 |
 | `assistant.message.content[].text` (델타) | `TextDelta` | 누적 → 텍스트 응답 |
 | `assistant.message.content[].thinking` | `ThinkingDelta` | Extended Thinking |
+| `stream_event` (`text_delta`, `thinking_delta`) | `TextDelta`, `ThinkingDelta` | CR-175. 러너가 CLI 를 `--include-partial-messages` 로 띄워 받는 조각. 조각으로 넘긴 답 id 의 `assistant` 문단은 다시 넘기지 않는다. `parent_tool_use_id` 가 있는 조각(서브에이전트)은 넘기지 않는다 |
 | `tool_use` | `ToolUseStart` | id/name/input 추출 |
 | `tool_result` | `ToolResultEvent` | tool_use_id/output/isError |
 | `result` | `Done` | usage/finish_reason/total_cost_usd |
@@ -463,7 +481,7 @@ aimbase-agent --runner-mode \
 ### 6.2 내부 구성
 
 - HTTP 서버 (Spring Boot 또는 Helidon — aimbase-agent 기존 스택 따름)
-- 컨트롤러: `RunnerController` (`/v1/chat`, `/v1/chat/stream`, `/v1/cancel`, `/v1/health`)
+- 컨트롤러: `RunnerController` (`/v1/chat`, `/v1/chat/stream`, `/v1/cancel`, `/v1/interrupt`, `/v1/health`)
 - `ClaudeCliWorkerPool` (이동된 모듈에서 재사용)
 - `ClaudeCliCommandBuilder` (이동된 모듈에서 재사용)
 
@@ -526,7 +544,7 @@ aimbase-agent가 시작 시 Aimbase 서버에 등록 (CR-041 `AgentRegistryServi
 | Phase | 내용 | 산출물 | PR 단위 |
 |---|---|---|---|
 | **1. 모듈 분리 + 기존 삭제** | `ClaudeCliWorker/Pool/CommandBuilder` 신규 모듈로 이동 + `ClaudeCliLlmAdapter` 즉시 삭제 + `ClaudeCodeTool` 및 동반 클래스/테스트 삭제 + `ChatController`/`ConnectionAdapterFactory`의 의존 정리 | 신규 모듈 + 단일 경로 | 1 PR |
-| **2. Runner HTTP** | aimbase-agent `--runner-mode` + `RunnerController` 4 endpoint (`/v1/chat`, `/v1/chat/stream`, `/v1/cancel`, `/v1/health`) | aimbase-agent 신버전 | 1 PR |
+| **2. Runner HTTP** | aimbase-agent `--runner-mode` + `RunnerController` 5 endpoint (`/v1/chat`, `/v1/chat/stream`, `/v1/cancel`, `/v1/interrupt`(CR-175), `/v1/health`) | aimbase-agent 신버전 | 1 PR |
 | **3. AgentRegistry 확장** | `runner_endpoint`/`runner_api_key_hash`/`runner_capability` 컬럼 + V57 Flyway | 마이그레이션 + 서비스 | 1 PR |
 | **4. ClaudeCliAdapter** | `ClaudeCliAdapter` + `ClaudeCliRunnerClient` + `RequestContext` + `AgentIdRequestFilter` 신설 + `ConnectionAdapterFactory` 단일 경로 등록 | 신규 어댑터 동작 | 1 PR |
 | **5. 통합 테스트 + 가이드** | docker-compose 시나리오 + `AdapterComparisonIT` 재작성 + 가이드 문서 4종 갱신 (api/ops/sdk/claudecode-mcp-setup) | 통합 테스트 PASS + 문서 | 1 PR |
