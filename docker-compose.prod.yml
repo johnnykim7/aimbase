@@ -54,9 +54,13 @@ services:
       AIMBASE_TTS_SIDECAR_URL: http://tts-sidecar:8310
     # skill-sandbox 는 skill-sandbox-net 에만 있으므로 api 가 그 망에 더 붙는다.
     # default 를 함께 적지 않으면 러너와 rag-pipeline 이 api 에 닿지 못한다.
+    # 러너는 서비스 이름 api 가 아니라 aimbase-api 로 부른다. 59 에서는 다른 스택(bp-3plgw)이
+    # 이 망에 들어오면서 그쪽 서비스 이름 api 도 따라 들어와, api 가 두 컨테이너로 풀려
+    # 러너의 하트비트와 서버 도구 호출이 절반쯤 엉뚱한 곳으로 갔다(CR-175).
     networks:
-      - default
-      - skill-sandbox-net
+      default:
+        aliases: [aimbase-api]
+      skill-sandbox-net: {}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health || exit 1"]
       interval: 15s
@@ -129,13 +133,13 @@ services:
       # CR-104: 서버 MCP endpoint(aimbase-server)만 사용 — 도구 출처를 API 경로와 동일화.
       # local stdio MCP(AIMBASE_MCP_JAR)는 제거 — server 와 도구 중복 + allowedTools(mcp__aimbase-server__*)
       # prefix 정합성 깨짐 방지. 정공 A 의 도구는 모두 서버 MCP endpoint 를 거친다.
-      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
       AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${SERVER_MCP_API_KEY:?SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bidding"
       SERVER_PORT: "8290"
       # ── Agent 등록 (AgentProperties: agent.*) ──
       AGENT_NAME: "cli-runner-bidding"
-      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
       AGENT_API_KEY: "${SERVER_MCP_API_KEY:?SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "bidding_system"
       AGENT_MCP_PORT: "8291"
@@ -171,12 +175,12 @@ services:
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
-      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
       AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${AXOPM_SERVER_MCP_API_KEY:?AXOPM_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-axopm"
       SERVER_PORT: "8292"   # 8290 → 8292 (bidding agent 와 충돌 회피)
       AGENT_NAME: "cli-runner-axopm"   # 이름 분리
-      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
       AGENT_API_KEY: "${AXOPM_SERVER_MCP_API_KEY:?AXOPM_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "axopm_companyA"   # ★ axopm_companyA DB 에 등록 — 라우팅 핵심
       AGENT_MCP_PORT: "8293"   # 8291 → 8293 (충돌 회피)
@@ -211,12 +215,12 @@ services:
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
-      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
       AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WORKMAP_SERVER_MCP_API_KEY:?WORKMAP_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-workmap"
       SERVER_PORT: "8294"   # 8292 → 8294 (기존 agent 와 충돌 회피)
       AGENT_NAME: "cli-runner-workmap"   # 이름 분리
-      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
       AGENT_API_KEY: "${WORKMAP_SERVER_MCP_API_KEY:?WORKMAP_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "workmap"   # ★ workmap DB 에 등록 — 라우팅 핵심
       AGENT_MCP_PORT: "8295"   # 8293 → 8295 (충돌 회피)
@@ -251,7 +255,7 @@ services:
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "5"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
-      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
       # ★ MCP 인증키는 AGENT_TENANT_ID 와 같은 테넌트 것이어야 한다 (CR-123 실측).
       # bidding 키를 공유하면 /mcp/sse 가 bidding_system 으로 인증돼 bp_wes 원격도구가 안 보이고
       # MCP 핸드셰이크가 status=pending 에서 멈춘다.
@@ -259,7 +263,7 @@ services:
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes"
       SERVER_PORT: "8296"   # 8294 → 8296 (기존 agent 와 충돌 회피)
       AGENT_NAME: "cli-runner-bp-wes"   # 이름 분리
-      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
       AGENT_API_KEY: "${WES_SERVER_MCP_API_KEY:?WES_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "bp_wes"   # ★ bp_wes DB 에 등록 — 라우팅 핵심
       AGENT_MCP_PORT: "8297"   # 8295 → 8297 (충돌 회피)
@@ -306,12 +310,12 @@ services:
       # 실행기 전체 Claude 프로세스 상한(CR-173 14절). 운영 chaws 와 같게 두어 59 에서 같은 줄서기를 본다.
       AIMBASE_RUNNER_MAX_PROCESSES: "2"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
-      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
       AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WES_SERVER_MCP_API_KEY:?WES_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes-cs"
       SERVER_PORT: "8298"
       AGENT_NAME: "cli-runner-bp-wes-cs"
-      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
       AGENT_API_KEY: "${WES_SERVER_MCP_API_KEY:?WES_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "bp_wes"
       AGENT_MCP_PORT: "8299"
@@ -352,12 +356,12 @@ services:
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "3"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
-      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
       AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${LEXFLOW_SERVER_MCP_API_KEY:?LEXFLOW_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-lexflow"
       SERVER_PORT: "8300"
       AGENT_NAME: "cli-runner-lexflow"
-      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
       AGENT_API_KEY: "${LEXFLOW_SERVER_MCP_API_KEY:?LEXFLOW_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "lexflow"
       AGENT_MCP_PORT: "8301"
@@ -391,12 +395,12 @@ services:
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "3"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
-      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
       AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${BP_OFFICE_SERVER_MCP_API_KEY:?BP_OFFICE_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-office"
       SERVER_PORT: "8302"
       AGENT_NAME: "cli-runner-bp-office"
-      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
       AGENT_API_KEY: "${BP_OFFICE_SERVER_MCP_API_KEY:?BP_OFFICE_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "bp_office"
       AGENT_MCP_PORT: "8303"
@@ -432,12 +436,12 @@ services:
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "1"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "1800"
-      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
       AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${BP_3PLGW_SERVER_MCP_API_KEY:?BP_3PLGW_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-3plgw"
       SERVER_PORT: "8304"
       AGENT_NAME: "cli-runner-bp-3plgw"
-      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
       AGENT_API_KEY: "${BP_3PLGW_SERVER_MCP_API_KEY:?BP_3PLGW_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
       AGENT_TENANT_ID: "bp_3plgw"
       AGENT_MCP_PORT: "8305"
