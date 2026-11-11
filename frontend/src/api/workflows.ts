@@ -44,8 +44,14 @@ export const workflowsApi = {
     apiClient.post<ApiResponse<WorkflowRun>>(`/workflows/runs/${runId}/rerun`),
 
   // CR-102: 전체 워크플로우 횡단 실행 내역
-  allRuns: (params?: { page?: number; size?: number; workflow_id?: string; status?: string }) =>
-    apiClient.get<ApiResponse<WorkflowRun[]>>("/workflows/runs", { params }),
+  // CR-130: run_type — "chat"(채팅 run) / "workflow"(워크플로우 run) / 미지정(전체)
+  allRuns: (params?: {
+    page?: number;
+    size?: number;
+    workflow_id?: string;
+    status?: string;
+    run_type?: string;
+  }) => apiClient.get<ApiResponse<WorkflowRun[]>>("/workflows/runs", { params }),
 
   getRunById: (runId: string) =>
     apiClient.get<ApiResponse<WorkflowRun>>(`/workflows/runs/${runId}`),

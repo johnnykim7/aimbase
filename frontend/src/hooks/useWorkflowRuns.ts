@@ -9,6 +9,8 @@ export const useAllWorkflowRuns = (params: {
   size?: number;
   workflow_id?: string;
   status?: string;
+  /** CR-130: "chat" = 채팅 run 만, "workflow" = 워크플로우 run 만, 미지정 = 전체 */
+  run_type?: string;
 }) =>
   useQuery({
     queryKey: ["workflow-runs", params],

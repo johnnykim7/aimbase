@@ -34,7 +34,10 @@ export interface Workflow {
 
 export interface WorkflowRun {
   id: string;
-  workflowId: string;
+  /** CR-130: 채팅(chat/completions) 경로 run 은 workflowId 가 없다(null). 화면에서 "채팅" 뱃지로 구분. */
+  workflowId?: string | null;
+  /** CR-130: 채팅 run 식별용 세션 ID. */
+  sessionId?: string | null;
   status: "running" | "completed" | "failed" | "pending_approval";
   startedAt?: string;
   completedAt?: string;

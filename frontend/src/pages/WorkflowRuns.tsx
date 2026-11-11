@@ -40,6 +40,8 @@ export default function WorkflowRuns() {
   const navigate = useNavigate();
   const [workflowFilter, setWorkflowFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  // CR-130: 실행 유형 필터 — 채팅 run 과 워크플로우 run 이 한 화면에 섞이므로 구분 조회를 제공.
+  const [typeFilter, setTypeFilter] = useState("");
   const [page, setPage] = useState(0);
 
   const { data: workflows = [] } = useWorkflows();
@@ -53,18 +55,28 @@ export default function WorkflowRuns() {
     size: 20,
     workflow_id: workflowFilter || undefined,
     status: statusFilter || undefined,
+    run_type: typeFilter || undefined,
   });
   const runs = data?.runs ?? [];
   const pagination = data?.pagination;
 
   const columns: Column<WorkflowRun>[] = [
     {
+      // CR-130: workflowId 가 없는 run = 채팅(chat/completions) 경로. 워크플로우와 같은 화면에서 함께 본다.
       header: "워크플로우",
-      render: (r) => (
-        <span className="text-[13px] font-medium text-foreground">
-          {workflowNames.get(r.workflowId) ?? r.workflowId}
-        </span>
-      ),
+      render: (r) =>
+        r.workflowId ? (
+          <span className="text-[13px] font-medium text-foreground">
+            {workflowNames.get(r.workflowId) ?? r.workflowId}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5">
+            <Badge color="purple">채팅</Badge>
+            <span className="text-xs text-muted-foreground">
+              {r.sessionId ? r.sessionId.slice(0, 24) : "--"}
+            </span>
+          </span>
+        ),
     },
     {
       header: "상태",
@@ -118,6 +130,16 @@ export default function WorkflowRuns() {
     <Page>
       {/* Filters */}
       <div className="flex gap-3 mb-5">
+        {/* CR-130: 실행 유형(전체/채팅/워크플로우) */}
+        <select
+          style={{ ...inputStyle, width: 150 }}
+          value={typeFilter}
+          onChange={(e) => { setTypeFilter(e.target.value); setPage(0); }}
+        >
+          <option value="">전체 유형</option>
+          <option value="workflow">워크플로우</option>
+          <option value="chat">채팅</option>
+        </select>
         <select
           style={{ ...inputStyle, width: 220 }}
           value={workflowFilter}
@@ -143,7 +165,7 @@ export default function WorkflowRuns() {
         <EmptyState
           icon={<History className="size-6" />}
           title="실행 내역이 없습니다"
-          description="워크플로우가 실행되면 여기에 표시됩니다"
+          description="워크플로우 또는 채팅(CLI 커넥션)이 실행되면 여기에 표시됩니다"
         />
       ) : (
         <>
