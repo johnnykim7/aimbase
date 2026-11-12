@@ -103,6 +103,8 @@ public class OrchestratorEngine {
     private final CancellationRegistry cancellationRegistry;
     /** CR-130: 채팅 경로용 run 기록자 — 채팅도 "실행 내역"에서 도구 궤적까지 보이게 한다. */
     private final ChatRunRecorder chatRunRecorder;
+    /** CR-183: 대화 API 요청의 계산 도구 붙이기와 그릴 수 있는 형식 안내(BIZ-222, BIZ-223). */
+    private final ChatFeatureSupport chatFeatures;
     /** CR-132 후속: 채팅 세션 workspace 자동 할당(산출물 out/ 의 부모)의 base 경로 산정용. */
     private final WorkspaceProperties workspaceProperties;
     /** CR-178: 질문마다 붙는 시스템 지시(프로젝트 지시문)를 넣는 곳. */
@@ -140,9 +142,11 @@ public class OrchestratorEngine {
             CancellationRegistry cancellationRegistry,
             ChatRunRecorder chatRunRecorder,
             WorkspaceProperties workspaceProperties,
-            TurnInstructions turnInstructions
+            TurnInstructions turnInstructions,
+            ChatFeatureSupport chatFeatures
     ) {
         this.turnInstructions = turnInstructions;
+        this.chatFeatures = chatFeatures;
         this.chatRunRecorder = chatRunRecorder;
         this.workspaceProperties = workspaceProperties;
         this.modelRouter = modelRouter;
@@ -311,6 +315,8 @@ public class OrchestratorEngine {
 
         // CR-178 BIZ-172: 프로젝트 지시문은 검색 자료 다음, 이번 질문 바로 앞에 붙인다
         trimmedMessages = turnInstructions.attach(trimmedMessages, sessionId, request);
+        // CR-183: 위젯이 그릴 수 있는 형식의 안내 틀을 시스템 안내 끝에 덧붙인다(BIZ-223).
+        trimmedMessages = chatFeatures.withRenderGuides(trimmedMessages, request.renderFeatures());
 
         // 4. LLM 어댑터 선택 (connectionId > modelRouter). 그룹은 chat() 입구에서 멤버 connectionId 로 바뀌어 온다(CR-161)
         //    CR-029: runtimeRegistry 로깅 (향후 selectBest 연결 지점)
@@ -367,8 +373,15 @@ public class OrchestratorEngine {
         boolean llmSuccess = false;
         // CR-068: 도구 호출 누적 (ChatResponse.actions_executed 채움)
         List<Map<String, Object>> actionsExecuted = List.of();
+        // CR-183: 대화 요청이면 계산 도구를 붙인다. API 는 도구를 끈 대화여도 데이터 파일이 있으면
+        // 계산 도구 하나만 실은 도구 루프를 탄다. CLI 는 러너가 계산 도구 통로를 붙인다(BIZ-222).
+        boolean cliAdapter = com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider());
+        com.platform.tool.ToolFilterContext toolFilter = chatFeatures.attachDataTools(request, sessionId, cliAdapter);
+        boolean dataQueryOnly = !request.actionsEnabled() && !cliAdapter
+                && ChatFeatureSupport.attachesDataQuery(toolFilter);
+        String dataSessionId = ChatFeatureSupport.attachesDataQuery(toolFilter) ? sessionId : null;
         try {
-            if (request.actionsEnabled() && toolRegistry.hasTools()) {
+            if ((request.actionsEnabled() && toolRegistry.hasTools()) || dataQueryOnly) {
                 // Tool use 루프 — 최대 5회 반복 (CR-006 + CR-029: ToolContext + lineage)
                 com.platform.tool.ToolCallHandler.beginActionTracking();
                 try {
@@ -376,7 +389,8 @@ public class OrchestratorEngine {
                     llmResponse = toolCallHandler.executeLoop(
                             adapter, resolvedModel, trimmedMessages,
                             modelConfig, sessionId, toolRegistry,
-                            request.toolFilter(), request.toolChoice(), toolContext,
+                            dataQueryOnly ? ChatFeatureSupport.dataQueryOnly(toolFilter) : toolFilter,
+                            request.toolChoice(), toolContext,
                             resolvedSchema,
                             // CR-128(갭B): 요청 단위 CLI override 를 도구루프 경로에도 전달
                             request.toolModeOverride(), request.systemPromptOverride());
@@ -391,7 +405,8 @@ public class OrchestratorEngine {
                         resolvedModel, trimmedMessages, null,
                         modelConfig, false, sessionId, null, resolvedSchema, workspacePath)
                         // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (CLI 어댑터만 사용, 그 외 무시)
-                        .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride());
+                        .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride())
+                        .withDataSessionId(dataSessionId);   // CR-183: CLI 어댑터만 읽는다
                 try {
                     if (request.connectionId() == null || request.connectionId().isBlank()) {
                         // CR-082: CLI adapter 는 fallback chain 우회 — 다른 provider 로 떨어지면
@@ -639,6 +654,8 @@ public class OrchestratorEngine {
 
         // CR-178 BIZ-172: 프로젝트 지시문은 검색 자료 다음, 이번 질문 바로 앞에 붙인다
         trimmedMessages = turnInstructions.attach(trimmedMessages, sessionId, request);
+        // CR-183: 위젯이 그릴 수 있는 형식의 안내 틀을 시스템 안내 끝에 덧붙인다(BIZ-223).
+        trimmedMessages = chatFeatures.withRenderGuides(trimmedMessages, request.renderFeatures());
 
         // CR-058: Done 이벤트에 citations 를 합쳐 내보내는 decorator.
         // CR-175: Done 은 바로 내보내지 않고 쥐고 있다가, 대화 기록을 저장한 뒤 답 번호와 순번을 채워 내보낸다.
@@ -702,12 +719,19 @@ public class OrchestratorEngine {
         // CR-045 Phase 2-B: 도구 루프 통합 스트리밍
         LLMResponse finalResponse;
         boolean streamSuccess = false;
+        // CR-183: 계산 도구 붙이기. 판단은 비스트리밍 경로와 같다(BIZ-222).
+        boolean streamCliAdapter = com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider());
+        com.platform.tool.ToolFilterContext streamToolFilter =
+                chatFeatures.attachDataTools(request, sessionId, streamCliAdapter);
+        boolean streamDataQueryOnly = !request.actionsEnabled() && !streamCliAdapter
+                && ChatFeatureSupport.attachesDataQuery(streamToolFilter);
         try {
-            if (request.actionsEnabled() && toolRegistry.hasTools()) {
+            if ((request.actionsEnabled() && toolRegistry.hasTools()) || streamDataQueryOnly) {
                 finalResponse = toolCallHandler.executeLoopStream(
                         adapter, resolvedModel, trimmedMessages,
                         streamModelConfig, sessionId, toolRegistry,
-                        request.toolFilter(), request.toolChoice(), toolContext,
+                        streamDataQueryOnly ? ChatFeatureSupport.dataQueryOnly(streamToolFilter) : streamToolFilter,
+                        request.toolChoice(), toolContext,
                         streamSinkWithCitations, cancelled);
             } else {
                 // 도구 비활성/없음 → 단순 스트리밍
@@ -716,7 +740,9 @@ public class OrchestratorEngine {
                         resolvedModel, trimmedMessages, null,
                         streamModelConfig, true, sessionId, null, null, workspacePath)
                         // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (스트리밍 경로)
-                        .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride());
+                        .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride())
+                        // CR-183: CLI 어댑터만 읽는다. 러너가 계산 도구 통로를 붙인다(BIZ-222)
+                        .withDataSessionId(ChatFeatureSupport.attachesDataQuery(streamToolFilter) ? sessionId : null);
                 StringBuilder textBuf = new StringBuilder();
                 final TokenUsage[] usageHolder = new TokenUsage[]{null};
                 final String[] idHolder = new String[]{""};

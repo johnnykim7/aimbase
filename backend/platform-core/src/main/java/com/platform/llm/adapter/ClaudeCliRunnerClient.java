@@ -342,6 +342,10 @@ public class ClaudeCliRunnerClient {
                     .map(r -> Map.<String, Object>of("name", r.name(), "scope", r.scope(), "version", r.version()))
                     .toList());
         }
+        // CR-183: 대화 요청이면 러너가 계산 도구 통로를 붙이도록 대화 세션 번호를 싣는다(BIZ-222).
+        if (request.dataSessionId() != null && !request.dataSessionId().isBlank()) {
+            body.put("data_session_id", request.dataSessionId());
+        }
         // CR-107 디버그: BE 가 agent 로 보내는 working_directory 추적.
         org.slf4j.LoggerFactory.getLogger(ClaudeCliRunnerClient.class)
                 .info("[CR107-DEBUG] runner body: runId={}, working_directory(sent)={}",

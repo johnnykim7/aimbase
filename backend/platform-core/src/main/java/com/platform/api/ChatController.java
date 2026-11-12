@@ -59,6 +59,11 @@ public class ChatController {
     private final com.platform.image.ImageGenerationSettings imageSettings;
     private final com.platform.session.ChatProjectService chatProjectService;
     private final com.platform.repository.ConversationSessionRepository sessionRepository;
+    private final com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder;
+
+    /** CR-183 BIZ-223: render_features 값 모양과 개수 상한. */
+    private static final java.util.regex.Pattern RENDER_FEATURE = java.util.regex.Pattern.compile("[a-z0-9-]{1,40}");
+    private static final int MAX_RENDER_FEATURES = 10;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -74,9 +79,11 @@ public class ChatController {
                           com.platform.image.ImageGenerationService imageGeneration,
                           com.platform.image.ImageGenerationSettings imageSettings,
                           com.platform.session.ChatProjectService chatProjectService,
-                          com.platform.repository.ConversationSessionRepository sessionRepository) {
+                          com.platform.repository.ConversationSessionRepository sessionRepository,
+                          com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder) {
         this.chatProjectService = chatProjectService;
         this.sessionRepository = sessionRepository;
+        this.attachmentPromptBuilder = attachmentPromptBuilder;
         this.orchestrator = orchestrator;
         this.workspaceProperties = workspaceProperties;
         this.cancellationRegistry = cancellationRegistry;
@@ -137,11 +144,16 @@ public class ChatController {
         // CR-178: 프로젝트는 응답을 시작하기 전에 거른다(PRD-424). 주인은 이 스레드에서 정해 실어 보낸다
         String owner = com.platform.session.ChatOwner.current();
         UUID chatProjectId = resolveChatProject(request, owner);
+        List<String> renderFeatures = parseRenderFeatures(request.renderFeatures());   // CR-183
         rewindIfRequested(request);
 
         AdapterResolution resolved = resolveAdapter(request.model(), request.connectionId());
+        // CR-183: 계산 도구가 붙는 요청이면 데이터 요약 끝에 계산 안내 틀을 붙인다(BIZ-221). 대화 API 요청은
+        // CLI 면 언제나, API 면 데이터 파일이 있을 때 붙으므로 요청이 이 도구를 빼지 않았으면 붙는다.
+        boolean dataGuide = request.toolFilter() == null || request.toolFilter().excludeTools() == null
+                || !request.toolFilter().excludeTools().contains(com.platform.tool.builtin.DataQueryTool.NAME);
         List<UnifiedMessage> messages = request.messages().stream()
-                .map(dto -> toUnifiedMessage(dto, request.sessionId(), resolved))
+                .map(dto -> toUnifiedMessage(dto, request.sessionId(), resolved, dataGuide))
                 .toList();
 
         // CR-007: response_format → ChatRequest.ResponseFormat 변환
@@ -182,7 +194,9 @@ public class ChatController {
                 request.toolMode(),
                 request.systemPromptOverride()
         ).withThinkingOverride(thinkingOverride)
-                .withWidgetTurn(new ChatRequest.WidgetTurn(owner, chatProjectId, questionDisplay(request)));
+                .withWidgetTurn(new ChatRequest.WidgetTurn(owner, chatProjectId, questionDisplay(request)))
+                // CR-183: 대화 API 요청 표시(계산 도구 붙이기)와 위젯이 그릴 수 있는 형식(BIZ-222, BIZ-223)
+                .withChatFeatures(true, renderFeatures);
 
         if (request.stream()) {
             return streamResponse(chatRequest);
@@ -386,7 +400,9 @@ public class ChatController {
             // CR-184: 있으면 그림 연결로 그림 한 장을 만든다(PRD-540, PRD-541)
             ImageDto image,
             // CR-178: 세션을 처음 만들 때 넣을 위젯 프로젝트. 이미 있는 세션이면 쓰지 않는다(PRD-424)
-            @JsonProperty("chat_project_id") String chatProjectId
+            @JsonProperty("chat_project_id") String chatProjectId,
+            // CR-183: 위젯이 그릴 수 있는 형식(chart, math). 값마다 widget.render.<값> 틀을 붙인다(BIZ-223)
+            @JsonProperty("render_features") List<String> renderFeatures
     ) {
         /** CR-184 이전 15칸 호환(그림 없음) */
         public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
@@ -396,7 +412,29 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, null, null);
+                    thinking, null, null, null);
+        }
+
+        /** CR-184 다음 16칸 호환(위젯 프로젝트, 그리기 형식 없음) */
+        public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
+                                     boolean actionsEnabled, String connectionId, String connectionGroupId,
+                                     ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
+                                     String workingDirectory, String toolMode, String systemPromptOverride,
+                                     Integer rewindFromSeq, String thinking, ImageDto image) {
+            this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
+                    toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
+                    thinking, image, null, null);
+        }
+
+        /** CR-183 이전 17칸 호환(그리기 형식 없음) */
+        public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
+                                     boolean actionsEnabled, String connectionId, String connectionGroupId,
+                                     ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
+                                     String workingDirectory, String toolMode, String systemPromptOverride,
+                                     Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId) {
+            this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
+                    toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
+                    thinking, image, chatProjectId, null);
         }
     }
 
@@ -512,7 +550,8 @@ public class ChatController {
     // ─── 멀티모달 변환 헬퍼 ───
 
     @SuppressWarnings("unchecked")
-    private UnifiedMessage toUnifiedMessage(MessageDto dto, String sessionId, AdapterResolution adapter) {
+    private UnifiedMessage toUnifiedMessage(MessageDto dto, String sessionId, AdapterResolution adapter,
+                                            boolean dataGuide) {
         UnifiedMessage.Role role = UnifiedMessage.Role.valueOf(dto.role().toUpperCase());
 
         if (dto.content() instanceof String text) {
@@ -539,7 +578,7 @@ public class ChatController {
 
                 } else if ("document".equals(type)) {
                     // CR-061: PDF 첨부 — adapter.pdf 지원 여부에 따라 Document or 텍스트 폴백
-                    resolveDocumentBlock(map, sessionId, adapter, blocks, pdfFallbackPrefix);
+                    resolveDocumentBlock(map, sessionId, adapter, blocks, pdfFallbackPrefix, dataGuide);
 
                 } else if ("image_url".equals(type)) {
                     // PRD-111 호환: OpenAI 스타일 data: URI 또는 URL
@@ -603,7 +642,8 @@ public class ChatController {
      * 이미지도 미지원 → PdfTextExtractor 텍스트 폴백.
      */
     private void resolveDocumentBlock(Map<?, ?> map, String sessionId, AdapterResolution adapter,
-                                       List<ContentBlock> blocks, StringBuilder pdfFallbackPrefix) {
+                                       List<ContentBlock> blocks, StringBuilder pdfFallbackPrefix,
+                                       boolean dataGuide) {
         String attachmentId = (String) map.get("attachment_id");
         if (attachmentId == null || attachmentId.isBlank()) {
             throw new AttachmentException(HttpStatus.BAD_REQUEST,
@@ -613,7 +653,17 @@ public class ChatController {
         ChatAttachmentEntity att = attachmentService.loadOwned(UUID.fromString(attachmentId), sessionId);
         byte[] bytes = attachmentService.readBytes(att);
 
-        // PDF 외(미래 확장)는 기존 path 유지 — 현재 document 블록은 PDF 만 들어온다.
+        // CR-183: 워드, 텍스트는 본문 글 블록, 데이터 파일은 요약 글 블록 하나로 보낸다(BIZ-221).
+        java.util.Optional<com.platform.attachment.AttachmentKind> kind =
+                com.platform.attachment.AttachmentKind.fromMediaType(att.getMediaType());
+        if (kind.isPresent()) {
+            blocks.add(new ContentBlock.Text(kind.get().isData()
+                    ? attachmentPromptBuilder.dataSummary(att, bytes, kind.get(), dataGuide)
+                    : attachmentPromptBuilder.documentText(att, bytes, kind.get())));
+            return;
+        }
+
+        // 그 밖의 document 블록은 PDF 다.
         PdfVisionResolver.PdfVisionResult vision = pdfVisionResolver.resolve(
                 bytes, adapter.capability().supportsPdf(), adapter.capability().supportsImage());
 
@@ -674,6 +724,22 @@ public class ChatController {
         if (!connectionAdapterFactory.isModelAllowed(request.connectionId(), request.model())) {
             throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "model_not_allowed");
         }
+    }
+
+    /** CR-183 BIZ-223: 영문 소문자, 숫자, 하이픈만 최대 10개. 겹친 값은 하나로 줄인다. */
+    static List<String> parseRenderFeatures(List<String> raw) {
+        if (raw == null || raw.isEmpty()) return null;
+        if (raw.size() > MAX_RENDER_FEATURES) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "render_features_invalid");
+        }
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        for (String v : raw) {
+            if (v == null || !RENDER_FEATURE.matcher(v).matches()) {
+                throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "render_features_invalid");
+            }
+            out.add(v);
+        }
+        return List.copyOf(out);
     }
 
     /** CR-175 BIZ-150: thinking 칸. 켜기를 요청했는데 그 연결 어댑터가 요청마다 바꾸지 못하면 400. */

@@ -51,7 +51,8 @@ class AttachmentServiceTest {
     @BeforeEach
     void setUp() {
         mimeValidator = new MimeValidator();
-        service = new AttachmentService(repo, storage, mimeValidator, settings);
+        service = new AttachmentService(repo, storage, mimeValidator, settings,
+                new com.platform.attachment.data.DataTableReader(settings));
         TenantContext.setTenantId("tenant-a");
     }
 

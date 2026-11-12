@@ -15,5 +15,9 @@ public interface ChatAttachmentRepository extends JpaRepository<ChatAttachmentEn
 
     long countBySessionIdAndExpiresAtAfter(String sessionId, OffsetDateTime now);
 
+    /** CR-183: 세션에 보관 중인 데이터 파일이 있는지(BIZ-222). */
+    boolean existsBySessionIdAndMediaTypeInAndExpiresAtAfter(String sessionId, java.util.Collection<String> mediaTypes,
+                                                             OffsetDateTime now);
+
     List<ChatAttachmentEntity> findTop100ByExpiresAtBefore(OffsetDateTime now);
 }

@@ -21,14 +21,36 @@ public record ToolFilterContext(
         // --- CR-029 신규 ---
         List<String> requiredCapabilities,
         PermissionLevel maxPermission,
-        Boolean readOnlyMode
+        Boolean readOnlyMode,
+        // CR-183: 노출 목록과 세션 활성 목록에 없어도 이 요청에 붙이는 도구(BIZ-222). exclude 에 있으면 붙이지 않는다.
+        List<String> attachedTools
 ) {
+    /** CR-029 6칸 호환 (CR-183 attachedTools 없음) */
+    public ToolFilterContext(List<String> allowedTools, List<String> excludeTools, List<String> tags,
+                             List<String> requiredCapabilities, PermissionLevel maxPermission,
+                             Boolean readOnlyMode) {
+        this(allowedTools, excludeTools, tags, requiredCapabilities, maxPermission, readOnlyMode, null);
+    }
+
     /** CR-006 하위호환: 3-arg constructor */
     public ToolFilterContext(List<String> allowedTools, List<String> excludeTools, List<String> tags) {
         this(allowedTools, excludeTools, tags, null, null, null);
     }
 
     /** 필터 없음 (전체 도구 노출) */
+    /** CR-183: 붙이는 도구를 더한 복사본. null 필터에서도 부를 수 있게 정적 메서드다. */
+    public static ToolFilterContext withAttached(ToolFilterContext base, List<String> attached) {
+        if (base == null) return new ToolFilterContext(null, null, null, null, null, null, attached);
+        return new ToolFilterContext(base.allowedTools, base.excludeTools, base.tags, base.requiredCapabilities,
+                base.maxPermission, base.readOnlyMode, attached);
+    }
+
+    /** CR-183: 이 요청에 붙이는 도구인지. allowedTools 와 상관없이 붙이고 excludeTools 에 있으면 붙이지 않는다. */
+    public boolean attaches(String toolName) {
+        if (attachedTools == null || !attachedTools.contains(toolName)) return false;
+        return excludeTools == null || !excludeTools.contains(toolName);
+    }
+
     public static ToolFilterContext none() {
         return new ToolFilterContext(null, null, null);
     }

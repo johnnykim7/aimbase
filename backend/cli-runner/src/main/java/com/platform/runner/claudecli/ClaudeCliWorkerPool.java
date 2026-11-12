@@ -357,6 +357,21 @@ public class ClaudeCliWorkerPool {
                                             String workingDirectory,
                                             boolean disallowSubagent,
                                             List<SkillRef> skillSet) {
+        return getOrCreateMain(runId, model, configDir, systemPrompt, toolMode, allowedTools, workingDirectory,
+                disallowSubagent, skillSet, null);
+    }
+
+    /**
+     * CR-183: 대화 요청의 세션 번호 추가. 있으면 워커가 계산 도구 통로를 붙인다(BIZ-222). 메인 워커가 이미 살아있으면 무시한다.
+     */
+    public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
+                                            String systemPrompt,
+                                            ClaudeCliCommandBuilder.ToolMode toolMode,
+                                            List<String> allowedTools,
+                                            String workingDirectory,
+                                            boolean disallowSubagent,
+                                            List<SkillRef> skillSet,
+                                            String dataSessionId) {
         // CR-173: 돌려주는 워커는 lease 된 상태다. 호출자는 턴을 마치면 unlease 한다(그동안 자리 내기 대상이 아니다).
         // 실행기 전체 자리는 run 잠금 밖에서 기다린다. 잠금을 쥔 채 기다리면 자리 내기가 다른 run 잠금을 잡다 서로 막힌다.
         boolean slotHeld = false;
@@ -374,7 +389,7 @@ public class ClaudeCliWorkerPool {
                     if (!slotHeld && tryTakeProcessSlot()) slotHeld = true;
                     if (slotHeld) {
                         ClaudeCliWorker worker = spawnMain(rw, runId, model, configDir, systemPrompt, toolMode,
-                                allowedTools, workingDirectory, disallowSubagent, skillSet);
+                                allowedTools, workingDirectory, disallowSubagent, skillSet, dataSessionId);
                         handProcessSlotTo(worker);
                         slotHeld = false;
                         worker.lease();
@@ -422,7 +437,8 @@ public class ClaudeCliWorkerPool {
                                       List<String> allowedTools,
                                       String workingDirectory,
                                       boolean disallowSubagent,
-                                      List<SkillRef> skillSet) {
+                                      List<SkillRef> skillSet,
+                                      String dataSessionId) {
         acquireSlot(rw, runId);
         try {
             ClaudeCliWorker worker = workerFactory.create(model, null, false, configDir);
@@ -445,6 +461,9 @@ public class ClaudeCliWorkerPool {
             }
             if (skillSet != null && !skillSet.isEmpty()) {
                 worker.setSkillSet(skillSet);
+            }
+            if (dataSessionId != null && !dataSessionId.isBlank()) {
+                worker.setDataSessionId(dataSessionId);
             }
             worker.start();
             rw.main = worker;

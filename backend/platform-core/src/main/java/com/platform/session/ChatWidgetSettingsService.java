@@ -3,6 +3,8 @@ package com.platform.session;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.attachment.AttachmentKind;
+import com.platform.attachment.AttachmentService;
 import com.platform.config.PlatformSettingsService;
 import com.platform.image.ImageConnectionResolver;
 import com.platform.image.ImageGenerationSettings;
@@ -44,6 +46,7 @@ public class ChatWidgetSettingsService {
     private final ObjectMapper objectMapper;
     private final ImageConnectionResolver imageConnectionResolver;
     private final ImageGenerationSettings imageSettings;
+    private final AttachmentService attachmentService;
 
     public ChatWidgetSettingsService(PlatformSettingsService platformSettings,
                                      ConnectionAdapterFactory connectionAdapterFactory,
@@ -51,7 +54,8 @@ public class ChatWidgetSettingsService {
                                      ConnectionRepository connectionRepository,
                                      ObjectMapper objectMapper,
                                      ImageConnectionResolver imageConnectionResolver,
-                                     ImageGenerationSettings imageSettings) {
+                                     ImageGenerationSettings imageSettings,
+                                     AttachmentService attachmentService) {
         this.platformSettings = platformSettings;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.adapterRegistry = adapterRegistry;
@@ -59,6 +63,7 @@ public class ChatWidgetSettingsService {
         this.objectMapper = objectMapper;
         this.imageConnectionResolver = imageConnectionResolver;
         this.imageSettings = imageSettings;
+        this.attachmentService = attachmentService;
     }
 
     /**
@@ -96,7 +101,16 @@ public class ChatWidgetSettingsService {
                 "widget.project-instructions-max-chars", ChatProjectService.DEFAULT_INSTRUCTIONS_MAX));
         body.put("project_files_max_count", platformSettings.getInt(
                 "widget.project-files-max-count", ChatProjectService.DEFAULT_FILES_MAX));
+        body.put("attachments", attachments());
         return body;
+    }
+
+    /** CR-183: 파일 선택 창이 받는 확장자와 종류별 크기 상한(T3-2, BIZ-220). 위젯이 올리기 전에 같은 기준으로 거른다. */
+    Map<String, Object> attachments() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("accept", AttachmentKind.acceptedExtensions());
+        out.put("max_bytes", attachmentService.maxBytesByGroup());
+        return out;
     }
 
     /**

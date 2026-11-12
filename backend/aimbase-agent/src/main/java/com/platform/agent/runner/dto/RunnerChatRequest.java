@@ -72,6 +72,13 @@ public class RunnerChatRequest {
     @JsonProperty("skill_set")
     private List<Map<String, Object>> skillSet;
 
+    /**
+     * CR-183: 대화 요청의 세션 번호. Worker 가 계산 도구 통로(aimbase-data) 항목을 더하고
+     * X-Aimbase-Session-Id 머리글로 싣는다(BIZ-222). null 이면 붙이지 않는다(워크플로우 단계).
+     */
+    @JsonProperty("data_session_id")
+    private String dataSessionId;
+
     /** CR-175: 깊게 생각하기. null 이면 CLI 생각 설정에 손대지 않는다. */
     @JsonProperty("thinking")
     private Boolean thinking;
@@ -100,6 +107,8 @@ public class RunnerChatRequest {
     public void setDisallowSubagent(Boolean disallowSubagent) { this.disallowSubagent = disallowSubagent; }
     public List<Map<String, Object>> getSkillSet() { return skillSet; }
     public void setSkillSet(List<Map<String, Object>> skillSet) { this.skillSet = skillSet; }
+    public String getDataSessionId() { return dataSessionId; }
+    public void setDataSessionId(String dataSessionId) { this.dataSessionId = dataSessionId; }
     public Boolean getThinking() { return thinking; }
     public void setThinking(Boolean thinking) { this.thinking = thinking; }
 }

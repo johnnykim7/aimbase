@@ -169,7 +169,7 @@ public class ChatProjectService {
             throw new ChatRejectedException(HttpStatus.CONFLICT, "project_files_full");
         }
         byte[] bytes = attachmentService.readUpload(file);
-        String mediaType = attachmentService.validate(bytes, file.getContentType());
+        String mediaType = attachmentService.validate(bytes, file.getOriginalFilename(), file.getContentType());
         String filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "upload";
 
         String storagePath;

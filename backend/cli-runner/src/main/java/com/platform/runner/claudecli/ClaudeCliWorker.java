@@ -2,6 +2,7 @@ package com.platform.runner.claudecli;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.api.filter.AgentIdRequestFilter;
 import com.platform.llm.model.ContentBlock;
 import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.TokenUsage;
@@ -9,6 +10,7 @@ import com.platform.llm.model.ToolCall;
 import com.platform.llm.model.UnifiedMessage;
 import com.platform.skill.SkillSetHeader;
 import com.platform.tool.SkillRef;
+import com.platform.tool.builtin.DataQueryTool;
 import com.platform.tool.builtin.SkillOpenTool;
 import com.platform.tool.builtin.SkillReadTool;
 import com.platform.tool.builtin.SkillRunTool;
@@ -114,6 +116,14 @@ public class ClaudeCliWorker implements AutoCloseable {
     private static final String SKILLS_PATH = "/mcp-skills";
     private static final String SKILLS_PREFIX = "mcp__" + SKILLS_SERVER_KEY + "__";
     private static final List<String> SKILL_TOOLS = List.of(SkillOpenTool.NAME, SkillReadTool.NAME, SkillRunTool.NAME);
+    /**
+     * CR-183: 대화 요청이면 채우는 대화 세션 번호. 있으면 모든 모드에 계산 도구 통로(aimbase-data) 항목을 더하고
+     * 머리글 X-Aimbase-Session-Id 로 서버에 돌려준다(BIZ-222). start() 호출 전에만 setDataSessionId 로 변경 가능.
+     */
+    private volatile String dataSessionId;
+    static final String DATA_SERVER_KEY = "aimbase-data";
+    private static final String DATA_PATH = "/mcp-data";
+    private static final String DATA_TOOL = "mcp__" + DATA_SERVER_KEY + "__" + DataQueryTool.NAME;
     /**
      * CR-068 후속: --system-prompt flag 로 CLI 의 기본 system prompt 를 우리 prompt 로 교체.
      * null 이면 CLI 기본(Claude Code 학습 패턴) 사용. 비어있으면 SYSTEM 메시지 prepend 폴백.
@@ -269,6 +279,14 @@ public class ClaudeCliWorker implements AutoCloseable {
             throw new IllegalStateException("Worker already started; cannot set skillSet after start()");
         }
         this.skillSet = (skills == null || skills.isEmpty()) ? null : List.copyOf(skills);
+    }
+
+    /** CR-183: 대화 세션 번호. 비어 있으면 계산 도구 통로를 붙이지 않는다(워크플로우 단계). */
+    public void setDataSessionId(String sessionId) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set dataSessionId after start()");
+        }
+        this.dataSessionId = (sessionId == null || sessionId.isBlank()) ? null : sessionId.trim();
     }
 
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
@@ -1193,7 +1211,8 @@ public class ClaudeCliWorker implements AutoCloseable {
      * 호출처가 setToolMode(...) 로 override.
      */
     /** CR-117: 서버 MCP 도구가 run 격리 작업장을 보도록 X-Aimbase-Workspace-Path 헤더 키. */
-    private static final String WORKSPACE_HEADER = "X-Aimbase-Workspace-Path";
+    private static final String WORKSPACE_HEADER = AgentIdRequestFilter.WORKSPACE_HEADER;
+    private static final String SESSION_HEADER = AgentIdRequestFilter.SESSION_HEADER;
 
     /**
      * CR-117: MCP config 의 aimbase-server.headers 에 {@code X-Aimbase-Workspace-Path} 헤더를 주입한다.
@@ -1351,11 +1370,55 @@ public class ClaudeCliWorker implements AutoCloseable {
 
     /** aimbase-server 주소 .../mcp 를 .../mcp-skills 로. 끝이 /mcp 가 아니면 호스트 바로 아래로 둔다. */
     static String skillsUrl(String serverUrl) {
+        return siblingUrl(serverUrl, SKILLS_PATH);
+    }
+
+    private static String siblingUrl(String serverUrl, String path) {
         String base = serverUrl.endsWith("/") ? serverUrl.substring(0, serverUrl.length() - 1) : serverUrl;
         if (base.endsWith("/mcp")) {
-            return base.substring(0, base.length() - "/mcp".length()) + SKILLS_PATH;
+            return base.substring(0, base.length() - "/mcp".length()) + path;
         }
-        return URI.create(base).resolve(SKILLS_PATH).toString();
+        return URI.create(base).resolve(path).toString();
+    }
+
+    /**
+     * CR-183: MCP 설정에 aimbase-data 항목을 더한다. aimbase-server 항목을 본떠 주소를 /mcp-data 로 바꾸고
+     * 머리글에 대화 세션 번호를 싣는다. 바탕 설정이 비었으면(NATIVE) 이 항목 하나가 된다.
+     * aimbase-server 항목이 없으면 계산 도구에 닿을 길이 없어 바탕 설정을 그대로 돌려준다.
+     */
+    @SuppressWarnings("unchecked")
+    static String withDataEntry(String baseConfig, String serverConfig, String chatSessionId) {
+        Map<String, Object> server;
+        try {
+            server = serverEntry(serverConfig);
+        } catch (IllegalStateException e) {
+            log.warn("ClaudeCliWorker: no aimbase-server entry, data_query channel not attached");
+            return baseConfig;
+        }
+        Map<String, Object> data = new LinkedHashMap<>(server);
+        data.put("url", siblingUrl(String.valueOf(server.get("url")), DATA_PATH));
+        Map<String, Object> headers = new LinkedHashMap<>();
+        if (server.get("headers") instanceof Map<?, ?> h) {
+            h.forEach((k, v) -> headers.put(String.valueOf(k), v));
+        }
+        headers.remove(WORKSPACE_HEADER);
+        headers.remove(SkillSetHeader.NAME);
+        headers.put(SESSION_HEADER, chatSessionId);
+        data.put("headers", headers);
+        try {
+            Map<String, Object> root = (baseConfig == null || baseConfig.isBlank())
+                    ? new LinkedHashMap<>()
+                    : MAPPER.readValue(baseConfig, MAP_TYPE);
+            Map<String, Object> servers = root.get("mcpServers") instanceof Map<?, ?> m
+                    ? (Map<String, Object>) m
+                    : new LinkedHashMap<>();
+            servers.put(DATA_SERVER_KEY, data);
+            root.put("mcpServers", servers);
+            return MAPPER.writeValueAsString(root);
+        } catch (Exception e) {
+            log.warn("ClaudeCliWorker: failed to add data_query channel, using original: {}", e.getMessage());
+            return baseConfig;
+        }
     }
 
     private List<String> buildCommand() {
@@ -1366,7 +1429,9 @@ public class ClaudeCliWorker implements AutoCloseable {
         List<String> mcpAllowed = null;
         if (allowedToolNames != null && !allowedToolNames.isEmpty()) {
             List<String> names = new ArrayList<>();
-            allowedToolNames.forEach(n -> names.add(MCP_SERVER_PREFIX + n));
+            // CR-183: data_query 는 aimbase-server 에 없고 아래에서 aimbase-data 이름으로 더한다.
+            allowedToolNames.stream().filter(n -> !DataQueryTool.NAME.equals(n))
+                    .forEach(n -> names.add(MCP_SERVER_PREFIX + n));
             // CR-147: NATIVE 의 스킬 도구는 aimbase-skills 항목에서 오므로 그 이름으로도 허용한다.
             if (nativeWithSkills) {
                 allowedToolNames.stream().filter(SKILL_TOOLS::contains).forEach(n -> names.add(SKILLS_PREFIX + n));
@@ -1380,6 +1445,15 @@ public class ClaudeCliWorker implements AutoCloseable {
             nativeMcpConfig = skillsOnlyConfig(mcpConfig);
         } else if (skillSet != null) {
             serverEntry(mcpConfig);   // AIMBASE, HYBRID 도 스킬 도구가 실릴 aimbase-server 항목이 있어야 한다
+        }
+        // CR-183: 대화 요청이면 모든 모드에 계산 도구 통로를 더한다. data_query 는 /mcp 노출 목록에 없다.
+        if (dataSessionId != null) {
+            if (toolMode == ClaudeCliCommandBuilder.ToolMode.NATIVE) {
+                nativeMcpConfig = withDataEntry(nativeMcpConfig, mcpConfig, dataSessionId);
+            } else {
+                mcpConfig = withDataEntry(mcpConfig, mcpConfig, dataSessionId);
+            }
+            if (mcpAllowed != null) mcpAllowed.add(DATA_TOOL);
         }
         // CR-152: CLI 가 실제로 받는 설정은 NATIVE 면 nativeMcpConfig, 그 밖은 mcpConfig 다(빌더 resolveMcpJson 과 같은 기준).
         requiredMcpServers = mcpServerNames(

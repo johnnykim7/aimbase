@@ -37,6 +37,8 @@ public class AgentIdRequestFilter extends OncePerRequestFilter {
     public static final String HEADER = "X-Aimbase-Agent-Id";
     /** CR-117: CLI 워커가 보내는 run 격리 작업장 절대경로 헤더. */
     public static final String WORKSPACE_HEADER = "X-Aimbase-Workspace-Path";
+    /** CR-183: CLI 워커가 aimbase-data 통로에 싣는 대화 세션 번호 머리글. */
+    public static final String SESSION_HEADER = "X-Aimbase-Session-Id";
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -46,7 +48,11 @@ public class AgentIdRequestFilter extends OncePerRequestFilter {
         String agentId = request.getHeader(HEADER);
         String workspacePath = request.getHeader(WORKSPACE_HEADER);
         String skillSet = request.getHeader(SkillSetHeader.NAME);
+        String chatSessionId = request.getHeader(SESSION_HEADER);
         try {
+            if (chatSessionId != null && !chatSessionId.isBlank()) {
+                RequestContext.setChatSessionId(chatSessionId.trim());
+            }
             if (agentId != null && !agentId.isBlank()) {
                 RequestContext.setAgentId(agentId.trim());
             }

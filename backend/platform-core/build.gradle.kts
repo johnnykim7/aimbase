@@ -50,6 +50,9 @@ dependencies {
     implementation("org.apache.pdfbox:pdfbox:3.0.4")
     implementation("org.apache.poi:poi-ooxml:5.4.0")
 
+    // ── 첨부 데이터 파일 계산 (CR-183): 호출마다 메모리 DB 를 열고 닫는다. 판은 Spring Boot BOM 관리 ──
+    implementation("com.h2database:h2")
+
     // ── Skill Bundle zip (CR-147): 심볼릭 링크 항목을 가려내려면 zip 의 유닉스 모드가 필요하다 ──
     implementation("org.apache.commons:commons-compress:1.27.1")
 

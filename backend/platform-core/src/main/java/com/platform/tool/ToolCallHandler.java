@@ -1,5 +1,6 @@
 package com.platform.tool;
 
+import com.platform.tool.builtin.DataQueryTool;
 import com.platform.tool.model.UnifiedToolDef;
 import com.platform.domain.ToolExecutionLogEntity;
 import com.platform.hook.HookDecision;
@@ -146,8 +147,8 @@ public class ToolCallHandler {
         LLMResponse response = null;
 
         // 필터링된 도구 목록 (루프 전체에서 동일하게 사용)
-        List<UnifiedToolDef> filteredTools =
-                sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter));
+        List<UnifiedToolDef> filteredTools = withAttached(toolRegistry, toolFilter,
+                sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter)));
 
         if (filteredTools.isEmpty()) {
             log.debug("No tools available after filtering, executing without tools");
@@ -344,7 +345,7 @@ public class ToolCallHandler {
         // CR-068 (2026-04-26): CR-048 의 sessionToolRegistry.filterActive 가 도구 schema 를 좁혀서
         // 모델이 필요한 도구를 못 받고 환각 답변하는 회귀를 만들었다. 작년 4월 정상 동작 동등으로 환원 —
         // 모든 도구 schema 를 모델에게 전달하고 모델이 자율 선택한다.
-        List<UnifiedToolDef> filteredTools = toolRegistry.getToolDefs(toolFilter);
+        List<UnifiedToolDef> filteredTools = withAttached(toolRegistry, toolFilter, toolRegistry.getToolDefs(toolFilter));
 
         if (filteredTools.isEmpty()) {
             log.debug("No tools available after filtering, executing without tools");
@@ -530,13 +531,16 @@ public class ToolCallHandler {
 
         List<UnifiedMessage> mutableMessages = new ArrayList<>(messages);
         LLMResponse response = null;
-        List<UnifiedToolDef> filteredTools =
-                sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter));
+        List<UnifiedToolDef> filteredTools = withAttached(toolRegistry, toolFilter,
+                sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter)));
 
+        // CR-183: CLI 어댑터만 읽는다. 러너가 계산 도구 통로를 붙인다(BIZ-222).
+        String dataSessionId = toolFilter != null && toolFilter.attaches(DataQueryTool.NAME) ? sessionId : null;
         // 도구 없음 → 단순 스트리밍 한 번
         if (filteredTools.isEmpty()) {
             LLMRequest request = new LLMRequest(
-                    resolvedModel, mutableMessages, null, config, true, sessionId, null);
+                    resolvedModel, mutableMessages, null, config, true, sessionId, null)
+                    .withDataSessionId(dataSessionId);
             StreamingAccumulator acc = new StreamingAccumulator(streamSink, cancelled);
             adapter.chatStream(request, acc::accept);
             acc.await();
@@ -554,7 +558,8 @@ public class ToolCallHandler {
 
             LLMRequest request = new LLMRequest(
                     resolvedModel, mutableMessages, filteredTools,
-                    config, true, sessionId, toolChoice);
+                    config, true, sessionId, toolChoice)
+                    .withDataSessionId(dataSessionId);
 
             StreamingAccumulator acc = new StreamingAccumulator(streamSink, cancelled);
             adapter.chatStream(request, acc::accept);
@@ -944,6 +949,22 @@ public class ToolCallHandler {
      * tool_result 도착 → 같은 iteration 으로 TOOL_RESULT insert (FE 페어링 키 = step+iteration+tool_name).
      * turn 끝의 observedToolEvents batch 는 이 경로에서 중복이므로 적재하지 않는다.
      */
+    /**
+     * CR-183: 노출 목록과 세션 활성 목록에 없는 도구 가운데 이 요청에 붙인 것을 끝에 더한다(BIZ-222).
+     * 세션 활성 목록으로 좁힌 뒤에 더해야 빠지지 않는다.
+     */
+    static List<UnifiedToolDef> withAttached(ToolRegistry registry, ToolFilterContext filter,
+                                             List<UnifiedToolDef> defs) {
+        if (filter == null || filter.attachedTools() == null || filter.attachedTools().isEmpty()) return defs;
+        List<UnifiedToolDef> out = new ArrayList<>(defs);
+        for (String name : filter.attachedTools()) {
+            if (!filter.attaches(name) || out.stream().anyMatch(d -> d.name().equals(name))) continue;
+            ToolExecutor executor = registry.getExecutor(name);
+            if (executor != null) out.add(executor.getDefinition());
+        }
+        return out;
+    }
+
     private LLMResponse executeCliStreaming(
             LLMAdapter adapter, String resolvedModel, List<UnifiedMessage> messages,
             ModelConfig config, String sessionId, ToolRegistry toolRegistry,
@@ -963,7 +984,10 @@ public class ToolCallHandler {
                 // CR-128(갭B): 요청 단위 tool_mode/system_prompt override 를 CLI 도구루프 경로에도 전파
                 .withCliOverrides(toolModeOverride, systemPromptOverride)
                 // CR-147: 러너가 MCP 머리글로 돌려줘 서버 쪽 스킬 도구가 단계가 고정한 판을 쓴다(BIZ-123)
-                .withSkillSet(ctx != null ? ctx.skillSet() : null);
+                .withSkillSet(ctx != null ? ctx.skillSet() : null)
+                // CR-183: 대화 요청이면 러너가 계산 도구 통로(aimbase-data)를 붙인다(BIZ-222)
+                .withDataSessionId(toolFilter != null && toolFilter.attaches(DataQueryTool.NAME) && ctx != null
+                        ? ctx.sessionId() : null);
 
         final java.util.UUID runId = (ctx != null && ctx.workflowRunId() != null)
                 ? parseUuidSafe(ctx.workflowRunId()) : null;

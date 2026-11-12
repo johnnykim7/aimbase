@@ -29,6 +29,11 @@ public final class RequestContext {
      * 서버 MCP 도구가 ToolContext.skillSet 으로 채운다. 없으면 null 이라 스킬 도구가 이름으로 최신 판을 찾는다.
      */
     private static final ThreadLocal<List<SkillRef>> SKILL_SET = new ThreadLocal<>();
+    /**
+     * CR-183: CLI 워커가 aimbase-data 통로에 X-Aimbase-Session-Id 머리글로 싣는 대화 세션 번호(BIZ-222).
+     * data_query 가 첨부 소유를 이 세션으로 확인한다.
+     */
+    private static final ThreadLocal<String> CHAT_SESSION_ID = new ThreadLocal<>();
 
     private RequestContext() {}
 
@@ -45,6 +50,10 @@ public final class RequestContext {
     public static void setSkillSet(List<SkillRef> skills) { SKILL_SET.set(skills); }
 
     public static List<SkillRef> getSkillSet() { return SKILL_SET.get(); }
+
+    public static void setChatSessionId(String sessionId) { CHAT_SESSION_ID.set(sessionId); }
+
+    public static String getChatSessionId() { return CHAT_SESSION_ID.get(); }
 
     /** CR-075: JwtAuthenticationFilter 가 widget 토큰 인증 시 set. */
     public static void setUserRef(String ref) { USER_REF.set(ref); }
@@ -70,5 +79,6 @@ public final class RequestContext {
         USER_REF.remove();
         WORKSPACE_PATH.remove();
         SKILL_SET.remove();
+        CHAT_SESSION_ID.remove();
     }
 }

@@ -23,6 +23,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ex.getStatus()).body(ApiResponse.error(ex.getMessage()));
     }
 
+    /**
+     * CR-183: 첨부 오류. 위젯이 code 로 문구를 고르고, 크기, 행, 열 상한 거절은 limit 으로 「최대 N」 을 보인다(BIZ-220).
+     */
+    @ExceptionHandler(com.platform.attachment.AttachmentException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleAttachment(com.platform.attachment.AttachmentException ex) {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("success", false);
+        body.put("error", ex.getDetail());
+        body.put("code", ex.getCode());
+        if (ex.getLimit() != null) body.put("limit", ex.getLimit());
+        return ResponseEntity.status(ex.getStatusCode()).body(body);
+    }
+
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
         log.warn("IllegalStateException: {}", ex.getMessage());

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.config.PlatformSettingsService;
 import com.platform.mcp.agent.McpToolConversion;
 import com.platform.tool.builtin.SkillOpenTool;
+import com.platform.tool.builtin.DataQueryTool;
 import com.platform.tool.builtin.SkillReadTool;
 import com.platform.tool.builtin.SkillRunTool;
 import com.platform.tool.ToolExecutor;
@@ -78,6 +79,8 @@ public class ServerMcpConfig {
     private final Set<String> publishedTools = ConcurrentHashMap.newKeySet();
     /** CR-147: /mcp-skills 에 실려 있는 도구 이름. */
     private final Set<String> publishedSkillTools = ConcurrentHashMap.newKeySet();
+    /** CR-183: /mcp-data 에 실려 있는 도구 이름. */
+    private final Set<String> publishedDataTools = ConcurrentHashMap.newKeySet();
     /** CR-153: 실려 있는 도구에 적은 결과 크기 상한. 설정이 바뀌면 도구를 모두 다시 싣는다. */
     private int publishedResultMaxChars;
 
@@ -169,6 +172,39 @@ public class ServerMcpConfig {
     }
 
     /**
+     * CR-183: 계산 도구 전용 통로. data_query 하나만 싣고 대화 세션 머리글로 첨부 소유를 확인한다(BIZ-222).
+     * 노출 목록과 상관없이 대화 요청의 CLI 작업자가 이 통로를 연결한다.
+     */
+    @Bean
+    public HttpServletStreamableServerTransportProvider dataMcpTransport() {
+        return HttpServletStreamableServerTransportProvider.builder()
+                .jsonMapper(io.modelcontextprotocol.json.McpJsonDefaults.getMapper())
+                .mcpEndpoint("/mcp-data")
+                .build();
+    }
+
+    @Bean
+    public org.springframework.boot.web.servlet.ServletRegistrationBean<HttpServletStreamableServerTransportProvider>
+            dataMcpServletRegistration(HttpServletStreamableServerTransportProvider dataMcpTransport) {
+        var reg = new org.springframework.boot.web.servlet.ServletRegistrationBean<>(dataMcpTransport, "/mcp-data/*");
+        reg.setName("dataMcpStreamableServlet");
+        reg.setAsyncSupported(true);
+        reg.setLoadOnStartup(1);
+        return reg;
+    }
+
+    @Bean
+    public McpSyncServer dataMcpServer(HttpServletStreamableServerTransportProvider dataMcpTransport) {
+        return McpServer.sync(dataMcpTransport)
+                .immediateExecution(true)   // serverMcpServer 와 같은 이유
+                .serverInfo("aimbase-data", "1.0.0")
+                .capabilities(io.modelcontextprotocol.spec.McpSchema.ServerCapabilities.builder()
+                        .tools(true)
+                        .build())
+                .build();
+    }
+
+    /**
      * ToolRegistry 가 builtins 등록을 마친 이후, MCP 서버에 도구 사양을 동적으로 추가.
      *
      * <p>ToolRegistry.registerBuiltins 도 같은 {@link ApplicationReadyEvent} 를 듣고 LOWEST_PRECEDENCE
@@ -232,6 +268,12 @@ public class ServerMcpConfig {
         Map<String, ToolExecutor> skills = new HashMap<>(desired);
         skills.keySet().retainAll(SKILL_TOOLS);
         sync("skillMcpServer", skills, publishedSkillTools, meta, resized);
+
+        // CR-183: /mcp-data 는 노출 목록이 아니라 등록된 data_query 를 그대로 싣는다.
+        Map<String, ToolExecutor> data = new HashMap<>();
+        ToolExecutor dataQuery = toolRegistry.getExecutor(DataQueryTool.NAME);
+        if (dataQuery != null) data.put(DataQueryTool.NAME, dataQuery);
+        sync("dataMcpServer", data, publishedDataTools, meta, resized);
         publishedResultMaxChars = resultMaxChars;
         return publishedTools.size();
     }
@@ -272,8 +314,11 @@ public class ServerMcpConfig {
                 // CR-124 (SDK 2.0.0): 핸들러 2번째 인자가 Map → CallToolRequest 로 변경됨.
                 // CR-146: 실행기를 여기서 잡아 두면 바깥 MCP 재연결 뒤에도 닫힌 옛 연결을 부른다.
                 // 이름이 같으면 다시 싣지 않으므로 핸들러는 호출 때 이름으로 지금 실행기를 찾는다.
+                boolean dataChannel = "dataMcpServer".equals(serverBean);
                 mcpServer.addTool(new McpServerFeatures.SyncToolSpecification(mcpTool,
-                        (exchange, request) -> dispatcher.dispatch(name, request.arguments())));
+                        (exchange, request) -> dataChannel
+                                ? dispatcher.dispatchData(name, request.arguments())
+                                : dispatcher.dispatch(name, request.arguments())));
                 publishedTools.add(name);
                 changed = true;
                 log.info("Server MCP {}: tool exposed '{}'", serverBean, name);

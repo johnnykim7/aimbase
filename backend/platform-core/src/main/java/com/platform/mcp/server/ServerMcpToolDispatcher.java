@@ -13,6 +13,7 @@ import com.platform.tenant.TenantContext;
 import com.platform.tool.ApprovalState;
 import com.platform.tool.PermissionLevel;
 import com.platform.tool.ToolContext;
+import com.platform.tool.builtin.DataQueryTool;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.ToolMessageBlock;
 import com.platform.tool.ToolRegistry;
@@ -102,6 +103,27 @@ public class ServerMcpToolDispatcher {
             log.warn("Server MCP: blocked non-CLI-exposed tool '{}'", name);
             return errorResult("Tool not exposed via MCP CLI channel");
         }
+        return execute(tool, name, args, null);
+    }
+
+    /**
+     * CR-183: aimbase-data 통로(/mcp-data). data_query 는 노출 목록에 없어 위 판정을 타지 않고 이 통로에서만
+     * 부른다. 대화 세션은 워커가 실은 X-Aimbase-Session-Id 로 채워 첨부 소유를 확인하게 한다(BIZ-222).
+     */
+    public McpSchema.CallToolResult dispatchData(String name, Map<String, Object> args) {
+        if (!DataQueryTool.NAME.equals(name)) {
+            log.warn("Server MCP data channel: blocked tool '{}'", name);
+            return errorResult("Tool not available on data channel: " + name);
+        }
+        ToolExecutor tool = toolRegistry.getExecutor(name);
+        if (tool == null) {
+            return errorResult("Tool not available: " + name);
+        }
+        return execute(tool, name, args, RequestContext.getChatSessionId());
+    }
+
+    private McpSchema.CallToolResult execute(ToolExecutor tool, String name, Map<String, Object> args,
+                                             String chatSessionId) {
 
         // Rate Limit (테넌트 단위, MCP 채널 한정 키 스코프). 익명 호출은 'anon' 으로 묶임.
         String tenantKey = "mcp:" + nonNullOrAnon(TenantContext.getTenantId());
@@ -134,7 +156,7 @@ public class ServerMcpToolDispatcher {
                 // newMessages 는 MCP 멀티모달 content 블록으로 변환해 같은 tool result 에 실어 보낸다.
                 // CR-117: ToolContext.workspacePath 를 CLI 워커가 보낸 run 격리 cwd 로 채운다
                 // (X-Aimbase-Workspace-Path 헤더 → RequestContext). 누락 시 null → minimal 동일(폴백 보존).
-                ToolResult toolResult = enhanced.execute(safeArgs, buildToolContext());
+                ToolResult toolResult = enhanced.execute(safeArgs, buildToolContext(chatSessionId));
                 result = ToolResultRenderer.render(toolResult);
                 mediaBlocks = toMediaContent(toolResult.newMessages());
             } else {
@@ -251,8 +273,16 @@ public class ServerMcpToolDispatcher {
      * 헤더 누락 시 null → WorkspaceResolver 가 default/general 폴백 (기존 동작 보존).
      * tenantId/sessionId 는 기존 minimal 과 동일하게 null — 행동 동일성 유지.
      */
-    private ToolContext buildToolContext() {
+    private ToolContext buildToolContext(String chatSessionId) {
         String workspacePath = RequestContext.getWorkspacePath();
+        if (chatSessionId != null && !chatSessionId.isBlank()) {
+            // CR-183: data 통로만 세션을 싣는다. 다른 통로는 아래 기존 모양 그대로다.
+            return new ToolContext(
+                    TenantContext.getTenantId(), null, null, chatSessionId, null, null, null, null, null,
+                    PermissionLevel.READ_ONLY, ApprovalState.NOT_REQUIRED,
+                    workspacePath, false, 0
+            );
+        }
         ToolContext context = (workspacePath == null || workspacePath.isBlank())
                 ? ToolContext.minimal(null, null)
                 // minimal 과 동일 (tenantId/sessionId=null, READ_ONLY/NOT_REQUIRED) + workspacePath 주입.

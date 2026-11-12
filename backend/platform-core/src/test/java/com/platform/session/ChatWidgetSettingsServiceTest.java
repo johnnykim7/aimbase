@@ -37,13 +37,15 @@ class ChatWidgetSettingsServiceTest {
     @Mock private com.platform.image.ImageGenerationSettings imageSettings;
     @Mock private LLMAdapter apiAdapter;
     @Mock private LLMAdapter cliAdapter;
+    @Mock private com.platform.attachment.AttachmentService attachmentService;
 
     private ChatWidgetSettingsService service;
 
     @BeforeEach
     void setUp() {
         service = new ChatWidgetSettingsService(platformSettings, connectionAdapterFactory, adapterRegistry,
-                connectionRepository, new ObjectMapper(), imageConnectionResolver, imageSettings);
+                connectionRepository, new ObjectMapper(), imageConnectionResolver, imageSettings,
+                attachmentService);
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FEEDBACK_REASONS_KEY), anyString()))
                 .thenReturn("[{\"code\":\"WRONG_INFO\",\"label\":\"틀린 정보\"}]");
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FOLLOW_UPS_ENABLED_KEY), anyString()))

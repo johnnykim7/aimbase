@@ -3579,15 +3579,17 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 |--------|------|
 | `file not found` | 세션 없음, 다른 세션 파일, 보관 기간 지남, 데이터 파일 아님 |
 | `no data file in this conversation` | 그 세션에 데이터 파일이 없음 |
-| `only a single SELECT or WITH statement is allowed` | 문장 검사 위반 |
+| `only a SELECT or WITH statement is allowed`, `only one statement is allowed`, `not allowed in data_query: <이름>` | 문장 검사 위반(재귀, 큰 글과 큰 행 집합을 만드는 함수 포함) |
 | `query timed out after N seconds` | 시간 상한 |
-| H2 오류 글 그대로 | 없는 표, 열, 문법 오류. 모델이 고쳐 다시 부른다 |
+| `SQL error: <H2 오류 첫 줄>` | 없는 표, 열, 문법 오류, 관리 권한이 필요한 함수. 모델이 고쳐 다시 부른다 |
 
 | 연결 | 붙는 조건 | 길 |
 |------|----------|-----|
-| API | 세션에 보관 중인 데이터 파일이 있음. `tool_filter.exclude_tools` 에 있으면 빼고, `allowed_tools` 가 있으면 더한다 | 도구 정의 |
-| 실행기 AIMBASE, HYBRID | 대화 API 요청 | `/mcp` 허용 도구에 더한다 |
-| 실행기 NATIVE | 대화 API 요청 | `/mcp-data` 통로 `aimbase-data`, `--allowedTools mcp__aimbase-data__data_query` |
+| API | 세션에 보관 중인 데이터 파일이 있음. `tool_filter.exclude_tools` 에 있으면 빼고, `allowed_tools` 와 세션 활성 목록에 없어도 더한다 | 도구 정의 |
+| 실행기(NATIVE, AIMBASE, HYBRID) | 대화 API 요청 | `/mcp-data` 통로 `aimbase-data`. 허용 도구 목록이 있으면 `mcp__aimbase-data__data_query` 를 더한다 |
+
+- `actions_enabled=false` 인 대화도 데이터 파일이 있으면 `data_query` 하나만 실은 도구 반복으로 답한다.
+- 실행기 세 방식이 같은 통로를 쓴다. `/mcp` 는 실행기가 세션 번호를 싣지 않고, 노출 등급이 없는 도구를 걸러 내므로 쓰지 않는다.
 
 ### 서버 MCP 통로 `/mcp-data` [PRD-521]
 

@@ -226,7 +226,8 @@ public class RunnerController {
                         req.getRunId(), req.getWorkingDirectory());
         return new LLMRequest(model, messages, null, config, true, req.getRunId())
                 .withWorkingDirectory(req.getWorkingDirectory())
-                .withSkillSet(toSkillSet(req.getSkillSet()));
+                .withSkillSet(toSkillSet(req.getSkillSet()))
+                .withDataSessionId(req.getDataSessionId());
     }
 
     /** CR-147: skill_set 항목을 판까지 받는다. 깨진 항목은 최신 판으로 넘어가지 않게 400 이다(BIZ-123). */

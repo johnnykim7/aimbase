@@ -1,5 +1,7 @@
 package com.platform.attachment;
 
+import com.platform.attachment.data.DataTableReader;
+import com.platform.attachment.data.DocumentTextReader;
 import com.platform.config.PlatformSettingsService;
 import com.platform.domain.ChatAttachmentEntity;
 import com.platform.repository.ChatAttachmentRepository;
@@ -31,6 +33,8 @@ public class AttachmentService {
 
     private static final Logger log = LoggerFactory.getLogger(AttachmentService.class);
 
+    static final String MAX_IMAGE_BYTES_KEY = "widget.attachment.max-image-bytes";
+    static final String MAX_PDF_BYTES_KEY = "widget.attachment.max-pdf-bytes";
     static final long DEFAULT_MAX_IMAGE_BYTES = 10L * 1024 * 1024;   // BIZ-099 image
     static final long DEFAULT_MAX_PDF_BYTES   = 32L * 1024 * 1024;   // BIZ-099 pdf
     static final int  DEFAULT_MAX_PER_SESSION = 10;                  // BIZ-100
@@ -40,15 +44,18 @@ public class AttachmentService {
     private final StorageService storage;
     private final MimeValidator mimeValidator;
     private final PlatformSettingsService settings;
+    private final DataTableReader tableReader;
 
     public AttachmentService(ChatAttachmentRepository repo,
                              StorageService storage,
                              MimeValidator mimeValidator,
-                             PlatformSettingsService settings) {
+                             PlatformSettingsService settings,
+                             DataTableReader tableReader) {
         this.repo = repo;
         this.storage = storage;
         this.mimeValidator = mimeValidator;
         this.settings = settings;
+        this.tableReader = tableReader;
     }
 
     /**
@@ -61,7 +68,7 @@ public class AttachmentService {
         }
         byte[] bytes = readUpload(file);
         String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "upload";
-        String mediaType = validate(bytes, file.getContentType());
+        String mediaType = validate(bytes, originalName, file.getContentType());
         return saveForSession(sessionId, originalName, mediaType, bytes);
     }
 
@@ -83,7 +90,21 @@ public class AttachmentService {
     /**
      * 종류와 크기 검사. 판정한 미디어 종류를 돌려준다. CR-178 프로젝트 자료도 같은 검사를 쓴다(BIZ-173).
      */
-    public String validate(byte[] bytes, String declaredContentType) {
+    public String validate(byte[] bytes, String filename, String declaredContentType) {
+        java.util.Optional<AttachmentKind> kind = AttachmentKind.fromFilename(filename);
+        if (kind.isPresent()) {
+            // CR-183: 엑셀, CSV, TSV, 워드, 텍스트는 확장자로 종류를 정한다. 운영체제마다 Content-Type 이 달라
+            // 머리글은 대조하지 않는다. 크기를 먼저 보고, 열어서 내용과 암호, 행과 열 상한을 본다(BIZ-220).
+            AttachmentKind k = kind.get();
+            assertSize(bytes.length, getLong(k.maxBytesKey(), k.defaultMaxBytes()), k.mediaType());
+            if (k.isData()) {
+                tableReader.read(bytes, k);
+            } else {
+                DocumentTextReader.read(bytes, k);
+            }
+            return k.mediaType();
+        }
+
         // Magic number 기반 MIME 판정 + Content-Type 이중 검증
         byte[] head = new byte[Math.min(16, bytes.length)];
         System.arraycopy(bytes, 0, head, 0, head.length);
@@ -102,13 +123,9 @@ public class AttachmentService {
 
         // 크기 제한 BIZ-099
         long maxBytes = MimeValidator.isPdf(mediaType)
-                ? getLong("widget.attachment.max-pdf-bytes", DEFAULT_MAX_PDF_BYTES)
-                : getLong("widget.attachment.max-image-bytes", DEFAULT_MAX_IMAGE_BYTES);
-        if (bytes.length > maxBytes) {
-            throw new AttachmentException(HttpStatus.BAD_REQUEST,
-                    AttachmentException.CODE_SIZE_EXCEEDED,
-                    "size " + bytes.length + " exceeds limit " + maxBytes + " for " + mediaType);
-        }
+                ? getLong(MAX_PDF_BYTES_KEY, DEFAULT_MAX_PDF_BYTES)
+                : getLong(MAX_IMAGE_BYTES_KEY, DEFAULT_MAX_IMAGE_BYTES);
+        assertSize(bytes.length, maxBytes, mediaType);
         return mediaType;
     }
 
@@ -215,6 +232,34 @@ public class AttachmentService {
         }
         repo.deleteById(attachmentId);
         log.info("Attachment deleted — id={} session={}", attachmentId, sessionId);
+    }
+
+    /** CR-183: 위젯이 「최대 N」 을 보이도록 상한을 싣는다(BIZ-220). */
+    private static void assertSize(long size, long maxBytes, String mediaType) {
+        if (size > maxBytes) {
+            throw new AttachmentException(HttpStatus.BAD_REQUEST,
+                    AttachmentException.CODE_SIZE_EXCEEDED,
+                    "size " + size + " exceeds limit " + maxBytes + " for " + mediaType, maxBytes);
+        }
+    }
+
+    /**
+     * CR-183: 세션에 보관 중인 데이터 파일이 있는지. API 연결이 계산 도구를 실을지 정한다(BIZ-222).
+     */
+    public boolean hasActiveDataFile(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return false;
+        return repo.existsBySessionIdAndMediaTypeInAndExpiresAtAfter(
+                sessionId, AttachmentKind.dataMediaTypes(), OffsetDateTime.now());
+    }
+
+    /** 위젯 설정의 첨부 크기 상한(T3-2 widget-settings attachments.max_bytes). 올리기 검사와 같은 설정을 읽는다. */
+    public java.util.Map<String, Long> maxBytesByGroup() {
+        java.util.Map<String, Long> out = new java.util.LinkedHashMap<>();
+        out.put("image", getLong(MAX_IMAGE_BYTES_KEY, DEFAULT_MAX_IMAGE_BYTES));
+        out.put("pdf", getLong(MAX_PDF_BYTES_KEY, DEFAULT_MAX_PDF_BYTES));
+        out.put("data", getLong(AttachmentKind.MAX_DATA_BYTES_KEY, AttachmentKind.DEFAULT_MAX_DATA_BYTES));
+        out.put("text", getLong(AttachmentKind.MAX_TEXT_BYTES_KEY, AttachmentKind.DEFAULT_MAX_TEXT_BYTES));
+        return out;
     }
 
     private long getLong(String key, long defaultValue) {

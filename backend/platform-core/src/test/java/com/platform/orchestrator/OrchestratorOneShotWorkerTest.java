@@ -105,7 +105,9 @@ class OrchestratorOneShotWorkerTest {
                 mock(TraceService.class), mock(SchemaRegistry.class), mock(SchemaValidator.class),
                 new ObjectMapper(), responseCache, mock(MemoryService.class), mock(QuotaService.class),
                 contextAssembly, mock(RuntimeRegistry.class), hooks, mock(MemoryAutoExtractService.class),
-                cancellation, mock(ChatRunRecorder.class), mock(WorkspaceProperties.class), turnInstructions);
+                cancellation, mock(ChatRunRecorder.class), mock(WorkspaceProperties.class), turnInstructions,
+                new ChatFeatureSupport(mock(com.platform.attachment.AttachmentService.class),
+                        mock(com.platform.service.PromptTemplateService.class)));
     }
 
     private static ChatRequest request(String sessionId) {
