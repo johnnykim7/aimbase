@@ -1,10 +1,13 @@
 package com.platform.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.CacheControl;
 import org.springframework.lang.NonNull;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * CR-058: 위젯 번들·가이드 정적 리소스 서빙.
@@ -18,19 +21,26 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *   <li>/widget/v1/sample-bff/ — BFF 샘플 코드</li>
  * </ul>
  *
- * 장기 캐시(30일)로 브라우저 재다운로드를 줄인다. 버전 패스(/v1/)가 고정이므로
- * 번들이 업데이트되면 새 파일명이 아니라 etag/last-modified 로 재검증된다.
+ * 진입 파일(로더, esm, 타입, 안내 페이지)은 이름이 판마다 같아 오래 캐시하면 배포한 수정이
+ * 사용자 브라우저에 닿지 않는다(CR-175). 그래서 열 때마다 Last-Modified 로 바뀌었는지 묻게 한다.
+ * 코드 조각은 빌드가 내용 해시를 이름에 붙이므로 내용이 바뀌면 이름도 바뀐다. 그것만 오래 둔다.
  */
 @Configuration
 public class WebStaticConfig implements WebMvcConfigurer {
 
-    private static final int CACHE_SECONDS = 60 * 60 * 24 * 30; // 30일
+    /** tsup(esbuild) 가 코드 조각 이름 끝에 붙이는 내용 해시: 대문자와 숫자 8자. */
+    private static final String HASHED_CHUNK_PATTERN = "/widget/v1/{file:.+-[A-Z0-9]{8}\\.js}";
+
+    private static final long HASHED_CHUNK_CACHE_DAYS = 365;
 
     @Override
     public void addResourceHandlers(@NonNull ResourceHandlerRegistry registry) {
+        registry.addResourceHandler(HASHED_CHUNK_PATTERN)
+                .addResourceLocations("classpath:/static/widget/v1/")
+                .setCacheControl(CacheControl.maxAge(HASHED_CHUNK_CACHE_DAYS, TimeUnit.DAYS).cachePublic().immutable());
         registry.addResourceHandler("/widget/**")
                 .addResourceLocations("classpath:/static/widget/")
-                .setCachePeriod(CACHE_SECONDS);
+                .setCacheControl(CacheControl.noCache());
     }
 
     /** 루트 디렉토리 URL 을 index.html 로 포워드한다. */
