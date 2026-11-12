@@ -534,42 +534,74 @@ public class ClaudeCliWorker implements AutoCloseable {
             }
         }
 
-        boolean firstUserConsumed = false;
-        for (UnifiedMessage msg : messages) {
-            switch (msg.role()) {
-                case SYSTEM -> {
-                    // override 있으면 무시, 없으면 위에서 systemPrefix 로 누적됨.
-                }
-                case USER -> {
-                    // CR-098: 멀티모달(Image/Document) 블록이 있으면 stream-json content 배열로 전송.
-                    boolean hasMultimodal = msg.content().stream()
-                            .anyMatch(b -> b instanceof ContentBlock.Image || b instanceof ContentBlock.Document);
-                    String prefix = null;
-                    if (!firstUserConsumed && systemPrefix.length() > 0) {
-                        prefix = systemPrefix.toString();
-                        firstUserConsumed = true;
-                    }
-                    if (hasMultimodal) {
-                        writeUserContentBlocks(msg, prefix);
-                    } else {
-                        String text = flattenText(msg);
-                        if (prefix != null) text = prefix + "\n\n" + text;
-                        writeUserLine(text);
-                    }
-                }
-                case TOOL_RESULT -> {
-                    // CR-050: OrchestratorEngine 이 도구 실행 결과를 다시 주입할 때.
-                    // stream-json: {type:"user", message:{role:"user", content:[{type:"tool_result", tool_use_id, content}]}}
-                    writeToolResultLine(msg);
-                }
-                default -> log.debug("Skipping message role={} in CLI input", msg.role());
+        int lastUserIdx = -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i).role() == UnifiedMessage.Role.USER) {
+                lastUserIdx = i;
+                break;
             }
         }
-        // 입력에 USER 가 없고 SYSTEM 만 있던 경우(이론적, override 없을 때만), system 만 user 라인으로 보낸다.
-        if (!firstUserConsumed && systemPrefix.length() > 0) {
-            writeUserLine(systemPrefix.toString());
+
+        if (lastUserIdx < 0) {
+            // CR-050: 도구 루프 중 OrchestratorEngine 이 도구 결과만 다시 넣는 경우.
+            for (UnifiedMessage msg : messages) {
+                if (msg.role() == UnifiedMessage.Role.TOOL_RESULT) writeToolResultLine(msg);
+            }
+            // SYSTEM 만 있던 경우(이론적, override 없을 때만), system 만 user 라인으로 보낸다.
+            if (systemPrefix.length() > 0) writeUserLine(systemPrefix.toString());
+            stdin.flush();
+            return;
+        }
+
+        // 새로 뜬 CLI 는 user 줄마다 따로 답하고(result 하나씩) 이 턴은 첫 result 에서 끝난다. 지난 질문을
+        // 줄마다 쓰면 가장 오래된 질문의 답이 이번 답으로 나가므로(CR-175 모델 바꾸기, CR-121 쉬던 작업자
+        // 정리 뒤), 지난 대화는 질문과 답째 이번 질문 앞에 붙여 한 줄로 보낸다.
+        StringBuilder prefixBuilder = new StringBuilder(systemPrefix);
+        String earlier = previousConversation(messages.subList(0, lastUserIdx));
+        if (!earlier.isEmpty()) {
+            if (prefixBuilder.length() > 0) prefixBuilder.append("\n\n");
+            prefixBuilder.append(earlier);
+        }
+        String prefix = prefixBuilder.length() > 0 ? prefixBuilder.toString() : null;
+
+        UnifiedMessage current = messages.get(lastUserIdx);
+        // CR-098: 멀티모달(Image/Document) 블록이 있으면 stream-json content 배열로 전송.
+        boolean hasMultimodal = current.content().stream()
+                .anyMatch(b -> b instanceof ContentBlock.Image || b instanceof ContentBlock.Document);
+        if (hasMultimodal) {
+            writeUserContentBlocks(current, prefix);
+        } else {
+            String text = flattenText(current);
+            if (prefix != null) text = prefix + "\n\n" + text;
+            writeUserLine(text);
+        }
+        // CR-050: 이번 질문 뒤에 붙은 도구 결과(도구 루프 진행 중)는 CLI 가 기다리는 입력이라 그대로 보낸다.
+        for (int i = lastUserIdx + 1; i < messages.size(); i++) {
+            UnifiedMessage msg = messages.get(i);
+            if (msg.role() == UnifiedMessage.Role.TOOL_RESULT) writeToolResultLine(msg);
         }
         stdin.flush();
+    }
+
+    /**
+     * 이번 질문 앞의 질문과 답을 한 덩어리로 만든다. 지난 도구 결과는 짝이 되는 도구 호출이 새 CLI 에 없어
+     * 넣지 않고, 지난 질문의 첨부는 글만 남는다.
+     */
+    // visible for testing
+    static String previousConversation(List<UnifiedMessage> earlier) {
+        StringBuilder sb = new StringBuilder();
+        for (UnifiedMessage m : earlier) {
+            String tag = switch (m.role()) {
+                case USER -> "user";
+                case ASSISTANT -> "assistant";
+                default -> null;
+            };
+            if (tag == null) continue;
+            String text = flattenText(m);
+            if (text.isBlank()) continue;
+            sb.append('<').append(tag).append(">\n").append(text).append("\n</").append(tag).append(">\n");
+        }
+        return sb.length() == 0 ? "" : "<previous_conversation>\n" + sb + "</previous_conversation>";
     }
 
     /**
@@ -684,7 +716,7 @@ public class ClaudeCliWorker implements AutoCloseable {
         stdin.newLine();
     }
 
-    private String flattenText(UnifiedMessage msg) {
+    private static String flattenText(UnifiedMessage msg) {
         StringBuilder sb = new StringBuilder();
         for (ContentBlock block : msg.content()) {
             if (block instanceof ContentBlock.Text t) sb.append(t.text());

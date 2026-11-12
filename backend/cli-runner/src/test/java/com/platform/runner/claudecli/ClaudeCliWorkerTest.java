@@ -18,6 +18,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -759,6 +760,51 @@ class ClaudeCliWorkerTest {
     }
 
     /** 받은 줄을 모두 적고, 생각 신호에는 {@code controlResult} 로 답하고, 질문에는 생각 블록, 답 블록, 끝을 낸다. */
+    /**
+     * CR-175 TC-CHT-018: 새로 뜬 작업자(모델 바꾸기, 쉬던 작업자 정리 뒤)는 지난 대화를 받아도 user 줄을 하나만
+     * 쓴다. 줄마다 쓰면 CLI 가 줄마다 답하고 이 턴은 가장 오래된 질문의 답을 돌려준다.
+     */
+    @Test
+    void new_worker_gets_previous_conversation_in_one_line_ending_with_current_question() throws IOException {
+        Path stdinDump = tempDir.resolve("stdin-history-" + System.nanoTime() + ".txt");
+        worker = new ClaudeCliWorker(thinkingStub(stdinDump, "success").toString(), null, null, false, null,
+                Duration.ofSeconds(10));
+        worker.start();
+
+        LLMResponse resp = worker.turnFirst(List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, "screen-context"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "q1"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, "a1"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "q2"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, "a2"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "q3")));
+
+        List<String> lines = Files.readAllLines(stdinDump);
+        assertThat(lines).hasSize(1);
+        String text = (String) ((Map<?, ?>) new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(lines.get(0), Map.class).get("message")).get("content");
+        assertThat(text).startsWith("screen-context\n\n<previous_conversation>\n");
+        assertThat(text).containsSubsequence("<user>\nq1\n</user>", "<assistant>\na1\n</assistant>",
+                "<user>\nq2\n</user>", "<assistant>\na2\n</assistant>", "</previous_conversation>");
+        assertThat(text).endsWith("</previous_conversation>\n\nq3");
+        assertThat(resp.textContent()).isEqualTo("answer-text");
+    }
+
+    /** CR-175 TC-CHT-018: 지난 도구 결과와 빈 답은 지난 대화에 넣지 않고, 지난 질문이 없으면 덩어리를 만들지 않는다. */
+    @Test
+    void previous_conversation_skips_tool_results_and_blank_messages() {
+        assertThat(ClaudeCliWorker.previousConversation(List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, "ctx")))).isEmpty();
+        String text = ClaudeCliWorker.previousConversation(List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "q1"),
+                UnifiedMessage.ofAssistantWithToolUse(List.of(
+                        new ContentBlock.ToolUse("tu-1", "lookup", Map.of()))),
+                UnifiedMessage.ofToolResults(List.of(new ContentBlock.ToolResult("tu-1", "tool-output"))),
+                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, "a1")));
+        assertThat(text).isEqualTo("<previous_conversation>\n<user>\nq1\n</user>\n<assistant>\na1\n</assistant>\n"
+                + "</previous_conversation>");
+    }
+
     private Path thinkingStub(Path stdinDump, String controlResult) throws IOException {
         return writeStub("""
                 #!/bin/bash
