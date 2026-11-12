@@ -60,7 +60,7 @@ class RunnerServiceTest {
     @Test
     @DisplayName("CR-109: 첫 턴 timeout 예외 시 shutdownForRun 호출 — 좀비 워커 정리")
     void firstTurnTimeoutClosesWorker() {
-        when(worker.turnFirst(any()))
+        when(worker.turnFirst(any(), any()))
                 .thenThrow(new RuntimeException("turn timeout after 300s"));
 
         assertThatThrownBy(() -> service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE,
@@ -81,7 +81,7 @@ class RunnerServiceTest {
                 List.of(new com.platform.llm.model.ContentBlock.Text("ok")),
                 List.of(), new com.platform.llm.model.TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(worker.turnFirst(any()))
+        when(worker.turnFirst(any(), any()))
                 .thenThrow(new RuntimeException("turn timeout after 300s"))
                 .thenReturn(ok);
 
@@ -93,7 +93,7 @@ class RunnerServiceTest {
 
         // 2차: 정리 뒤 새로 뜬 워커라 다시 turnFirst(첫 턴) 경로로 진입해 정상 응답
         LLMResponse resp = service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
-        verify(worker, times(2)).turnFirst(any());
+        verify(worker, times(2)).turnFirst(any(), any());
         assertThatNoException(resp);
     }
 
@@ -105,7 +105,7 @@ class RunnerServiceTest {
                 List.of(new com.platform.llm.model.ContentBlock.Text("ok")),
                 List.of(), new com.platform.llm.model.TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(worker.turnFirst(any())).thenReturn(ok);
+        when(worker.turnFirst(any(), any())).thenReturn(ok);
 
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
 
@@ -120,7 +120,7 @@ class RunnerServiceTest {
                 List.of(new com.platform.llm.model.ContentBlock.Text("ok")),
                 List.of(), new com.platform.llm.model.TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(worker.turnFirst(any())).thenReturn(ok);
+        when(worker.turnFirst(any(), any())).thenReturn(ok);
         List<SkillRef> pins = List.of(new SkillRef("ax-proposal", "tenant", 1));
 
         service.chat(request("run-1").withSkillSet(pins), ClaudeCliCommandBuilder.ToolMode.NATIVE, null, null);
@@ -133,7 +133,7 @@ class RunnerServiceTest {
     @Test
     @DisplayName("CR-173: 턴이 끝나면 성공이든 실패든 워커 lease 를 푼다(실행기 전체 상한의 자리 내기 대상이 된다)")
     void turnReleasesLeaseOnSuccessAndFailure() {
-        when(worker.turnFirst(any())).thenReturn(okResponse())
+        when(worker.turnFirst(any(), any())).thenReturn(okResponse())
                 .thenThrow(new RuntimeException("turn timeout after 300s"));
 
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
@@ -147,15 +147,15 @@ class RunnerServiceTest {
     @DisplayName("CR-173: 같은 run 이라도 워커가 새로 떴으면(유휴 회수, 자리 내기) 대화 전체를 첫 턴으로 다시 넣는다")
     void freshWorkerForKnownRunGetsWholeConversation() {
         when(worker.claimFirstTurn()).thenReturn(true, false, true);
-        when(worker.turnFirst(any())).thenReturn(okResponse());
-        when(worker.turn(any())).thenReturn(okResponse());
+        when(worker.turnFirst(any(), any())).thenReturn(okResponse());
+        when(worker.turn(any(), any())).thenReturn(okResponse());
 
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
 
-        verify(worker, times(2)).turnFirst(any());
-        verify(worker, times(1)).turn(any());
+        verify(worker, times(2)).turnFirst(any(), any());
+        verify(worker, times(1)).turn(any(), any());
     }
 
     private static LLMResponse okResponse() {

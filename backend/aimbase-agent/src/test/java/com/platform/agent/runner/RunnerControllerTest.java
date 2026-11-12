@@ -24,6 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -76,7 +78,7 @@ class RunnerControllerTest {
                 new TokenUsage(10, 5),
                 LLMResponse.FinishReason.END,
                 123L, 0.0);
-        when(service.chat(any(LLMRequest.class), any(ClaudeCliCommandBuilder.ToolMode.class), any(), any(), any(), anyBoolean()))
+        when(service.chat(any(LLMRequest.class), any(ClaudeCliCommandBuilder.ToolMode.class), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(llmResp);
 
         RunnerChatResponse out = controller.chat("secret-test-key", req);
@@ -86,7 +88,7 @@ class RunnerControllerTest {
         assertThat(out.getContent()).isEqualTo("ok");
         assertThat(out.getFinishReason()).isEqualTo("END");
         assertThat(out.getUsage()).containsEntry("input_tokens", 10).containsEntry("output_tokens", 5);
-        verify(service, times(1)).chat(any(), any(), any(), any(), any(), anyBoolean());
+        verify(service, times(1)).chat(any(), any(), any(), any(), any(), anyBoolean(), any());
     }
 
     @Test
@@ -100,7 +102,7 @@ class RunnerControllerTest {
                 new TokenUsage(0, 0),
                 LLMResponse.FinishReason.TOOL_USE,
                 10L, 0.0);
-        when(service.chat(any(), any(), any(), any(), any(), anyBoolean())).thenReturn(llmResp);
+        when(service.chat(any(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(llmResp);
 
         RunnerChatResponse out = controller.chat("secret-test-key", req);
 
@@ -187,7 +189,7 @@ class RunnerControllerTest {
                 List.of(new ContentBlock.Text("ok")),
                 List.of(), new TokenUsage(0, 0),
                 LLMResponse.FinishReason.END, 1L, 0.0);
-        when(service.chat(any(), any(), any(), any(), any(), anyBoolean())).thenReturn(llmResp);
+        when(service.chat(any(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(llmResp);
 
         RunnerChatResponse out = controller.chat(null, req);
         assertThat(out.getContent()).isEqualTo("ok");
@@ -201,11 +203,27 @@ class RunnerControllerTest {
         LLMResponse llmResp = new LLMResponse("id-1", "m", List.of(new ContentBlock.Text("ok")), List.of(),
                 new TokenUsage(1, 1), LLMResponse.FinishReason.END, 1L, 0.0);
         ArgumentCaptor<LLMRequest> captor = ArgumentCaptor.forClass(LLMRequest.class);
-        when(service.chat(captor.capture(), any(), any(), any(), any(), anyBoolean())).thenReturn(llmResp);
+        when(service.chat(captor.capture(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(llmResp);
 
         controller.chat("secret-test-key", req);
 
         assertThat(captor.getValue().skillSet()).containsExactly(new SkillRef("ax-proposal", "tenant", 1));
+    }
+
+    @Test
+    @DisplayName("CR-175: thinking 은 그대로 service 로 넘어가고, 없으면 null 이다")
+    void thinkingReachesService() {
+        LLMResponse llmResp = new LLMResponse("id-1", "m", List.of(new ContentBlock.Text("ok")), List.of(),
+                new TokenUsage(1, 1), LLMResponse.FinishReason.END, 1L, 0.0);
+        when(service.chat(any(), any(), any(), any(), any(), anyBoolean(), any())).thenReturn(llmResp);
+        RunnerChatRequest off = sampleRequest();
+        off.setThinking(false);
+
+        controller.chat("secret-test-key", off);
+        controller.chat("secret-test-key", sampleRequest());
+
+        verify(service).chat(any(), any(), any(), any(), any(), anyBoolean(), eq(Boolean.FALSE));
+        verify(service).chat(any(), any(), any(), any(), any(), anyBoolean(), isNull());
     }
 
     @Test
@@ -217,6 +235,6 @@ class RunnerControllerTest {
         assertThatThrownBy(() -> controller.chat("secret-test-key", req))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("skill_set");
-        verify(service, never()).chat(any(), any(), any(), any(), any(), anyBoolean());
+        verify(service, never()).chat(any(), any(), any(), any(), any(), anyBoolean(), any());
     }
 }

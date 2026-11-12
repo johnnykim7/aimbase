@@ -136,6 +136,8 @@ interface WidgetSettings {
     }>;
     default_model: string;
     thinking_supported: boolean;
+    /** 깊게 생각하기 단추의 처음 상태. 연결 설정, 없으면 연결 방식의 기본(Claude CLI 는 켬). */
+    thinking_default?: boolean;
     feedback_reasons: Array<{
         code: string;
         label: string;

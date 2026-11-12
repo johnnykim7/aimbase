@@ -72,6 +72,10 @@ public class RunnerChatRequest {
     @JsonProperty("skill_set")
     private List<Map<String, Object>> skillSet;
 
+    /** CR-175: 깊게 생각하기. null 이면 CLI 생각 설정에 손대지 않는다. */
+    @JsonProperty("thinking")
+    private Boolean thinking;
+
     public String getRunId() { return runId; }
     public void setRunId(String runId) { this.runId = runId; }
     public String getModel() { return model; }
@@ -96,4 +100,6 @@ public class RunnerChatRequest {
     public void setDisallowSubagent(Boolean disallowSubagent) { this.disallowSubagent = disallowSubagent; }
     public List<Map<String, Object>> getSkillSet() { return skillSet; }
     public void setSkillSet(List<Map<String, Object>> skillSet) { this.skillSet = skillSet; }
+    public Boolean getThinking() { return thinking; }
+    public void setThinking(Boolean thinking) { this.thinking = thinking; }
 }

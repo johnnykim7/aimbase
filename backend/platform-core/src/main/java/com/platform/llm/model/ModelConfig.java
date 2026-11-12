@@ -34,6 +34,16 @@ public record ModelConfig(
     }
 
     /**
+     * CR-175: 연결 config 나 요청이 생각 설정을 정했으면 켬 여부, 아무도 정하지 않았으면 null 이다.
+     * null 이면 어댑터 기본을 그대로 둔다(BIZ-150). Claude CLI 처럼 설정이 없어도 생각하는 어댑터가 있어서
+     * resolveThinkingMode() 의 DISABLED 와 구분해야 한다.
+     */
+    public Boolean explicitThinking() {
+        if (thinkingMode == null && extendedThinking == null) return null;
+        return resolveThinkingMode() != ThinkingMode.DISABLED;
+    }
+
+    /**
      * CR-175: 요청 단위로 생각하기를 켜거나 끈다. 켤 때 예산과 적응 모드는 연결 설정을 따르고
      * 새 수치를 만들지 않는다(BIZ-150). null 이면 연결 설정 그대로다.
      */

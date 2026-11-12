@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.config.PlatformSettingsService;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.LLMAdapterRegistry;
+import com.platform.llm.model.ModelConfig;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.repository.ConnectionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,29 +59,45 @@ class ChatWidgetSettingsServiceTest {
         when(connectionAdapterFactory.defaultModel("api-1")).thenReturn("claude-haiku-5-5");
         when(connectionAdapterFactory.getAdapter("api-1")).thenReturn(apiAdapter);
         when(apiAdapter.supportsThinkingOverride()).thenReturn(true);
+        when(connectionAdapterFactory.resolveModelConfig("api-1")).thenReturn(ModelConfig.defaults());
 
         Map<String, Object> body = service.settings("api-1");
 
         assertThat(body.get("default_model")).isEqualTo("claude-sonnet-5-5");
         assertThat((List<?>) body.get("models")).hasSize(2);
         assertThat(body.get("thinking_supported")).isEqualTo(true);
+        assertThat(body.get("thinking_default")).isEqualTo(false);
         assertThat(body.get("feedback_comment_max_chars")).isEqualTo(500);
         assertThat(body.get("follow_ups_enabled")).isEqualTo(true);
     }
 
     @Test
-    void cli_connection_reports_thinking_not_supported() {
+    void cli_connection_supports_thinking_and_starts_on_without_setting() {
+        stubCliConnection(ModelConfig.defaults());
+
+        Map<String, Object> body = service.settings("cli-1");
+
+        assertThat((List<?>) body.get("models")).hasSize(1);
+        assertThat(body.get("thinking_supported")).isEqualTo(true);
+        assertThat(body.get("thinking_default")).isEqualTo(true);
+    }
+
+    @Test
+    void connection_thinking_setting_wins_over_adapter_default() {
+        stubCliConnection(new ModelConfig(null, null, null, null, false, null));
+
+        assertThat(service.settings("cli-1").get("thinking_default")).isEqualTo(false);
+    }
+
+    private void stubCliConnection(ModelConfig config) {
         when(connectionRepository.existsById("cli-1")).thenReturn(true);
         when(connectionAdapterFactory.selectableModels("cli-1"))
                 .thenReturn(List.of(Map.of("id", "claude-sonnet-5-5", "label", "claude-sonnet-5-5")));
         when(connectionAdapterFactory.defaultModel("cli-1")).thenReturn("claude-sonnet-5-5");
         when(connectionAdapterFactory.getAdapter("cli-1")).thenReturn(cliAdapter);
-        when(cliAdapter.supportsThinkingOverride()).thenReturn(false);
-
-        Map<String, Object> body = service.settings("cli-1");
-
-        assertThat((List<?>) body.get("models")).hasSize(1);
-        assertThat(body.get("thinking_supported")).isEqualTo(false);
+        when(connectionAdapterFactory.resolveModelConfig("cli-1")).thenReturn(config);
+        when(cliAdapter.supportsThinkingOverride()).thenReturn(true);
+        lenient().when(cliAdapter.thinksByDefault()).thenReturn(true);
     }
 
     @Test
@@ -94,6 +111,7 @@ class ChatWidgetSettingsServiceTest {
 
         assertThat(body.get("default_model")).isEqualTo("anthropic/claude-sonnet-4-5");
         assertThat((List<?>) body.get("models")).hasSize(1);
+        assertThat(body.get("thinking_default")).isEqualTo(false);
     }
 
     @Test
