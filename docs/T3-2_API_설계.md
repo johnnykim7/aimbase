@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.19 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185
+> 설계 버전: 7.20 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3185,6 +3185,112 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 - 위젯 본체가 아는 이벤트는 `delta`, `thinking`, `tool_use_start`, `tool_result`, `done` 이다. 그 밖의 이름은 버리지 않고 위젯 기능에 그대로 전달한다(틀 사용법 `streamEvent`)
 - 응답 도중 `event: error`, `data: {"code": "...", "message": "..."}` 가 오면 그 응답을 오류로 끝낸다. 오류 글은 위젯 문구표, 기능이 등록한 오류 글, 서버 `message`, 코드 순으로 고른다
 - 대화 요청 본문에 칸을 더하는 건은 서버 `ChatCompletionRequest` 에 그 칸을 같은 건에서 더한다
+## 위젯 지난 대화 목록과 프로젝트 묶기 [v7.20, CR-178]
+
+설계 상세: [CR-178_위젯_지난_대화_목록과_프로젝트_묶기.md](CR-178_위젯_지난_대화_목록과_프로젝트_묶기.md) 3절.
+
+모두 인증 필요(`chat:stream` 위젯 토큰 또는 로그인). 주인은 위젯 토큰 user_ref, 로그인은 사용자 id 다. 남의 대화와 프로젝트는 404. user_ref 없는 위젯 토큰은 이 절의 API 가 모두 403 `widget_user_required` 다(BIZ-170).
+
+| 메서드 | 경로 | 설명 | 기능 |
+|--------|------|------|------|
+| GET | `/api/v1/chat/sessions` | 내 대화 목록 | PRD-420 |
+| GET | `/api/v1/chat/sessions/{session_id}/messages` | 이어보기 | PRD-421 |
+| PATCH | `/api/v1/chat/sessions/{session_id}` | 이름 바꾸기, 프로젝트로 옮기기, 빼기 | PRD-422, PRD-424 |
+| DELETE | `/api/v1/chat/sessions/{session_id}` | 대화 삭제(관리용 삭제와 한 서비스) | PRD-422 |
+| GET, POST | `/api/v1/chat/projects` | 내 프로젝트 목록, 만들기 | PRD-423 |
+| GET, PATCH, DELETE | `/api/v1/chat/projects/{project_id}` | 한 건, 바꾸기, 삭제 | PRD-423 |
+| GET, POST | `/api/v1/chat/projects/{project_id}/files` | 자료 목록, 올리기(multipart `file`, `chat:upload`) | PRD-425 |
+| DELETE | `/api/v1/chat/projects/{project_id}/files/{file_id}` | 자료 삭제 | PRD-425 |
+| POST | `/api/v1/chat/projects/{project_id}/files/{file_id}/attach` | 대화 첨부로 붙이기 `{session_id}` (`chat:upload`) | PRD-425 |
+
+### 대화 목록 [PRD-420]
+
+`GET /api/v1/chat/sessions?chat_project_id=&query=&page=&size=`
+
+| 파라미터 | 설명 |
+|----------|------|
+| chat_project_id | 프로젝트 id 면 그 프로젝트 대화만. `none` 이면 프로젝트에 없는 대화만. 비우면 전부 |
+| query | 제목 부분 일치(대소문자 무시). 주면 chat_project_id 를 보지 않는다 |
+| page, size | 0 부터. size 기본 `widget.history-page-size`, 최대 100 |
+
+- 대상: 주인이 요청자, 지우지 않음, `scope_type = chat`, 메시지 1개 이상. `updated_at` 내림차순
+- 행: `session_id`, `title`, `chat_project_id`, `updated_at`(오프셋 붙은 ISO-8601). 응답은 `ApiResponse.page`
+
+### 이어보기 [PRD-421]
+
+`GET /api/v1/chat/sessions/{session_id}/messages`
+
+```json
+{"session_id": "8f1e...", "title": "11/7 박스 파손 회신", "chat_project_id": "3c2a...", "truncated": false,
+ "turns": [
+   {"turn_id": "0b6f...", "user_seq": 4,
+    "question": {"text": "파손 건 회신문 써줘", "created_at": "2026-11-07T14:20:03+09:00",
+                 "attachments": [{"attachment_id": "a1...", "filename": "사진1.jpg", "media_type": "image/jpeg", "available": true}]},
+    "answer": {"text": "회신문 초안입니다 ...", "model": "claude-sonnet-5-5", "created_at": "2026-11-07T14:20:31+09:00",
+               "stopped": false, "tool_uses": [{"name": "wes_order_lookup"}]},
+    "feedback": {"rating": "DOWN", "reason_codes": ["NO_LOOKUP"], "comment": "출고 이력을 안 봤어요"}}
+ ]}
+```
+
+- 지우지 않은 메시지를 순번 순으로 읽어 질문 하나부터 다음 질문 앞까지를 한 묶음으로 만든다. `system` 메시지(화면 맥락), 압축 경계는 빼고, 도구는 이름만 싣는다
+- `user_seq` 는 그 `turn_id` 메시지 중 가장 작은 순번(되감기 시작점, CR-175). `turn_id` 없는 예전 메시지는 둘 다 비운다
+- 응답이 멈춤 표시 글로 시작하면 떼고 `stopped = true`. 만료된 첨부는 `available = false`
+- 평가는 요청자가 그 답에 남긴 것만. 묶음이 `widget.history-turns-max` 보다 많으면 마지막 그만큼과 `truncated = true`
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 404 | `session_not_found` | 없거나, 지웠거나, 요청자의 세션이 아님 |
+
+### 대화 바꾸기와 삭제 [PRD-422, PRD-424]
+
+`PATCH /api/v1/chat/sessions/{session_id}` 본문 `{"title": "..."}`, `{"chat_project_id": "..."}`, `{"chat_project_id": null}` 중 준 칸만 바꾼다. 제목을 바꾸면 `title_source = USER`.
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 400 | `session_invalid:title` | 앞뒤 공백을 뺀 제목이 비었거나 500자 넘음 |
+| 404 | `session_not_found` | 없거나 요청자의 세션이 아님 |
+| 404 | `project_not_found` | 옮길 프로젝트가 없거나 요청자의 것이 아님 |
+
+### 프로젝트와 자료 [PRD-423, PRD-425]
+
+- 목록 행: `id`, `name`, `has_instructions`, `file_count`, `session_count`, `last_active_at`(프로젝트를 고친 시각과 그 안 대화 마지막 활동 중 늦은 것, 내림차순)
+- 한 건: 위 칸과 `instructions`, `files`
+- 만들기, 바꾸기 본문 `{name, instructions}`. 이름 1 ~ 100자, 지시문 최대 `widget.project-instructions-max-chars` 자
+- 삭제: 대화는 남아 프로젝트에서 빠지고 자료는 저장소 파일과 행을 함께 지운다
+- 자료 행: `file_id`, `filename`, `media_type`, `size_bytes`, `pages`, `created_at`. 종류와 크기 검사는 채팅 첨부와 같다
+- 붙이기: 자료 파일을 복사해 새 첨부를 만들고 첨부 올리기와 같은 응답(`attachment_id`, `filename`, `media_type`, `size_bytes`, `pages`, `expires_at`)을 돌려준다. 세션이 아직 없으면 그대로 붙인다
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 400 | `project_invalid:name` | 이름이 비었거나 100자 넘음 |
+| 400 | `project_invalid:instructions` | 지시문이 최대 글자 수 넘음 |
+| 400, 413 | 첨부와 같음 | 자료 종류, 크기 오류 |
+| 404 | `project_not_found`, `file_not_found`, `session_not_found` | 없거나 요청자의 것이 아님 |
+| 409 | `project_files_full` | 자료가 `widget.project-files-max-count` 개 있음 |
+
+### 대화 요청 칸 추가 [PRD-424, PRD-426]
+
+`POST /api/v1/chat/completions` 인증 필요(`chat:stream`)
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| chat_project_id | UUID | N | 세션을 처음 만들 때 그 프로젝트에 넣는다. 이미 있는 세션이면 쓰지 않는다 |
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 404 | `project_not_found` | 없거나 요청자의 것이 아님. 응답을 시작하기 전에 거른다 |
+
+- 세션이 프로젝트에 있고 지시문이 있으면 프롬프트 틀 `widget.project-instructions` 로 감싸 시스템 지시로 붙인다. 대화 기록에는 넣지 않는다(BIZ-172)
+- 이번 질문 몫의 시스템 메시지(화면 맥락, 검색 자료, 기억, 지시문)는 실행기 요청 `messages[]` 항목에 `turn_scoped: true` 를 싣는다. 실행기는 이 항목을 이어 쓰는 질문에서도, 시스템 지시 대체값이 있어도 그 질문 앞에 붙인다. 이 칸을 모르는 실행기는 무시한다
+
+### 위젯 설정 칸 추가
+
+`GET /api/v1/chat/widget-settings` 응답에 `history_enabled`(user_ref 없는 위젯 토큰이면 false), `project_instructions_max_chars`, `project_files_max_count` 를 더한다.
+
+### 관리용 대화 API 와 위젯 토큰 [PRD-427]
+
+`/api/v1/conversations/**` 를 위젯 토큰으로 부르면 403 `widget_forbidden`. 관리 화면의 로그인 호출은 바뀌지 않는다.
+
 
 ## 위젯 옆 창 문서를 대화로 고치기 [v7.13, CR-181]
 
