@@ -49,12 +49,12 @@ public class VoiceTicketService {
     private final VoiceRelayRegistry registry;
     private final SecureRandom random = new SecureRandom();
 
-    public VoiceTicketService(RedisTemplate<String, String> redis,
+    public VoiceTicketService(RedisTemplate<String, String> redisTemplate,
                               ObjectMapper objectMapper,
                               PlatformSettingsService settings,
                               SttLocalConnections sttConnections,
                               VoiceRelayRegistry registry) {
-        this.redis = redis;
+        this.redis = redisTemplate;
         this.objectMapper = objectMapper;
         this.settings = settings;
         this.sttConnections = sttConnections;
