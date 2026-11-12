@@ -133,8 +133,9 @@ button { font: inherit; color: inherit; }
 
 .u { align-self: flex-end; max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; }
 .u .bub { background: var(--aimbase-user-bg); border-radius: 14px; padding: 8px 12px; white-space: pre-wrap; line-height: 1.55; word-break: break-word; }
-.u .acts { display: flex; justify-content: flex-end; gap: 2px; margin-top: 2px; opacity: 0; transition: opacity .12s; align-items: center; }
-.u:hover .acts, .u:focus-within .acts { opacity: 1; }
+.u .acts { display: flex; justify-content: flex-end; gap: 2px; margin-top: 2px; align-items: center; }
+.u .acts button { opacity: 0; transition: opacity .12s; }
+.u:hover .acts button, .u:focus-within .acts button { opacity: 1; }
 .time { font-size: 11px; color: var(--aimbase-muted); padding: 0 4px; white-space: nowrap; }
 .u .edit { border: 1px solid var(--aimbase-border-strong); border-radius: 12px; padding: 8px; background: var(--aimbase-bg); width: min(520px, 72vw); }
 .u .edit textarea { width: 100%; border: 0; outline: none; resize: none; font: inherit; min-height: 48px; background: transparent; color: var(--aimbase-fg); }

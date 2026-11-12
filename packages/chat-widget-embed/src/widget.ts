@@ -1,5 +1,6 @@
 import { AttachmentClient } from "./attachment-client";
 import { ChatClient } from "./chat-client";
+import { copyText } from "./clipboard";
 import { icon } from "./icons";
 import { renderRichInto } from "./rich-render";
 import { T } from "./strings";
@@ -735,12 +736,12 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   }
 
   async function copyAnswer(text: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyText(text)) {
       showToast(T.copied);
-    } catch (e) {
-      options.on?.onError?.(e as Error);
+      return;
     }
+    showToast(T.copyFailed);
+    options.on?.onError?.(new Error("clipboard copy failed"));
   }
 
   // ── 평가 ─────────────────────────
