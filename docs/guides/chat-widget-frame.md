@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.4 | 최종 수정: 2026-11-13 | 관련 CR: CR-177
+> 문서 버전: 1.5 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-186
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -304,7 +304,9 @@ interface ConversationView {
 ### 3.8 서버 호출과 그 밖
 
 - 서버 호출은 `ctx.api.request<R>(method, path, body?)` 로 한다. 위젯 토큰을 싣고, 실패하면 `WidgetApiError(status, code)` 를 던지고, 성공하면 `ApiResponse` 의 `data` 를 돌려준다. `widget-api.ts` 에 메서드를 더하지 않는다.
-- 그림, 파일처럼 JSON 이 아닌 응답은 `ctx.api.requestBlob(method, path)` 로 받는다. 위젯 토큰을 싣고, 실패하면 `WidgetApiError` 를 던지고, 성공하면 `Blob` 을 돌려준다.
+- 그림, 파일, 소리처럼 JSON 이 아닌 응답은 `ctx.api.requestBlob(method, path, body?, { signal }?)` 로 받는다. 위젯 토큰을 싣고, body 가 있으면 JSON 으로 싣는다. 실패하면 `WidgetApiError` 를 던지고, 성공하면 `Blob` 을 돌려준다. 받는 중에 끊으려면 `AbortController` 의 `signal` 을 준다.
+- `ctx.api.hasScope(scope)` 는 위젯 토큰에 그 scope 가 있으면 참이다. 토큰을 받기 전에는 거짓이므로 `install` 에서 한 번 묻고 끝내지 말고 `settingsLoaded` 뒤나 단추를 그릴 때 묻는다.
+- `ctx.api.wsUrl(path)` 는 위젯 서버 주소로 만든 절대 웹소켓 주소다. 서버 주소가 http 면 ws, https 면 wss 다.
 - `ctx.ui.layer` 는 위젯 판(panel) 요소다. 녹음 덮개, 발표 화면 같은 겹치는 요소를 여기에 붙인다.
 - `ctx.ui.onEscape(fn)` 은 Esc 를 위젯 본체보다 먼저 받는다. 처리했으면 참을 돌려준다.
 - `ctx.ui.toast(text)` 는 잠깐 보이는 알림, `ctx.ui.notice(text)` 는 대화 칸 회색 줄이다.

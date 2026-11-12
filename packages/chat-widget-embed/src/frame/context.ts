@@ -262,6 +262,11 @@ export interface WidgetContext {
   };
   api: {
     request<R>(method: string, path: string, body?: unknown): Promise<R>;
-    requestBlob(method: string, path: string): Promise<Blob>;
+    /** body 가 있으면 JSON 으로 싣는다. signal 로 받는 중인 요청을 끊는다 */
+    requestBlob(method: string, path: string, body?: unknown, opts?: { signal?: AbortSignal }): Promise<Blob>;
+    /** 위젯 토큰에 그 scope 가 있으면 참. 토큰을 받기 전에는 거짓이라 settingsLoaded 뒤나 쓰는 때에 묻는다 */
+    hasScope(scope: string): boolean;
+    /** 위젯 서버 주소로 만든 절대 웹소켓 주소. http 는 ws, https 는 wss */
+    wsUrl(path: string): string;
   };
 }
