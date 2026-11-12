@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.16 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183
+> 설계 버전: 7.17 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3467,6 +3467,81 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다.
 ### 서버 MCP 통로 `/mcp-data` [PRD-521]
 
 `data_query` 하나만 등록한 MCP 통로. 인증과 요청 스레드 실행은 `/mcp-skills` 와 같다. 머리글 `X-Aimbase-Session-Id`(실행기가 싣는 세션 번호, 도구 문맥의 세션). 워크플로우 단계 요청에는 붙이지 않는다.
+
+## 위젯 이미지 생성 [v7.17, CR-184]
+
+설계 상세: [CR-184_위젯_이미지_생성.md](CR-184_위젯_이미지_생성.md) 3절. 위젯 쪽 자리는 CR-177 틀 안내서를 따른다.
+
+### 대화 요청 칸 추가 [PRD-540, PRD-541]
+
+`POST /api/v1/chat/completions` (인증, `chat:stream`)
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| image | object | N | 있으면 모델을 부르지 않고 그림 연결로 그림 한 장을 만든다. 마지막 사용자 메시지 글이 그림 설명이고, 그 메시지에 붙인 그림(image 블록)은 바탕 그림이다 |
+| image.action | string | Y | `create`(만들기), `edit`(고치기) |
+| image.source_image_id | string(UUID) | edit 때 Y | 고칠 그림. 같은 대화에서 만든 그림이어야 한다 |
+
+- `model`, `thinking`, `tool_filter`, `rag_source_id`, `response_format` 은 쓰지 않는다. `rewind_from_seq` 는 지금처럼 먼저 되감는다
+- 스트림, 한 번에 받기 모두 된다
+
+스트림을 열기 전 오류(JSON):
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 400 | `image_invalid` | `action` 이 `create`, `edit` 가 아니거나 edit 에 `source_image_id` 가 없다 |
+| 400 | `image_not_configured` | `connection_id` 가 없거나 그 연결에 그림 연결이 없다 |
+| 400 | `image_prompt_empty` | 그림 설명 글이 비었다 |
+| 400 | `image_prompt_too_long` | 글이 `widget.image.max-prompt-chars` 초과. `limit` |
+| 400 | `image_too_many_sources` | 바탕 그림이 `widget.image.max-source-images` 초과. `limit` |
+| 400 | `image_source_invalid` | 붙인 것 중 그림이 아닌 것이 있다 |
+| 404 | `image_not_found` | `source_image_id` 가 그 대화의 그림이 아니거나 지운 표시가 있다 |
+| 409 | `session_busy` | 지금 규칙 그대로(CR-175) |
+
+스트림 이벤트:
+
+| 순번 | 이벤트 | 데이터 |
+|------|--------|--------|
+| 1 | `image_status` | `{"state": "generating"}` |
+| 2 | `delta` | 답 글 `![<설명 앞 100자>](aimbase-image:<그림 id>)` 한 번 |
+| 3 | `done` | 지금 칸(`turn_id`, `turn_seq`, `model` 은 그림 모델) + `images: [{"id", "media_type", "width", "height"}]` |
+| 실패 | `error` | `{"code": ...}` 를 보내고 닫는다. 대화 기록에 남기지 않는다 |
+
+공급처 실패 코드(스트림 `error`, 한 번에 받기면 502 같은 코드):
+
+| 코드 | 공급처 응답 |
+|------|------------|
+| `image_provider_auth` | 401, 403 |
+| `image_provider_quota` | 429(요청 한도, 크레딧 없음) |
+| `image_rejected` | 400 중 내용 거절(`moderation_blocked`, `content_policy_violation`) |
+| `image_timeout` | `widget.image.timeout-ms` 초과 |
+| `image_failed` | 그 밖 |
+
+- 응답 중지(`POST /api/v1/chat/{sessionId}/abort`)는 공급처 호출을 끊고 질문과 「[중단됨]」 답을 남긴다. `done` 에 `turn_seq` 를 준다. 그림은 남기지 않는다
+
+### 그림 받기 [PRD-542]
+
+`GET /api/v1/chat/images/{image_id}?session_id={sessionId}` (인증, `chat:stream` 위젯 토큰 또는 로그인)
+
+| 상태 | 응답 | 경우 |
+|------|------|------|
+| 200 | 그림 바이트. `Content-Type` 저장 형식, `Content-Disposition: inline`, `Cache-Control: private, max-age=86400` | 정상 |
+| 404 | `image_not_found` | 그 테넌트에 그림이 없거나, `session_id` 가 그 그림의 대화가 아니거나, 지운 표시가 있다 |
+| 403 | `forbidden` | 대화 `user_id` 가 있는데 지금 사람과 다르다(대화 지우기와 같은 검사) |
+
+### 위젯 설정 칸 추가 [PRD-544]
+
+`GET /api/v1/chat/widget-settings?connection_id=` 응답에 더한다.
+
+```json
+{"image_generation": {"enabled": true}}
+```
+
+- 그 연결에 그림 연결이 있으면 참. `connection_id` 가 없으면 거짓
+
+### 연결 config 칸 [PRD-544]
+
+`POST /api/v1/connections`, `PUT /api/v1/connections/{id}` 의 `config` 에 `image_connection_id`, `image_model`, `image_quality` 를 둔다(T3-1 connections.config 추가 칸). 경로는 늘지 않는다.
 
 ---
 
