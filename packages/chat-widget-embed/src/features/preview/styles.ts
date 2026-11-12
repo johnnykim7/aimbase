@@ -69,7 +69,8 @@ export const PREVIEW_CSS = `
 .pv-md { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; }
 .pv-text { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 12px 16px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85em; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
-.pv-busy { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.6); }
+.pv-busy { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; background: rgba(255,255,255,.6); text-align: center; }
+.pv-busy p { margin: 0; color: var(--aimbase-fg); font-size: .9em; }
 
 .pv-present { position: fixed; inset: 0; z-index: 2147483647; display: flex; align-items: center; justify-content: center; background: #000; outline: none; cursor: pointer; user-select: none; }
 .pv-present img { max-width: 100%; max-height: 100%; object-fit: contain; }

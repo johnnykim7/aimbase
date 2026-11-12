@@ -122,6 +122,7 @@ class PreviewController {
   private htmlMode: "run" | "code" = "run";
   private fit = true;
   private busy = false;
+  private busyLabel = "";
   private gen = 0;
   private openedFor: PreviewTarget | null = null;
   private bodyEl: HTMLElement | null = null;
@@ -164,8 +165,9 @@ class PreviewController {
     if (this.ctx.ui.sidePane.currentId() === PANE_ID) this.ctx.ui.sidePane.close();
   }
 
-  setBusy(busy: boolean): void {
+  setBusy(busy: boolean, label?: string): void {
     this.busy = busy;
+    this.busyLabel = busy ? label ?? "" : "";
     this.applyBusy();
   }
 
@@ -586,6 +588,12 @@ class PreviewController {
     const spin = document.createElement("span");
     spin.className = "pv-spin";
     cover.appendChild(spin);
+    if (this.busyLabel) {
+      cover.setAttribute("role", "status");
+      const text = document.createElement("p");
+      text.textContent = this.busyLabel;
+      cover.appendChild(text);
+    }
     root.appendChild(cover);
   }
 
@@ -643,8 +651,9 @@ export function setPreviewFooter(render: ((target: PreviewTarget, foot: HTMLElem
   active?.reopen();
 }
 
-export function setPreviewBusy(busy: boolean): void {
-  active?.setBusy(busy);
+/** label 은 덮개 가운데 표시 아래 글이다. 문구와 언어는 부르는 쪽이 정한다. */
+export function setPreviewBusy(busy: boolean, label?: string): void {
+  active?.setBusy(busy, label);
 }
 
 export function onPreviewSelection(listener: (text: string) => void): () => void {
