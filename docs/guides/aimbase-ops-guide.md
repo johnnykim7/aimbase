@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.34.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.35.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -903,7 +903,6 @@ location /share/ { proxy_pass http://127.0.0.1:8280; }
 | 「이 연결은 이 파일을 고치지 못합니다」 | 원본 없는 파일인데 실행기 연결이 아님, 또는 원본 있는 파일인데 파일 만들기 설정(`chat.file-create.enabled`)이 꺼짐(400 `document_edit_unsupported`) | 실행기 연결로 대화하거나, 파일 만들기 설정을 켜거나, 그 파일을 대화로 다시 만들게 한다 |
 | 「파일이 정리되어 고치지 못합니다」 | 산출물 보관 기한(`aimbase.artifact.ttl-hours`)이 지나 작업 폴더 파일이 지워짐(410 `document_source_gone`) | 다시 만들게 한다. 이미 버전이 있는 파일은 저장소의 버전으로 고친다 |
 | 「문서가 바뀌지 않았습니다」 | 답이 문서를 바꾸지 않았거나 바뀐 내용이 앞 버전과 같음 | 요청을 더 구체적으로 다시 보낸다 |
-
 ### 2-20. 위젯 답 읽어 주기와 음성 대화 운영 [CR-186]
 
 위젯 사용자가 응답을 소리로 듣고(「읽어 주기」), 말로 묻고 답을 소리로 듣는(「음성 대화」) 기능입니다. API 는 API 가이드 § 31.
@@ -954,6 +953,45 @@ location = /api/v1/chat/voice/stream {
 | 「지금은 음성 대화 자리가 없습니다」 | 열린 중계가 `widget.voice.max-concurrent-streams` 개 | 잠시 뒤 다시 하거나 상한을 올린다(받아쓰기 서버 부하를 함께 본다) |
 | 말을 했는데 「잘 듣지 못했습니다」 | 받아쓴 글이 비었음 | 마이크 소리가 작으면 `widget.voice.speech-level` 을 내린다 |
 | 말이 끝나기 전에 끊긴다, 또는 끝났는데 한참 기다린다 | 조용한 시간 기준이 환경에 맞지 않음 | `widget.voice.end-silence-ms` 를 늘리거나 줄인다 |
+
+### 2-21. 위젯 데이터 첨부, 계산, 그래프, 수식 운영 [CR-183]
+
+위젯 첨부가 엑셀(xlsx, xls), CSV, TSV, 워드(docx), 텍스트(txt, md)까지 받습니다. 엑셀, CSV, TSV 를 올리면 AI 가 계산 도구 `data_query` 로 SQL 을 돌려 값을 구하고 표와 그래프로 답합니다. 응답 안 수식도 그립니다. API 는 API 가이드 § 31.
+
+**런타임 설정.** 사이드바 Super Admin 묶음 「런타임 설정」(분류 widget)에서 재기동 없이 바꿉니다. 위젯은 크기 상한을 위젯 설정 조회로 받아 올리기 전에 검사하므로 바꾼 뒤 위젯을 다시 열면 화면 문구의 「최대 N」 도 바뀝니다.
+
+| 키 | 처음 값 | 뜻 |
+|---|---|---|
+| `widget.attachment.max-data-bytes` | 10485760 | 엑셀, CSV, TSV 한 파일 크기 상한 |
+| `widget.attachment.max-text-bytes` | 10485760 | 워드, 텍스트 한 파일 크기 상한 |
+| `widget.attachment.max-text-chars` | 100000 | 워드, 텍스트에서 모델에 보내는 글자 상한. 넘으면 앞부분만 보낸다 |
+| `widget.data.max-rows` | 100000 | 표(시트) 하나 행 상한 |
+| `widget.data.max-columns` | 200 | 표 하나 열 상한 |
+| `widget.data.inline-rows` | 200 | 모든 표 행 합이 이 이하면 모델에 전체 행을 보낸다 |
+| `widget.data.preview-rows` | 20 | 그보다 크면 표마다 모델에 보내는 앞 행 수 |
+| `widget.data.max-result-rows` | 500 | 계산 결과 행 상한 |
+| `widget.data.max-result-bytes` | 65536 | 계산 결과 크기 상한 |
+| `widget.data.query-timeout-seconds` | 10 | 계산 한 번 시간 상한 |
+
+사진과 PDF 크기 상한(`widget.attachment.max-image-bytes`, `max-pdf-bytes`), 세션당 첨부 개수, 보관 기간은 지금과 같습니다.
+
+**프롬프트 틀.** 테넌트 「프롬프트 템플릿」 에서 고칩니다. 비활성으로 두면 그 안내가 모델에 가지 않습니다.
+
+| 키 | 뜻 |
+|---|---|
+| `widget.data.guide` | 데이터 파일 요약 끝에 붙는 계산 안내. 합계, 평균, 순위 같은 값은 반드시 `data_query` 로 계산하라는 지시와 SQL 쓰는 법 |
+| `widget.render.chart` | 숫자를 비교하거나 추이를 보일 때 그래프 블록을 쓰라는 안내와 블록 형식 |
+| `widget.render.math` | 수식 표기 안내. 돈 표시 `$` 는 `\$` 로 쓰게 한다 |
+
+**CLI 연결.** Claude CLI 연결(NATIVE, AIMBASE, HYBRID)은 대화마다 실행기가 MCP 통로 `aimbase-data` 를 붙이고 세션 번호를 머리글 `X-Aimbase-Session-Id` 로 싣습니다. 이 머리글은 CR-183 이 들어간 실행기 판부터 실리므로 실행기를 함께 바꿔야 CLI 연결에서 계산이 됩니다.
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 「행이 너무 많습니다(최대 N행)」 | 시트 하나 행이 `widget.data.max-rows` 초과 | 시트를 나누거나 상한을 올린다 |
+| 「암호가 설정된 파일은 열 수 없습니다」 | 엑셀, 워드에 열기 암호 | 암호를 풀어 다시 올린다 |
+| 그래프 숫자가 엑셀 피벗과 다르다 | 모델이 `data_query` 를 부르지 않고 요약의 앞 행만 보고 답했다 | 세션 상세의 도구 실행에 `data_query` 가 있는지 본다. 없으면 `widget.data.guide` 틀이 활성인지, 요청 도구 필터가 `data_query` 를 빼지 않았는지 본다 |
+| CLI 연결에서 「file not found」 | 실행기가 세션 머리글을 싣지 않는 옛 판 | 실행기를 새 판으로 바꾼다 |
+| 그래프 대신 코드 블록과 「그래프를 그리지 못했습니다」 | 모델이 쓴 블록 형식이 틀렸다(계열 7개 이상, 항목 수와 값 수가 다름 등) | `widget.render.chart` 틀의 형식 안내를 확인한다 |
 
 ---
 
@@ -2159,6 +2197,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.35.0 | 2026-11-13 | **CR-183 위젯 데이터 첨부, 계산, 그래프, 수식** (§ 2-21). 첨부 종류 확대, 런타임 설정 `widget.attachment.max-data-bytes`, `max-text-bytes`, `max-text-chars`, `widget.data.*` 7개(마스터 V86), 프롬프트 틀 `widget.data.guide`, `widget.render.chart`, `widget.render.math`(테넌트 V86), CLI 실행기 판, 증상과 조치 |
 | v3.34.0 | 2026-11-13 | **CR-186 위젯 답 읽어 주기와 음성 대화** (§ 2-20). 필요한 연결(`tts_local`, `stt_local`), 앞단 nginx 음성 중계 경로, 런타임 설정 `widget.tts.*` 6개와 `widget.voice.*` 8개(마스터 V89), 위젯 토큰 scope `chat:tts`, `chat:voice`, 증상별 조치 |
 | v3.33.0 | 2026-11-13 | **CR-181 위젯 옆 창 문서 고치기** (§ 2-19). 고칠 수 있는 문서 조건, 버전 보관(테넌트 V84), 프롬프트 템플릿 `widget.document-edit.*` 4개, 증상별 조치 |
 | v3.32.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 2-18). 런타임 설정 `widget.memory-*` 5개와 `widget.preferences-max-chars`, 프롬프트 틀 `widget.memory-extract`, `widget.user-memory`, 사람 구분은 위젯 토큰 `user_ref` |

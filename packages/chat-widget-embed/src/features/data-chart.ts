@@ -1,7 +1,5 @@
 import type { WidgetContext, WidgetFeature } from "../frame/context";
 import { defineStrings, type Locale } from "../frame/i18n";
-import { enhanceTables } from "../rich-render";
-import { CORE } from "../strings";
 
 /**
  * 응답 안 그래프(CR-183, PRD-522, BIZ-224). 답 글의 chart 코드 블록을 막대, 선 그래프(SVG)로 바꾸고
@@ -197,6 +195,11 @@ interface Hit {
   y: number;
 }
 
+/** 표 칸 글. 마크다운 기호와 수식 기호를 글자로 둔다. */
+function mdText(s: string): string {
+  return s.replace(/[\\`*_{}[\]()#+\-.!|$<>~]/g, (c) => `\\${c}`).replace(/\s*\n\s*/g, " ");
+}
+
 /** chart 블록 하나. 폭이 바뀌거나 화면 언어가 바뀌면 다시 그린다. */
 class Plot {
   readonly root: HTMLDivElement;
@@ -214,6 +217,7 @@ class Plot {
     private readonly spec: PlotSpec,
     private readonly t: Texts,
     private readonly locale: () => Locale,
+    private readonly drawMarkdown: (target: HTMLElement, text: string) => void,
   ) {
     this.root = div("ach");
     const head = div("ach-head");
@@ -474,29 +478,20 @@ class Plot {
     this.frame?.overlay.replaceChildren();
   }
 
+  /**
+   * 표 보기는 응답 본문 표와 같은 모양(복사, CSV, 엑셀 단추)으로 틀의 마크다운 그리기에 맡긴다.
+   * 엑셀 받기가 숫자 칸으로 인식하도록 값에 천 단위 쉼표를 넣지 않는다.
+   */
   private renderTable(): void {
     const { spec } = this;
-    const locale = this.locale();
-    const table = document.createElement("table");
-    const head = table.createTHead().insertRow();
-    for (const h of [spec.xLabel ?? this.t.category, ...spec.series.map((s) => s.name)]) {
-      const th = document.createElement("th");
-      th.textContent = h;
-      head.append(th);
-    }
-    const body = table.createTBody();
-    spec.labels.forEach((label, i) => {
-      const tr = body.insertRow();
-      tr.insertCell().textContent = label;
-      for (const s of spec.series) {
-        const v = s.data[i];
-        const td = tr.insertCell();
-        td.textContent = v === null ? "" : fullNumber(v, locale);
-        td.align = "right";
-      }
-    });
-    this.tableBox.replaceChildren(table);
-    enhanceTables(this.tableBox, CORE[locale].rich);
+    const row = (cells: string[]) => `| ${cells.join(" | ")} |`;
+    const lines = [
+      row([spec.xLabel ?? this.t.category, ...spec.series.map((s) => s.name)].map(mdText)),
+      row(["---", ...spec.series.map(() => "---:")]),
+      ...spec.labels.map((label, i) =>
+        row([mdText(label), ...spec.series.map((s) => (s.data[i] === null ? "" : String(s.data[i])))])),
+    ];
+    this.drawMarkdown(this.tableBox, lines.join("\n"));
   }
 }
 
@@ -543,7 +538,7 @@ class DataPlot {
         pre.after(div("ach-failed", this.t.failed));
         return;
       }
-      const plot = new Plot(spec, this.t, () => this.ctx.locale());
+      const plot = new Plot(spec, this.t, () => this.ctx.locale(), (target, text) => this.ctx.ui.renderMarkdown(target, text));
       pre.replaceWith(plot.root);
       this.plots.add(plot);
       plot.render(true);

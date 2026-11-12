@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.38.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.39.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1763,7 +1763,7 @@ BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:upload` 
 | 파라미터 | 필수 | 설명 |
 |---------|:-:|------|
 | `session_id` | ✅ | 첨부가 속할 세션 — 타 세션에서 참조 시 403 |
-| `file`       | ✅ | 파일 (PNG/JPEG/GIF/WEBP/PDF) — magic number 재검증 |
+| `file`       | ✅ | 파일 (PNG/JPEG/GIF/WEBP/PDF) — magic number 재검증. 엑셀, CSV, TSV, 워드, 텍스트는 § 31-1 |
 
 **응답 201**
 ```json
@@ -1789,6 +1789,8 @@ BFF 가 `/sessions/issue-widget-token` 호출 시 scope 배열에 `chat:upload` 
 | 404 | FG-ATT-4041 | 첨부 없음 또는 만료 |
 | 409 | FG-ATT-4091 | 세션당 활성 첨부 초과 (BIZ-100: 최대 10개) |
 | 422 | FG-ATT-4221 | magic number 와 Content-Type 헤더 불일치 |
+
+엑셀, 워드 열어 보기 오류(`FG-ATT-4003` ~ `FG-ATT-4006`)와 오류 본문의 `code`, `limit` 은 § 31-1 입니다.
 
 ### 18-3. `DELETE /api/v1/chat/attachments/{attachment_id}?session_id=...`
 
@@ -2581,6 +2583,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 7, "model": "claude-
 - `thinking_default` 는 깊게 생각하기 단추의 처음 상태입니다. 연결 config 에 생각 설정이 있으면 그 값, 없으면 어댑터 기본(Claude CLI 는 켜짐)입니다.
 - `locale` 은 위젯 화면 언어입니다(CR-177). `feedback_reasons` 의 `label` 이 그 언어 이름이고, 그 언어 이름이 없는 이유나 `locale` 이 없을 때는 기본 이름(한국어)입니다. `en-US` 처럼 지역이 붙은 값은 앞 언어(`en`)로 봅니다. 위젯은 화면 언어를 바꾸면 이 조회를 다시 부릅니다.
 - 그 테넌트에 없는 연결이면 404 `connection_not_found`.
+- `attachments` 는 받는 첨부 확장자와 묶음별 크기 상한입니다(§ 31-1, CR-183).
 
 ### 28-3. 응답 평가 (`PUT`, `DELETE /api/v1/chat/feedback`)
 
@@ -3179,11 +3182,120 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 - `widget.allowed-origins` 에 없는 출처는 손잡기 전에 403 으로 막힙니다(브라우저에는 닫는 번호 1006 으로 보입니다).
 - 이 경로는 로그인 검사와 테넌트 머리글 검사 없이 입장권으로만 들어옵니다. 앞단 nginx 는 이 경로만 웹소켓 전환(`Upgrade`)을 열어야 합니다(운용 가이드 § 2-17).
 - 감사 로그 `VOICE_STREAM` 에 세션, 이은 시간(`duration_ms`), 받은 소리 바이트(`audio_bytes`), 끝난 까닭(`end_reason`: `final`, `final_timeout`, `too_long`, `upstream_closed`, `client_closed` 등)을 남깁니다. 받아쓴 글은 남기지 않습니다.
+## 36. 위젯 데이터 첨부, 계산, 그래프, 수식 [CR-183]
+
+위젯 첨부가 엑셀, CSV, TSV, 워드, 텍스트까지 받습니다. 데이터 파일(엑셀, CSV, TSV)은 모델이 계산 도구 `data_query` 로 SQL 을 돌려 값을 구하고, 위젯은 응답 안 그래프 블록과 수식을 그립니다.
+
+### 36-1. 첨부 종류 (`POST /api/v1/chat/attachments`)
+
+| 묶음 | 확장자 | 저장 `media_type` | 크기 상한 설정 |
+|---|---|---|---|
+| image | png, jpg, jpeg, gif, webp | 지금과 같다 | `widget.attachment.max-image-bytes` |
+| pdf | pdf | `application/pdf` | `widget.attachment.max-pdf-bytes` |
+| data | xlsx, xls, csv, tsv | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `application/vnd.ms-excel`, `text/csv`, `text/tab-separated-values` | `widget.attachment.max-data-bytes` (기본 10MB) |
+| text | docx, txt, md | `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `text/plain`, `text/markdown` | `widget.attachment.max-text-bytes` (기본 10MB) |
+
+- data, text 묶음은 확장자로 종류를 정하고 내용이 그 종류인지 봅니다. 요청의 Content-Type 은 대조하지 않습니다(윈도우는 CSV 를 `application/vnd.ms-excel` 로 보냅니다).
+- CSV, TSV, 텍스트는 UTF-8(BOM 허용), 아니면 CP949 로 읽습니다. 엑셀에서 저장한 한글 CSV 가 CP949 입니다.
+- 엑셀, 워드는 올릴 때 한 번 열어 봅니다. 데이터 파일은 표(시트)마다 행, 열 수를 셉니다.
+
+| HTTP | 코드 | 경우 | `limit` |
+|:---:|---|---|---|
+| 400 | FG-ATT-4001 | 받지 않는 확장자 | - |
+| 400 | FG-ATT-4002 | 크기 상한 초과 | 상한 바이트 |
+| 400 | FG-ATT-4003 | 암호가 설정된 파일 | - |
+| 400 | FG-ATT-4004 | 열리지 않는 파일 | - |
+| 400 | FG-ATT-4005 | 표 하나 행이 `widget.data.max-rows`(기본 100000) 초과 | 행 상한 |
+| 400 | FG-ATT-4006 | 표 하나 열이 `widget.data.max-columns`(기본 200) 초과 | 열 상한 |
+| 422 | FG-ATT-4221 | 확장자와 내용이 다름(이름만 xlsx 인 PNG, NUL 바이트가 있는 txt) | - |
+
+첨부 오류 본문:
+
+```json
+{"success": false, "error": "table has more than 100000 rows", "code": "FG-ATT-4005", "limit": 100000}
+```
+
+`limit` 은 크기, 행, 열 상한으로 거절했을 때만 있습니다. 화면 문구는 `code` 로 고르세요.
+
+### 36-2. 대화 요청 (`POST /api/v1/chat/completions`)
+
+| 칸 | 타입 | 설명 |
+|---|---|---|
+| `messages[].content[]` 의 `document` 블록 | `{"type": "document", "attachment_id": "..."}` | PDF 밖에 data, text 묶음 첨부도 이 블록입니다. 이미지만 `image` 블록입니다 |
+| `render_features` | 글 배열, 선택 | 화면이 그릴 수 있는 형식. 이번 값은 `chart`, `math`. 값마다 테넌트 프롬프트 틀 `widget.render.<값>` 이 있고 활성이면 시스템 안내 끝에 붙습니다. 모르는 값과 중복은 무시합니다. 영문 소문자, 숫자, 하이픈만, 최대 10개이고 어기면 400 `render_features_invalid` |
+
+서버가 모델에 보내는 것:
+
+| 묶음 | 모델에 가는 것 |
+|---|---|
+| pdf | 지금과 같다(§ 18-4) |
+| text | 글 블록 하나. 첫 줄 `[첨부 문서: <이름>]`, 다음 줄부터 본문. 워드의 표는 마크다운 표. `widget.attachment.max-text-chars`(기본 100000) 를 넘으면 앞부분과 `[앞 N자만 보냄, 전체 M자]` |
+| data | 글 블록 하나(데이터 요약). 첫 줄 `[첨부 데이터 파일: <이름>, file_id <첨부 id>]`, 표마다 이름(t1, t2, ...), 시트, 행 수, 열 이름과 타입, 그리고 행. 모든 표 행 합이 `widget.data.inline-rows`(기본 200) 이하면 전체 행, 넘으면 표마다 앞 `widget.data.preview-rows`(기본 20) 행. 끝에 계산 안내 틀 `widget.data.guide` |
+
+요약은 그 질문 메시지의 일부로 대화 기록에 남아, 다음 질문에서도 같은 file_id 로 계산합니다(보관 기간 안).
+
+### 36-3. 계산 도구 `data_query`
+
+| 항목 | 내용 |
+|---|---|
+| 입력 | `file_id`(첨부 id), `sql`(SELECT 또는 WITH 로 시작하는 한 문장) |
+| 출력 | `columns`(`[{name, type}]`), `rows`, `truncated`, `elapsed_ms` |
+| SQL | H2, PostgreSQL 호환 모드. 표와 열 이름은 큰따옴표로 감쌉니다(`SELECT "지점", SUM("매출액") FROM "t1" GROUP BY "지점"`) |
+| 상한 | 결과 `widget.data.max-result-rows`(기본 500) 행, `widget.data.max-result-bytes`(기본 64KB), 칸 글 200자, 시간 `widget.data.query-timeout-seconds`(기본 10초). 넘으면 잘라서 `truncated: true` |
+| 막는 것 | 쓰기 문장, 여러 문장, 파일 읽고 쓰기, 다른 DB 연결, 함수 만들기. 호출마다 새 메모리 DB 를 만들고 끝나면 지웁니다 |
+| 소유 | 그 대화 세션의 데이터 첨부만. 다른 세션, 보관 기간이 지난 파일, 데이터가 아닌 첨부는 `file not found` |
+
+붙는 곳:
+
+| 연결 | 조건 |
+|---|---|
+| API(Anthropic, OpenAI, Ollama) | 그 세션에 보관 중인 데이터 파일이 있을 때 도구 목록에 더합니다. `tool_filter.exclude_tools` 에 `data_query` 가 있으면 빼고, `actions_enabled=false` 여도 `data_query` 하나는 싣습니다 |
+| Claude CLI(NATIVE, AIMBASE, HYBRID) | 대화 API 요청이면 MCP 통로 `aimbase-data`(`/mcp-data`)를 붙입니다. 실행기가 머리글 `X-Aimbase-Session-Id` 로 세션을 싣습니다. 워크플로우 단계에는 붙지 않습니다 |
+
+### 36-4. 그래프 블록 (`render_features` 의 `chart`)
+
+모델은 응답에 아래 코드 블록을 씁니다. 위젯은 응답이 끝난 뒤 그 자리를 막대나 선 그래프로 바꾸고, 머리줄 「그래프 | 표」 로 같은 데이터를 표로 보입니다.
+
+````
+```chart
+{"type": "bar", "title": "지점별 11월 매출", "x_label": "지점", "y_label": "매출액(원)",
+ "labels": ["서울", "부산", "대구"],
+ "series": [{"name": "11월", "data": [1250000, 830000, 610000]}]}
+```
+````
+
+| 칸 | 필수 | 뜻 |
+|---|---|---|
+| type | 예 | `bar`, `line` |
+| title | 아니오 | 제목 |
+| x_label, y_label | 아니오 | 축 이름 |
+| labels | 예 | 가로축 항목, 1 ~ 200개 |
+| series | 예 | 계열 1 ~ 6개. `name`, `data`(labels 와 같은 개수의 숫자 또는 null) |
+
+형식에 맞지 않으면 위젯은 코드 블록을 그대로 두고 「그래프를 그리지 못했습니다」 를 보입니다. 직접 그리는 소비앱도 이 형식을 그대로 쓰면 됩니다.
+
+### 36-5. 수식 (`render_features` 의 `math`)
+
+줄 안 `$...$`, `\(...\)`, 따로 줄 `$$...$$`, `\[...\]`. 돈 표시와 헷갈리지 않게 `$` 하나짜리는 여는 `$` 바로 뒤와 닫는 `$` 바로 앞이 빈칸이 아니고 닫는 `$` 바로 뒤가 숫자가 아닐 때만 수식입니다. 틀 `widget.render.math` 가 모델에게 돈 표시 `$` 를 `\$` 로 쓰라고 안내합니다.
+
+### 36-6. 위젯 설정 칸 (`GET /api/v1/chat/widget-settings`)
+
+```json
+{
+  "attachments": {
+    "accept": ["png", "jpg", "jpeg", "gif", "webp", "pdf", "xlsx", "xls", "csv", "tsv", "docx", "txt", "md"],
+    "max_bytes": {"image": 10485760, "pdf": 33554432, "data": 10485760, "text": 10485760}
+  }
+}
+```
+
+위젯은 파일 선택 창의 종류와 올리기 전 크기 검사를 이 값으로 합니다. 화면 문구는 [embed-chat-widget.md](embed-chat-widget.md) 를 보세요.
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.39.0 | 2026-11-13 | **CR-183 위젯 데이터 첨부, 계산, 그래프, 수식** (§ 36). 첨부가 xlsx, xls, csv, tsv, docx, txt, md 를 받고 오류 코드 `FG-ATT-4003` ~ `FG-ATT-4006`, 오류 본문 `code`, `limit`. 대화 요청 `render_features`, `document` 블록이 데이터, 텍스트 첨부도 받음. 계산 도구 `data_query`. 위젯 설정 `attachments` |
 | v3.38.0 | 2026-11-13 | **CR-186 위젯 답 읽어 주기와 음성 대화** (§ 35). 읽을 소리 `POST /api/v1/chat/tts`, 음성 대화 입장권 `POST /api/v1/chat/voice/tickets`, 실시간 받아쓰기 중계 웹소켓 `/api/v1/chat/voice/stream`, 위젯 설정 칸 7개, 위젯 토큰 scope `chat:tts`, `chat:voice` |
 | v3.37.0 | 2026-11-13 | **CR-178 위젯 지난 대화 목록과 프로젝트** (§ 34). 대화 목록 `GET /api/v1/chat/sessions`, 이어보기 `GET /api/v1/chat/sessions/{session_id}/messages`, 이름 바꾸기와 옮기기 `PATCH`, 삭제 `DELETE`, 프로젝트와 자료 `/api/v1/chat/projects/**`, 대화 요청 `chat_project_id`, 위젯 설정 `history_enabled`, `project_instructions_max_chars`, `project_files_max_count`. `user_ref` 없는 위젯 토큰은 403 `widget_user_required`, 위젯 토큰으로 `/api/v1/conversations/**` 는 403 `widget_forbidden` |
 | v3.36.0 | 2026-11-13 | **CR-181 위젯 옆 창 문서를 대화로 고치기** (§ 33). 대화 요청 `document_edit`, 스트림 이벤트와 `done` 의 `document`. 세션 문서 목록 `GET /api/v1/chat/documents`, 판 본문 `GET /api/v1/chat/documents/{document_id}/versions/{version}`, 되돌리기 `POST .../restore`. 미리보기 정보, 쪽 그림, 내려받기에 `version` 인자, 미리보기 정보에 `has_source`, 위젯 설정에 `document_binary_edit_supported` (§ 28-2) |

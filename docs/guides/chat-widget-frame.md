@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.10 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-178, CR-185, CR-186
+> 문서 버전: 1.11 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-178, CR-183, CR-185, CR-186
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -72,7 +72,7 @@ export const exportChat: WidgetFeature = {
 | 4 | 옆 창 | `ctx.ui.sidePane.open(spec)`, `close()` | CR-180 미리보기, CR-181 고치기 |
 | 5 | 입력칸 단추, 입력칸 모드 | `ctx.ui.composer.addTool(spec)`, `setMode(spec)` | CR-186 음성 대화, CR-184 그림 만들기 |
 | 6 | 응답 아래 단추 | `ctx.ui.answer.addAction(spec)` | CR-182 응답 저장, CR-186 읽어 주기 |
-| 7 | 응답 본문 손질, 마크다운 그리기 | `ctx.ui.answer.addDecorator(spec)`, `addMarkdownExtension(spec)`, `ctx.ui.renderMarkdown` | CR-180 HTML, SVG 보기 단추, CR-183 그래프, 수식, CR-184 그림 |
+| 7 | 응답 본문 손질, 마크다운 그리기 | `ctx.ui.answer.addDecorator(spec)`, `addMarkdownExtension(spec)`, `ctx.ui.renderMarkdown` | CR-180 HTML, SVG 보기 단추, CR-183 그래프(`features/data-chart.ts`, `chart`), 수식(`features/math.ts`, `math`), CR-184 그림 |
 | 8 | 산출물 열기 | `ctx.ui.answer.addArtifactOpener(spec)` | CR-180 산출물 칩을 누르면 옆 창 |
 | 9 | 산출물 칩 단추 | `ctx.ui.answer.addArtifactAction(spec)` | CR-182 파일 공유 |
 | 10 | 문구표, 오류 문구, 화면 언어 | `defineStrings`, `ctx.strings(pack)`, `ctx.text`, `ctx.list`, `ctx.setLocale`, `ctx.ui.addErrorTexts(map)` | 모든 건, CR-184 그림 오류 |
@@ -108,7 +108,7 @@ interface MenuRowSpec {        // 글자 크기 줄처럼 안에 단추가 있�
 |---|---|---|---|---|---|
 | 1 | + | 0 | 10 | 파일 올리기 | 위젯 본체 |
 | 2 | + | 0 | 20 | 프로젝트 자료에서 | CR-178 |
-| 3 | + | 0 | 30 | 이 화면 캡처 | (주인 없음) |
+| 3 | + | 0 | 30 | 이 화면 캡처 | CR-183 (`features/screen-capture.ts`) |
 | 4 | + | 1 | 10 | 그림 만들기 | CR-184 |
 | 5 | 더 보기 | 0 | 10 | 대화 내보내기 | CR-182 |
 | 6 | 더 보기 | 0 | 20 | 공유 링크 만들기 | CR-182 |
