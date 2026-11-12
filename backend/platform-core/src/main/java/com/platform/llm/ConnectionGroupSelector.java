@@ -197,6 +197,19 @@ public class ConnectionGroupSelector {
         roundRobinCounters.remove(groupId);
     }
 
+    /** CR-175: 그룹의 멤버 커넥션 id. 질문 수정이 어느 멤버가 그 세션을 맡았는지 모른 채 실행기 대화를 닫을 때 쓴다. */
+    public List<String> memberConnectionIds(String groupId) {
+        ConnectionGroupEntity group = groupRepository.findById(groupId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Connection group not found: " + groupId));
+        List<String> ids = new ArrayList<>();
+        for (Map<String, Object> m : group.getMembers()) {
+            Object id = m.get("connection_id");
+            if (id instanceof String s && !s.isBlank()) ids.add(s);
+        }
+        return ids;
+    }
+
     /**
      * 그룹 전략에 따라 최적 커넥션 1개를 선택한다 (스트리밍용 — 폴백 없이).
      * 서킷 브레이커 OPEN인 커넥션은 건너뛴다.

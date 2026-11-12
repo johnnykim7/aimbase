@@ -147,7 +147,11 @@ public class ConversationController {
         if (body.containsKey("projectId")) session.setProjectId((String) body.get("projectId"));
         if (body.containsKey("parentSessionId")) session.setParentSessionId((String) body.get("parentSessionId"));
         // CR-045 follow-up: FE 세션 목록에서 제목 편집 지원
-        if (body.containsKey("title")) session.setTitle((String) body.get("title"));
+        // CR-175 BIZ-151: 사람이 고친 제목은 자동 제목이 덮지 않는다.
+        if (body.containsKey("title")) {
+            session.setTitle((String) body.get("title"));
+            session.setTitleSource(ConversationSessionEntity.TITLE_SOURCE_USER);
+        }
 
         sessionRepository.save(session);
         return ApiResponse.ok(Map.of("updated", sessionId));

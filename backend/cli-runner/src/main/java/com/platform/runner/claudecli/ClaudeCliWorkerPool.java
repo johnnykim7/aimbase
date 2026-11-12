@@ -366,7 +366,7 @@ public class ClaudeCliWorkerPool {
                 synchronized (rw) {
                     // reaper 가 빈 항목을 치웠으면 지금 항목으로 다시 한다.
                     if (runs.get(runId) != rw) continue;
-                    ClaudeCliWorker live = liveMain(rw, runId);
+                    ClaudeCliWorker live = liveMain(rw, runId, model);
                     if (live != null) {
                         live.lease();
                         return live;
@@ -389,17 +389,25 @@ public class ClaudeCliWorkerPool {
         }
     }
 
-    /** 이어 쓸 수 있는 메인 워커. 프로세스가 죽었으면 닫고 null 이다. rw 잠금 안에서 부른다. */
-    private ClaudeCliWorker liveMain(RunWorkers rw, String runId) {
+    /**
+     * 이어 쓸 수 있는 메인 워커. 프로세스가 죽었거나 모델이 바뀌었으면 닫고 null 이다. rw 잠금 안에서 부른다.
+     * 죽은 메인을 남겨 두면 run 자리와 실행기 전체 자리를 계속 쥐고 있게 된다.
+     */
+    private ClaudeCliWorker liveMain(RunWorkers rw, String runId, String model) {
         ClaudeCliWorker current = rw.main;
         if (current == null) return null;
-        if (current.isAlive()) return current;
-        // 죽은 메인을 남겨 두면 run 자리와 실행기 전체 자리를 계속 쥐고 있게 된다.
+        boolean alive = current.isAlive();
+        if (alive && sameModel(current.getModel(), model)) return current;
         rw.main = null;
         rw.forks.remove(current);
         rw.slots.release();
         current.close();
-        log.info("Run '{}': dead main worker closed before respawn (pid={})", runId, current.pid());
+        if (alive) {
+            // CR-175: 위젯에서 모델을 바꿨다. CLI 는 실행 중에 모델을 못 바꾸므로 새로 띄운다.
+            log.info("Run '{}': main worker closed because the model changed", runId);
+        } else {
+            log.info("Run '{}': dead main worker closed before respawn (pid={})", runId, current.pid());
+        }
         return null;
     }
 
@@ -626,6 +634,13 @@ public class ClaudeCliWorkerPool {
 
     public int activeRunCount() {
         return runs.size();
+    }
+
+    /** 비어 있는 모델은 CLI 기본 모델 하나로 본다. */
+    private static boolean sameModel(String a, String b) {
+        String left = a == null || a.isBlank() ? null : a.trim();
+        String right = b == null || b.isBlank() ? null : b.trim();
+        return java.util.Objects.equals(left, right);
     }
 
     private void acquireSlot(RunWorkers rw, String runId) {

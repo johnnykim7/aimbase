@@ -42,11 +42,12 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
      */
     @Modifying
     @Transactional
-    @Query(value = "INSERT INTO conversation_sessions (id, session_id, title, message_count, scope_type, created_at, updated_at) "
-            + "VALUES (:id, :sessionId, :title, :messageCount, COALESCE(:scopeType, 'chat'), NOW(), NOW()) "
+    @Query(value = "INSERT INTO conversation_sessions (id, session_id, title, message_count, scope_type, user_id, created_at, updated_at) "
+            + "VALUES (:id, :sessionId, :title, :messageCount, COALESCE(:scopeType, 'chat'), :userId, NOW(), NOW()) "
             + "ON CONFLICT (session_id) DO UPDATE SET "
             + "  message_count = EXCLUDED.message_count, "
+            + "  user_id = COALESCE(conversation_sessions.user_id, EXCLUDED.user_id), "
             + "  updated_at = NOW()",
             nativeQuery = true)
-    void upsertSession(UUID id, String sessionId, String title, int messageCount, String scopeType);
+    void upsertSession(UUID id, String sessionId, String title, int messageCount, String scopeType, String userId);
 }

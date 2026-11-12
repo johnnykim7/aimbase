@@ -6,14 +6,18 @@ export { defineAimbaseChat, AimbaseChatElement } from "./web-component";
 export type {
   AuthResolver,
   ApprovalEvent,
+  ChatArtifact,
   ChatDelta,
   Citation,
   DisplayMode,
+  FeedbackRating,
+  FontSize,
   SttResult,
   SttRecordingState,
   TokenResponse,
   WidgetHandle,
   WidgetOptions,
+  WidgetSettings,
   WorkflowStepEvent,
 } from "./types";
 export { SttClient, SttError } from "./stt-client";

@@ -336,6 +336,11 @@ public class ClaudeCliWorker implements AutoCloseable {
         return sessionId;
     }
 
+    /** CR-175: 띄울 때 정한 모델. 실행 중에는 바꿀 수 없어 모델이 바뀌면 작업자를 새로 띄운다. */
+    public String getModel() {
+        return model;
+    }
+
     public boolean isAlive() {
         return process != null && process.isAlive();
     }

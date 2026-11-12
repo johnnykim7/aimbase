@@ -24,6 +24,13 @@ interface Citation {
     page_number?: number;
     metadata?: Record<string, unknown>;
 }
+/** CR-132: CLI 가 생성한 다운로드 산출물(pptx/xlsx/pdf/docx …) 메타. */
+interface ChatArtifact {
+    name: string;
+    size: number;
+    /** 서버 상대 경로. 위젯이 baseUrl 앞에 붙여 위젯 토큰으로 GET. */
+    download_url: string;
+}
 interface ChatDelta {
     type: "delta" | "thinking" | "tool_use_start" | "tool_result" | "done" | "error";
     text?: string;
@@ -40,6 +47,14 @@ interface ChatDelta {
     done?: {
         rag_used?: boolean;
         citations?: Citation[];
+        /** CR-132: 이 턴에 생성된 산출물. 위젯이 다운로드 칩으로 렌더. */
+        artifacts?: ChatArtifact[];
+        /** CR-175: 이 답의 번호. 평가와 후속 질문이 이 번호로 답을 가리킨다. */
+        turn_id?: string;
+        /** CR-175: 이 답을 이룬 메시지 묶음의 첫 순번. 다시 생성, 질문 수정이 이 순번부터 되감는다. */
+        turn_seq?: number;
+        /** CR-175: 실제로 답한 모델. */
+        model?: string;
     };
     error?: string;
 }
@@ -84,6 +99,14 @@ interface WidgetOptions {
     actionsEnabled?: boolean;
     /** 모델 명시 지정 — chat request 의 model 로 전달. 미지정 시 "auto". */
     model?: string;
+    /** CR-175: 첫 화면 추천 질문. 최대 4개까지 보인다. */
+    suggestions?: string[];
+    /** CR-175: 첫 화면 안내 제목. 없으면 위젯 기본 문구. */
+    emptyTitle?: string;
+    /** CR-175: 첫 화면 안내 한 줄. 없으면 비운다. */
+    emptySubtitle?: string;
+    /** CR-175: 글자 크기 기본값. 사용자가 더보기에서 바꾸면 그 브라우저에서는 그 값을 따른다. */
+    fontSize?: FontSize;
     /** 위젯 내 승인 UI 활성화 — 기본 false (이벤트만 발행) */
     allowApproval?: boolean;
     theme?: {
@@ -96,7 +119,29 @@ interface WidgetOptions {
         onApprovalRequired?: (ev: ApprovalEvent) => void;
         onError?: (err: Error) => void;
         onTokenExpiring?: () => void;
+        /** CR-175: 새 대화를 시작했을 때. 앞 대화는 서버에 남는다. */
+        onNewConversation?: (ev: {
+            previousSessionId: string;
+            sessionId: string;
+        }) => void;
     };
+}
+type FontSize = "small" | "medium" | "large";
+type FeedbackRating = "UP" | "DOWN";
+/** CR-175: GET /api/v1/chat/widget-settings 응답. */
+interface WidgetSettings {
+    models: Array<{
+        id: string;
+        label: string;
+    }>;
+    default_model: string;
+    thinking_supported: boolean;
+    feedback_reasons: Array<{
+        code: string;
+        label: string;
+    }>;
+    feedback_comment_max_chars: number;
+    follow_ups_enabled: boolean;
 }
 interface WidgetHandle {
     open(): void;
@@ -197,4 +242,4 @@ declare class SttError extends Error {
 /** 전역 네임스페이스 편의 API — <script> 로드 시 `window.AimbaseChat.init(...)` 로 호출 가능. */
 declare function init(options: WidgetOptions): WidgetHandle;
 
-export { AimbaseChatElement, type ApprovalEvent, type AuthResolver, type ChatDelta, type Citation, type DisplayMode, SttClient, SttError, type SttRecordingState, type SttResult, type TokenResponse, type WidgetHandle, type WidgetOptions, type WorkflowStepEvent, createWidget, defineAimbaseChat, init };
+export { AimbaseChatElement, type ApprovalEvent, type AuthResolver, type ChatArtifact, type ChatDelta, type Citation, type DisplayMode, type FeedbackRating, type FontSize, SttClient, SttError, type SttRecordingState, type SttResult, type TokenResponse, type WidgetHandle, type WidgetOptions, type WidgetSettings, type WorkflowStepEvent, createWidget, defineAimbaseChat, init };

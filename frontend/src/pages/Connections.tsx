@@ -16,6 +16,15 @@ import {
   useTestConnection,
 } from "../hooks/useConnections";
 import type { Connection, ConnectionRequest } from "../types/connection";
+import {
+  WidgetModelsField,
+  hasWidgetModelsErrors,
+  parseWidgetModels,
+  serializeWidgetModels,
+  validateWidgetModels,
+  type WidgetModel,
+  type WidgetModelsErrors,
+} from "../components/connections/WidgetModelsField";
 
 const TYPE_ICONS: Record<string, string> = {
   database: "🗄️",
@@ -75,6 +84,8 @@ export default function Connections() {
   const [selectedAdapter, setSelectedAdapter] = useState("PostgreSQL");
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; latencyMs: number }>>({});
   const [form, setForm] = useState<Record<string, string>>({});
+  const [widgetModels, setWidgetModels] = useState<WidgetModel[]>([]);
+  const [widgetModelsErrors, setWidgetModelsErrors] = useState<WidgetModelsErrors | undefined>();
 
   const handleTest = async (id: string) => {
     const result = await testConnection.mutateAsync(id);
@@ -84,6 +95,8 @@ export default function Connections() {
   const openCreateModal = () => {
     setEditingConn(null);
     setForm({});
+    setWidgetModels([]);
+    setWidgetModelsErrors(undefined);
     setSelectedType("database");
     setSelectedAdapter("PostgreSQL");
     setShowModal(true);
@@ -94,6 +107,8 @@ export default function Connections() {
     setSelectedType(conn.type ?? "llm");
     setSelectedAdapter(conn.adapter ?? "");
     const cfg = conn.config ?? {};
+    setWidgetModels(parseWidgetModels(cfg.models));
+    setWidgetModelsErrors(undefined);
     setForm({
       "연결 이름": conn.name ?? conn.id,
       "이름": conn.name ?? "",
@@ -126,6 +141,13 @@ export default function Connections() {
   };
 
   const handleSave = () => {
+    if (selectedType === "llm") {
+      const errors = validateWidgetModels(widgetModels, form["모델"] ?? "");
+      if (hasWidgetModelsErrors(errors)) {
+        setWidgetModelsErrors(errors);
+        return;
+      }
+    }
     const config: Record<string, unknown> = {
       host: form["호스트"],
       port: form["포트"],
@@ -136,6 +158,8 @@ export default function Connections() {
       apiKey: form["API Key"],
       token: form["Token"],
       model: form["모델"],
+      // CR-175: 허용 모델. 비면 키를 저장하지 않는다(BIZ-150)
+      models: selectedType === "llm" ? serializeWidgetModels(widgetModels) : undefined,
       // CR-032: 프로바이더 확장 필드
       base_url: form["Base URL"],
       aws_region: form["AWS Region"],
@@ -422,6 +446,13 @@ export default function Connections() {
                 onChange={(e) => setForm((p) => ({ ...p, 모델: e.target.value }))}
               />
             </FormField>
+            <WidgetModelsField
+              rows={widgetModels}
+              defaultModel={form["모델"] ?? ""}
+              errors={widgetModelsErrors}
+              onRowsChange={(rows) => { setWidgetModels(rows); setWidgetModelsErrors(undefined); }}
+              onDefaultChange={(id) => { setForm((p) => ({ ...p, 모델: id })); setWidgetModelsErrors(undefined); }}
+            />
           </>
         )}
 

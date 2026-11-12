@@ -27,13 +27,21 @@ public sealed interface StreamEvent {
     /**
      * 최종 완료 (usage 포함, null 가능).
      * CR-058: citations + ragUsed 확장 — 위젯이 SSE done 이벤트 payload 로 렌더.
+     * CR-175: turnId, turnSeq, model 확장. 대화 기록을 저장한 뒤에 채워 내보낸다(PRD-369).
      */
     record Done(TokenUsage usage,
                 List<Map<String, Object>> citations,
-                Boolean ragUsed) implements StreamEvent {
+                Boolean ragUsed,
+                String turnId,
+                Integer turnSeq,
+                String model) implements StreamEvent {
         /** 하위 호환 생성자: citations 없이 사용. */
         public Done(TokenUsage usage) {
-            this(usage, null, null);
+            this(usage, null, null, null, null, null);
+        }
+
+        public Done(TokenUsage usage, List<Map<String, Object>> citations, Boolean ragUsed) {
+            this(usage, citations, ragUsed, null, null, null);
         }
     }
 

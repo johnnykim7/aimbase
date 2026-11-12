@@ -347,9 +347,10 @@ public class OrchestratorEngine {
         // 5. LLM 호출 (Phase 2: actionsEnabled=true 시 tool use 루프)
         if (adapter != null) calledAdapters.add(adapter);
         // CR-030: connection config에서 ModelConfig 구성 (extended_thinking 등)
-        ModelConfig modelConfig = (request.connectionId() != null && !request.connectionId().isBlank())
+        ModelConfig modelConfig = ((request.connectionId() != null && !request.connectionId().isBlank())
                 ? connectionAdapterFactory.resolveModelConfig(request.connectionId())
-                : ModelConfig.defaults();
+                : ModelConfig.defaults())
+                .withThinkingOverride(request.thinkingOverride());   // CR-175: 요청 단위 깊게 생각하기
 
         LLMResponse llmResponse = null;
         long llmStart = System.currentTimeMillis();
@@ -472,9 +473,12 @@ public class OrchestratorEngine {
         Map<String, Object> guardrailResult = validateOutput(llmResponse.textContent());
 
         // 7. 세션 저장 (사용자 메시지 + 어시스턴트 최종 응답)
-        request.messages().forEach(m -> sessionStore.appendMessage(sessionId, m));
-        sessionStore.appendMessage(sessionId,
-                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, llmResponse.textContent()));
+        // CR-175: 한 요청의 메시지를 한 번에 저장하고 답 번호와 첫 순번을 응답에 싣는다(PRD-369).
+        UUID turnId = UUID.randomUUID();
+        List<UnifiedMessage> turnMessages = new ArrayList<>(request.messages());
+        turnMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, llmResponse.textContent()));
+        Integer turnSeq = sessionStore.appendTurn(sessionId, turnMessages, turnId, resolvedModel,
+                com.platform.llm.adapter.RequestContext.getUserRef());
 
         // 7.5 PRD-128: 응답 캐시 저장 (세션 없는 단발 요청만, 유효한 응답만)
         if (request.sessionId() == null && lastUserMsg != null && !lastUserMsg.isBlank()
@@ -522,7 +526,9 @@ public class OrchestratorEngine {
                 llmResponse.costUsd(),
                 guardrailResult,
                 ragCitations,
-                ragUsed ? Boolean.TRUE : null  // ragUsed=false 일 때는 JSON에서 생략
+                ragUsed ? Boolean.TRUE : null,  // ragUsed=false 일 때는 JSON에서 생략
+                turnId.toString(),
+                turnSeq
         );
     }
 
@@ -594,10 +600,13 @@ public class OrchestratorEngine {
         }
 
         // CR-058: Done 이벤트에 citations 를 합쳐 내보내는 decorator.
+        // CR-175: Done 은 바로 내보내지 않고 쥐고 있다가, 대화 기록을 저장한 뒤 답 번호와 순번을 채워 내보낸다.
+        //   위젯이 done 을 받자마자 다시 만들기를 눌러도 되감을 기록이 DB 에 있어야 하기 때문이다.
+        final java.util.concurrent.atomic.AtomicReference<com.platform.orchestrator.stream.StreamEvent.Done> pendingDone =
+                new java.util.concurrent.atomic.AtomicReference<>();
         Consumer<com.platform.orchestrator.stream.StreamEvent> streamSinkWithCitations = ev -> {
             if (ev instanceof com.platform.orchestrator.stream.StreamEvent.Done d) {
-                streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.Done(
-                        d.usage(), streamRagCitations, streamRagUsed ? Boolean.TRUE : null));
+                pendingDone.set(d);
             } else {
                 streamSink.accept(ev);
             }
@@ -644,9 +653,10 @@ public class OrchestratorEngine {
             }
         }
 
-        ModelConfig streamModelConfig = (request.connectionId() != null && !request.connectionId().isBlank())
+        ModelConfig streamModelConfig = ((request.connectionId() != null && !request.connectionId().isBlank())
                 ? connectionAdapterFactory.resolveModelConfig(request.connectionId())
-                : ModelConfig.defaults();
+                : ModelConfig.defaults())
+                .withThinkingOverride(request.thinkingOverride());   // CR-175: 요청 단위 깊게 생각하기
 
         // CR-045 Phase 2-B: 도구 루프 통합 스트리밍
         LLMResponse finalResponse;
@@ -728,18 +738,32 @@ public class OrchestratorEngine {
 
             // 세션 저장 + 사용량 로그
             boolean wasCancelled = cancelled.get();
-            request.messages().forEach(m -> sessionStore.appendMessage(sessionId, m));
             String assistantText = finalResponse.textContent() != null ? finalResponse.textContent() : "";
             // 도구 루프 경로의 partial은 Handler가 텍스트만 반환 → 여기서 prefix 부착
             if (wasCancelled && !assistantText.startsWith("[중단됨]")) {
                 assistantText = "[중단됨] " + assistantText;
             }
-            sessionStore.appendMessage(sessionId,
-                    UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, assistantText));
+            // CR-175: 한 요청의 메시지를 한 번에 저장한다(PRD-369).
+            UUID turnId = UUID.randomUUID();
+            List<UnifiedMessage> turnMessages = new ArrayList<>(request.messages());
+            turnMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, assistantText));
+            Integer turnSeq = sessionStore.appendTurn(sessionId, turnMessages, turnId, resolvedModel,
+                    com.platform.llm.adapter.RequestContext.getUserRef());
             if (finalResponse.usage() != null) {
                 saveUsageLog(request.userId(), sessionId, resolvedModel, finalResponse);
             }
+            com.platform.orchestrator.stream.StreamEvent.Done held = pendingDone.getAndSet(null);
+            streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.Done(
+                    held != null ? held.usage() : finalResponse.usage(),
+                    streamRagCitations, streamRagUsed ? Boolean.TRUE : null,
+                    turnId.toString(), turnSeq, resolvedModel));
         } finally {
+            // CR-175: 저장 전에 예외로 끝났으면 쥐고 있던 Done 을 예전처럼 그대로 내보내 스트림을 닫는다.
+            com.platform.orchestrator.stream.StreamEvent.Done leftover = pendingDone.getAndSet(null);
+            if (leftover != null) {
+                streamSink.accept(new com.platform.orchestrator.stream.StreamEvent.Done(
+                        leftover.usage(), streamRagCitations, streamRagUsed ? Boolean.TRUE : null));
+            }
             // CR-130: 스트리밍 채팅 run 종료 — 예외·중단 포함 모든 경로에서 닫는다.
             // 중단(cancel)은 정상 완료와 구분되도록 FAILED 로 남긴다.
             if (chatRunId != null) {

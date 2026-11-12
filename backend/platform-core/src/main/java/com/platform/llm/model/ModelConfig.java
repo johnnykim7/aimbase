@@ -33,6 +33,20 @@ public record ModelConfig(
         return ThinkingMode.DISABLED;
     }
 
+    /**
+     * CR-175: 요청 단위로 생각하기를 켜거나 끈다. 켤 때 예산과 적응 모드는 연결 설정을 따르고
+     * 새 수치를 만들지 않는다(BIZ-150). null 이면 연결 설정 그대로다.
+     */
+    public ModelConfig withThinkingOverride(Boolean on) {
+        if (on == null) return this;
+        ThinkingMode mode = ThinkingMode.DISABLED;
+        if (on) {
+            ThinkingMode current = resolveThinkingMode();
+            mode = current == ThinkingMode.DISABLED ? ThinkingMode.ENABLED : current;
+        }
+        return new ModelConfig(temperature, maxTokens, topP, stopSequences, on, thinkingBudgetTokens, mode);
+    }
+
     public static ModelConfig defaults() {
         return new ModelConfig(null, null, null, null, null, null, null);
     }

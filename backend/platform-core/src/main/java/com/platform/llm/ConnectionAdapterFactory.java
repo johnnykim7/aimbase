@@ -27,6 +27,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -40,7 +41,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ConnectionAdapterFactory {
 
     private static final Logger log = LoggerFactory.getLogger(ConnectionAdapterFactory.class);
-    private static final String DEFAULT_MODEL = "anthropic/claude-sonnet-4-5";
+    /** CR-175: 연결도 모델도 정해지지 않았을 때 쓰는 모델. 코드에 박혀 있던 값을 런타임 설정으로 옮겼다(BIZ-150). */
+    public static final String DEFAULT_MODEL_SETTING_KEY = "llm.default-model";
 
     private final ConnectionRepository connectionRepository;
     private final int defaultMaxTokens;
@@ -122,9 +124,56 @@ public class ConnectionAdapterFactory {
                 && !"auto".equalsIgnoreCase(requestedModel)) {
             return requestedModel;
         }
-        ConnectionEntity conn = findConnection(connectionId);
-        Object defaultModel = conn.getConfig().get("model");
-        return defaultModel != null ? defaultModel.toString() : DEFAULT_MODEL;
+        return defaultModel(connectionId);
+    }
+
+    /** CR-175: 플랫폼 기본 모델(런타임 설정 llm.default-model). */
+    public String platformDefaultModel() {
+        String model = platformSettings.getString(DEFAULT_MODEL_SETTING_KEY, null);
+        if (model == null || model.isBlank()) {
+            throw new IllegalStateException("runtime setting " + DEFAULT_MODEL_SETTING_KEY + " is empty");
+        }
+        return model;
+    }
+
+    /** CR-175: 연결 기본 모델(config.model). 없으면 플랫폼 기본 모델. */
+    public String defaultModel(String connectionId) {
+        Object model = findConnection(connectionId).getConfig().get("model");
+        return model != null && !model.toString().isBlank() ? model.toString() : platformDefaultModel();
+    }
+
+    /**
+     * CR-175 BIZ-150: 위젯에서 고를 수 있는 모델(config.models, 적힌 순서가 화면 순서).
+     * 칸이 없으면 연결 기본 모델 하나다.
+     */
+    public List<Map<String, String>> selectableModels(String connectionId) {
+        Object raw = findConnection(connectionId).getConfig().get("models");
+        List<Map<String, String>> models = new java.util.ArrayList<>();
+        if (raw instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> m && m.get("id") != null && !m.get("id").toString().isBlank()) {
+                    String id = m.get("id").toString();
+                    Object label = m.get("label");
+                    models.add(Map.of("id", id, "label", label != null && !label.toString().isBlank() ? label.toString() : id));
+                }
+            }
+        }
+        if (models.isEmpty()) {
+            String model = defaultModel(connectionId);
+            models.add(Map.of("id", model, "label", model));
+        }
+        return models;
+    }
+
+    /** CR-175: 연결 config 에 models 가 있으면 그 목록 안의 모델만 받는다. 없으면 기존처럼 검사하지 않는다. */
+    public boolean isModelAllowed(String connectionId, String requestedModel) {
+        if (requestedModel == null || requestedModel.isBlank() || "auto".equalsIgnoreCase(requestedModel)) {
+            return true;
+        }
+        if (!(findConnection(connectionId).getConfig().get("models") instanceof List<?>)) {
+            return true;
+        }
+        return selectableModels(connectionId).stream().anyMatch(m -> requestedModel.equals(m.get("id")));
     }
 
     /**

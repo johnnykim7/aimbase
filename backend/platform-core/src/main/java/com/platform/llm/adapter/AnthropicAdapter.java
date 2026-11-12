@@ -85,6 +85,12 @@ public class AnthropicAdapter implements LLMAdapter {
     @Override
     public String getProvider() { return "anthropic"; }
 
+    /** CR-175: ModelConfig 의 생각 모드를 요청마다 읽어 thinking 블록을 붙인다. */
+    @Override
+    public boolean supportsThinkingOverride() {
+        return true;
+    }
+
     @Override
     public AdapterCapability capabilities() {
         // CR-061: Claude 3.5+ 는 이미지 + PDF Document 블록 네이티브 지원

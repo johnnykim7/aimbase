@@ -19,6 +19,10 @@ public class ConversationMessageEntity {
     public static final String TYPE_TOOL_RESULT = "TOOL_RESULT";
     public static final String TYPE_COMPACT_BOUNDARY = "COMPACT_BOUNDARY";
 
+    /** CR-175: 지운 표시 사유. */
+    public static final String DELETE_REASON_SESSION_DELETE = "SESSION_DELETE";
+    public static final String DELETE_REASON_REWIND = "REWIND";
+
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     @Column(columnDefinition = "uuid")
@@ -64,6 +68,13 @@ public class ConversationMessageEntity {
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
 
+    // CR-175: 이 메시지를 만든 대화 요청 번호. 기존 행은 null.
+    @Column(name = "turn_id", columnDefinition = "uuid")
+    private UUID turnId;
+
+    @Column(name = "delete_reason", length = 20)
+    private String deleteReason;
+
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
     public String getSessionId() { return sessionId; }
@@ -87,4 +98,8 @@ public class ConversationMessageEntity {
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getDeletedAt() { return deletedAt; }
     public void setDeletedAt(OffsetDateTime deletedAt) { this.deletedAt = deletedAt; }
+    public UUID getTurnId() { return turnId; }
+    public void setTurnId(UUID turnId) { this.turnId = turnId; }
+    public String getDeleteReason() { return deleteReason; }
+    public void setDeleteReason(String deleteReason) { this.deleteReason = deleteReason; }
 }
