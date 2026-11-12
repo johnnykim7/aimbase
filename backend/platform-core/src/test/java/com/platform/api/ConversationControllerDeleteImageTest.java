@@ -11,6 +11,7 @@ import com.platform.session.CancellationRegistry;
 import com.platform.session.ChatHistoryService;
 import com.platform.session.ChatProjectService;
 import com.platform.session.SessionStore;
+import com.platform.share.ChatShareService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,13 +42,14 @@ class ConversationControllerDeleteImageTest {
     @Mock private SessionStore sessionStore;
     @Mock private PlatformSettingsService settings;
     @Mock private ChatGeneratedImageRepository imageRepository;
+    @Mock private ChatShareService shareService;
 
     @Test
     @DisplayName("TC-CHT-106 3 대화를_지우면_그_대화_그림_모두에_지운_표시")
     void delete_soft_deletes_images() {
         ChatHistoryService historyService = new ChatHistoryService(sessionRepository, messageRepository,
                 attachmentRepository, feedbackRepository, projectService, cancellationRegistry, sessionStore,
-                settings, imageRepository);
+                settings, imageRepository, shareService);
         ConversationController controller = new ConversationController(sessionRepository, messageRepository, historyService);
         ConversationSessionEntity session = new ConversationSessionEntity();
         session.setSessionId("s-1");
@@ -57,5 +59,7 @@ class ConversationControllerDeleteImageTest {
 
         verify(messageRepository).softDeleteBySessionId(eq("s-1"), any(OffsetDateTime.class));
         verify(imageRepository).softDeleteBySessionId(eq("s-1"), any(OffsetDateTime.class));
+        // CR-182 TC-CHT-089: 관리 화면 대화 지우기도 공유 링크를 끊는다
+        verify(shareService).revokeAllForSession("s-1");
     }
 }
