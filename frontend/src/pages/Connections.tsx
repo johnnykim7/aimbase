@@ -25,6 +25,13 @@ import {
   type WidgetModel,
   type WidgetModelsErrors,
 } from "../components/connections/WidgetModelsField";
+import {
+  ImageGenerationFields,
+  parseImageGeneration,
+  serializeImageGeneration,
+  type ImageConnectionOption,
+  type ImageGenerationValues,
+} from "../components/connections/ImageGenerationFields";
 
 const TYPE_ICONS: Record<string, string> = {
   database: "🗄️",
@@ -104,6 +111,7 @@ export default function Connections() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [widgetModels, setWidgetModels] = useState<WidgetModel[]>([]);
   const [widgetModelsErrors, setWidgetModelsErrors] = useState<WidgetModelsErrors | undefined>();
+  const [imageGen, setImageGen] = useState<ImageGenerationValues>(() => parseImageGeneration({}));
 
   const handleTest = async (id: string) => {
     const result = await testConnection.mutateAsync(id);
@@ -115,6 +123,7 @@ export default function Connections() {
     setForm({});
     setWidgetModels([]);
     setWidgetModelsErrors(undefined);
+    setImageGen(parseImageGeneration({}));
     setSelectedType("database");
     setSelectedAdapter("PostgreSQL");
     setShowModal(true);
@@ -127,6 +136,7 @@ export default function Connections() {
     const cfg = conn.config ?? {};
     setWidgetModels(parseWidgetModels(cfg.models));
     setWidgetModelsErrors(undefined);
+    setImageGen(parseImageGeneration(cfg));
     setForm({
       "연결 이름": conn.name ?? conn.id,
       "이름": conn.name ?? "",
@@ -206,6 +216,10 @@ export default function Connections() {
         const list = raw.split(",").map((t) => t.trim()).filter(Boolean);
         return list.length > 0 ? list : undefined;
       })(),
+      // CR-184: 그림 칸. LLM 연결이 아니면 키를 모두 뺀다
+      ...(selectedType === "llm"
+        ? serializeImageGeneration(imageGen, selectedAdapter === "OpenAI")
+        : { image_model: undefined, image_quality: undefined, image_connection_id: undefined }),
     };
 
     if (editingConn) {
@@ -227,6 +241,21 @@ export default function Connections() {
       createConnection.mutate(req, { onSuccess: () => setShowModal(false) });
     }
   };
+
+  // CR-184: 그림 연결로 고를 수 있는 연결. 서버 조건과 같이 OpenAI 이면서 그림 모델이 있는 것만, 편집 중인 자기는 지금 칸 값으로 본다.
+  const imageConnectionOptions: ImageConnectionOption[] = connections
+    .filter(
+      (c: Connection) =>
+        c.id !== editingConn?.id &&
+        (c.type ?? "llm") === "llm" &&
+        displayAdapter("llm", c.adapter ?? "") === "OpenAI" &&
+        typeof c.config?.image_model === "string" &&
+        c.config.image_model.trim() !== "",
+    )
+    .map((c: Connection) => ({ id: c.id, label: c.name || c.id }));
+  if (editingConn && selectedAdapter === "OpenAI" && imageGen.imageModel.trim() !== "") {
+    imageConnectionOptions.unshift({ id: editingConn.id, label: form["이름"] || editingConn.name || editingConn.id });
+  }
 
   if (isLoading) return <LoadingSpinner fullPage />;
 
@@ -499,6 +528,12 @@ export default function Connections() {
               errors={widgetModelsErrors}
               onRowsChange={(rows) => { setWidgetModels(rows); setWidgetModelsErrors(undefined); }}
               onDefaultChange={(id) => { setForm((p) => ({ ...p, 모델: id })); setWidgetModelsErrors(undefined); }}
+            />
+            <ImageGenerationFields
+              isOpenAi={selectedAdapter === "OpenAI"}
+              values={imageGen}
+              options={imageConnectionOptions}
+              onChange={setImageGen}
             />
           </>
         )}
