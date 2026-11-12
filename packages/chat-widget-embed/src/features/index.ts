@@ -5,5 +5,6 @@
 import type { WidgetFeature } from "../frame/context";
 import { fontSize } from "./font-size";
 import { language } from "./language";
+import { preview } from "./preview";
 
-export const FEATURES: WidgetFeature[] = [fontSize, language];
+export const FEATURES: WidgetFeature[] = [fontSize, language, preview];

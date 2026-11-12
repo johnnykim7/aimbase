@@ -1,0 +1,51 @@
+import { defineStrings } from "../../frame/i18n";
+
+export const PREVIEW_STRINGS = defineStrings({
+  ko: {
+    download: "다운로드",
+    downloadFailed: "파일을 받지 못했습니다",
+    prev: "이전",
+    next: "다음",
+    pageOf: (n: number, total: number) => `${n} / ${total}`,
+    loading: "미리보기를 만드는 중입니다",
+    tooLarge: "파일이 커서 미리 볼 수 없습니다",
+    tooManyPages: "쪽이 많아 미리 볼 수 없습니다",
+    unsupported: "미리 볼 수 없는 파일입니다",
+    failed: "미리보기를 만들지 못했습니다",
+    busy: "미리보기를 만드는 사람이 많습니다. 잠시 뒤 다시 열어 주세요",
+    truncated: (rows: number, cols: number) => `처음 ${rows}행, ${cols}열만 보입니다. 전체는 내려받아 보세요`,
+    run: "실행",
+    code: "코드",
+    picture: "미리보기",
+    present: "발표",
+    rerun: "다시 실행",
+    openInPane: "옆 창에서 보기",
+    actualSize: "원래 크기",
+    fitSize: "창에 맞춤",
+  },
+  en: {
+    download: "Download",
+    downloadFailed: "Couldn't download the file",
+    prev: "Previous",
+    next: "Next",
+    pageOf: (n: number, total: number) => `${n} / ${total}`,
+    loading: "Preparing the preview",
+    tooLarge: "This file is too large to preview",
+    tooManyPages: "This file has too many pages to preview",
+    unsupported: "This file can't be previewed",
+    failed: "Couldn't create a preview",
+    busy: "Many previews are being prepared. Please open it again in a moment",
+    truncated: (rows: number, cols: number) =>
+      `Showing the first ${rows} rows and ${cols} columns. Download the file to see everything`,
+    run: "Run",
+    code: "Code",
+    picture: "Preview",
+    present: "Present",
+    rerun: "Run again",
+    openInPane: "Open in side pane",
+    actualSize: "Actual size",
+    fitSize: "Fit to pane",
+  },
+});
+
+export type PreviewTexts = (typeof PREVIEW_STRINGS)["ko"];
