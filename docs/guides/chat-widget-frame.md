@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.1 | 최종 수정: 2026-11-13 | 관련 CR: CR-177
+> 문서 버전: 1.2 | 최종 수정: 2026-11-13 | 관련 CR: CR-177
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -77,9 +77,10 @@ export const exportChat: WidgetFeature = {
 | 9 | 산출물 칩 단추 | `ctx.ui.answer.addArtifactAction(spec)` | CR-182 파일 공유 |
 | 10 | 문구표 | `defineStrings`, `ctx.strings(pack)` | 모든 건 |
 | 11 | 알림 | `ctx.on(name, cb)` | CR-179, CR-181, CR-186 등 |
-| 12 | 대화 동작 | `ctx.chat.send`, `abort`, `selectModel`, `setThinking`, `newConversation`, `attach` | CR-179, CR-181, CR-186 등 |
+| 12 | 대화 동작 | `ctx.chat.send`, `abort`, `open`, `selectModel`, `setThinking`, `setTitle`, `newConversation`, `attach`, `attachUploaded`, `addRequestFields` | CR-178, CR-179, CR-181, CR-186 등 |
 | 13 | 서버 호출 | `ctx.api.request(method, path, body?)`, `requestBlob(method, path)` | 서버를 부르는 건, CR-180 그림과 원본 파일 |
 | 14 | 덮개, 토스트, Esc | `ctx.ui.layer`, `toast`, `notice`, `onEscape` | 필요한 건 |
+| 15 | 머리줄 제목 표시 | `ctx.ui.header.setTitleTag(spec)` | CR-178 프로젝트 표시 |
 
 ### 3.1 + 메뉴와 더 보기 메뉴
 
@@ -237,6 +238,7 @@ ctx.on("answerDelta", ({ answer, text }) => ...);  // 응답 글 조각이 옴. 
 ctx.on("answerDone", (a: AnswerView) => ...);      // 응답 하나가 끝남(중지, 오류 포함)
 ctx.on("streamEvent", ({ name, data, answer }) => ...); // 대화 스트림에서 위젯 본체가 모르는 이벤트
 ctx.on("modelChange", ({ model, thinking }) => ...); // 사람이 모델이나 깊게 생각하기를 바꿈. selectModel, setThinking 으로 바꾼 것은 오지 않는다
+ctx.on("titleChange", ({ sessionId, title }) => ...); // 서버가 대화 제목을 만들어 머리줄 제목이 바뀜. setTitle 로 바꾼 것은 오지 않는다
 ctx.on("destroy", () => ...);                       // 위젯을 떼어 냄. 타이머, 마이크 등을 정리한다
 
 ctx.locale();            // "ko" | "en"
@@ -249,11 +251,37 @@ ctx.chat.selectModel(id);   // 모델 고르기. 위젯 설정의 목록에 없�
 ctx.chat.setThinking(on);   // 깊게 생각하기. 그 연결이 지원하지 않으면 거짓
 ctx.chat.newConversation();
 ctx.chat.attach(file);   // 입력칸 첨부 칩으로 더한다(검사, 올리기 포함)
+ctx.chat.attachUploaded(meta);  // 서버가 이미 만든 첨부(Attachment 모양)를 올린 상태의 칩으로 더한다
+ctx.chat.addRequestFields(() => ({ ... }));  // 보낼 때마다 불러 대화 요청 본문에 더한다. 없으면 {} 를 돌려준다
+ctx.chat.setTitle(text); // 머리줄 대화 제목만 바꾼다. 서버에는 쓰지 않는다
+ctx.chat.open(view);     // 지난 대화를 연다. 아래 ConversationView
 ```
+
+지난 대화 열기:
+
+```ts
+interface ConversationView {
+  sessionId: string;
+  title?: string;
+  notice?: string;                 // 맨 위 회색 줄 한 줄(앞부분이 잘렸다는 안내 등). 문구는 부르는 건이 준다
+  turns: Array<{
+    turnId?: string; turnSeq?: number;   // 없으면 그 응답의 다시 생성, 질문 수정, 평가를 숨긴다
+    question: { text: string; at?: Date; attachments?: Array<{ filename: string; mediaType: string; available: boolean }> };
+    answer: { text: string; model?: string; at?: Date; stopped?: boolean; tools?: string[];
+              extra?: Record<string, unknown>; requestBody?: Record<string, unknown> };
+    feedback?: { rating: "UP" | "DOWN"; reasonCodes?: string[]; comment?: string };
+  }>;
+}
+```
+
+- 응답이 돌고 있으면 먼저 멈춘다. 입력칸 첨부, 입력칸 모드, 열린 옆 창을 비우고 session_id 를 바꾼 뒤 대화 칸을 다시 그린다.
+- 마지막 응답에만 다시 생성을 그린다. 복사, 평가(남긴 평가는 켜진 상태로)는 모든 응답에 그린다. `stopped` 면 「응답을 중지했습니다」, `tools` 는 접힌 도구 줄로 그린다.
+- 응답마다 손질(decorate), 응답 아래 단추가 새 응답과 같이 불린다. `answerDone` 은 오지 않는다.
+- 서버 응답을 이 모양으로 바꾸는 것은 부르는 건(CR-178)이 한다. 붙이는 앱에 `onNewConversation` 은 보내지 않는다.
 
 요청 본문 덧붙임:
 
-- 대화 요청 본문에 더하는 칸은 `ctx.chat.send` 의 `body` 와 입력칸 모드의 `requestFields()` 두 곳에서 온다. 둘을 합쳐 싣고, 같은 키면 `body` 가 이긴다.
+- 대화 요청 본문에 더하는 칸은 `ctx.chat.addRequestFields` 로 등록한 것, 입력칸 모드의 `requestFields()`, `ctx.chat.send` 의 `body` 세 곳에서 온다. 이 순서로 합쳐 같은 키면 뒤가 이긴다.
 - 위젯 본체가 쓰는 키(`model`, `session_id`, `stream`, `messages`, `connection_id`, `rag_source_id`, `actions_enabled`, `rewind_from_seq`, `thinking`, `render_features`)는 덮어쓰지 못한다. 본체 값이 남는다.
 - 칸을 싣는 건은 서버 대화 요청(`ChatController.ChatCompletionRequest`)에 그 칸을 같은 건에서 더한다. 서버가 모르는 칸은 요청째 거절될 수 있다.
 - 합친 칸은 그 질문에 기억해 두었다가 다시 생성, 질문 수정 때 그대로 다시 싣는다. 그 응답의 `AnswerView.requestBody` 로 읽을 수 있다.
@@ -270,7 +298,7 @@ ctx.chat.attach(file);   // 입력칸 첨부 칩으로 더한다(검사, 올리�
 
 - CR-177 이 dev 에 들어가기 전: CR-177 창에 [요청] 으로 보낸다. 틀은 CR-177 만 고친다.
 - 들어간 뒤: 자리 하나를 더하는 작은 변경은 그 건이 `src/frame/` 에 직접 한다. 같은 커밋에 이 문서 3절 표에 한 줄을 더하고 컨타에 [알림] 한다. 있는 자리의 모양을 바꾸는 변경은 컨타에 먼저 묻는다.
-- 지난 대화 불러오기처럼 대화 칸 자체를 바꾸는 일은 자리가 아니라 위젯 본체 변경이다. 그 건이 본체를 고치되 컨타에 먼저 알린다.
+- 대화 칸 자체를 바꾸는 일은 자리가 아니라 위젯 본체 변경이다. 그 건이 본체를 고치되 컨타에 먼저 알린다. 지난 대화 열기는 틀이 맡는다(3.7 `ctx.chat.open`).
 
 ## 5. 빌드와 합치기
 
