@@ -60,6 +60,7 @@ public class ChatController {
     private final com.platform.session.ChatProjectService chatProjectService;
     private final com.platform.repository.ConversationSessionRepository sessionRepository;
     private final com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder;
+    private final com.platform.chatdoc.DocumentEditService documentEditService;
 
     /** CR-183 BIZ-223: render_features 값 모양과 개수 상한. */
     private static final java.util.regex.Pattern RENDER_FEATURE = java.util.regex.Pattern.compile("[a-z0-9-]{1,40}");
@@ -80,7 +81,8 @@ public class ChatController {
                           com.platform.image.ImageGenerationSettings imageSettings,
                           com.platform.session.ChatProjectService chatProjectService,
                           com.platform.repository.ConversationSessionRepository sessionRepository,
-                          com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder) {
+                          com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder,
+                          com.platform.chatdoc.DocumentEditService documentEditService) {
         this.chatProjectService = chatProjectService;
         this.sessionRepository = sessionRepository;
         this.attachmentPromptBuilder = attachmentPromptBuilder;
@@ -97,6 +99,7 @@ public class ChatController {
         this.widgetSettings = widgetSettings;
         this.imageGeneration = imageGeneration;
         this.imageSettings = imageSettings;
+        this.documentEditService = documentEditService;
     }
 
     /**
@@ -146,6 +149,10 @@ public class ChatController {
         UUID chatProjectId = resolveChatProject(request, owner);
         List<String> renderFeatures = parseRenderFeatures(request.renderFeatures());   // CR-183
         rewindIfRequested(request);
+        // CR-181: 옆 창 문서 고치기. 되감기 뒤에 준비해야 다시 생성이 지운 판을 바탕으로 쓰지 않는다.
+        com.platform.chatdoc.PreparedEdit documentEdit = request.documentEdit() == null ? null
+                : documentEditService.prepare(request.sessionId(), request.documentEdit(),
+                        request.connectionId(), request.connectionGroupId());
 
         AdapterResolution resolved = resolveAdapter(request.model(), request.connectionId());
         // CR-183: 계산 도구가 붙는 요청이면 데이터 요약 끝에 계산 안내 틀을 붙인다(BIZ-221). 대화 API 요청은
@@ -198,24 +205,43 @@ public class ChatController {
                         com.platform.session.ChatOwner.isWidget(com.platform.session.ChatOwner.currentPrincipal())))
                 // CR-183: 대화 API 요청 표시(계산 도구 붙이기)와 위젯이 그릴 수 있는 형식(BIZ-222, BIZ-223)
                 .withChatFeatures(true, renderFeatures)
-                .withFileCreate(Boolean.TRUE.equals(request.fileCreate()));
+                .withFileCreate(Boolean.TRUE.equals(request.fileCreate()))
+                .withTurnInstruction(documentEdit != null ? documentEdit.instruction() : null);
 
         if (request.stream()) {
-            return streamResponse(chatRequest);
+            return streamResponse(chatRequest, documentEdit);
         }
+        ChatResponse response;
         try {
-            ChatResponse response = orchestrator.chat(chatRequest);
-            return ApiResponse.ok(toChatCompletionResponse(response));
+            response = orchestrator.chat(chatRequest);
         } catch (IllegalStateException e) {
+            documentEditService.abandon(documentEdit);
             // CR-045 BIZ-091: 세션 workspaceRef 충돌 → 409
             if (e.getMessage() != null && e.getMessage().contains("workspaceRef 충돌")) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
             }
             throw e;
+        } catch (RuntimeException e) {
+            documentEditService.abandon(documentEdit);
+            throw e;
         }
+        Map<String, Object> body = toChatCompletionResponse(response);
+        if (documentEdit != null) {
+            var result = documentEditService.complete(documentEdit, textOf(response), response.turnId(), false);
+            if (result != null) body.put("document", result.toMap());
+        }
+        return ApiResponse.ok(body);
     }
 
-    private SseEmitter streamResponse(ChatRequest chatRequest) {
+    private static String textOf(ChatResponse response) {
+        StringBuilder sb = new StringBuilder();
+        for (ContentBlock block : response.content()) {
+            if (block instanceof ContentBlock.Text t && t.text() != null) sb.append(t.text());
+        }
+        return sb.toString();
+    }
+
+    private SseEmitter streamResponse(ChatRequest chatRequest, com.platform.chatdoc.PreparedEdit documentEdit) {
         SseEmitter emitter = new SseEmitter(300_000L);
         // CR-045: ThreadLocal은 VT별 독립 → 부모 요청 스레드의 TenantContext를
         // 가상 스레드에 수동 전파해야 Hibernate DataSource 라우팅이 테넌트 DB로 감.
@@ -237,15 +263,25 @@ public class ChatController {
                 com.platform.llm.adapter.RequestContext.setUserRef(propagatedUserRef);
             }
 
+            // CR-181: 고치기 요청이면 답 글을 모으고, 중지 여부는 이 요청의 중지 표시로 본다. 표시는 첫 이벤트 전에 걸린다.
+            final StringBuilder answerText = documentEdit != null ? new StringBuilder() : null;
+            final java.util.concurrent.atomic.AtomicReference<java.util.concurrent.atomic.AtomicBoolean> cancelToken =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+
             // 단일 SSE 송출 람다 — orchestrator.chatStream과 SubagentRunner가 공유.
             // CR-053 Phase 2: SubagentStart/Done도 같은 emitter로 송출한다.
             java.util.function.Consumer<com.platform.orchestrator.stream.StreamEvent> sseSink = ev -> {
+                if (documentEdit != null && cancelToken.get() == null) {
+                    cancelToken.compareAndSet(null, cancellationRegistry.getToken(chatRequest.sessionId()));
+                }
                 try {
                     switch (ev) {
-                        case com.platform.orchestrator.stream.StreamEvent.TextDelta t ->
+                        case com.platform.orchestrator.stream.StreamEvent.TextDelta t -> {
+                            if (answerText != null && t.delta() != null) answerText.append(t.delta());
                             emitter.send(SseEmitter.event()
                                     .name("delta")
                                     .data(Map.of("delta", t.delta() != null ? t.delta() : "")));
+                        }
                         case com.platform.orchestrator.stream.StreamEvent.ThinkingDelta t ->
                             emitter.send(SseEmitter.event()
                                     .name("thinking")
@@ -280,6 +316,18 @@ public class ChatController {
                             if (!artifacts.isEmpty()) {
                                 donePayload.put("artifacts", artifacts);
                             }
+                            // CR-181: 고친 결과는 끝 이벤트 바로 앞에 별도 이벤트로 보내고 끝 이벤트에도 싣는다.
+                            // 위젯 답 아래 카드는 끝 이벤트 칸(AnswerView.extra)으로 그린다.
+                            if (documentEdit != null) {
+                                java.util.concurrent.atomic.AtomicBoolean token = cancelToken.get();
+                                boolean stopped = token != null && token.get();
+                                var result = documentEditService.complete(documentEdit,
+                                        answerText.toString(), d.turnId(), stopped);
+                                if (result != null) {
+                                    emitter.send(SseEmitter.event().name("document").data(result.toMap()));
+                                    donePayload.put("document", result.toMap());
+                                }
+                            }
                             emitter.send(SseEmitter.event()
                                     .name("done")
                                     .data(donePayload));
@@ -312,6 +360,7 @@ public class ChatController {
             try {
                 orchestrator.chatStream(chatRequest, sseSink);
             } catch (Exception e) {
+                documentEditService.abandon(documentEdit);
                 // CR-082 (HOTFIX 2026-04-30): ResponseStatusException 도 일단 completeWithError 로 처리.
                 // emitter.complete() 흐름이 ASYNC dispatch 시 Spring Security 권한 재검사 통과 못 하는 케이스 관찰됨.
                 // SSE error event 표준화는 SecurityContext 흐름 정리 후 별도 작업.
@@ -406,7 +455,9 @@ public class ChatController {
             // CR-183: 위젯이 그릴 수 있는 형식(chart, math). 값마다 widget.render.<값> 틀을 붙인다(BIZ-223)
             @JsonProperty("render_features") List<String> renderFeatures,
             // CR-182: 파일 만들기 도구를 준다. 런타임 설정이 꺼져 있으면 무시한다(BIZ-210)
-            @JsonProperty("file_create") Boolean fileCreate
+            @JsonProperty("file_create") Boolean fileCreate,
+            // CR-181: 옆 창 문서 고치기(PRD-480). 비우면 평소 대화
+            @JsonProperty("document_edit") com.platform.chatdoc.DocumentEditRequest documentEdit
     ) {
         /** CR-184 이전 15칸 호환(그림 없음) */
         public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
@@ -416,7 +467,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, null, null, null, null);
+                    thinking, null, null, null, null, null);
         }
 
         /** CR-184 다음 16칸 호환(위젯 프로젝트, 그리기 형식 없음) */
@@ -427,7 +478,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking, ImageDto image) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, null, null, null);
+                    thinking, image, null, null, null, null);
         }
 
         /** CR-183 이전 17칸 호환(그리기 형식 없음) */
@@ -438,10 +489,10 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, null, null);
+                    thinking, image, chatProjectId, null, null, null);
         }
 
-        /** CR-182 이전 18칸 호환(파일 만들기 없음) */
+        /** CR-182 이전 18칸 호환(파일 만들기, 문서 고치기 없음) */
         public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
                                      boolean actionsEnabled, String connectionId, String connectionGroupId,
                                      ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
@@ -450,7 +501,19 @@ public class ChatController {
                                      List<String> renderFeatures) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, renderFeatures, null);
+                    thinking, image, chatProjectId, renderFeatures, null, null);
+        }
+
+        /** CR-181 이전 19칸 호환(문서 고치기 없음) */
+        public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
+                                     boolean actionsEnabled, String connectionId, String connectionGroupId,
+                                     ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
+                                     String workingDirectory, String toolMode, String systemPromptOverride,
+                                     Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId,
+                                     List<String> renderFeatures, Boolean fileCreate) {
+            this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
+                    toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
+                    thinking, image, chatProjectId, renderFeatures, fileCreate, null);
         }
     }
 

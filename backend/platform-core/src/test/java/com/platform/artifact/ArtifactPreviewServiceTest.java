@@ -1,7 +1,13 @@
 package com.platform.artifact;
 
 import com.platform.api.ArtifactController;
+import com.platform.chatdoc.ChatDocumentService;
 import com.platform.config.PlatformSettingsService;
+import com.platform.domain.ChatDocumentEntity;
+import com.platform.domain.ChatDocumentVersionEntity;
+import com.platform.repository.ChatDocumentRepository;
+import com.platform.repository.ChatDocumentVersionRepository;
+import com.platform.storage.StorageService;
 import com.platform.config.WorkspaceProperties;
 import com.platform.session.ChatRejectedException;
 import com.platform.session.SessionStore;
@@ -15,6 +21,7 @@ import org.springframework.http.HttpStatus;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +34,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -55,6 +64,10 @@ class ArtifactPreviewServiceTest {
     private SessionStore sessionStore;
     private ArtifactService artifactService;
     private PlatformSettingsService settings;
+    private ChatDocumentRepository documentRepo;
+    private ChatDocumentVersionRepository versionRepo;
+    private StorageService storage;
+    private ChatDocumentService chatDocuments;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -66,6 +79,10 @@ class ArtifactPreviewServiceTest {
         WorkspaceProperties props = new WorkspaceProperties();
         props.setWhitelistRoots(List.of(root.toString()));
         artifactService = new ArtifactService(sessionStore, props);
+        documentRepo = mock(ChatDocumentRepository.class);
+        versionRepo = mock(ChatDocumentVersionRepository.class);
+        storage = mock(StorageService.class);
+        chatDocuments = new ChatDocumentService(documentRepo, versionRepo, storage, artifactService);
         settings = mock(PlatformSettingsService.class);
         numbers.put(ArtifactPreviewService.MAX_FILE_MB_KEY, 30L);
         numbers.put(ArtifactPreviewService.MAX_PAGES_KEY, 300L);
@@ -227,7 +244,7 @@ class ArtifactPreviewServiceTest {
     }
 
     private ArtifactPreviewService service(Path soffice) {
-        return new ArtifactPreviewService(artifactService, settings, new SheetPreviewReader(),
+        return new ArtifactPreviewService(artifactService, chatDocuments, settings, new SheetPreviewReader(),
                 soffice.toString(), Objects.requireNonNullElse(binary("pdfinfo"), "pdfinfo"),
                 Objects.requireNonNullElse(binary("pdftoppm"), "pdftoppm"));
     }
@@ -267,6 +284,52 @@ class ArtifactPreviewServiceTest {
             doc.save(file.toFile());
         }
         return file;
+    }
+
+    // CR-181 TC-CHT-078
+    @Test
+    void has_source_follows_create_file_source() throws IOException {
+        ArtifactPreviewService service = service(fakeSoffice("exit 1"));
+        Files.writeString(out.resolve("a.txt"), "hello");
+        assertThat(service.info(SESSION, "a.txt")).containsEntry("has_source", false);
+
+        Files.createDirectories(out.resolve(".source"));
+        Files.writeString(out.resolve(".source/a.txt.json"), "{}");
+        assertThat(service.info(SESSION, "a.txt")).containsEntry("has_source", true);
+    }
+
+    // CR-181 TC-CHT-078
+    @Test
+    void version_previews_stored_copy_not_current_out_file() throws IOException {
+        ArtifactPreviewService service = service(fakeSoffice("exit 1"));
+        Files.writeString(out.resolve("a.txt"), "current");
+        ChatDocumentEntity doc = new ChatDocumentEntity();
+        doc.setId(UUID.randomUUID());
+        doc.setSessionId(SESSION);
+        doc.setKind(ChatDocumentEntity.Kind.FILE);
+        doc.setName("a.txt");
+        ChatDocumentVersionEntity v1 = new ChatDocumentVersionEntity();
+        v1.setDocumentId(doc.getId());
+        v1.setVersion(1);
+        v1.setStoragePath("p1");
+        v1.setSourceStoragePath("s1");
+        v1.setSizeBytes(3);
+        v1.setSha256("0123456789abcdef0123");
+        when(documentRepo.findFile(SESSION, "a.txt")).thenReturn(Optional.of(doc));
+        when(versionRepo.findLive(doc.getId(), 1)).thenReturn(Optional.of(v1));
+        when(versionRepo.findLive(doc.getId(), 9)).thenReturn(Optional.empty());
+        when(storage.load("p1")).thenAnswer(inv -> new ByteArrayInputStream("old".getBytes(StandardCharsets.UTF_8)));
+
+        Map<String, Object> info = service.info(SESSION, "a.txt", 1);
+
+        assertThat(info).containsEntry("size", 3L).containsEntry("has_source", true)
+                .containsEntry("preview_kind", "TEXT");
+        Path copy = workspace.resolve(".preview")
+                .resolve(ArtifactPreviewService.versionCacheKey("a.txt", v1.getSha256())).resolve("src.txt");
+        assertThat(copy).hasContent("old");
+        assertThat(out.resolve("a.txt")).hasContent("current");
+        assertRejected(() -> service.info(SESSION, "a.txt", 9), HttpStatus.NOT_FOUND, "artifact_not_found");
+        assertRejected(() -> service.info(SESSION, "b.txt", 1), HttpStatus.NOT_FOUND, "artifact_not_found");
     }
 
     private static void assertRejected(Runnable call, HttpStatus status, String code) {

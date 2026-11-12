@@ -40,7 +40,7 @@ public class ArtifactService {
     private static final Logger log = LoggerFactory.getLogger(ArtifactService.class);
 
     /** CLI 가 산출물을 쓰는 workspace 하위 고정 폴더명. */
-    static final String OUT_DIR = "out";
+    public static final String OUT_DIR = "out";
 
     /** CR-180: 미리보기 변환 결과를 두는 workspace 하위 폴더. out/ 밖이라 산출물 목록에 섞이지 않는다. */
     static final String PREVIEW_DIR = ".preview";
@@ -141,7 +141,7 @@ public class ArtifactService {
     }
 
     /** 세션 workspace/out/ 절대경로. whitelist 밖이거나 workspace 미설정이면 null/예외. */
-    private Path resolveOutDir(String sessionId) {
+    public Path resolveOutDir(String sessionId) {
         String workspaceRef = sessionStore.getWorkspaceRef(sessionId);
         if (workspaceRef == null || workspaceRef.isBlank()) {
             return null;

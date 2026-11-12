@@ -182,6 +182,15 @@ public class SessionStore {
      * @throws RewindRejectedException 묶음 첫 순번이 아니거나 마지막 압축 경계보다 앞일 때
      */
     public void rewind(String sessionId, int fromSeq) {
+        rewind(sessionId, fromSeq, null);
+    }
+
+    /**
+     * CR-181 BIZ-202: inTransaction 은 지운 표시와 같은 트랜잭션에서 지운 답 번호와 지운 시각을 받는다.
+     * 그 답이 만든 문서 판을 같은 시각으로 지우는 데 쓴다.
+     */
+    public void rewind(String sessionId, int fromSeq,
+                       java.util.function.BiConsumer<java.util.Set<UUID>, OffsetDateTime> inTransaction) {
         Semaphore lock = lockFor(sessionId);
         lock.acquireUninterruptibly();
         try {
@@ -199,9 +208,15 @@ public class SessionStore {
                 throw new RewindRejectedException(RewindRejectedException.Reason.BEFORE_COMPACTION);
             }
             String key = buildKey(sessionId);
+            java.util.Set<UUID> turnIds = live.stream()
+                    .filter(m -> m.getSeq() >= fromSeq && m.getTurnId() != null)
+                    .map(ConversationMessageEntity::getTurnId)
+                    .collect(java.util.stream.Collectors.toSet());
+            OffsetDateTime ts = OffsetDateTime.now();
             transactionTemplate.executeWithoutResult(status -> {
-                messageRepository.softDeleteFromSeq(sessionId, fromSeq, OffsetDateTime.now(),
+                messageRepository.softDeleteFromSeq(sessionId, fromSeq, ts,
                         ConversationMessageEntity.DELETE_REASON_REWIND);
+                if (inTransaction != null && !turnIds.isEmpty()) inTransaction.accept(turnIds, ts);
                 redisTemplate.delete(key);
             });
             loadFromDbAndCache(sessionId);

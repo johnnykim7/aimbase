@@ -1,6 +1,8 @@
 package com.platform.artifact;
 
 import com.platform.config.PlatformSettingsService;
+import com.platform.chatdoc.ChatDocumentService;
+import com.platform.domain.ChatDocumentVersionEntity;
 import com.platform.session.ChatRejectedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -72,6 +74,7 @@ public class ArtifactPreviewService {
     private static final Pattern PAGE_ROT = Pattern.compile("(?m)^Page rot:\\s+(\\d+)");
 
     private final ArtifactService artifactService;
+    private final ChatDocumentService chatDocuments;
     private final PlatformSettingsService settings;
     private final SheetPreviewReader sheetReader;
     private final String sofficeBin;
@@ -87,12 +90,14 @@ public class ArtifactPreviewService {
     private record Gate(int size, Semaphore semaphore) {}
 
     public ArtifactPreviewService(ArtifactService artifactService,
+                                  ChatDocumentService chatDocuments,
                                   PlatformSettingsService settings,
                                   SheetPreviewReader sheetReader,
                                   @Value("${aimbase.preview.soffice-path:soffice}") String sofficeBin,
                                   @Value("${largeinput.poppler.pdfinfo:pdfinfo}") String pdfinfoBin,
                                   @Value("${largeinput.poppler.pdftoppm:pdftoppm}") String pdftoppmBin) {
         this.artifactService = artifactService;
+        this.chatDocuments = chatDocuments;
         this.settings = settings;
         this.sheetReader = sheetReader;
         this.sofficeBin = sofficeBin;
@@ -100,13 +105,22 @@ public class ArtifactPreviewService {
         this.pdftoppmBin = pdftoppmBin;
     }
 
-    /** GET /api/v1/chat/artifacts/preview 본문. 한도를 넘으면 오류가 아니라 NONE 과 이유를 준다(BIZ-191). */
     public Map<String, Object> info(String sessionId, String name) {
-        Source src = resolve(sessionId, name);
+        return info(sessionId, name, null);
+    }
+
+    /**
+     * GET /api/v1/chat/artifacts/preview 본문. 한도를 넘으면 오류가 아니라 NONE 과 이유를 준다(BIZ-191).
+     *
+     * @param version CR-181 옆 창 문서의 판. 없으면 out/ 의 지금 파일
+     */
+    public Map<String, Object> info(String sessionId, String name, Integer version) {
+        Source src = resolve(sessionId, name, version);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("name", src.name());
         body.put("size", src.size());
         body.put("modified_at", src.modifiedAt().toString());
+        body.put("has_source", src.hasSource());
         body.put("preview_kind", src.kind().name());
         if (src.kind() == PreviewKind.NONE) return none(body, REASON_UNSUPPORTED);
         if (src.size() > maxFileBytes()) return none(body, REASON_TOO_LARGE);
@@ -126,9 +140,13 @@ public class ArtifactPreviewService {
         return body;
     }
 
-    /** GET /api/v1/chat/artifacts/preview/page 의 PNG 파일. page 는 1부터. */
     public Path page(String sessionId, String name, int page) {
-        Source src = resolve(sessionId, name);
+        return page(sessionId, name, page, null);
+    }
+
+    /** GET /api/v1/chat/artifacts/preview/page 의 PNG 파일. page 는 1부터. version 은 info 와 같다. */
+    public Path page(String sessionId, String name, int page, Integer version) {
+        Source src = resolve(sessionId, name, version);
         if (src.kind() != PreviewKind.PAGES || src.size() > maxFileBytes()) {
             throw new ChatRejectedException(HttpStatus.NOT_FOUND, ERR_PAGE);
         }
@@ -144,14 +162,38 @@ public class ArtifactPreviewService {
         return png;
     }
 
-    private Source resolve(String sessionId, String name) {
+    private Source resolve(String sessionId, String name, Integer version) {
+        if (version != null) return resolveVersion(sessionId, name, version);
         try {
             Path path = artifactService.resolveDownloadPath(sessionId, name);
             long size = Files.size(path);
             Instant modifiedAt = Instant.ofEpochMilli(Files.getLastModifiedTime(path).toMillis());
             Path cacheDir = artifactService.resolvePreviewRoot(sessionId)
                     .resolve(cacheKey(name, modifiedAt, size));
-            return new Source(name, path, size, modifiedAt, PreviewKind.of(name), cacheDir);
+            Path source = chatDocuments.sourceFile(sessionId, name);
+            boolean hasSource = source != null && Files.isRegularFile(source);
+            return new Source(name, path, size, modifiedAt, PreviewKind.of(name), cacheDir, hasSource);
+        } catch (ArtifactService.ArtifactAccessException e) {
+            throw new ChatRejectedException(HttpStatus.FORBIDDEN, ERR_ACCESS);
+        } catch (ArtifactService.ArtifactNotFoundException | IOException e) {
+            throw new ChatRejectedException(HttpStatus.NOT_FOUND, ERR_NOT_FOUND);
+        }
+    }
+
+    /**
+     * CR-181: 판 파일은 저장소에 있어 변환기가 읽을 수 있게 미리보기 폴더에 한 번 꺼내 둔다.
+     * 캐시 자리는 내용 해시로 정해 되돌리기로 같은 내용이 된 판끼리 변환 결과를 나눠 쓴다.
+     */
+    private Source resolveVersion(String sessionId, String name, int version) {
+        ChatDocumentVersionEntity v = chatDocuments.liveFileVersion(sessionId, name, version)
+                .orElseThrow(() -> new ChatRejectedException(HttpStatus.NOT_FOUND, ERR_NOT_FOUND));
+        try {
+            Path cacheDir = artifactService.resolvePreviewRoot(sessionId).resolve(versionCacheKey(name, v.getSha256()));
+            Path copy = cacheDir.resolve("src." + PreviewKind.extension(name));
+            if (!Files.isRegularFile(copy)) chatDocuments.copyVersionTo(v, copy);
+            Instant at = v.getCreatedAt() != null ? v.getCreatedAt().toInstant() : Instant.EPOCH;
+            return new Source(name, copy, v.getSizeBytes(), at, PreviewKind.of(name), cacheDir,
+                    v.getSourceStoragePath() != null);
         } catch (ArtifactService.ArtifactAccessException e) {
             throw new ChatRejectedException(HttpStatus.FORBIDDEN, ERR_ACCESS);
         } catch (ArtifactService.ArtifactNotFoundException | IOException e) {
@@ -354,9 +396,17 @@ public class ArtifactPreviewService {
     }
 
     static String cacheKey(String name, Instant modifiedAt, long size) {
+        return nameKey(name) + "-" + modifiedAt.toEpochMilli() + "-" + size;
+    }
+
+    static String versionCacheKey(String name, String sha256) {
+        return nameKey(name) + "-v" + sha256.substring(0, Math.min(16, sha256.length()));
+    }
+
+    private static String nameKey(String name) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(name.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest, 0, 8) + "-" + modifiedAt.toEpochMilli() + "-" + size;
+            return HexFormat.of().formatHex(digest, 0, 8);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
@@ -386,7 +436,8 @@ public class ArtifactPreviewService {
         T get() throws IOException, InterruptedException;
     }
 
-    private record Source(String name, Path path, long size, Instant modifiedAt, PreviewKind kind, Path cacheDir) {
+    private record Source(String name, Path path, long size, Instant modifiedAt, PreviewKind kind, Path cacheDir,
+                          boolean hasSource) {
         String ext() {
             return PreviewKind.extension(name);
         }

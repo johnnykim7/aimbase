@@ -326,6 +326,7 @@ public class OrchestratorEngine {
         trimmedMessages = turnInstructions.attach(trimmedMessages, sessionId, request);
         // CR-183: 위젯이 그릴 수 있는 형식의 안내 틀을 시스템 안내 끝에 덧붙인다(BIZ-223).
         trimmedMessages = chatFeatures.withRenderGuides(trimmedMessages, request.renderFeatures());
+        trimmedMessages = withTurnInstruction(trimmedMessages, request.turnInstruction());   // CR-181
 
         // 4. LLM 어댑터 선택 (connectionId > modelRouter). 그룹은 chat() 입구에서 멤버 connectionId 로 바뀌어 온다(CR-161)
         //    CR-029: runtimeRegistry 로깅 (향후 selectBest 연결 지점)
@@ -666,6 +667,7 @@ public class OrchestratorEngine {
         trimmedMessages = turnInstructions.attach(trimmedMessages, sessionId, request);
         // CR-183: 위젯이 그릴 수 있는 형식의 안내 틀을 시스템 안내 끝에 덧붙인다(BIZ-223).
         trimmedMessages = chatFeatures.withRenderGuides(trimmedMessages, request.renderFeatures());
+        trimmedMessages = withTurnInstruction(trimmedMessages, request.turnInstruction());   // CR-181
 
         // CR-058: Done 이벤트에 citations 를 합쳐 내보내는 decorator.
         // CR-175: Done 은 바로 내보내지 않고 쥐고 있다가, 대화 기록을 저장한 뒤 답 번호와 순번을 채워 내보낸다.
@@ -873,6 +875,34 @@ public class OrchestratorEngine {
         } catch (Exception e) {
             log.warn("Widget memory trigger failed (session={}): {}", sessionId, e.getMessage());
         }
+    }
+
+    /**
+     * CR-181: 이번 요청에만 싣는 지시를 모델에 보낼 마지막 질문 앞에 붙인다. 시스템 지시로 보내지 않는 것은
+     * CLI 실행기가 둘째 질문부터 시스템 지시를 다시 받지 않기 때문이다. 대화 기록은 request.messages() 로
+     * 저장하므로 지시는 기록에 남지 않는다.
+     */
+    static List<UnifiedMessage> withTurnInstruction(List<UnifiedMessage> messages, String instruction) {
+        if (instruction == null || instruction.isBlank()) return messages;
+        List<UnifiedMessage> out = new ArrayList<>(messages);
+        for (int i = out.size() - 1; i >= 0; i--) {
+            UnifiedMessage m = out.get(i);
+            if (m.role() != UnifiedMessage.Role.USER) continue;
+            List<ContentBlock> content = new ArrayList<>(m.content());
+            int firstText = -1;
+            for (int j = 0; j < content.size(); j++) {
+                if (content.get(j) instanceof ContentBlock.Text) { firstText = j; break; }
+            }
+            if (firstText >= 0) {
+                String text = ((ContentBlock.Text) content.get(firstText)).text();
+                content.set(firstText, new ContentBlock.Text(instruction + "\n\n" + (text != null ? text : "")));
+            } else {
+                content.add(0, new ContentBlock.Text(instruction));
+            }
+            out.set(i, new UnifiedMessage(UnifiedMessage.Role.USER, content));
+            return out;
+        }
+        return out;
     }
 
     /**

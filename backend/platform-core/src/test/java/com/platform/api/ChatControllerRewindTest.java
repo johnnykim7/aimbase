@@ -36,6 +36,7 @@ class ChatControllerRewindTest {
     @Mock private com.platform.llm.LLMAdapterRegistry adapterRegistry;
     @Mock private com.platform.artifact.ArtifactService artifactService;
     @Mock private com.platform.llm.ConnectionAdapterFactory connectionAdapterFactory;
+    @Mock private com.platform.chatdoc.DocumentEditService documentEditService;
     @Mock private ConversationRewindService rewindService;
     @Mock private com.platform.session.ChatWidgetSettingsService widgetSettings;
     @Mock private com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder;

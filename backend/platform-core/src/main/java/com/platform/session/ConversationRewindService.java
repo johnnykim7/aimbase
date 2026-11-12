@@ -1,5 +1,6 @@
 package com.platform.session;
 
+import com.platform.chatdoc.ChatDocumentService;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.ConnectionGroupSelector;
 import com.platform.repository.ChatGeneratedImageRepository;
@@ -9,7 +10,10 @@ import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * CR-175 BIZ-148: 다시 만들기와 질문 고치기의 되감기.
@@ -28,17 +32,20 @@ public class ConversationRewindService {
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final ConnectionGroupSelector connectionGroupSelector;
     private final ChatGeneratedImageRepository imageRepository;
+    private final ChatDocumentService chatDocumentService;
 
     public ConversationRewindService(SessionStore sessionStore,
                                      CancellationRegistry cancellationRegistry,
                                      ConnectionAdapterFactory connectionAdapterFactory,
                                      ConnectionGroupSelector connectionGroupSelector,
-                                     ChatGeneratedImageRepository imageRepository) {
+                                     ChatGeneratedImageRepository imageRepository,
+                                     ChatDocumentService chatDocumentService) {
         this.sessionStore = sessionStore;
         this.cancellationRegistry = cancellationRegistry;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.connectionGroupSelector = connectionGroupSelector;
         this.imageRepository = imageRepository;
+        this.chatDocumentService = chatDocumentService;
     }
 
     /**
@@ -50,7 +57,11 @@ public class ConversationRewindService {
         if (cancellationRegistry.isActive(sessionId)) {
             throw new RewindRejectedException(RewindRejectedException.Reason.SESSION_BUSY);
         }
-        sessionStore.rewind(sessionId, fromSeq);
+        // CR-181 BIZ-202: 지운 답이 만든 문서 판도 같은 트랜잭션에서 지우고, 파일은 남은 마지막 판으로 되돌린다.
+        Set<UUID> touchedDocuments = new HashSet<>();
+        sessionStore.rewind(sessionId, fromSeq,
+                (turnIds, ts) -> touchedDocuments.addAll(chatDocumentService.deleteEditsOfTurns(turnIds, ts)));
+        if (!touchedDocuments.isEmpty()) chatDocumentService.restoreFilesToLatest(touchedDocuments);
         softDeleteRewoundImages(sessionId);
         for (String connId : candidateConnections(connectionId, connectionGroupId)) {
             if (connectionAdapterFactory.isCliConnection(connId)) {

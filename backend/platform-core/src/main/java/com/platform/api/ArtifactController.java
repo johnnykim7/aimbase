@@ -6,8 +6,11 @@ import com.platform.auth.UserPrincipal;
 import com.platform.document.FileMediaTypes;
 import com.platform.session.ChatRejectedException;
 import com.platform.session.ChatSessionOwnership;
+import com.platform.chatdoc.ChatDocumentService;
+import com.platform.domain.ChatDocumentVersionEntity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.PathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
@@ -49,12 +52,14 @@ public class ArtifactController {
     private final ArtifactService service;
     private final ArtifactPreviewService previewService;
     private final ChatSessionOwnership ownership;
+    private final ChatDocumentService chatDocuments;
 
     public ArtifactController(ArtifactService service, ArtifactPreviewService previewService,
-                              ChatSessionOwnership ownership) {
+                              ChatSessionOwnership ownership, ChatDocumentService chatDocuments) {
         this.service = service;
         this.previewService = previewService;
         this.ownership = ownership;
+        this.chatDocuments = chatDocuments;
     }
 
     @GetMapping
@@ -76,9 +81,10 @@ public class ArtifactController {
     public ApiResponse<Map<String, Object>> preview(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam("session_id") String sessionId,
-            @RequestParam("name") String name) {
+            @RequestParam("name") String name,
+            @RequestParam(value = "version", required = false) Integer version) {
         requireOwner(principal, sessionId);
-        return ApiResponse.ok(previewService.info(sessionId, name));
+        return ApiResponse.ok(previewService.info(sessionId, name, version));
     }
 
     @GetMapping("/preview/page")
@@ -88,9 +94,10 @@ public class ArtifactController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam("session_id") String sessionId,
             @RequestParam("name") String name,
-            @RequestParam("page") int page) {
+            @RequestParam("page") int page,
+            @RequestParam(value = "version", required = false) Integer version) {
         requireOwner(principal, sessionId);
-        Path png = previewService.page(sessionId, name, page);
+        Path png = previewService.page(sessionId, name, page, version);
         return ResponseEntity.ok()
                 .cacheControl(PAGE_CACHE)
                 .contentType(MediaType.IMAGE_PNG)
@@ -115,9 +122,11 @@ public class ArtifactController {
     public ResponseEntity<Resource> download(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam("session_id") String sessionId,
-            @RequestParam("file") String file) {
+            @RequestParam("file") String file,
+            @RequestParam(value = "version", required = false) Integer version) {
         requireOwner(principal, sessionId);
 
+        if (version != null) return downloadVersion(sessionId, file, version);
         Path target;
         try {
             target = service.resolveDownloadPath(sessionId, file);
@@ -137,6 +146,23 @@ public class ArtifactController {
                 .contentType(MediaType.parseMediaType(FileMediaTypes.forName(target.getFileName().toString())))
                 .contentLength(sizeSafe(target))
                 .body(new PathResource(target));
+    }
+
+    /** CR-181: 옆 창 문서의 지난 판. 판 파일은 저장소에 있어 out/ 을 거치지 않는다. */
+    private ResponseEntity<Resource> downloadVersion(String sessionId, String file, int version) {
+        if (file == null || file.isBlank() || file.contains("/") || file.contains("\\")) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "파일 이름에 경로 구분자: " + file);
+        }
+        ChatDocumentVersionEntity v = chatDocuments.liveFileVersion(sessionId, file, version)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "판 없음: " + file + " v" + version));
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(file, StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .contentType(mediaTypeFor(Path.of(file)))
+                .contentLength(v.getSizeBytes())
+                .body(new InputStreamResource(chatDocuments.openFile(v)));
     }
 
     /** CR-132(할 일 3): done 이벤트에 실을 다운로드 URL — 상대 경로. 위젯이 baseUrl 앞에 붙인다. */

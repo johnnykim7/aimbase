@@ -125,6 +125,7 @@ public class ChatWidgetSettingsService {
         body.put("export_formats", exportFormats());
         body.put("share_enabled", shareSettings.usable());
         body.put("share_ttl_days", shareSettings.ttlDays());
+        body.put("document_binary_edit_supported", binaryDocumentEditSupported(connectionId));
         return body;
     }
 
@@ -147,6 +148,15 @@ public class ChatWidgetSettingsService {
         image.put("max_prompt_chars", imageSettings.maxPromptChars());
         image.put("max_source_images", imageSettings.maxSourceImages());
         return image;
+    }
+
+    /**
+     * CR-181 BIZ-203: CR-182 원본 없이 만들어진 파일(pptx 등)을 대화로 고칠 수 있는지.
+     * 모델이 작업 폴더의 파일을 직접 고쳐야 하므로 실행기(CLI) 연결만 된다. 어댑터 선택과 같은 순서로 본다.
+     */
+    public boolean binaryDocumentEditSupported(String connectionId) {
+        String connId = effectiveConnection(connectionId);
+        return connId != null && connectionAdapterFactory.isCliConnection(connId);
     }
 
     /**

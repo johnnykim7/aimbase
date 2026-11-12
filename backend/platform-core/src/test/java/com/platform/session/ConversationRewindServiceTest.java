@@ -13,8 +13,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -28,13 +30,14 @@ class ConversationRewindServiceTest {
     @Mock private ConnectionGroupSelector connectionGroupSelector;
     @Mock private LLMAdapter cliAdapter;
     @Mock private com.platform.repository.ChatGeneratedImageRepository imageRepository;
+    @Mock private com.platform.chatdoc.ChatDocumentService chatDocumentService;
 
     private ConversationRewindService service;
 
     @BeforeEach
     void setUp() {
         service = new ConversationRewindService(sessionStore, cancellationRegistry,
-                connectionAdapterFactory, connectionGroupSelector, imageRepository);
+                connectionAdapterFactory, connectionGroupSelector, imageRepository, chatDocumentService);
     }
 
     @Test
@@ -46,7 +49,7 @@ class ConversationRewindServiceTest {
         assertThatThrownBy(() -> service.rewind("s-1", 2, "conn-1", null))
                 .isInstanceOf(RewindRejectedException.class)
                 .extracting("reason").isEqualTo(RewindRejectedException.Reason.SESSION_BUSY);
-        verify(sessionStore, never()).rewind(anyString(), anyInt());
+        verify(sessionStore, never()).rewind(anyString(), anyInt(), any());
     }
 
     @Test
@@ -57,7 +60,7 @@ class ConversationRewindServiceTest {
 
         service.rewind("s-1", 2, "cli-1", null);
 
-        verify(sessionStore).rewind("s-1", 2);
+        verify(sessionStore).rewind(eq("s-1"), eq(2), any());
         verify(cliAdapter).cleanupSession("s-1");
     }
 
@@ -69,7 +72,7 @@ class ConversationRewindServiceTest {
         service.rewind("s-1", 2, null, null);
 
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(sessionStore, imageRepository);
-        order.verify(sessionStore).rewind("s-1", 2);
+        order.verify(sessionStore).rewind(eq("s-1"), eq(2), any());
         order.verify(imageRepository).softDeleteOrphanedBySessionId(
                 org.mockito.ArgumentMatchers.eq("s-1"), org.mockito.ArgumentMatchers.any());
     }
@@ -84,7 +87,7 @@ class ConversationRewindServiceTest {
 
         service.rewind("s-1", 2, null, null);
 
-        verify(sessionStore).rewind("s-1", 2);
+        verify(sessionStore).rewind(eq("s-1"), eq(2), any());
     }
 
     @Test
