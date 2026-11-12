@@ -35,7 +35,7 @@
     "dompurify": "^3.4.12",
     "fflate": "^0.8.3",
     "highlight.js": "^11.11.1",
-    "katex": "^0.19.1",
+    "katex": "^0.16.47",
     "marked": "^16.4.2",
     "mermaid": "^11.16.0"
   }
