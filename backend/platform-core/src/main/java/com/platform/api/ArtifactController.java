@@ -160,7 +160,7 @@ public class ArtifactController {
                 .build();
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .contentType(mediaTypeFor(Path.of(file)))
+                .contentType(MediaType.parseMediaType(FileMediaTypes.forName(file)))
                 .contentLength(v.getSizeBytes())
                 .body(new InputStreamResource(chatDocuments.openFile(v)));
     }

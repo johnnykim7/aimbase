@@ -3,6 +3,7 @@ package com.platform.api;
 import com.platform.artifact.ArtifactPreviewService;
 import com.platform.artifact.ArtifactService;
 import com.platform.auth.UserPrincipal;
+import com.platform.chatdoc.ChatDocumentService;
 import com.platform.domain.ConversationSessionEntity;
 import com.platform.repository.ConversationSessionRepository;
 import com.platform.session.ChatRejectedException;
@@ -29,6 +30,7 @@ class ArtifactControllerTest {
 
     private ArtifactService artifactService;
     private ArtifactPreviewService previewService;
+    private ChatDocumentService chatDocuments;
     private ArtifactController controller;
 
     @BeforeEach
@@ -40,7 +42,9 @@ class ArtifactControllerTest {
         when(sessionRepository.findBySessionId("s1")).thenReturn(Optional.of(session));
         artifactService = mock(ArtifactService.class);
         previewService = mock(ArtifactPreviewService.class);
-        controller = new ArtifactController(artifactService, previewService, new ChatSessionOwnership(sessionRepository));
+        chatDocuments = mock(ChatDocumentService.class);
+        controller = new ArtifactController(artifactService, previewService, new ChatSessionOwnership(sessionRepository),
+                chatDocuments);
     }
 
     @Test
@@ -49,10 +53,11 @@ class ArtifactControllerTest {
         UserPrincipal other = principal("user-b", "WIDGET");
 
         assertNotFound(() -> controller.list(other, "s1"));
-        assertNotFound(() -> controller.download(other, "s1", "보고서.docx"));
-        assertNotFound(() -> controller.preview(other, "s1", "보고서.docx"));
-        assertNotFound(() -> controller.previewPage(other, "s1", "보고서.docx", 1));
-        verifyNoInteractions(artifactService, previewService);
+        assertNotFound(() -> controller.download(other, "s1", "보고서.docx", null));
+        assertNotFound(() -> controller.download(other, "s1", "보고서.docx", 2));
+        assertNotFound(() -> controller.preview(other, "s1", "보고서.docx", null));
+        assertNotFound(() -> controller.previewPage(other, "s1", "보고서.docx", 1, 2));
+        verifyNoInteractions(artifactService, previewService, chatDocuments);
     }
 
     @Test
