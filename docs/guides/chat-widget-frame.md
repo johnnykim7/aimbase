@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.3 | 최종 수정: 2026-11-13 | 관련 CR: CR-177
+> 문서 버전: 1.4 | 최종 수정: 2026-11-13 | 관련 CR: CR-177
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -238,7 +238,8 @@ ctx.on("newConversation", ({ previousSessionId, sessionId }) => ...);
 ctx.on("answerStart", (a: AnswerView) => ...);     // 질문을 보내 응답을 기다리기 시작함(다시 생성, 질문 수정 포함). a.text 는 빈 글
 ctx.on("answerDelta", ({ answer, text }) => ...);  // 응답 글 조각이 옴. text 는 이번 조각, answer.text 는 지금까지. 생각, 도구 줄은 오지 않는다
 ctx.on("answerDone", (a: AnswerView) => ...);      // 응답 하나가 끝남(중지, 오류 포함)
-ctx.on("streamEvent", ({ name, data, answer }) => ...); // 대화 스트림에서 위젯 본체가 모르는 이벤트
+ctx.on("streamEvent", ({ name, data, answer, mount }) => ...); // 대화 스트림에서 위젯 본체가 모르는 이벤트. mount 는 아래
+ctx.on("workflowApproval", ({ runId, stepId, policyId, reason, approvers, timeoutAt, mount }) => ...); // 워크플로우 진행 칸에 승인 대기가 옴
 ctx.on("modelChange", ({ model, thinking }) => ...); // 사람이 모델이나 깊게 생각하기를 바꿈. selectModel, setThinking 으로 바꾼 것은 오지 않는다
 ctx.on("titleChange", ({ sessionId, title }) => ...); // 서버가 대화 제목을 만들어 머리줄 제목이 바뀜. setTitle 로 바꾼 것은 오지 않는다
 ctx.on("settingsLoaded", (settings) => ...);      // 위젯 설정을 받았거나 다시 받음(화면 언어를 바꿀 때 포함)
@@ -283,6 +284,13 @@ interface ConversationView {
 - 마지막 응답에만 다시 생성을 그린다. 복사, 평가(남긴 평가는 켜진 상태로)는 모든 응답에 그린다. `stopped` 면 「응답을 중지했습니다」, `tools` 는 접힌 도구 줄로 그린다.
 - 응답마다 손질(decorate), 응답 아래 단추가 새 응답과 같이 불린다. `answerDone` 은 오지 않는다.
 - 서버 응답을 이 모양으로 바꾸는 것은 부르는 건(CR-178)이 한다. 붙이는 앱에 `onNewConversation` 은 보내지 않는다.
+
+기능 요소 끼우기(`mount(el)`):
+
+- `streamEvent` 의 `mount(el)` 은 도는 중인 응답의 지금 위치(그때까지 받은 글 바로 아래)에 요소를 끼운다. 그 뒤에 오는 글은 요소 아래에 이어 그린다. 응답이 끝나도 남는다. 응답이 이미 끝났으면 끼우지 않고 거짓을 돌려준다.
+- 끼운 요소는 응답 글(`AnswerView.text`)에 들어가지 않는다. 복사는 글만 복사하고, 다시 생성한 새 버전과 지난 대화 열기에는 없다. 손질(decorate)은 요소로 나뉜 글 조각마다 불린다.
+- `workflowApproval` 의 `mount(el)` 은 그 워크플로우 진행 칸의 승인 대기 줄 바로 아래에 요소를 끼운다. 붙이는 앱의 `onApprovalRequired` 는 그대로 불린다.
+- 끼운 요소의 글은 기능이 `localeChange` 를 받아 다시 그린다.
 
 스트림 중간 오류: 서버가 응답 도중 `event: error`(`data: {"code": "...", "message": "..."}`)를 보내면 위젯 본체가 그 응답을 오류로 끝낸다. 받은 글은 남기고 「답을 받지 못했습니다: (오류 문구)」를 붙이며 다시 시도 단추는 두지 않는다(CR-175 T3-4 전송 7단계와 같다). 오류 문구는 3.6 의 규칙으로 고른다.
 
