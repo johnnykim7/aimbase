@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.33.1** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.34.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2776,9 +2776,117 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 - `enabled` 는 그 연결에 그림 연결이 있으면 참이고, `connection_id` 가 없으면 거짓입니다. 위젯은 참일 때만 + 메뉴에 「그림 만들기」 를 보입니다.
 - 오류 응답은 코드만 주므로 상한은 여기서 읽어 오류 문구에 씁니다.
 
+## 31. 위젯 파일 만들기, 저장, 내보내기, 공유 링크 [CR-182]
+
+모델이 워드, PDF, 엑셀, PPT, CSV 파일을 만들고, 사용자가 응답 하나나 대화 전체를 파일로 받고, 대화나 만든 파일의 그 순간 사본을 링크로 나눕니다. 설정 키는 운용 가이드 § 2-17 을 봅니다.
+
+### 31-1. 파일 만들기 (`POST /api/v1/chat/completions` 의 `file_create`)
+
+```json
+{"connection_id": "openai-main", "session_id": "...", "stream": true,
+ "messages": [{"role": "user", "content": "3분기 반품 현황을 엑셀로 만들어 줘"}],
+ "file_create": true}
+```
+
+- `file_create: true` 이고 런타임 설정 `chat.file-create.enabled` 가 켜져 있으면 그 요청에 서버 도구 `create_file` 을 줍니다. API 연결은 `actions_enabled` 가 없어도 이 도구 하나로 도구 고리를 돌리고, CLI 연결은 실행기 허용 도구 목록에 더합니다.
+- 칸이 없거나 거짓이면 지금과 같습니다. 붙이는 앱의 서버 호출은 바뀌지 않습니다.
+- 만든 파일은 세션 작업 폴더 `out/` 에 남고 끝 이벤트 `done.artifacts[]` 로 옵니다(§ 29 와 같은 모양). 받기는 `GET /api/v1/chat/artifacts/download` 입니다.
+
+`create_file` 입력(모델이 채웁니다):
+
+| 칸 | 쓰는 형식 | 설명 |
+|---|---|---|
+| file_name | 모두 | 확장자 없이. 경로 문자, 앞 점, 제어 문자를 지우고 120자로 자릅니다 |
+| format | 모두 | `docx`, `pdf`, `md`, `txt`, `html`, `xlsx`, `csv`, `pptx` |
+| title | docx, pdf, html, pptx | 맨 위 제목, pptx 는 표지 |
+| content | docx, pdf, md, txt, html, csv | 마크다운(md, txt 는 그대로) |
+| sheets | xlsx, csv | `[{"name", "rows": [[...]]}]`. 첫 행이 머리 |
+| slides | pptx | `[{"title", "bullets": [...], "notes"}]` |
+| overwrite | 모두 | 거짓이면 같은 이름에 ` (2)` 를 붙입니다 |
+
+도구 결과 오류: `file_invalid:format`, `file_invalid:content`, `file_invalid:file_name`, `file_too_large`(`chat.file-create.max-bytes`, 기본 20MB), `pdf_font_missing`, `file_create_disabled`, `file_no_workspace`, `file_write_failed`.
+
+### 31-2. 응답 저장 (`GET /api/v1/chat/sessions/{session_id}/turns/{turn_id}/export?format=&tz=`)
+
+위젯 토큰(`chat:stream`) 또는 로그인으로 부릅니다. `turn_id` 는 § 28 끝 이벤트의 답 번호입니다.
+
+| 인자 | 설명 |
+|---|---|
+| format | `pdf`, `docx` |
+| tz | 보는 사람 시간대(IANA 이름). 없거나 틀리면 `chat.export.default-timezone`(기본 `Asia/Seoul`) |
+
+| HTTP | 응답 | 경우 |
+|---|---|---|
+| 200 | 파일 바이트, `Content-Disposition: attachment` 이름 `<대화 제목>_<응답 시각 yyyyMMdd-HHmm>.<형식>` | 정상. 맨 위에 대화 제목, 응답 시각, 모델 |
+| 400 | `export_invalid:format` | 형식이 표에 없음 |
+| 404 | `turn_not_found` | 없는 답, 남의 세션 |
+| 503 | `pdf_font_missing` | 서버에 PDF 글꼴이 없음 |
+
+### 31-3. 대화 내보내기 (`GET /api/v1/chat/sessions/{session_id}/export?format=&tz=`)
+
+- `format` 은 `pdf`, `docx`, `md`. 지우지 않은 메시지를 질문, 응답 순으로 적고 첨부는 이름만 남깁니다. 생각과 도구 사용은 넣지 않습니다.
+- 파일 이름 `<대화 제목>_<내보낸 시각>.<형식>`, 맨 위에 제목, 내보낸 시각, 메시지 수.
+- 오류: 400 `export_invalid:format`, 404 `session_not_found`(없거나 남의 세션), 409 `export_empty`(메시지 없음), 503 `pdf_font_missing`.
+
+### 31-4. 공유 링크
+
+`POST /api/v1/chat/shares` 만들기:
+
+```json
+{"session_id": "cs-9471-...", "kind": "CONVERSATION"}
+{"session_id": "cs-9471-...", "kind": "FILE", "file_name": "3분기 반품 현황.xlsx", "ttl_days": 14}
+```
+
+응답(목록 행과 같은 모양, 시각은 오프셋 붙은 ISO-8601):
+
+```json
+{"share_id": "4f0c...", "url": "https://ai.example.com/share/bp_wms/Q2x...", "kind": "FILE",
+ "file_name": "3분기 반품 현황.xlsx", "status": "ACTIVE", "view_count": 0,
+ "expires_at": "2026-11-20T09:00:00+09:00", "created_at": "2026-11-13T09:00:00+09:00", "revoked_at": null}
+```
+
+- 사본을 만든 순간의 것을 나눕니다. 대화가 이어지거나 파일이 24시간 지움으로 사라져도 링크는 만든 순간의 것을 보입니다.
+- 같은 대상에 살아 있는 링크가 있어도 새로 만듭니다.
+- 기한은 `ttl_days`, 없으면 `chat.share.ttl-days`(기본 7). 1 ~ `chat.share.max-ttl-days`(기본 30) 밖이면 400.
+- `status` 는 `ACTIVE`, `REVOKED`, `EXPIRED`.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `share_invalid:kind`, `share_invalid:file_name`, `share_invalid:ttl_days` | 칸이 틀림 |
+| 404 | `session_not_found`, `file_not_found` | 없거나 남의 세션, 없는 파일 |
+| 409 | `share_not_configured` | 공개 주소 `chat.share.public-base-url` 이 비었거나 `chat.share.enabled` 꺼짐 |
+| 409 | `export_empty` | 대화가 비었음 |
+| 503 | `share_write_failed`, `pdf_font_missing` | 사본을 쓰지 못함 |
+
+- `GET /api/v1/chat/shares?session_id=` 그 세션에 내가 만든 링크 최근 20개(`{"shares": [...]}`). 끊긴 것, 기한 지난 것도 상태와 함께 옵니다.
+- `DELETE /api/v1/chat/shares/{share_id}` 끊기. 사본을 바로 지우고 바뀐 행을 줍니다. 이미 끊긴 것은 그대로 200, 남의 링크나 없는 링크는 404 `share_not_found`.
+- 세션을 지우면 그 세션의 살아 있는 링크가 함께 끊깁니다.
+
+받는 사람 열기 `GET /share/{tenant_id}/{token}`(로그인, 토큰, 테넌트 머리글 없음):
+
+- 대화는 스크립트 없는 HTML 한 장, 파일은 attachment 로 내려갑니다. `Content-Security-Policy: sandbox`, `Cache-Control: no-store`, `X-Robots-Tag: noindex` 를 붙입니다.
+- 없는 링크, 끊긴 링크, 기한 지난 링크는 모두 같은 404 화면입니다. 같은 주소에서 분당 `chat.share.open-rate-per-minute`(기본 60)회를 넘으면 429 입니다.
+
+### 31-5. 위젯 설정 칸
+
+`GET /api/v1/chat/widget-settings` 응답에 칸이 붙습니다.
+
+```json
+{"file_create_enabled": true, "export_formats": ["pdf", "docx", "md"], "share_enabled": true, "share_ttl_days": 7}
+```
+
+- `export_formats` 는 서버에 PDF 글꼴이 없으면 `pdf` 를 뺍니다.
+- `share_enabled` 는 `chat.share.enabled` 가 켜져 있고 공개 주소가 있을 때만 참입니다.
+
+### 31-6. 산출물 API 세션 주인 대조
+
+`GET /api/v1/chat/artifacts`, `/download`, `/preview`, `/preview/page` 는 위젯 토큰이면 그 세션 주인(`user_ref`)만 엽니다. 남의 세션이면 404 `artifact_not_found` 입니다. 소비앱 키와 로그인은 지금처럼 테넌트 안에서 엽니다.
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+|------|------|----------|
+| v3.34.0 | 2026-11-13 | **CR-182 위젯 파일 만들기, 저장, 내보내기, 공유 링크** (§ 31). 대화 요청 `file_create` 와 서버 도구 `create_file`, 응답 저장 `GET /api/v1/chat/sessions/{id}/turns/{turn_id}/export`, 대화 내보내기 `GET /api/v1/chat/sessions/{id}/export`, 공유 링크 `POST`, `GET`, `DELETE /api/v1/chat/shares`, 받는 사람 `GET /share/{tenant_id}/{token}`. 위젯 설정 `file_create_enabled`, `export_formats`, `share_enabled`, `share_ttl_days`. 산출물 API 세션 주인 대조 404 `artifact_not_found` |
 | v3.33.1 | 2026-11-13 | **CR-177 워크플로우 끝남 알림에 실패 이유** (§ 17-6). `workflow.done` 에 `error`(실패한 런만) |
 | v3.33.0 | 2026-11-13 | **CR-184 위젯 그림 만들기** (§ 30). 대화 요청 `image` 칸(`create`, `edit`), 스트림 `image_status` 와 `done.images`, 그림 받기 `GET /api/v1/chat/images/{image_id}`, 위젯 설정 `image_generation`, 오류 코드 `image_*` |
 | v3.32.0 | 2026-11-13 | **CR-180 위젯 옆 창 문서 미리보기** (§ 29). 미리보기 정보 `GET /api/v1/chat/artifacts/preview`, 쪽 그림 `GET /api/v1/chat/artifacts/preview/page`. 대화 끝 `artifacts[]` 와 산출물 목록에 `modified_at`, `preview_kind`. 산출물 확장자에 svg, jpg, jpeg, gif, webp. 위젯 설정에 `preview_html_script_sources` (§ 28-2) |
@@ -2821,7 +2929,6 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 | v3.7.0 | 2026-06-08 | **CR-100 — 로컬 PC 문서 파싱 다리** (§ 20-6). 사용자 로컬 PC 문서를 서버 사이드카로 파싱하는 경로 완성. `builtin_file_read` 에 `as_base64=true` 옵션 신설(바이너리도 base64 반환, 10MB 가드), `parse_document` 에 `content`(base64) 입력 신설(url/file_path/content 3종 택1, PDF면 비전·그 외 사이드카 텍스트 추출, 50MB 가드). 흐름: CLI→`file_read(as_base64)`(로컬 byte)→`parse_document(content)`(서버 MCP CLI-level 기존 노출)→사이드카. 사이드카(Python)·MCPRagClient 는 이미 base64 입력 지원 → 무수정, Java 도구 2개만 수정. 단위 `FileReadToolTest` 4 + `ParseDocumentToolTest` content 4 추가, tool 회귀 PASS |
 | v3.6.0 | 2026-06-05 | **CR-095 — PDF Native 비전 파싱** (openclaude 1:1). PDF 첨부(`document` 블록)를 사이드카 텍스트 추출(`parse_document`/OCR ~38초)이 아니라 **LLM 모델 비전**으로 파싱 (§ 18-4). 3분기: ≤3MB & PDF지원 → base64 `DocumentBlockParam` 통째 / >3MB or PDF미지원 → 사이드카 `pdf_to_images`(poppler, JPEG 100DPI) 페이지 이미지화 → `ImageBlockParam` 배열 / 이미지도 미지원 → `PdfTextExtractor` 텍스트 폴백. 임계값 `aimbase.pdf.*` (inline-max-bytes 3MB, target-raw-max-bytes 20MB, max-pages-per-read 20, image-dpi 100). **AGENT 자율 호출**(`parse_document` 도구)도 PDF 면 비전 경로 — tool_result 엔 메타, 실제 PDF/이미지는 별도 user 메시지로 주입(`ToolResult.newMessages`, openclaude newMessages 패턴). 신규 사이드카 MCP 툴 `pdf_to_images`. 단위: 사이드카 18 + PdfVisionResolver 9 + tool/rag/attachment 회귀 GREEN. **기존 동작 무변경(하위호환)** |
 | v3.5.0 | 2026-06-04 | **CR-090 — 워크플로우 실행 이벤트 조회 API 문서화**. 기존 운영 라이브였으나 가이드에 누락돼 있던 `GET /api/v1/workflows/runs/{runId}/events` 추가 (§ 17-9). STEP_START/TOOL_USE/TOOL_RESULT/LLM_RESPONSE/STEP_END/STEP_FAILED 6종 이벤트를 시간순 배열로 반환 — 실시간 SSE(§17-6) 부담 없이 실행 단위 흐름을 사후/폴링 로그로 소비. 인증은 §17-6 과 동일(Bearer 또는 `?access_token=` 위젯 토큰, 공통 JWT 필터 처리). prompt/response 원본 미저장(얇은 버전), `trace_id`/`subagent_run_id` 로 심층 join. **신규 코드 없음 — 문서만 추가** |
-|------|------|----------|
 | v3.4.0 | 2026-06-03 | **CR-092 — 전통적 OCR (Tesseract)**. 사이드카 `read_pdf` 의 `ocr_enabled` 인자 실연결 + 신규 `ocr_image` MCP 툴 + BE `PdfTextExtractor` 텍스트 < 50자 fallback 자동 OCR + BE Built-in Tool `ocr_image` 신설 + CR-072 CLI 화이트리스트 추가(27개). 설정 4키 `aimbase.ocr.*` (`global_config` V65 seed). 언어 화이트리스트 BIZ-106 (eng/kor/jpn/chi_sim/chi_tra/fra/deu/spa), 페이지 상한 BIZ-105 (50), fallback 임계 BIZ-107 (50자). Dockerfile `tesseract-ocr-kor` 한국어 언어팩 추가. Vision 모델(CR-061)과 분리 — RAG 인제스션·결정론·오프라인 OCR 경로 (§ 20) |
 | v3.3.0 | 2026-05-29 | **CR-087 — 워크플로우 FOREACH step (동적 컬렉션 fan-out)**. 신규 스텝 타입 `FOREACH` — 런타임 컬렉션(`items`)의 각 원소에 `body` 스텝(`LLM_CALL`/`TOOL_CALL`/`SUB_WORKFLOW` 등)을 적용(map). body에서 `{{item.field}}`(Map)·`{{item.value}}`(스칼라)·`{{index.value}}`(0-based) 참조. `mode`(`sequential` 기본 / `parallel`=Virtual Thread + `max_concurrency` 기본 5), `max_items`(기본 100, 초과 시 FAIL), `collect`(`append` 기본 / `merge` / `none`), `on_item_error`(`fail` 기본 / `continue`). 출력 `{output:[...], results:[...], item_count, failed_count}`. `PARALLEL`(정적 branch)·`ROUTER`(N중 1택)로 표현 못하던 map/fan-out을 단일 노드로 선언 (LangGraph `Send`/map 대응). FOREACH 직접 중첩은 차단(body=`SUB_WORKFLOW`로 중첩). **단일 노드라 DAG/cyclic 양 모드 동일 동작, 마이그레이션 불필요(StepType JSONB 문자열), 기존 워크플로우 무변경(하위호환)** — platform-core 전체 회귀 GREEN |
 | v3.2.0 | 2026-05-18 | **CR-085 — State 채널 reducer + 중첩 경로 + 노드 토큰 스트리밍**. 변수 참조에 중첩 경로(`{{step.a.b[0].c}}`, List 인덱스/Map 혼합) 추가 — 기존 1뎁스 참조·실패 폴백(빈 문자열) 동작 100% 보존. 스텝 config에 `output_channel`+`reduce`(`replace` 기본 / `append`=List 누적, LangGraph `add_messages` 대응 / `merge`=Map 얕은 병합) opt-in — 미지정 시 기존 덮어쓰기 동작 그대로, `{{stepId.field}}` 참조는 항상 유지. `LLM_CALL` config에 `stream_tokens:true` opt-in 시 노드 내부 LLM 토큰 델타를 SSE `step_token`(`tokenDelta`/`type`/`iterationIndex` nullable)로 발행 — `response_schema` 없는 텍스트 응답에만 적용, orchestrator SSE 공용 스트리밍 경로 재사용. **기존 워크플로우 무변경(하위호환)** — platform-core 653 회귀 GREEN |

@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.30.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.31.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -816,6 +816,44 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | 「그림 서비스 사용 한도를 넘었습니다」 | OpenAI 키 거부(401, 403) 또는 요청 한도, 크레딧 없음(429) | 그 OpenAI 조직의 키와 결제를 확인한다 |
 | 「그림을 만드는 데 시간이 너무 걸려 멈췄습니다」 | `widget.image.timeout-ms` 초과 | 그림 품질을 낮추거나 시간 한도를 늘린다 |
 | 「요청한 내용으로는 그림을 만들 수 없습니다」 | OpenAI 내용 거절 | 설명을 바꿔 다시 보낸다 |
+
+### 2-17. 위젯 파일 만들기, 저장, 내보내기, 공유 링크 운영 [CR-182]
+
+위젯 사용자가 AI 에게 워드, PDF, 엑셀, PPT, CSV 파일을 만들게 하고, 응답 하나를 「저장」(PDF, 워드), 대화 전체를 더 보기 「대화 내보내기」(PDF, 워드, 마크다운)로 받고, 대화나 만든 파일을 「공유 링크 만들기」 로 나누는 기능입니다. API 는 API 가이드 § 31.
+
+**파일 만들기.** 연결 종류(API, CLI)와 관계없이 서버 도구 `create_file` 이 파일을 그려 세션 작업 폴더 `out/` 에 씁니다. 위젯이 대화 요청마다 `file_create: true` 를 실을 때만 도구가 열리므로 붙이는 앱의 서버 호출은 바뀌지 않습니다. 모델에게 보이는 도구 설명은 테넌트 프롬프트 틀 `tool.create-file.description` 에서 고칩니다.
+
+**PDF 한글 글꼴.** api 이미지에 `fonts-nanum` 을 깝니다. 글꼴 폴더는 환경변수 `AIMBASE_DOCUMENT_PDF_FONT_DIR`(기본 `/usr/share/fonts/truetype/nanum`)입니다. 폴더에 글꼴이 없으면 PDF 만 503 `pdf_font_missing` 이고 위젯 형식 목록에서 PDF 가 빠집니다. 워드, 마크다운은 그대로 됩니다.
+
+**공유 링크 공개 주소.** 받는 사람은 `{공개 주소}/share/{tenant_id}/{token}` 을 로그인 없이 엽니다. 런타임 설정 `chat.share.public-base-url` 에 위젯이 붙는 Aimbase 공개 주소(예: `https://ai.banpoom.co.kr`)를 넣어야 공유가 켜집니다. 비어 있으면 위젯에 공유 단추가 보이지 않습니다. 앞단 nginx 에 `/share/` 경로를 api 로 넘기는 설정이 있어야 합니다.
+
+```nginx
+location /share/ { proxy_pass http://127.0.0.1:8280; }
+```
+
+**사본 저장.** 링크를 만들 때 그 순간의 사본을 작업 폴더 기준 경로 `shares/{tenant_id}/{share_id}/` 에 둡니다. 작업 폴더 24시간 지움과 따로 살고, 기한이 지나면 1시간마다 도는 지움이 사본만 지웁니다(테넌트 DB `chat_shares` 행은 남습니다). 링크 끊기와 대화 삭제는 사본을 바로 지웁니다.
+
+**런타임 설정.** 사이드바 Super Admin 묶음 「런타임 설정」 의 Chat 묶음에서 재기동 없이 바꿉니다.
+
+| 키 | 처음 값 | 뜻 |
+|---|---|---|
+| `chat.file-create.enabled` | true | 파일 만들기 도구를 위젯 대화에 준다 |
+| `chat.file-create.max-bytes` | 20971520 | 만든 파일 크기 상한(20MB) |
+| `chat.export.default-timezone` | Asia/Seoul | 위젯이 시간대를 싣지 않았을 때 파일 이름과 본문 시각의 시간대. 공유 사본 시각도 이 값 |
+| `chat.export.labels` | 문구 JSON | 저장, 내보내기, 공유 사본, 링크 끝 화면에 들어가는 낱말. 빠진 키는 기본 낱말 |
+| `chat.share.enabled` | true | 공유 링크를 만든다 |
+| `chat.share.public-base-url` | (비움) | 받는 사람이 여는 공개 주소. 비면 공유가 꺼진다 |
+| `chat.share.ttl-days` | 7 | 기본 기한(일) |
+| `chat.share.max-ttl-days` | 30 | 요청으로 늘릴 수 있는 기한 상한 |
+| `chat.share.open-rate-per-minute` | 60 | 같은 주소에서 분당 열기 상한. 넘으면 429 |
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 응답 아래 「저장」 이나 더 보기 「대화 내보내기」 에 PDF 가 없다 | api 컨테이너에 한글 글꼴이 없다 | 이미지를 다시 만들거나 `AIMBASE_DOCUMENT_PDF_FONT_DIR` 을 글꼴이 있는 폴더로 맞춘다 |
+| 더 보기에 「공유 링크 만들기」, 파일 칩에 「공유」 가 없다 | `chat.share.public-base-url` 이 비었거나 `chat.share.enabled` 가 꺼짐 | 공개 주소를 넣고 위젯을 다시 연다 |
+| 받는 사람이 링크를 열면 Aimbase 화면이 아닌 404 가 뜬다 | 앞단 nginx 에 `/share/` 경로가 없다 | 위 `location /share/` 를 더하고 nginx 를 다시 읽힌다 |
+| 「링크가 없거나 끝났습니다」 | 끊긴 링크, 기한 지난 링크, 틀린 주소 | 보낸 사람이 공유 창에서 새 링크를 만든다 |
+| 파일을 만들어 달라고 해도 파일 칩이 오지 않는다 | `chat.file-create.enabled` 꺼짐 또는 위젯이 CR-182 전 판 | 설정과 위젯 판을 확인한다 |
 
 ---
 
@@ -2021,6 +2059,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.31.0 | 2026-11-13 | **CR-182 위젯 파일 만들기, 저장, 내보내기, 공유 링크** (§ 2-17). api 이미지 `fonts-nanum` 과 환경변수 `AIMBASE_DOCUMENT_PDF_FONT_DIR`, 런타임 설정 `chat.file-create.*`, `chat.export.*`, `chat.share.*`, 앞단 nginx `location /share/`, 프롬프트 틀 `tool.create-file.description` |
 | v3.30.0 | 2026-11-13 | **CR-184 위젯 그림 만들기** (§ 2-16). 연결 편집 「그림 모델」, 「그림 품질」, 「그림 연결」, 런타임 설정 `widget.image.*`, 환경변수 `AIMBASE_IMAGE_OPENAI_BASE_URL`, 증상과 조치 |
 | v3.29.0 | 2026-11-13 | **CR-180 위젯 옆 창 문서 미리보기** (§ 2-15). api 컨테이너 LibreOffice 변환기와 환경변수 `AIMBASE_PREVIEW_SOFFICE_PATH`, 런타임 설정 `widget.preview-*` 8개(마스터 V83), 증상별 조치 |
 | v3.28.0 | 2026-11-13 | **CR-177 위젯 영어 화면** (§ 2-14). 런타임 설정 `widget.feedback-reasons` 항목에 화면 언어별 이름 `labels`. 처음 값 그대로인 곳은 V80 이 영어 이름을 더한다 |
