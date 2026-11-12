@@ -1,2 +1,0 @@
-import{a as e,b as r}from"./chunk-F7X4ARVI.js";import"./chunk-YYRZ7E5Z.js";import"./chunk-5IV3NQOF.js";export{e as ArchitectureModule,r as createArchitectureServices};
-//# sourceMappingURL=architecture-TIHT7OUA-AY3A74H4.js.map
