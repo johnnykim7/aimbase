@@ -39,7 +39,8 @@ public class FlywayMultiTenantConfig {
             // CR-175 V74 가 먼저 들어간다). 앞 번호가 나중에 오거나 파일이 없는 지난 판이 있어도 기동이 멈추지 않게
             // 테넌트 경로(CR-049)와 같게 둔다.
             .outOfOrder(true)
-            .ignoreMigrationPatterns("*:missing")
+            // 이 값은 Flyway 기본값 *:future 를 덮어쓴다. 다른 가지가 먼저 올린 더 높은 번호가 DB 에 있어도 뜨게 future 도 둔다.
+            .ignoreMigrationPatterns("*:missing", "*:future")
             .load();
         flyway.migrate();
         log.info("Master DB Flyway migration completed");
@@ -69,7 +70,7 @@ public class FlywayMultiTenantConfig {
             // 기존 테넌트 DB 에서 V23.2 등이 V50 이후 시점에 실행될 수 있으므로 out-of-order 허용 필요.
             .outOfOrder(true)
             // CR-049: 예전에 제거된 resolve 불가 migration(V23.1 처럼 파일이 없어진 레거시 이력)은 무시.
-            .ignoreMigrationPatterns("*:missing")
+            .ignoreMigrationPatterns("*:missing", "*:future")
             .load();
         // CR-049: 본 CR 배포 중 V24.3 파일이 HNSW 가드 추가를 위해 한 번 변경되었다. 체크섬 불일치가 발생한 테넌트를
         // 자동 복구하기 위해 migrate 직전에 repair() 를 호출한다. repair 는 이미 일치하는 경우 no-op 이므로 안전.
@@ -94,7 +95,7 @@ public class FlywayMultiTenantConfig {
             .baselineOnMigrate(true)
             // CR-049: tenant 경로와 동일한 이유로 out-of-order 허용 + 누락 파일 이력 무시.
             .outOfOrder(true)
-            .ignoreMigrationPatterns("*:missing")
+            .ignoreMigrationPatterns("*:missing", "*:future")
             .load();
         flyway.migrate();
         log.info("App DB Flyway migration completed");
