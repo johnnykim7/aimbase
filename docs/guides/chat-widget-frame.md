@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.2 | 최종 수정: 2026-11-13 | 관련 CR: CR-177
+> 문서 버전: 1.3 | 최종 수정: 2026-11-13 | 관련 CR: CR-177
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -75,12 +75,13 @@ export const exportChat: WidgetFeature = {
 | 7 | 응답 본문 손질 | `ctx.ui.answer.addDecorator(spec)`, `addMarkdownExtension(spec)` | CR-180 HTML, SVG 보기 단추, CR-183 그래프, 수식, CR-184 그림 |
 | 8 | 산출물 열기 | `ctx.ui.answer.addArtifactOpener(spec)` | CR-180 산출물 칩을 누르면 옆 창 |
 | 9 | 산출물 칩 단추 | `ctx.ui.answer.addArtifactAction(spec)` | CR-182 파일 공유 |
-| 10 | 문구표 | `defineStrings`, `ctx.strings(pack)` | 모든 건 |
+| 10 | 문구표, 오류 문구 | `defineStrings`, `ctx.strings(pack)`, `ctx.ui.addErrorTexts(map)` | 모든 건, CR-184 그림 오류 |
 | 11 | 알림 | `ctx.on(name, cb)` | CR-179, CR-181, CR-186 등 |
 | 12 | 대화 동작 | `ctx.chat.send`, `abort`, `open`, `selectModel`, `setThinking`, `setTitle`, `newConversation`, `attach`, `attachUploaded`, `addRequestFields` | CR-178, CR-179, CR-181, CR-186 등 |
 | 13 | 서버 호출 | `ctx.api.request(method, path, body?)`, `requestBlob(method, path)` | 서버를 부르는 건, CR-180 그림과 원본 파일 |
 | 14 | 덮개, 토스트, Esc | `ctx.ui.layer`, `toast`, `notice`, `onEscape` | 필요한 건 |
 | 15 | 머리줄 제목 표시 | `ctx.ui.header.setTitleTag(spec)` | CR-178 프로젝트 표시 |
+| 16 | 위젯 설정 읽기 | `ctx.widgetSettings()`, `ctx.connectionId()`, 알림 `settingsLoaded` | CR-184 그림 만들기 보이기 |
 
 ### 3.1 + 메뉴와 더 보기 메뉴
 
@@ -123,7 +124,7 @@ interface MenuRowSpec {        // 글자 크기 줄처럼 안에 단추가 있�
 ```ts
 interface LeftPaneSpec {
   label: () => string;                    // 머리줄 여닫기 단추의 도움말(예: 대화 목록)
-  render: (body: HTMLElement) => void;    // 빈 칸을 받아 그린다. 언어가 바뀌면 다시 그리는 것은 기능 몫
+  render: (body: HTMLElement) => void;    // 빈 칸을 받아 그린다. 언어가 바뀌면 다시 그리는 것은 기능이 한다
 }
 const pane = ctx.ui.leftPane.mount(spec); // 위젯 하나에 하나. 두 번째 mount 는 오류
 pane.open(); pane.close(); pane.isOpen();
@@ -172,15 +173,15 @@ interface ComposerModeSpec {
   label: () => string;                          // 입력칸 위 표시 글. 옆에 × 가 붙는다
   icon?: string;
   requestFields: () => Record<string, unknown>; // 보낼 때마다 대화 요청 본문에 더한다
-  onClear?: () => void;                         // × 또는 새 대화로 풀렸을 때
+  onClear?: () => void;                         // × 또는 새 대화로 꺼졌을 때
 }
 ctx.ui.composer.setMode(spec);
 ctx.ui.composer.clearMode();
 ctx.ui.composer.currentMode();                  // id, 없으면 null
 ```
 
-- 모드는 한 번에 하나다. 다른 모드를 걸면 앞 모드의 `onClear` 를 부른 뒤 바꾼다.
-- × 를 누르거나 새 대화를 시작하면 풀린다. 보낸 뒤에는 유지한다.
+- 모드는 한 번에 하나다. 다른 모드를 켜면 앞 모드의 `onClear` 를 부른 뒤 바꾼다.
+- × 를 누르거나 새 대화를 시작하면 꺼진다. 보낸 뒤에는 유지한다.
 
 ### 3.5 응답 자리
 
@@ -208,7 +209,7 @@ ctx.ui.answer.addMarkdownExtension({ id, extension });   // extension 은 marked
 ```
 
 - 응답 아래 단추는 끝난 응답에만 그린다. 기본 단추(복사, 다시 생성, 버전, 좋아요, 아쉬워요) 뒤, 시각 앞에 order 순으로 놓인다. null 을 돌려주면 그 응답에는 그리지 않는다.
-- 손질(decorate)은 응답이 끝나 마크다운으로 그려진 뒤마다 불린다(판 넘김, 언어 바꿈 포함). 본문은 매번 새로 그려지므로 같은 일을 다시 해도 겹치지 않는다. 답이 도는 중에는 부르지 않는다.
+- 손질(decorate)은 응답이 끝나 마크다운으로 그려진 뒤마다 불린다(버전 바꿈, 언어 바꿈 포함). 본문은 매번 새로 그려지므로 같은 일을 다시 해도 겹치지 않는다. 답이 도는 중에는 부르지 않는다.
 - `renderFeatures` 는 그 손질이 그릴 수 있는 형식 이름이다(예: `chart`, `math`). 등록된 모든 손질의 이름을 모아 대화 요청에 `render_features` 배열로 싣는다. 하나도 없으면 싣지 않는다. 서버가 그 칸을 어떻게 쓰는지는 그 건이 정한다.
 - 응답 글이 비어도 오류가 아니면 응답 칸과 아래 줄을 그린다(그림만 있는 답).
 - 산출물 칩을 누르면 order 순으로 `canOpen` 이 참인 첫 열기가 받는다. 없으면 위젯 본체가 내려받는다.
@@ -226,6 +227,7 @@ const t = ctx.strings(S);                            // t.key 를 읽을 때마�
 - 값이 바뀌는 문구는 함수로 둔다(`(n: number) => ...`).
 - 한국어 이름은 `docs/T1-10_용어표.md` 를 따른다. 용어표에 없는 화면 이름은 먼저 용어표에 올리고 사용자 승인을 받는다.
 - 서버가 주는 표시 글(아쉬워요 이유 등)은 서버가 언어별로 준다. 위젯 설정 조회에 `locale` 을 실어 부른다(위젯 본체가 한다).
+- 서버 오류 코드를 글로 바꿀 때 위젯 본체 문구표를 먼저 보고, 없으면 `ctx.ui.addErrorTexts({ code: () => t.text })` 로 등록된 글을 본다. 둘 다 없으면 서버가 준 글, 그것도 없으면 코드를 보인다.
 - 붙이는 앱이 주는 글(`emptyTitle`, `suggestions` 등)은 글 하나 또는 언어별 값(`{ ko, en }`)이다. 새 옵션도 같은 모양으로 받고 `ctx.text(value)` 로 지금 언어 값을 꺼낸다.
 
 ### 3.7 알림과 대화 동작
@@ -239,12 +241,15 @@ ctx.on("answerDone", (a: AnswerView) => ...);      // 응답 하나가 끝남(�
 ctx.on("streamEvent", ({ name, data, answer }) => ...); // 대화 스트림에서 위젯 본체가 모르는 이벤트
 ctx.on("modelChange", ({ model, thinking }) => ...); // 사람이 모델이나 깊게 생각하기를 바꿈. selectModel, setThinking 으로 바꾼 것은 오지 않는다
 ctx.on("titleChange", ({ sessionId, title }) => ...); // 서버가 대화 제목을 만들어 머리줄 제목이 바뀜. setTitle 로 바꾼 것은 오지 않는다
+ctx.on("settingsLoaded", (settings) => ...);      // 위젯 설정을 받았거나 다시 받음(화면 언어를 바꿀 때 포함)
 ctx.on("destroy", () => ...);                       // 위젯을 떼어 냄. 타이머, 마이크 등을 정리한다
 
 ctx.locale();            // "ko" | "en"
 ctx.sessionId();
 ctx.isBusy();            // 응답이 도는 중
 ctx.isRecording();       // 위젯 본체 마이크가 녹음 중이거나 글로 바꾸는 중
+ctx.widgetSettings();    // 위젯 본체가 받은 위젯 설정 응답 그대로(모르는 칸 포함). 받기 전이거나 실패면 null
+ctx.connectionId();      // 붙이는 앱이 준 연결 id, 없으면 null
 ctx.chat.send(text, { body });  // 입력칸에서 보낸 것과 같다. body 는 아래 요청 본문 덧붙임
 ctx.chat.abort();        // 응답 중지 단추와 같다. 돌고 있지 않으면 아무 일 없음
 ctx.chat.selectModel(id);   // 모델 고르기. 위젯 설정의 목록에 없으면 거짓
@@ -278,6 +283,8 @@ interface ConversationView {
 - 마지막 응답에만 다시 생성을 그린다. 복사, 평가(남긴 평가는 켜진 상태로)는 모든 응답에 그린다. `stopped` 면 「응답을 중지했습니다」, `tools` 는 접힌 도구 줄로 그린다.
 - 응답마다 손질(decorate), 응답 아래 단추가 새 응답과 같이 불린다. `answerDone` 은 오지 않는다.
 - 서버 응답을 이 모양으로 바꾸는 것은 부르는 건(CR-178)이 한다. 붙이는 앱에 `onNewConversation` 은 보내지 않는다.
+
+스트림 중간 오류: 서버가 응답 도중 `event: error`(`data: {"code": "...", "message": "..."}`)를 보내면 위젯 본체가 그 응답을 오류로 끝낸다. 받은 글은 남기고 「답을 받지 못했습니다: (오류 문구)」를 붙이며 다시 시도 단추는 두지 않는다(CR-175 T3-4 전송 7단계와 같다). 오류 문구는 3.6 의 규칙으로 고른다.
 
 요청 본문 덧붙임:
 
