@@ -410,6 +410,8 @@ interface WorkflowDoneEvent {
     status: "completed" | "failed" | "cancelled";
     /** 실패나 거절 이유. 서버가 준 글 그대로이고 없으면 비운다 */
     reason?: string;
+    /** 서버 error.reason 원문(approval_timeout, Human approval rejected, step_budget_exceeded 등). 기능이 이것으로 문구를 고른다. 없으면 비운다 */
+    code?: string;
 }
 interface WidgetEvents {
     /** 위젯 창을 열거나 닫았을 때. 늘 열려 있는 inline 은 오지 않는다 */
