@@ -3195,7 +3195,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 |--------|------|------|------|
 | GET | `/api/v1/chat/sessions` | 내 대화 목록 | PRD-420 |
 | GET | `/api/v1/chat/sessions/{session_id}/messages` | 이어보기 | PRD-421 |
-| PATCH | `/api/v1/chat/sessions/{session_id}` | 이름 바꾸기, 프로젝트로 옮기기, 빼기 | PRD-422, PRD-424 |
+| PATCH | `/api/v1/chat/sessions/{session_id}` | 이름 바꾸기, 프로젝트로 옮기기, 프로젝트에서 제외 | PRD-422, PRD-424 |
 | DELETE | `/api/v1/chat/sessions/{session_id}` | 대화 삭제(관리용 삭제와 한 서비스) | PRD-422 |
 | GET, POST | `/api/v1/chat/projects` | 내 프로젝트 목록, 만들기 | PRD-423 |
 | GET, PATCH, DELETE | `/api/v1/chat/projects/{project_id}` | 한 건, 바꾸기, 삭제 | PRD-423 |
