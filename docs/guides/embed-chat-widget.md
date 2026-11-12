@@ -263,11 +263,12 @@ const handle = createWidget({
 | `empty-subtitle` | string 또는 언어별 JSON | 없음 | 첫 화면 안내 한 줄. 언어별 글은 `empty-title` 과 같은 모양 (CR-175, CR-177) |
 | `locale` | `ko` \| `en` | `ko` | 화면 언어 기본값. `en-US` 처럼 지역이 붙어도 된다. 사용자가 더 보기에서 바꾸면 그 브라우저에서는 그 값을 따른다 (CR-177) |
 | `font-size` | `small` \| `medium` \| `large` | `medium` | 글자 크기 기본값. 사용자가 더보기에서 바꾸면 그 브라우저에서는 그 값을 따른다 (CR-175) |
+| `allow-approval` | `true` \| `false` | `true` | 워크플로우 승인 카드에 승인, 거절 단추를 둘지. `false` 면 카드에 단추를 두지 않고 `onApprovalRequired` 로만 알린다. 붙이는 앱이 자기 결재 화면을 쓸 때 끈다. 대화 중 도구 승인 카드는 서버가 기다리므로 이 값과 상관없이 뜬다 (CR-185) |
 
 JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - `contextProvider`: 현재 화면 컨텍스트(예: `{orderId}`)를 매 대화 자동 주입
 - `on.onMessage` / `on.onWorkflowStep` / `on.onApprovalRequired` / `on.onError` / `on.onTokenExpiring`
-- `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`, `locale`: 위 속성과 같다. 언어별 값은 `{ ko: ..., en: ... }` 객체로 준다 (CR-175, CR-177)
+- `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`, `locale`, `allowApproval`: 위 속성과 같다. 언어별 값은 `{ ko: ..., en: ... }` 객체로 준다 (CR-175, CR-177)
 - `on.onNewConversation({previousSessionId, sessionId})`: 사용자가 새 대화를 시작했을 때. 엘리먼트로 붙였으면 `new-conversation` 이벤트(`detail` 에 같은 값). 앞 대화는 서버에 남는다 (CR-175)
 
 ### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-179, CR-180, CR-184, CR-182, CR-181, CR-178, CR-186, CR-183)
@@ -298,6 +299,7 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | 20 | 파일 첨부: 사진, PDF, 엑셀(xlsx, xls), CSV, TSV, 워드(docx), 텍스트(txt, md). 엑셀, CSV, TSV 는 AI 가 계산 도구로 값을 구해 표와 그래프로 답한다 (CR-183) | 없음. 받는 종류와 크기 상한은 Aimbase 런타임 설정에서 온다(운용 가이드 § 2-21). 토큰 scopes 에 `chat:upload` |
 | 21 | 응답 안 막대, 선 그래프와 수식. 그래프는 머리줄 「표」 로 같은 값을 표로 보고 복사, CSV, 엑셀로 받는다 (CR-183) | 없음 |
 | 22 | + 메뉴 「이 화면 캡처」: 지금 보는 화면 한 장을 그림으로 첨부한다 (CR-183) | 없음. https 화면에서만 보이고 모바일처럼 화면 공유가 없는 브라우저에서는 숨는다. 위젯을 얹은 페이지가 iframe 안이면 그 iframe 에 `allow="display-capture"` 를 준다 |
+| 23 | 승인 요청 카드. AI 가 승인이 필요한 도구를 부르면 응답 안에 카드가 떠 승인, 거절로 정한다. 워크플로우 승인 대기도 진행 칸의 같은 카드로 정한다 (CR-185) | 대화 중 도구 승인은 없음. 운영자가 정책 「도구 실행 전 승인」으로 대상 도구를 골라야 뜬다(운용 가이드 § 3-2). 워크플로우 카드에서 정하려면 토큰에 `workflow:approve` 가 있어야 하고, 승인자 목록이 있는 단계는 토큰을 받을 때 `user_ref` 를 줘야 한다. 없으면 단추 대신 「승인자만 정할 수 있습니다」 |
 
 위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 파일 미리보기는 받기와 같은 권한이라 토큰 scopes 에 `chat:upload` 가 있어야 한다. 「읽어 주기」는 `chat:tts`, 「음성 대화」는 `chat:voice` 가 있어야 보인다. 서버 API 는 API 가이드 § 28, § 29, § 32, § 33, § 34, § 35, § 36, 운영 설정은 운용 가이드 § 2-14, § 2-18, § 2-19, § 2-20, § 2-21.
 
@@ -366,6 +368,5 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - CR-060: 음성 입력 (STT) UI
 - CR-061: 파일 업로드
 - CR-062: CDN 배포 인프라 (필요 시 외부 CDN 도입)
-- 위젯 내 승인 UI (`allowApproval: true`) — 현재는 이벤트만 발행, 소비앱 자체 결재 플로우 재사용
 
 **문의**: CR-058 관련 개선 요청은 Aimbase 프로젝트 저장소 이슈로.
