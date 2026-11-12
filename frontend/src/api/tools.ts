@@ -4,7 +4,7 @@ import type { ToolContract, ToolResult, ToolExecution } from "../types/tool";
 
 export const toolsApi = {
   list: (params?: { page?: number; size?: number; tag?: string }) =>
-    apiClient.get<ApiResponse<ToolContract[]>>("/tools", { params }),
+    apiClient.get<ApiResponse<{ tools: ToolContract[]; count: number }>>("/tools", { params }),
 
   getContract: (toolName: string) =>
     apiClient.get<ApiResponse<ToolContract>>(`/tools/${toolName}/contract`),

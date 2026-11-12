@@ -4,7 +4,8 @@ import { toolsApi } from "../api/tools";
 export const useTools = (params?: { tag?: string }) =>
   useQuery({
     queryKey: ["tools", params],
-    queryFn: () => toolsApi.list(params).then((r) => r.data.data ?? []),
+    // 서버는 { tools, count } 로 준다. 목록만 꺼내 쓴다.
+    queryFn: () => toolsApi.list(params).then((r) => r.data.data?.tools ?? []),
     retry: false,
   });
 

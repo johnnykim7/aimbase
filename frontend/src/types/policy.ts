@@ -14,6 +14,7 @@ export interface Policy {
   domain?: string;
   matchPattern?: string;
   match?: string;
+  matchRules?: Record<string, unknown>;
   ruleCount?: number;
   triggeredCount?: number;
   rules?: PolicyRule[];
@@ -30,7 +31,7 @@ export interface PolicyRequest {
   domain?: string;
   matchPattern?: string;
   matchRules?: Record<string, unknown>;
-  rules?: PolicyRule[];
+  rules?: Array<PolicyRule | Record<string, unknown>>;
 }
 
 export interface SimulateRequest {

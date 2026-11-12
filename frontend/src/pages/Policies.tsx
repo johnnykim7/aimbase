@@ -15,6 +15,17 @@ import {
   useSimulatePolicy,
 } from "../hooks/usePolicies";
 import type { Policy, PolicyRule } from "../types/policy";
+import { ToolApprovalFields, type ToolApprovalValue } from "../components/policy/ToolApprovalFields";
+
+/** CR-185: 도구 대상 정책. 서버는 matchRules.tools 로 대상을 보고 규칙 REQUIRE_APPROVAL 로 묻는다. */
+const TOOL_APPROVAL = "tool_approval";
+const TOOLS_REQUIRED = "도구를 하나 이상 고르세요";
+const EMPTY_TOOL_APPROVAL: ToolApprovalValue = { tools: [], message: "" };
+
+function targetTools(policy: Policy): string[] {
+  const tools = policy.matchRules?.tools;
+  return Array.isArray(tools) ? tools.filter((t): t is string => typeof t === "string") : [];
+}
 
 const RULE_TYPE_OPTIONS = [
   { value: "content_filter", label: "콘텐츠 필터", description: "금지 키워드/패턴 차단", fields: ["keywords", "action"] },
@@ -23,6 +34,7 @@ const RULE_TYPE_OPTIONS = [
   { value: "rate_limit", label: "호출 제한", description: "시간당 최대 호출 횟수", fields: ["max_requests", "window_seconds"] },
   { value: "model_filter", label: "모델 필터", description: "허용/차단 모델 목록", fields: ["allowed_models", "blocked_models"] },
   { value: "time_restriction", label: "시간 제한", description: "허용 시간대 설정", fields: ["allowed_hours_start", "allowed_hours_end"] },
+  { value: TOOL_APPROVAL, label: "도구 실행 전 승인", description: "고른 도구를 실행하기 전에 대화 중인 사용자에게 묻는다", fields: ["tools", "message"] },
 ];
 
 function generateRuleTemplate(ruleType: string): object[] {
@@ -66,6 +78,17 @@ export default function Policies() {
   const [form, setForm] = useState({ id: "", name: "", priority: "100", domain: "", matchPattern: "" });
   const [selectedRuleType, setSelectedRuleType] = useState("");
   const [rulesJson, setRulesJson] = useState("");
+  const [toolApproval, setToolApproval] = useState<ToolApprovalValue>(EMPTY_TOOL_APPROVAL);
+  const [toolsError, setToolsError] = useState("");
+  const isToolApproval = selectedRuleType === TOOL_APPROVAL;
+
+  const closeModal = () => {
+    setShowModal(false);
+    setSelectedRuleType("");
+    setRulesJson("");
+    setToolApproval(EMPTY_TOOL_APPROVAL);
+    setToolsError("");
+  };
 
   const handleSimulate = async (id: string) => {
     const amount = simInput[id + "_amount"] ?? "";
@@ -110,6 +133,11 @@ export default function Policies() {
                       <div className="text-[11px] font-mono text-muted-foreground/60 mt-0.5">
                         {policy.matchPattern ?? policy.match ?? policy.id}
                       </div>
+                      {targetTools(policy).length > 0 && (
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          대상 도구: {targetTools(policy).join(", ")}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2 items-center">
@@ -182,7 +210,7 @@ export default function Policies() {
         </div>
       )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="새 정책 추가">
+      <Modal open={showModal} onClose={closeModal} title="새 정책 추가">
         <FormField label="정책 ID">
           <input style={inputStyle} value={form.id} onChange={(e) => setForm((p) => ({ ...p, id: e.target.value }))} />
         </FormField>
@@ -195,9 +223,11 @@ export default function Policies() {
         <FormField label="도메인">
           <input style={inputStyle} placeholder="ecommerce" value={form.domain} onChange={(e) => setForm((p) => ({ ...p, domain: e.target.value }))} />
         </FormField>
-        <FormField label="매칭 패턴">
-          <input style={inputStyle} placeholder="process_refund → *" value={form.matchPattern} onChange={(e) => setForm((p) => ({ ...p, matchPattern: e.target.value }))} />
-        </FormField>
+        {!isToolApproval && (
+          <FormField label="매칭 패턴">
+            <input style={inputStyle} placeholder="process_refund → *" value={form.matchPattern} onChange={(e) => setForm((p) => ({ ...p, matchPattern: e.target.value }))} />
+          </FormField>
+        )}
         <FormField label="규칙 타입">
           <select
             style={inputStyle}
@@ -205,7 +235,8 @@ export default function Policies() {
             onChange={(e) => {
               const ruleType = e.target.value;
               setSelectedRuleType(ruleType);
-              if (ruleType) {
+              setToolsError("");
+              if (ruleType && ruleType !== TOOL_APPROVAL) {
                 setRulesJson(JSON.stringify(generateRuleTemplate(ruleType), null, 2));
               }
             }}
@@ -218,29 +249,50 @@ export default function Policies() {
         </FormField>
 
         {/* CR-015: 타입별 전용 입력 폼 */}
-        {selectedRuleType && <RuleTypeForm ruleType={selectedRuleType} onUpdate={(updated) => setRulesJson(JSON.stringify(updated, null, 2))} />}
-
-        <FormField label="규칙 (JSON)">
-          <textarea
-            style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
-            className="font-mono text-xs"
-            placeholder='[{ "type": "default", "action": "ALLOW", "params": {} }]'
-            value={rulesJson}
-            onChange={(e) => setRulesJson(e.target.value)}
+        {isToolApproval ? (
+          <ToolApprovalFields
+            value={toolApproval}
+            onChange={(next) => {
+              setToolApproval(next);
+              if (next.tools.length > 0) setToolsError("");
+            }}
+            toolsError={toolsError}
           />
-        </FormField>
+        ) : (
+          <>
+            {selectedRuleType && <RuleTypeForm ruleType={selectedRuleType} onUpdate={(updated) => setRulesJson(JSON.stringify(updated, null, 2))} />}
+
+            <FormField label="규칙 (JSON)">
+              <textarea
+                style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
+                className="font-mono text-xs"
+                placeholder='[{ "type": "default", "action": "ALLOW", "params": {} }]'
+                value={rulesJson}
+                onChange={(e) => setRulesJson(e.target.value)}
+              />
+            </FormField>
+          </>
+        )}
         <div className="flex gap-2 justify-end mt-2">
-          <ActionButton variant="ghost" onClick={() => setShowModal(false)}>취소</ActionButton>
+          <ActionButton variant="ghost" onClick={closeModal}>취소</ActionButton>
           <ActionButton
             variant="primary"
             icon="💾"
             disabled={createPolicy.isPending}
             onClick={() => {
-              let rules: PolicyRule[];
+              if (isToolApproval && toolApproval.tools.length === 0) {
+                setToolsError(TOOLS_REQUIRED);
+                return;
+              }
+              let rules: Array<PolicyRule | Record<string, unknown>>;
               try {
                 rules = rulesJson.trim() ? JSON.parse(rulesJson) : [{ condition: "*", action: "ALLOW", params: {} }];
               } catch {
                 rules = [{ condition: "*", action: "ALLOW", params: {} }];
+              }
+              const message = toolApproval.message.trim();
+              if (isToolApproval) {
+                rules = [{ type: "REQUIRE_APPROVAL", ...(message ? { message } : {}) }];
               }
               createPolicy.mutate(
                 {
@@ -248,14 +300,14 @@ export default function Policies() {
                   name: form.name,
                   priority: Number(form.priority),
                   domain: form.domain,
-                  matchRules: { pattern: form.matchPattern || "*" },
+                  matchRules: isToolApproval ? { tools: toolApproval.tools } : { pattern: form.matchPattern || "*" },
                   rules,
                 },
                 {
-                  onSuccess: () => {
-                    setShowModal(false);
-                    setSelectedRuleType("");
-                    setRulesJson("");
+                  onSuccess: closeModal,
+                  onError: (err: unknown) => {
+                    const code = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+                    if (code === "policy_tools_empty") setToolsError(TOOLS_REQUIRED);
                   },
                 }
               );
