@@ -65,7 +65,8 @@ public class CorsConfig {
         };
 
         CorsConfiguration template = new CorsConfiguration();
-        template.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        // CR-178: 위젯 대화 이름 바꾸기, 프로젝트로 옮기기, 프로젝트 고치기가 PATCH 라 붙이는 앱 출처에서도 받아야 한다.
+        template.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         template.setAllowedHeaders(List.of(
                 "Authorization", "X-API-Key", "X-Tenant-Id",
                 "Content-Type", "Accept", "Last-Event-ID"));
