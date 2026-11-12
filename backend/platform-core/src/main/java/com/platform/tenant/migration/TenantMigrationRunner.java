@@ -21,7 +21,7 @@ import java.util.List;
  *
  * <p>기존 {@code FlywayMultiTenantConfig#migrateTenantDatabase(DataSource)} 가
  * {@code baselineOnMigrate(true)} + {@code outOfOrder(true)} +
- * {@code ignoreMigrationPatterns("*:missing")} + {@code repair()} 를 이미 포함하므로
+ * {@code ignoreMigrationPatterns("*:missing", "*:future")} + {@code repair()} 를 이미 포함하므로
  * 본 Runner 는 "활성 테넌트 순회 + 실패 격리 + 결과 집계" 에만 책임진다.
  *
  * <p>실패 격리: 1개 테넌트 실패 시 나머지 진행, 결과 {@link TenantMigrationResult} 로 요약 반환.
@@ -198,7 +198,7 @@ public class TenantMigrationRunner {
                 .table("flyway_schema_history")
                 .baselineOnMigrate(true)
                 .outOfOrder(true)
-                .ignoreMigrationPatterns("*:missing")
+                .ignoreMigrationPatterns("*:missing", "*:future")
                 .load();
     }
 }
