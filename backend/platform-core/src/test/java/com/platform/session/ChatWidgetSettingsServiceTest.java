@@ -267,6 +267,8 @@ class ChatWidgetSettingsServiceTest {
     void voice_fields_are_on_when_stt_connection_exists() {
         when(connectionAdapterFactory.platformDefaultModel()).thenReturn("anthropic/claude-sonnet-4-5");
         when(adapterRegistry.hasAdapter("anthropic/claude-sonnet-4-5")).thenReturn(false);
+        // 다른 칸의 숫자 설정은 기본값 그대로 두고 이 시험이 보는 칸만 정한다.
+        lenient().when(platformSettings.getInt(anyString(), anyInt())).thenAnswer(inv -> inv.getArgument(1));
         when(platformSettings.getInt(eq(com.platform.speech.WidgetTtsService.KEY_MAX_CHARS), anyInt())).thenReturn(300);
         when(platformSettings.getInt(eq(com.platform.speech.voice.VoiceTicketService.KEY_END_SILENCE_MS), anyInt())).thenReturn(1200);
         when(platformSettings.getDouble(eq(com.platform.speech.voice.VoiceTicketService.KEY_SPEECH_LEVEL), org.mockito.ArgumentMatchers.anyDouble())).thenReturn(0.02);
