@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.32.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.33.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -881,6 +881,29 @@ location /share/ { proxy_pass http://127.0.0.1:8280; }
 | 더 보기에 「기억과 선호」 가 없다 | 토큰에 `user_ref` 가 없거나 `widget.memory-enabled` 꺼짐 | 붙이는 앱의 토큰 발급과 설정을 확인한다 |
 | 자동 기억이 생기지 않는다 | 그 사람이 자동 기억을 껐거나, 뽑기가 시간 한도를 넘김 | 위젯 화면의 스위치를 확인하고, 실행기 연결이면 `widget.memory-timeout-ms` 를 늘린다 |
 | 상담원끼리 기억이 섞인다 | 붙이는 앱이 여러 사람에게 같은 `user_ref` 를 준다 | 토큰 발급에서 사람마다 다른 값을 준다 |
+
+### 2-19. 위젯 옆 창 문서 고치기 운영 [CR-181]
+
+위젯 사용자가 옆 창에 연 문서(응답 안 HTML, SVG 코드, AI 가 만든 파일)를 옆 창 아래 입력칸에서 대화로 고치고, 고칠 때마다 남은 버전을 오가거나 앞 버전으로 되돌리는 기능입니다. 화면은 위젯이 그리고 API 는 [API 가이드 § 30](aimbase-api-guide.md) 입니다.
+
+**고칠 수 있는 문서.** 응답 안 HTML, SVG 코드는 어느 연결로도 고칩니다. 파일은 만들 때 원본을 남긴 파일(서버 도구 `create_file` 로 만든 파일)이면 어느 연결로도 고치고, 원본이 없는 파일(사람이 올린 pptx 등)은 실행기(Claude CLI) 연결에서만 고칩니다. 고칠 수 없는 문서면 옆 창에 입력칸이 보이지 않습니다.
+
+**버전 보관.** 버전 목록은 테넌트 DB `chat_documents`, `chat_document_versions`(테넌트 V84)에 있고, 파일 버전은 첨부와 같은 저장소(`StorageService`)의 `chat-documents` 분류에 둡니다. 대화를 되감으면 그 뒤 답이 만든 버전도 지운 표시가 됩니다. 되돌리기로 만든 버전은 지우지 않습니다.
+
+**프롬프트 틀.** 고치기 지시문은 테넌트 「프롬프트 템플릿」 4개입니다. 바꾸면 다음 고치기부터 씁니다.
+
+| 키 | 쓰는 때 | 입력 칸 |
+|---|---|---|
+| `widget.document-edit.block` | 응답 안 HTML, SVG 코드 | `{{lang}}`, `{{content}}`, `{{selection}}` |
+| `widget.document-edit.file-source` | 원본이 있는 파일 | `{{name}}`, `{{source}}`, `{{selection}}` |
+| `widget.document-edit.file` | 원본이 없는 파일(실행기 연결) | `{{path}}`(작업 폴더 안 파일 경로), `{{selection}}` |
+| `widget.document-edit.selection` | 사용자가 문서 일부를 선택했을 때 위 세 틀의 `{{selection}}` 에 들어가는 글 | `{{text}}` |
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 「이 연결은 이 파일을 고치지 못합니다」 | 원본 없는 파일인데 실행기 연결이 아님(400 `document_edit_unsupported`) | 실행기 연결로 대화하거나, 그 파일을 대화로 다시 만들게 한다 |
+| 「파일이 정리되어 고치지 못합니다」 | 산출물 보관 기한(`aimbase.artifact.ttl-hours`)이 지나 작업 폴더 파일이 지워짐(410 `document_source_gone`) | 다시 만들게 한다. 이미 버전이 있는 파일은 저장소의 버전으로 고친다 |
+| 「문서가 바뀌지 않았습니다」 | 답이 문서를 바꾸지 않았거나 바뀐 내용이 앞 버전과 같음 | 요청을 더 구체적으로 다시 보낸다 |
 
 ---
 
@@ -2086,6 +2109,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.33.0 | 2026-11-13 | **CR-181 위젯 옆 창 문서 고치기** (§ 2-19). 고칠 수 있는 문서 조건, 버전 보관(테넌트 V84), 프롬프트 템플릿 `widget.document-edit.*` 4개, 증상별 조치 |
 | v3.32.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 2-18). 런타임 설정 `widget.memory-*` 5개와 `widget.preferences-max-chars`, 프롬프트 틀 `widget.memory-extract`, `widget.user-memory`, 사람 구분은 위젯 토큰 `user_ref` |
 | v3.31.0 | 2026-11-13 | **CR-182 위젯 파일 만들기, 저장, 내보내기, 공유 링크** (§ 2-17). api 이미지 `fonts-nanum` 과 환경변수 `AIMBASE_DOCUMENT_PDF_FONT_DIR`, 런타임 설정 `chat.file-create.*`, `chat.export.*`, `chat.share.*`, 앞단 nginx `location /share/`, 프롬프트 틀 `tool.create-file.description` |
 | v3.30.0 | 2026-11-13 | **CR-184 위젯 그림 만들기** (§ 2-16). 연결 편집 「그림 모델」, 「그림 품질」, 「그림 연결」, 런타임 설정 `widget.image.*`, 환경변수 `AIMBASE_IMAGE_OPENAI_BASE_URL`, 증상과 조치 |

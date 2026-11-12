@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.35.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.36.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2569,10 +2569,12 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 7, "model": "claude-
   "feedback_reasons": [{"code": "WRONG_INFO", "label": "틀린 정보"}],
   "feedback_comment_max_chars": 500,
   "follow_ups_enabled": true,
-  "preview_html_script_sources": ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"]
+  "preview_html_script_sources": ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"],
+  "document_binary_edit_supported": false
 }
 ```
 
+- `document_binary_edit_supported` 는 이 연결이 원본 없는 파일(사람이 올린 pptx 등)도 고칠 수 있는지입니다. 실행기 연결이면 참입니다(§ 30, CR-181).
 - `preview_html_script_sources` 는 옆 창 HTML 실행 틀이 스크립트, 스타일, 글꼴, 그림을 불러올 수 있는 출처입니다(§ 29, CR-180). 런타임 설정 `widget.preview-html-script-sources`.
 - `models` 는 연결 config `models` 그대로입니다. 없으면 기본 모델 하나이고, 위젯은 목록이 둘 이상일 때만 모델 선택 칸을 보입니다.
 - `connection_id` 가 없으면 런타임 설정 `llm.default-model` 하나입니다.
@@ -2916,10 +2918,86 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 
 대화 요청 본문에 칸을 더하지 않습니다. 주인이 있는 위젯 대화면 서버가 내 선호와 자동 기억을 이번 질문 바로 앞에 넣고, 응답이 정상으로 끝나면 이번 질문 글(첨부 제외)로 따로 기억을 뽑습니다. 응답을 중지하거나 실패하면 뽑지 않습니다. 뽑기는 응답과 따로 돌고, 실패해도 대화는 그대로입니다. 저장한 선호는 다음 질문부터 들어갑니다.
 
+---
+
+## 33. 위젯 옆 창 문서를 대화로 고치기 [CR-181]
+
+위젯 옆 창에 연 문서(답 안 HTML, SVG 코드 블록, 답이 만든 파일)를 대화로 고치고, 고칠 때마다 판을 남기는 API 입니다. 권한은 대화와 같은 위젯 토큰(`chat:stream`) 또는 로그인이고, 문서는 현재 테넌트에서만 찾습니다. 위젯을 그대로 붙인 소비앱은 따로 할 일이 없습니다.
+
+### 33-1. 고치기 요청 (`POST /api/v1/chat/completions` 의 `document_edit`)
+
+```json
+{
+  "session_id": "sess-...",
+  "stream": true,
+  "messages": [{"role": "user", "content": [{"type": "text", "text": "표지 제목을 2026 상반기 보고로 바꿔 줘"}]}],
+  "document_edit": {"target": {"kind": "file", "name": "report.pptx"}, "base_version": 2, "selection": {"text": "2025 하반기"}}
+}
+```
+
+| 칸 | 필수 | 설명 |
+|---|---|---|
+| `document_edit.target` | Y | 파일은 `{kind: "file", name}`, 코드 블록은 `{kind: "block", turn_id, index, lang}`. 처음 고치는 코드 블록은 `source`(답에 나온 원문)도 싣습니다 |
+| `document_edit.base_version` | N | 고칠 바탕 판. 없으면 마지막 판 |
+| `document_edit.selection` | N | `{text}`. 있으면 그 부분만 고치게 합니다. 글로 보이는 문서(HTML, MARKDOWN, TEXT, 표)에서만 위젯이 싣습니다 |
+
+- 고친 결과는 스트림 이벤트 `document` 로 `done` 바로 앞에 오고, `done` 에도 같은 값이 `document` 칸으로 옵니다. 비스트리밍은 응답 본문의 `document` 칸입니다.
+
+```json
+{"document_id": "6f1c...", "status": "UPDATED", "version": 3}
+```
+
+- `status` 는 `UPDATED`(새 판을 만듦), `UNCHANGED`(내용이 같아 판을 만들지 않음), `FAILED`(중지, 오류) 입니다.
+- 다시 생성과 질문 수정은 그 답을 보낼 때의 `document_edit` 를 그대로 다시 싣습니다. 되감기로 지운 답이 만든 판은 함께 지워집니다.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `document_edit_invalid:no_session` | `session_id` 없음 |
+| 400 | `document_edit_invalid:target` | `target` 이 없거나 종류, 이름, 답 번호, 순번, 언어가 틀림 |
+| 400 | `document_edit_invalid:source` | 처음 고치는 코드 블록인데 `source` 없음 |
+| 400 | `document_edit_invalid:base_version` | 바탕 판이 없거나 지운 판 |
+| 400 | `document_edit_unsupported` | 원본 없는 파일인데 실행기 연결이 아님 |
+| 404 | `document_not_found` | 코드 블록의 `turn_id` 가 이 세션 답이 아님 |
+| 409 | `session_busy` | 그 세션에 답이 도는 중 |
+| 410 | `document_source_gone` | 처음 고치는 파일인데 작업 폴더에 없음(보관 기한이 지나 지워짐) |
+
+### 33-2. 세션 문서와 판 (`GET /api/v1/chat/documents?session_id=`)
+
+```json
+[{
+  "document_id": "6f1c...", "kind": "FILE", "name": "report.pptx",
+  "turn_id": null, "index": null, "lang": null, "latest_version": 3,
+  "versions": [
+    {"version": 1, "base_version": null, "made_by": "ORIGINAL", "turn_id": null, "size": 28243, "created_at": "2026-11-13T10:00:00+09:00"},
+    {"version": 2, "base_version": 1, "made_by": "CHAT_EDIT", "turn_id": "a1...", "size": 28511, "created_at": "2026-11-13T10:00:40+09:00"}
+  ]
+}]
+```
+
+- 코드 블록은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있습니다. 지운 판은 오지 않습니다.
+- `made_by` 는 `ORIGINAL`(1판), `CHAT_EDIT`(고치기 답이 만듦, `turn_id` 가 그 답), `RESTORE`(되돌리기) 입니다. 지난 대화를 열었을 때 답과 판을 잇는 데 씁니다.
+
+### 33-3. 판 본문 (`GET /api/v1/chat/documents/{document_id}/versions/{version}`)
+
+- 코드 블록은 `{"lang": "html", "content": "<!doctype html>..."}`, 파일은 파일 그대로(내려받기) 입니다.
+- 없는 판, 지운 판, 다른 테넌트면 404 `document_not_found`.
+
+### 33-4. 앞 판으로 되돌리기 (`POST /api/v1/chat/documents/{document_id}/versions/{version}/restore`)
+
+- 요청 본문은 없습니다. 그 판 내용을 마지막 판 다음 번호로 복사하고 § 33-1 과 같은 `{document_id, status, version}` 을 줍니다. 마지막 판과 같으면 `UNCHANGED` 입니다.
+- 파일은 작업 폴더의 파일도 새 판으로 맞춥니다. 되돌려 만든 판은 되감기로 지우지 않습니다.
+- 403 `document_forbidden`(다른 사람 세션), 404 `document_not_found`, 409 `session_busy`.
+
+### 33-5. 미리보기와 내려받기의 판 인자
+
+- § 29-2 미리보기 정보, § 29-3 쪽 그림, 산출물 내려받기(`GET /api/v1/chat/artifacts/download`)에 `version` 인자를 붙이면 그 판 파일을 씁니다. 없으면 작업 폴더의 지금 파일(마지막 판)입니다.
+- 미리보기 정보에 `has_source`(만들 때 남긴 원본이 있는지)가 더해졌습니다. 원본이 있는 파일은 어느 연결로도 고칠 수 있고, 없으면 `document_binary_edit_supported` 연결에서만 고칠 수 있습니다.
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.36.0 | 2026-11-13 | **CR-181 위젯 옆 창 문서를 대화로 고치기** (§ 33). 대화 요청 `document_edit`, 스트림 이벤트와 `done` 의 `document`. 세션 문서 목록 `GET /api/v1/chat/documents`, 판 본문 `GET /api/v1/chat/documents/{document_id}/versions/{version}`, 되돌리기 `POST .../restore`. 미리보기 정보, 쪽 그림, 내려받기에 `version` 인자, 미리보기 정보에 `has_source`, 위젯 설정에 `document_binary_edit_supported` (§ 28-2) |
 | v3.35.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 32). 내 선호 `GET`, `PUT /api/v1/chat/me/preferences`, 자동 기억 `GET`, `DELETE /api/v1/chat/me/memories`, `DELETE /api/v1/chat/me/memories/{id}`, 오류 코드 `memory_unavailable`, `memory_disabled`, `memory_not_found`, `preferences_too_long`. 대화 요청 모양은 그대로 |
 | v3.34.0 | 2026-11-13 | **CR-182 위젯 파일 만들기, 저장, 내보내기, 공유 링크** (§ 31). 대화 요청 `file_create` 와 서버 도구 `create_file`, 응답 저장 `GET /api/v1/chat/sessions/{id}/turns/{turn_id}/export`, 대화 내보내기 `GET /api/v1/chat/sessions/{id}/export`, 공유 링크 `POST`, `GET`, `DELETE /api/v1/chat/shares`, 받는 사람 `GET /share/{tenant_id}/{token}`. 위젯 설정 `file_create_enabled`, `export_formats`, `share_enabled`, `share_ttl_days`. 산출물 API 세션 주인 대조 404 `artifact_not_found` |
 | v3.33.1 | 2026-11-13 | **CR-177 워크플로우 끝남 알림에 실패 이유** (§ 17-6). `workflow.done` 에 `error`(실패한 런만) |

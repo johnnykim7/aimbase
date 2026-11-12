@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.21 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179
+> 설계 버전: 7.22 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3339,7 +3339,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 | status | `UPDATED`, `UNCHANGED`(BIZ-201), `FAILED`(중지, 오류) |
 | version | `UPDATED` 일 때 만든 판 |
 
-비스트리밍 응답은 `result.document` 에 같은 값을 싣는다.
+끝 이벤트(done)에도 같은 값을 `document` 칸으로 싣는다. 위젯 틀은 done 의 모르는 칸을 `AnswerView.extra` 로 넘긴다. 비스트리밍 응답은 응답 본문(`data`)의 `document` 칸에 같은 값을 싣는다.
 
 ### 세션 문서 목록 [PRD-481]
 
@@ -3391,6 +3391,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 |-----|------|------|
 | `GET /api/v1/chat/artifacts/preview` | 인자 `version`, 응답 `has_source` | `version` 이 있으면 판 저장소의 그 판 파일을 변환 대상으로 쓴다. 변환 캐시 열쇠에 판 해시를 넣는다. `has_source` 는 `out/.source/<이름>.json` 이 있는지 |
 | `GET /api/v1/chat/artifacts/preview/page` | 인자 `version` | 위와 같다 |
+| `GET /api/v1/chat/artifacts/download` | 인자 `version` | 있으면 판 저장소의 그 판 파일을 준다. 옆 창이 글로 보이는 파일(HTML, MARKDOWN, TEXT)의 지난 판 본문을 읽는 데 쓴다. 없는 판은 404 |
 
 ### 위젯 설정 조회 칸 추가 [PRD-480]
 
