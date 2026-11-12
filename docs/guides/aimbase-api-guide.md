@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.32.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.33.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2686,9 +2686,94 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 - 쪽 번호가 범위 밖이거나 쪽이 없는 종류면 404 `page_not_found`. 그 밖의 오류는 § 29-2 와 같습니다.
 - 변환 결과는 세션 작업 폴더 `.preview/` 에 두고, 산출물과 같은 보관 기한(`aimbase.artifact.ttl-hours`)이 지나면 지웁니다.
 
+## 30. 위젯 그림 만들기 [CR-184]
+
+대화 요청에 `image` 칸을 실으면 모델을 부르지 않고 그 대화 연결에 정한 그림 연결(OpenAI)로 그림 한 장을 만듭니다. 마지막 사용자 메시지 글이 그림 설명이고, 그 메시지에 붙인 그림은 바탕 그림입니다. 그림 연결 설정은 운용 가이드 연결 관리의 그림 칸을 봅니다.
+
+### 30-1. 대화 요청 (`POST /api/v1/chat/completions`)
+
+```json
+{"connection_id": "openai-main", "session_id": "...", "stream": true,
+ "messages": [{"role": "user", "content": "노을 지는 바닷가의 등대를 수채화로"}],
+ "image": {"action": "create"}}
+```
+
+```json
+{"connection_id": "openai-main", "session_id": "...", "stream": true,
+ "messages": [{"role": "user", "content": "등대를 빨간색으로 바꿔 줘"}],
+ "image": {"action": "edit", "source_image_id": "0b9c1e7a-...-..."}}
+```
+
+| 필드 | 필수 | 설명 |
+|---|---|---|
+| image.action | Y | `create`(만들기), `edit`(고치기) |
+| image.source_image_id | edit 때 Y | 고칠 그림. 같은 대화에서 만든 그림의 id(§ 30-2 `done.images[].id`) |
+
+- 바탕 그림은 마지막 사용자 메시지의 image 블록(`attachment_id` 또는 `data` + `media_type`)입니다. edit 이면 고칠 그림이 맨 앞에 붙습니다.
+- `model`, `thinking`, `tool_filter`, `rag_source_id`, `response_format` 은 쓰지 않습니다. `rewind_from_seq` 는 그대로 먼저 되감습니다.
+- 스트림과 한 번에 받기가 모두 됩니다. 한 번에 받기의 답 글과 칸은 스트림 `done` 과 같습니다.
+
+스트림을 열기 전 오류(JSON `error`):
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `image_invalid` | `action` 이 `create`, `edit` 가 아니거나 edit 에 `source_image_id` 가 없음 |
+| 400 | `image_not_configured` | `connection_id` 가 없거나 그 연결에 그림 연결이 없음 |
+| 400 | `image_prompt_empty` | 그림 설명 글이 비었음 |
+| 400 | `image_prompt_too_long` | 글이 런타임 설정 `widget.image.max-prompt-chars`(기본 4000자) 초과 |
+| 400 | `image_too_many_sources` | 바탕 그림이 `widget.image.max-source-images`(기본 4장) 초과 |
+| 400 | `image_source_invalid` | 붙인 것 중 그림이 아닌 것이 있음 |
+| 404 | `image_not_found` | `source_image_id` 가 그 대화의 그림이 아니거나 지운 그림 |
+| 400, 409 | `rewind_invalid:*`, `session_busy`, `rewind_before_compaction` | `rewind_from_seq` 를 실었을 때 § 28 과 같음 |
+
+### 30-2. 스트림 이벤트
+
+| 순번 | 이벤트 | 데이터 |
+|---|---|---|
+| 1 | `image_status` | `{"state": "generating"}` |
+| 2 | `delta` | 답 글 `![<설명 앞 100자>](aimbase-image:<그림 id>)` 한 번 |
+| 3 | `done` | `session_id`, `turn_id`, `turn_seq`, `model`(그림 모델) + `images: [{"id", "media_type", "width", "height"}]` |
+| 실패 | `error` | `{"code": "..."}` 를 보내고 닫습니다. 대화 기록에 남지 않습니다 |
+
+공급처 실패 코드(스트림 `error`, 한 번에 받기면 HTTP 502 와 같은 코드):
+
+| 코드 | 공급처 응답 |
+|---|---|
+| `image_provider_auth` | 401, 403 |
+| `image_provider_quota` | 429(요청 한도, 크레딧 없음) |
+| `image_rejected` | 400 중 내용 거절(`moderation_blocked`, `content_policy_violation`) |
+| `image_timeout` | `widget.image.timeout-ms`(기본 120000) 초과 |
+| `image_failed` | 그 밖 |
+
+- 답 글의 `aimbase-image:` 주소는 브라우저가 열 수 없습니다. 위젯은 이 참조를 그림 자리로 바꾸고 § 30-3 으로 받아 그립니다. 위젯이 아닌 화면도 같은 방법으로 그립니다.
+- 응답 중지(`POST /api/v1/chat/{sessionId}/abort`)는 공급처 호출을 끊고 질문과 「[중단됨]」 답을 남깁니다. 그림은 남지 않습니다.
+- 그림은 대화 기록에 남으므로 다시 생성, 질문 수정(`rewind_from_seq`)이 그대로 됩니다. 되감긴 턴의 그림과 지운 대화의 그림은 지운 표시가 붙어 더 받을 수 없습니다.
+
+### 30-3. 그림 받기 (`GET /api/v1/chat/images/{image_id}?session_id=`)
+
+위젯 토큰(`chat:stream`) 또는 로그인으로 부릅니다.
+
+| HTTP | 응답 | 경우 |
+|---|---|---|
+| 200 | 그림 바이트. `Content-Type` 은 저장 형식(png, jpeg, webp), `Content-Disposition: inline`, `Cache-Control: private, max-age=86400` | 정상 |
+| 403 | `forbidden` | 대화 주인이 있는데 지금 사람과 다름 |
+| 404 | `image_not_found` | 그 테넌트에 없음, `session_id` 가 그 그림의 대화가 아님, 지운 그림 |
+
+### 30-4. 위젯 설정 칸
+
+`GET /api/v1/chat/widget-settings?connection_id=` 응답에 그림 칸이 붙습니다.
+
+```json
+{"image_generation": {"enabled": true, "max_prompt_chars": 4000, "max_source_images": 4}}
+```
+
+- `enabled` 는 그 연결에 그림 연결이 있으면 참이고, `connection_id` 가 없으면 거짓입니다. 위젯은 참일 때만 + 메뉴에 「그림 만들기」 를 보입니다.
+- 오류 응답은 코드만 주므로 상한은 여기서 읽어 오류 문구에 씁니다.
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.33.0 | 2026-11-13 | **CR-184 위젯 그림 만들기** (§ 30). 대화 요청 `image` 칸(`create`, `edit`), 스트림 `image_status` 와 `done.images`, 그림 받기 `GET /api/v1/chat/images/{image_id}`, 위젯 설정 `image_generation`, 오류 코드 `image_*` |
 | v3.32.0 | 2026-11-13 | **CR-180 위젯 옆 창 문서 미리보기** (§ 29). 미리보기 정보 `GET /api/v1/chat/artifacts/preview`, 쪽 그림 `GET /api/v1/chat/artifacts/preview/page`. 대화 끝 `artifacts[]` 와 산출물 목록에 `modified_at`, `preview_kind`. 산출물 확장자에 svg, jpg, jpeg, gif, webp. 위젯 설정에 `preview_html_script_sources` (§ 28-2) |
 | v3.31.0 | 2026-11-13 | **CR-177 위젯 영어 화면** (§ 28-2). 위젯 설정 조회에 `locale` 인자. `feedback_reasons` 의 `label` 을 그 언어 이름으로 준다 |
 | v3.30.1 | 2026-11-12 | **CR-175 위젯 파일 캐시** (§ 17, 문서만). 이름이 고정인 위젯 파일은 no-cache, 해시 붙은 조각만 1년 캐시. 로더가 자기 주소 쿼리를 esm 에 붙인다. 30일 캐시 시절 사본을 건너뛰는 판 표시 안내 |

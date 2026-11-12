@@ -268,7 +268,7 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`: 위 속성과 같다 (CR-175)
 - `on.onNewConversation({previousSessionId, sessionId})`: 사용자가 새 대화를 시작했을 때. 엘리먼트로 붙였으면 `new-conversation` 이벤트(`detail` 에 같은 값). 앞 대화는 서버에 남는다 (CR-175)
 
-### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-180)
+### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-180, CR-184)
 
 붙이는 앱이 따로 만들 것 없이 위젯 안에 들어 있다.
 
@@ -283,6 +283,7 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | 7 | 글자 크기 | 기본값만 `font-size` 로 줄 수 있다 |
 | 8 | AI 가 만든 파일을 옆 창에서 미리보기(pptx, docx, pdf, xlsx, csv, HTML, SVG, 그림, 마크다운, 글). 슬라이드는 「발표」로 화면 가득 넘긴다 | 없음. 파일 칩을 누르면 열리고, 받기는 칩 끝과 옆 창의 「다운로드」 단추로 한다 |
 | 9 | 응답 안 HTML 코드 블록의 「실행」, SVG 코드 블록의 그림 보기와 「옆 창에서 보기」 | 없음. HTML 은 격리된 틀에서 돌고 바깥 주소로 데이터를 보내지 못한다 |
+| 10 | + 메뉴 「그림 만들기」 와 그림 아래 크게 보기, 다운로드, 「그림 고치기」 (CR-184) | 없음. 운영자가 그 대화 연결에 「그림 연결」 을 선택해야 메뉴가 보인다(운용 가이드 § 2-16) |
 
 위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 파일 미리보기는 받기와 같은 권한이라 토큰 scopes 에 `chat:upload` 가 있어야 한다. 서버 API 는 API 가이드 § 28, § 29, 운영 설정은 운용 가이드 § 2-14.
 

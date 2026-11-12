@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.29.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.30.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -789,6 +789,33 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | 「미리보기를 만들지 못했습니다」 | 파일이 깨졌거나 변환이 시간 한도를 넘김(422 `preview_failed:convert`, `preview_failed:timeout`) | 받아서 열어 보고, 큰 파일이면 `widget.preview-convert-timeout-seconds` 를 늘린다 |
 | 한글이 네모로 보인다 | api 이미지에 한글 글꼴이 없음(CR-180 전 이미지) | `./deploy.sh` 로 api 를 다시 올린다 |
 | HTML 실행에서 바깥 라이브러리를 못 불러온다 | 그 출처가 `widget.preview-html-script-sources` 에 없음 | 출처를 더한다. 붙이는 앱의 보안 정책(CSP)도 허용해야 한다 |
+
+### 2-16. 위젯 그림 만들기 운영 [CR-184]
+
+위젯 + 메뉴 「그림 만들기」 로 그림을 만들고, 그림 아래 「그림 고치기」 로 이어 고치는 기능입니다. 그림은 OpenAI 그림 모델이 만듭니다. API 는 API 가이드 § 30.
+
+**그림 연결 만들기.** 테넌트 관리 「연결 관리」 에서 어댑터 OpenAI 연결을 만들거나 편집해 API Key 와 「그림 모델」(예: `gpt-image-1`)을 적습니다. 그림 모델을 적으면 「그림 품질」(자동, 낮음, 보통, 높음. 처음 값 보통)이 보입니다. 그림 한 장 값은 품질에 따라 달라집니다. config 로는 `image_model`, `image_quality` 입니다.
+
+**대화 연결에 잇기.** 위젯이 쓰는 대화 연결(어댑터 무관)을 편집해 「그림 연결」 에서 그림 모델이 있는 OpenAI 연결을 선택합니다. config 로는 `image_connection_id` 입니다. OpenAI 대화 연결이면 자기 자신을 그림 연결로 선택해도 됩니다. 위젯을 다시 열면 + 메뉴에 「그림 만들기」 가 보입니다.
+
+**런타임 설정.** 사이드바 Super Admin 묶음 「런타임 설정」 에서 재기동 없이 바꿉니다.
+
+| 키 | 처음 값 | 뜻 |
+|---|---|---|
+| `widget.image.timeout-ms` | 120000 | 그림 한 장을 기다리는 시간 한도 |
+| `widget.image.max-prompt-chars` | 4000 | 그림 설명 최대 글자 수 |
+| `widget.image.max-source-images` | 4 | 바탕 그림 최대 장 수(고칠 그림 포함) |
+
+**저장.** 그림은 테넌트 파일 저장소 `generated-images/` 에 두고 테넌트 DB `chat_generated_images` 에 한 줄 남깁니다. 다시 생성, 질문 수정으로 되감긴 턴과 지운 대화의 그림은 지운 표시만 붙고 더는 받을 수 없습니다. 그림 한 장마다 사용량 기록에 그림 모델과 토큰이 남습니다.
+
+**공급처 주소.** 환경변수 `AIMBASE_IMAGE_OPENAI_BASE_URL`(기본 `https://api.openai.com/v1`). 로컬 시험에서 가짜 공급처로 보낼 때만 바꿉니다.
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| + 메뉴에 「그림 만들기」 가 없다 | 대화 연결에 그림 연결이 없거나, 그림 연결이 OpenAI 가 아니거나, 그림 모델이나 API Key 가 비었다 | 두 연결의 편집을 확인하고 위젯을 다시 연다 |
+| 「그림 서비스 사용 한도를 넘었습니다」 | OpenAI 키 거부(401, 403) 또는 요청 한도, 크레딧 없음(429) | 그 OpenAI 조직의 키와 결제를 확인한다 |
+| 「그림을 만드는 데 시간이 너무 걸려 멈췄습니다」 | `widget.image.timeout-ms` 초과 | 그림 품질을 낮추거나 시간 한도를 늘린다 |
+| 「요청한 내용으로는 그림을 만들 수 없습니다」 | OpenAI 내용 거절 | 설명을 바꿔 다시 보낸다 |
 
 ---
 
@@ -1994,6 +2021,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.30.0 | 2026-11-13 | **CR-184 위젯 그림 만들기** (§ 2-16). 연결 편집 「그림 모델」, 「그림 품질」, 「그림 연결」, 런타임 설정 `widget.image.*`, 환경변수 `AIMBASE_IMAGE_OPENAI_BASE_URL`, 증상과 조치 |
 | v3.29.0 | 2026-11-13 | **CR-180 위젯 옆 창 문서 미리보기** (§ 2-15). api 컨테이너 LibreOffice 변환기와 환경변수 `AIMBASE_PREVIEW_SOFFICE_PATH`, 런타임 설정 `widget.preview-*` 8개(마스터 V83), 증상별 조치 |
 | v3.28.0 | 2026-11-13 | **CR-177 위젯 영어 화면** (§ 2-14). 런타임 설정 `widget.feedback-reasons` 항목에 화면 언어별 이름 `labels`. 처음 값 그대로인 곳은 V80 이 영어 이름을 더한다 |
 | v3.27.0 | 2026-11-11 | **CR-175 채팅 위젯 대화 기본기** (§ 2-14). 연결 「허용 모델」, 깊게 생각하기 처음 상태, 런타임 설정 `llm.default-model` 과 `widget.feedback-*`, `widget.follow-ups-*`, 프롬프트 틀 `widget.follow-ups`, 「응답 평가」 화면, CLI 연결의 모델 바꾸기와 장애 대응 |
