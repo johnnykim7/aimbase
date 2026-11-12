@@ -27,34 +27,34 @@ export class WidgetApi {
 
   /** CR-177: 기능이 위젯 토큰으로 서버를 부른다. 응답 본문의 data 를 돌려준다. */
   async request<R>(method: string, path: string, body?: unknown): Promise<R> {
-    const token = await this.tokens.getToken();
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) throw await readError(res);
+    const res = await this.send(method, path, body);
     const json = (await res.json().catch(() => ({}))) as { data?: R };
     return json.data as R;
   }
 
-  /** CR-177: 파일처럼 본문을 그대로 받는다. body 가 있으면 JSON 으로 싣는다. */
+  /** CR-177: 파일처럼 본문을 그대로 받는다. */
   async requestBlob(method: string, path: string, body?: unknown, opts?: { signal?: AbortSignal }): Promise<Blob> {
-    const token = await this.tokens.getToken();
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: opts?.signal,
-    });
-    if (!res.ok) throw await readError(res);
+    const res = await this.send(method, path, body, opts?.signal);
     return res.blob();
+  }
+
+  /**
+   * FormData 는 multipart 로 그대로 싣는다. 경계값이 든 Content-Type 은 브라우저가 붙이므로 직접 넣지 않는다.
+   * 그 밖의 값은 JSON 으로 싣는다.
+   */
+  private async send(method: string, path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+    const token = await this.tokens.getToken();
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    let payload: BodyInit | undefined;
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+      payload = body;
+    } else if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+      payload = JSON.stringify(body);
+    }
+    const res = await fetch(`${this.baseUrl}${path}`, { method, headers, body: payload, signal });
+    if (!res.ok) throw await readError(res);
+    return res;
   }
 
   /** CR-177: 위젯 서버 주소로 만든 절대 웹소켓 주소. */

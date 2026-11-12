@@ -307,8 +307,8 @@ interface ConversationView {
 
 ### 3.8 서버 호출과 그 밖
 
-- 서버 호출은 `ctx.api.request<R>(method, path, body?)` 로 한다. 위젯 토큰을 싣고, 실패하면 `WidgetApiError(status, code)` 를 던지고, 성공하면 `ApiResponse` 의 `data` 를 돌려준다. `widget-api.ts` 에 메서드를 더하지 않는다.
-- 그림, 파일, 소리처럼 JSON 이 아닌 응답은 `ctx.api.requestBlob(method, path, body?, { signal }?)` 로 받는다. 위젯 토큰을 싣고, body 가 있으면 JSON 으로 싣는다. 실패하면 `WidgetApiError` 를 던지고, 성공하면 `Blob` 을 돌려준다. 받는 중에 끊으려면 `AbortController` 의 `signal` 을 준다.
+- 서버 호출은 `ctx.api.request<R>(method, path, body?)` 로 한다. 위젯 토큰을 싣고, body 가 `FormData` 면 multipart 로 그대로(파일 올리기), 그 밖에는 JSON 으로 싣는다. 실패하면 `WidgetApiError(status, code)` 를 던지고, 성공하면 `ApiResponse` 의 `data` 를 돌려준다. `widget-api.ts` 에 메서드를 더하지 않는다.
+- 그림, 파일, 소리처럼 JSON 이 아닌 응답은 `ctx.api.requestBlob(method, path, body?, { signal }?)` 로 받는다. 위젯 토큰을 싣고, body 는 `request` 와 같이 싣는다. 실패하면 `WidgetApiError` 를 던지고, 성공하면 `Blob` 을 돌려준다. 받는 중에 끊으려면 `AbortController` 의 `signal` 을 준다.
 - `ctx.api.hasScope(scope)` 는 위젯 토큰에 그 scope 가 있으면 참이다. 토큰을 받기 전에는 거짓이므로 `install` 에서 한 번 묻고 끝내지 말고 `settingsLoaded` 뒤나 단추를 그릴 때 묻는다.
 - `ctx.api.wsUrl(path)` 는 위젯 서버 주소로 만든 절대 웹소켓 주소다. 서버 주소가 http 면 ws, https 면 wss 다.
 - `ctx.ui.layer` 는 위젯 판(panel) 요소다. 녹음 덮개, 발표 화면 같은 겹치는 요소를 여기에 붙인다.

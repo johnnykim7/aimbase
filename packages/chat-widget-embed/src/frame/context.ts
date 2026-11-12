@@ -263,8 +263,9 @@ export interface WidgetContext {
     addRequestFields(fn: () => Record<string, unknown>): void;
   };
   api: {
+    /** body 가 FormData 면 multipart 로 그대로, 그 밖에는 JSON 으로 싣는다 */
     request<R>(method: string, path: string, body?: unknown): Promise<R>;
-    /** body 가 있으면 JSON 으로 싣는다. signal 로 받는 중인 요청을 끊는다 */
+    /** body 는 request 와 같이 싣는다. signal 로 받는 중인 요청을 끊는다 */
     requestBlob(method: string, path: string, body?: unknown, opts?: { signal?: AbortSignal }): Promise<Blob>;
     /** 위젯 토큰에 그 scope 가 있으면 참. 토큰을 받기 전에는 거짓이라 settingsLoaded 뒤나 쓰는 때에 묻는다 */
     hasScope(scope: string): boolean;
