@@ -8,6 +8,7 @@ import com.platform.llm.model.UnifiedMessage;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -266,6 +267,7 @@ class SessionStoreCr083Test {
     }
 
     @Test
+    @DisplayName("IT-09-005 2,4 묶음_가운데_순번은_not_turn_start_이고_지우지_않는다")
     void rewind_rejects_seq_inside_a_turn() {
         // CR-175 TC-CHT-002: 묶음 가운데(맥락 메시지 뒤 질문) 순번은 not_turn_start
         String sessionId = "rw-2";
@@ -278,10 +280,14 @@ class SessionStoreCr083Test {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> sessionStore.rewind(sessionId, 1))
                 .isInstanceOf(RewindRejectedException.class)
                 .extracting("reason").isEqualTo(RewindRejectedException.Reason.NOT_TURN_START);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> sessionStore.rewind(sessionId, 2))
+                .isInstanceOf(RewindRejectedException.class)
+                .extracting("reason").isEqualTo(RewindRejectedException.Reason.NOT_TURN_START);
         verify(messageRepository, never()).softDeleteFromSeq(anyString(), anyInt(), any(), anyString());
     }
 
     @Test
+    @DisplayName("IT-09-005 3,4 압축_경계_앞_묶음은_before_compaction_이고_지우지_않는다")
     void rewind_rejects_turn_before_compaction_boundary() {
         // CR-175 TC-CHT-004: 마지막 압축 경계보다 앞 묶음은 되감지 않는다
         String sessionId = "rw-3";

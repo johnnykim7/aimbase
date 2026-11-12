@@ -4,6 +4,7 @@ import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.ConnectionGroupSelector;
 import com.platform.llm.adapter.LLMAdapter;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -36,6 +37,7 @@ class ConversationRewindServiceTest {
     }
 
     @Test
+    @DisplayName("IT-09-004 2 답이_도는_세션은_되감기를_session_busy_로_거절한다")
     void busy_session_is_rejected_before_touching_history() {
         // CR-175 TC-CHT-003
         when(cancellationRegistry.isActive("s-1")).thenReturn(true);

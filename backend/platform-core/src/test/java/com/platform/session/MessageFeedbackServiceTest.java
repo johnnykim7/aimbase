@@ -7,6 +7,7 @@ import com.platform.domain.MessageFeedbackEntity;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.MessageFeedbackRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -73,6 +74,7 @@ class MessageFeedbackServiceTest {
     }
 
     @Test
+    @DisplayName("IT-09-007 2,3 규칙에_맞지_않는_평가는_칸별_코드로_거절된다")
     void invalid_input_is_rejected_with_field_code() {
         // CR-175 TC-CHT-007
         assertRejected(() -> service.save("u", "s-1", turnId.toString(), "MEH", null, null),
@@ -88,6 +90,7 @@ class MessageFeedbackServiceTest {
     }
 
     @Test
+    @DisplayName("IT-09-007 4 남의_답에_남긴_평가는_turn_not_found")
     void someone_elses_turn_is_not_found() {
         // CR-175 TC-CHT-007: 남의 세션 답은 404 (ChatTurnLookup 이 던진다)
         when(turnLookup.find("intruder", "s-1", turnId.toString()))
