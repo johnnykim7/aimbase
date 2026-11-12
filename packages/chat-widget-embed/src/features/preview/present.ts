@@ -11,7 +11,8 @@ export interface PresentOptions {
 
 /**
  * 지금 장부터 화면 가득 띄운다. 브라우저가 전체 화면을 막으면 페이지를 덮어 같은 동작을 한다.
- * 전체 화면에서는 Esc 를 브라우저가 받아 끝내고, 덮는 방식에서는 위젯 Esc 순서보다 먼저 받는다.
+ * Esc 는 두 방식 모두 위젯 Esc 순서에 먼저 걸어 발표만 끝낸다. 브라우저가 전체 화면을 풀며 Esc 를
+ * 삼키는 경우는 fullscreenchange 로 끝낸다. 걸지 않으면 Esc 가 옆 창을 닫고 덮개가 남는다.
  */
 export function startPresentation(o: PresentOptions): void {
   const count = o.src.count;
@@ -92,13 +93,13 @@ export function startPresentation(o: PresentOptions): void {
 
   const cover = () => {
     overlay.classList.add("pv-cover");
-    offEscape = o.onEscape(() => {
-      end();
-      return true;
-    });
     overlay.focus();
   };
 
+  offEscape = o.onEscape(() => {
+    end();
+    return true;
+  });
   show(page);
   if (typeof overlay.requestFullscreen === "function") {
     overlay.requestFullscreen().then(

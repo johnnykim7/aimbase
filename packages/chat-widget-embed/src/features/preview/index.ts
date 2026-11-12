@@ -1,6 +1,5 @@
 import type { AnswerView, SidePaneSpec, WidgetContext, WidgetFeature } from "../../frame/context";
 import { svgIcon } from "../../icons";
-import { renderRichInto } from "../../rich-render";
 import type { ChatArtifact } from "../../types";
 import { WidgetApiError } from "../../widget-api";
 import { decorateCodeBlocks, svgUrl } from "./blocks";
@@ -366,7 +365,7 @@ class PreviewController {
         const md = document.createElement("div");
         md.className = "pv-md";
         root.appendChild(md);
-        renderRichInto(md, l.text);
+        this.ctx.ui.renderMarkdown(md, l.text);
         this.watch(md);
         break;
       }
