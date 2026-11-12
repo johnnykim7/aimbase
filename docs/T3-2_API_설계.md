@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.22 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179
+> 설계 버전: 7.23 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3513,7 +3513,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 
 | 칸 | 타입 | 필수 | 뜻 |
 |---|---|---|---|
-| file_create | 참거짓 | 선택 | 참이고 `chat.file-create.enabled` 면 서버 도구 `create_file` 을 준다(BIZ-210). API 연결은 `actions_enabled` 가 없어도 이 도구 하나로 도구 고리를 돈다. CLI 연결은 허용 도구에 더한다 |
+| file_create | 참거짓 | 선택 | 참이고 `chat.file-create.enabled` 면 서버 도구 `create_file` 을 준다(BIZ-210). API 연결은 `actions_enabled` 가 없어도 이 도구 하나로 도구 고리를 돈다. CLI 연결은 실행기 통로 `aimbase-data` 에 싣는다(「서버 MCP 통로 `/mcp-data`」) |
 
 ### 서버 도구 create_file [PRD-500]
 
@@ -3682,7 +3682,16 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 
 ### 서버 MCP 통로 `/mcp-data` [PRD-521]
 
-`data_query` 하나만 등록한 MCP 통로. 인증과 요청 스레드 실행은 `/mcp-skills` 와 같다. 머리글 `X-Aimbase-Session-Id`(실행기가 싣는 세션 번호, 도구 문맥의 세션). 워크플로우 단계 요청에는 붙이지 않는다.
+`data_query` 와 `create_file`(CR-182)을 등록한 MCP 통로. 인증과 요청 스레드 실행은 `/mcp-skills` 와 같다. 머리글 `X-Aimbase-Session-Id`(실행기가 싣는 세션 번호, 도구 문맥의 세션), `X-Aimbase-Channel-Tools`(이번 CLI 에 연 통로 도구의 쉼표 목록. 없으면 `data_query` 만). 목록에 없는 도구는 `Tool not available on data channel` 오류다. 워크플로우 단계 요청에는 붙이지 않는다.
+
+서버가 실행기에 보내는 대화 요청(`/v1/chat`, `/v1/chat/stream`)의 통로 칸:
+
+| 칸 | 타입 | 뜻 |
+|---|---|---|
+| data_session_id | 글 | 대화 세션 번호(CR-183). 있으면 실행기가 `aimbase-data` 통로를 붙인다 |
+| channel_tools | 글 목록 | 통로에 열 도구(CR-182). `data_query`, `create_file` 중. 없으면 `data_query` 하나 |
+
+- 실행기는 대화 세션마다 CLI 를 이어 쓴다. `channel_tools` 가 살아 있는 CLI 와 다르면 닫고 새로 띄운다.
 
 ## 위젯 이미지 생성 [v7.17, CR-184]
 
