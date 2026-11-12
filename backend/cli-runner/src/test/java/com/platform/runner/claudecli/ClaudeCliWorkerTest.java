@@ -755,6 +755,41 @@ class ClaudeCliWorkerTest {
         assertThat(resp.textContent()).isEqualTo("answer-text");
     }
 
+    /**
+     * CR-175: 조각으로 받은 생각과 답은 받는 대로 넘기고, 블록이 끝난 뒤 통째로 다시 오는 같은 글은 넘기지 않는다.
+     * 하위 에이전트 조각은 받지 않고, 조각 없이 온 메시지는 지금처럼 통째로 넘긴다.
+     */
+    @Test
+    void partial_chunks_are_forwarded_as_they_arrive_without_repeating_the_full_block() throws IOException {
+        Path stub = writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-partial"}'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_A","content":[]}},"parent_tool_use_id":null}'
+                  echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"th1"}},"parent_tool_use_id":null}'
+                  echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"th2"}},"parent_tool_use_id":null}'
+                  echo '{"type":"assistant","message":{"id":"msg_A","role":"assistant","content":[{"type":"thinking","thinking":"th1th2"}]},"parent_tool_use_id":null}'
+                  echo '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ab"}},"parent_tool_use_id":null}'
+                  echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"SUB"}},"parent_tool_use_id":"toolu_1"}'
+                  echo '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"cd"}},"parent_tool_use_id":null}'
+                  echo '{"type":"assistant","message":{"id":"msg_A","role":"assistant","content":[{"type":"text","text":"abcd"}]},"parent_tool_use_id":null}'
+                  echo '{"type":"assistant","message":{"id":"msg_B","role":"assistant","content":[{"type":"text","text":"ef"}]},"parent_tool_use_id":null}'
+                  echo '{"type":"result","subtype":"success","result":"abcdef","session_id":"sess-partial","usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """);
+        worker = new ClaudeCliWorker(stub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.start();
+        List<String> deltas = new java.util.ArrayList<>();
+        List<String> thoughts = new java.util.ArrayList<>();
+
+        LLMResponse resp = worker.turnStream(question("q1"), true, deltas::add, null, thoughts::add, null);
+
+        assertThat(thoughts).containsExactly("th1", "th2");
+        assertThat(deltas).containsExactly("ab", "cd", "ef");
+        assertThat(resp.textContent()).isEqualTo("abcdef");
+    }
+
     private static List<UnifiedMessage> question(String text) {
         return List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, text));
     }

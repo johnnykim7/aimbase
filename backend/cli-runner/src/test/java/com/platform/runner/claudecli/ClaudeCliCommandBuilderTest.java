@@ -142,6 +142,19 @@ class ClaudeCliCommandBuilderTest {
         assertThat(cmd).containsSequence("--permission-mode", "bypassPermissions");
         assertThat(cmd).containsSequence("--append-system-prompt", "Aimbase rules");
         assertThat(cmd).containsSequence("--model", "claude-sonnet-4-6");
+        assertThat(cmd).doesNotContain("--include-partial-messages");
+    }
+
+    /** CR-175: 조각 출력은 stream-json 모드에서만 붙는다. CLI 가 다른 출력 형식에서는 이 옵션을 받지 않는다. */
+    @Test
+    void include_partial_messages_only_with_stream_json() {
+        List<String> streaming = ClaudeCliCommandBuilder.builder("claude")
+                .streamJson(true).includePartialMessages(true).build();
+        List<String> textOnly = ClaudeCliCommandBuilder.builder("claude")
+                .prompt("hi").outputFormat("json").includePartialMessages(true).build();
+
+        assertThat(streaming).containsSequence("--output-format", "stream-json", "--include-partial-messages");
+        assertThat(textOnly).doesNotContain("--include-partial-messages");
     }
 
     @Test
