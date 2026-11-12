@@ -233,7 +233,10 @@ class History {
   }
 
   private onAnswerDone(a: AnswerView): void {
-    if (a.sessionId !== this.current.sessionId || a.error) return;
+    // 멈춘 응답도 서버에 남으므로 목록에 올린다. 실패한 응답만 건드리지 않는다.
+    if (a.sessionId !== this.current.sessionId || (a.error && !a.stopped)) return;
+    // 서버는 제목이 생기기 전까지 첫 질문을 제목으로 둔다. 목록도 같은 글을 보인다.
+    if (!this.current.saved && !this.current.title && a.question.trim()) this.current.title = a.question.trim();
     this.current.saved = true;
     this.pane?.touch({ ...this.currentRow(), updated_at: a.at.toISOString() });
     if (this.current.projectId) void this.pane?.loadProjects();
