@@ -3873,7 +3873,7 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 
 | 칸 | 타입 | 필수 | 뜻 |
 |---|---|---|---|
-| instructions | 글 | 선택 | 내 선호 글. 빈 글이면 지운다 |
+| instructions | 글 | 선택 | 내 선호 글. 빈 글이면 비운다 |
 | memory_enabled | 참거짓 | 선택 | 자동 기억 켬 |
 | last_model | 글 | 선택 | 마지막에 선택한 모델 id |
 | last_thinking | 참거짓 | 선택 | 마지막에 선택한 깊게 생각하기 |
@@ -3881,20 +3881,20 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 - 본문에 온 칸만 바꾼다. 돌려주는 모양은 조회와 같다.
 - 400 `preferences_too_long`: `instructions` 가 `widget.preferences-max-chars` 자를 넘음. 400 `model_invalid`: `last_model` 이 100자를 넘음.
 
-### 자동 기억 목록과 지우기 [PRD-441]
+### 자동 기억 목록과 삭제 [PRD-441]
 
 | 방법 | 경로 | 뜻 |
 |---|---|---|
-| GET | /api/v1/chat/me/memories | `[{"id": "uuid", "content": "답은 짧게 받기를 원함", "created_at": "2026-11-13T10:00:00+09:00"}]` 오래된 것부터 |
-| DELETE | /api/v1/chat/me/memories/{id} | 하나 지운다. 없거나 남의 것이면 404 `memory_not_found` |
-| DELETE | /api/v1/chat/me/memories | 그 사람 자동 기억을 모두 지운다. `{"deleted": 3}` |
+| GET | /api/v1/chat/me/memories | `[{"id": "uuid", "content": "답은 짧게 받기를 원함", "created_at": "2026-11-13T01:00:00Z"}]` 오래된 것부터 |
+| DELETE | /api/v1/chat/me/memories/{id} | 하나 삭제한다. 없거나 남의 것이면 404 `memory_not_found` |
+| DELETE | /api/v1/chat/me/memories | 그 사람 자동 기억을 모두 삭제한다. `{"deleted": 3}` |
 
-- 자동 기억을 꺼도 목록과 지우기는 된다(BIZ-184).
+- 자동 기억을 꺼도 목록 보기와 삭제는 된다(BIZ-184).
 - 테넌트 스위치가 꺼지면 위 다섯 API 모두 409 `memory_disabled` 다.
 
 ### 대화 요청
 
-요청 본문에 칸을 더하지 않는다. 주인이 있는 위젯 대화면 서버가 내 선호와 자동 기억을 시스템 지시 뒤에 넣고(BIZ-181), 응답이 정상으로 끝나면 응답과 따로 기억을 뽑는다(BIZ-182).
+요청 본문에 칸을 더하지 않는다. 주인이 있는 위젯 대화면 서버가 내 선호와 자동 기억을 이번 질문 바로 앞에 질문마다 붙이는 지시로 넣고(BIZ-181), 응답이 정상으로 끝나면 응답과 따로 기억을 뽑는다(BIZ-182).
 
 ## 작성 가이드
 

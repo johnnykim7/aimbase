@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.31.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.32.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -854,6 +854,33 @@ location /share/ { proxy_pass http://127.0.0.1:8280; }
 | 받는 사람이 링크를 열면 Aimbase 화면이 아닌 404 가 뜬다 | 앞단 nginx 에 `/share/` 경로가 없다 | 위 `location /share/` 를 더하고 nginx 를 다시 읽힌다 |
 | 「링크가 없거나 끝났습니다」 | 끊긴 링크, 기한 지난 링크, 틀린 주소 | 보낸 사람이 공유 창에서 새 링크를 만든다 |
 | 파일을 만들어 달라고 해도 파일 칩이 오지 않는다 | `chat.file-create.enabled` 꺼짐 또는 위젯이 CR-182 전 판 | 설정과 위젯 판을 확인한다 |
+
+### 2-18. 위젯 사용자 선호 기억 운영 [CR-179]
+
+위젯 더 보기 메뉴 「기억과 선호」 에서 사용자가 「내 선호」 글을 적고, AI 가 대화에서 뽑은 「자동 기억」 을 보고 삭제하는 기능입니다. 마지막에 선택한 모델과 깊게 생각하기도 사람마다 기억합니다. API 는 API 가이드 § 32.
+
+**사람 구분.** 위젯 토큰의 `user_ref` 로 사람을 가립니다. 붙이는 앱이 토큰에 `user_ref` 를 주지 않으면 메뉴가 보이지 않고 기억도 쓰지 않습니다. 로그인 사용자와 API Key 요청도 쓰지 않습니다.
+
+**런타임 설정.** 사이드바 Super Admin 묶음 「런타임 설정」에서 재기동 없이 바꿉니다.
+
+| 키 | 처음 값 | 뜻 |
+|---|---|---|
+| `widget.memory-enabled` | true | 테넌트 스위치. 끄면 메뉴가 숨고, 선호와 기억을 대화에 넣지도 뽑지도 않는다. 저장된 것은 지우지 않는다 |
+| `widget.memory-model` | (비움) | 자동 기억을 뽑을 모델. 비면 대화 연결 기본 모델 |
+| `widget.memory-timeout-ms` | 15000 | 뽑기 호출 시간 한도 |
+| `widget.memory-max-items` | 30 | 한 사람 자동 기억 최대 개수. 넘으면 오래된 것부터 지운다 |
+| `widget.memory-item-max-chars` | 200 | 자동 기억 하나 최대 글자 수 |
+| `widget.preferences-max-chars` | 1500 | 내 선호 글 최대 글자 수 |
+
+**프롬프트 틀.** 테넌트 「프롬프트 템플릿」 두 개입니다. `widget.memory-extract` 는 이번 질문과 지금 기억 목록을 받아 `{"add": [...], "remove": [...]}` JSON 을 돌려주게 하는 뽑기 지시문이고, `widget.user-memory` 는 내 선호와 자동 기억을 대화에 넣을 때 감싸는 글입니다. 입력 칸 이름은 바꾸지 않습니다.
+
+**저장.** 내 선호와 마지막 선택은 테넌트 DB `widget_user_preferences`, 자동 기억은 `conversation_memories`(`memory_type = USER_PROFILE`, `scope = PRIVATE`, `user_id = user_ref`)에 둡니다. 대화를 지워도 기억은 남습니다.
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 더 보기에 「기억과 선호」 가 없다 | 토큰에 `user_ref` 가 없거나 `widget.memory-enabled` 꺼짐 | 붙이는 앱의 토큰 발급과 설정을 확인한다 |
+| 자동 기억이 생기지 않는다 | 그 사람이 자동 기억을 껐거나, 뽑기가 시간 한도를 넘김 | 위젯 화면의 스위치를 확인하고, 실행기 연결이면 `widget.memory-timeout-ms` 를 늘린다 |
+| 상담원끼리 기억이 섞인다 | 붙이는 앱이 여러 사람에게 같은 `user_ref` 를 준다 | 토큰 발급에서 사람마다 다른 값을 준다 |
 
 ---
 
@@ -2059,6 +2086,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.32.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 2-18). 런타임 설정 `widget.memory-*` 5개와 `widget.preferences-max-chars`, 프롬프트 틀 `widget.memory-extract`, `widget.user-memory`, 사람 구분은 위젯 토큰 `user_ref` |
 | v3.31.0 | 2026-11-13 | **CR-182 위젯 파일 만들기, 저장, 내보내기, 공유 링크** (§ 2-17). api 이미지 `fonts-nanum` 과 환경변수 `AIMBASE_DOCUMENT_PDF_FONT_DIR`, 런타임 설정 `chat.file-create.*`, `chat.export.*`, `chat.share.*`, 앞단 nginx `location /share/`, 프롬프트 틀 `tool.create-file.description` |
 | v3.30.0 | 2026-11-13 | **CR-184 위젯 그림 만들기** (§ 2-16). 연결 편집 「그림 모델」, 「그림 품질」, 「그림 연결」, 런타임 설정 `widget.image.*`, 환경변수 `AIMBASE_IMAGE_OPENAI_BASE_URL`, 증상과 조치 |
 | v3.29.0 | 2026-11-13 | **CR-180 위젯 옆 창 문서 미리보기** (§ 2-15). api 컨테이너 LibreOffice 변환기와 환경변수 `AIMBASE_PREVIEW_SOFFICE_PATH`, 런타임 설정 `widget.preview-*` 8개(마스터 V83), 증상별 조치 |

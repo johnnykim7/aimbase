@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.34.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.35.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2882,10 +2882,45 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 
 `GET /api/v1/chat/artifacts`, `/download`, `/preview`, `/preview/page` 는 위젯 토큰이면 그 세션 주인(`user_ref`)만 엽니다. 남의 세션이면 404 `artifact_not_found` 입니다. 소비앱 키와 로그인은 지금처럼 테넌트 안에서 엽니다.
 
+## 32. 위젯 사용자 선호 기억 [CR-179]
+
+위젯 사용자가 「내 선호」 글을 적어 두면 AI 가 대화마다 참고하고, 대화에서 밝힌 선호를 AI 가 「자동 기억」 으로 남겨 다음 대화에 씁니다. 마지막에 선택한 모델과 깊게 생각하기도 기억해 새 대화에 다시 적용합니다. 다섯 API 모두 `chat:stream` 위젯 토큰으로 부르고, 주인은 토큰의 `user_ref` 입니다. BFF 가 토큰을 발급할 때(§ 17-2) `user_ref` 를 사람마다 다르게 줘야 기억이 사람마다 갈립니다.
+
+| 오류 | 경우 |
+|---|---|
+| 403 `memory_unavailable` | 토큰에 `user_ref` 가 없거나, 위젯 토큰이 아님(로그인 사용자, API Key) |
+| 409 `memory_disabled` | 테넌트 런타임 설정 `widget.memory-enabled` 가 꺼짐 |
+
+### 32-1. 내 선호 조회와 저장 (`GET`, `PUT /api/v1/chat/me/preferences`)
+
+```json
+{"instructions": "저는 CS 상담원입니다. 답은 짧게, 존댓말로 주세요.", "instructions_max_chars": 1500,
+ "memory_enabled": true, "last_model": "claude-sonnet-5-5", "last_thinking": false}
+```
+
+- 저장한 적이 없으면 `instructions` 는 빈 글, `memory_enabled` 는 참, `last_model`, `last_thinking` 은 null 입니다.
+- `PUT` 은 본문에 온 칸만 바꾸고 조회와 같은 모양을 돌려줍니다. 칸은 `instructions`(글, 빈 글이면 비움), `memory_enabled`(참거짓), `last_model`(모델 id), `last_thinking`(참거짓 또는 null) 입니다.
+- 400 `preferences_too_long`: `instructions` 가 `instructions_max_chars` 자를 넘음. 400 `model_invalid`: `last_model` 이 100자를 넘음.
+
+### 32-2. 자동 기억 목록과 삭제
+
+| 방법 | 경로 | 뜻 |
+|---|---|---|
+| GET | `/api/v1/chat/me/memories` | `[{"id": "uuid", "content": "답은 짧게 받기를 원함", "created_at": "2026-11-13T01:00:00Z"}]` 오래된 것부터 |
+| DELETE | `/api/v1/chat/me/memories/{id}` | 하나 삭제합니다. 없거나 남의 것이면 404 `memory_not_found` |
+| DELETE | `/api/v1/chat/me/memories` | 그 사람 자동 기억을 모두 삭제합니다. `{"deleted": 3}` |
+
+- 자동 기억을 꺼도 목록 보기와 삭제는 됩니다.
+
+### 32-3. 대화 요청
+
+대화 요청 본문에 칸을 더하지 않습니다. 주인이 있는 위젯 대화면 서버가 내 선호와 자동 기억을 이번 질문 바로 앞에 넣고, 응답이 정상으로 끝나면 이번 질문 글(첨부 제외)로 따로 기억을 뽑습니다. 응답을 중지하거나 실패하면 뽑지 않습니다. 뽑기는 응답과 따로 돌고, 실패해도 대화는 그대로입니다. 저장한 선호는 다음 질문부터 들어갑니다.
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.35.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 32). 내 선호 `GET`, `PUT /api/v1/chat/me/preferences`, 자동 기억 `GET`, `DELETE /api/v1/chat/me/memories`, `DELETE /api/v1/chat/me/memories/{id}`, 오류 코드 `memory_unavailable`, `memory_disabled`, `memory_not_found`, `preferences_too_long`. 대화 요청 모양은 그대로 |
 | v3.34.0 | 2026-11-13 | **CR-182 위젯 파일 만들기, 저장, 내보내기, 공유 링크** (§ 31). 대화 요청 `file_create` 와 서버 도구 `create_file`, 응답 저장 `GET /api/v1/chat/sessions/{id}/turns/{turn_id}/export`, 대화 내보내기 `GET /api/v1/chat/sessions/{id}/export`, 공유 링크 `POST`, `GET`, `DELETE /api/v1/chat/shares`, 받는 사람 `GET /share/{tenant_id}/{token}`. 위젯 설정 `file_create_enabled`, `export_formats`, `share_enabled`, `share_ttl_days`. 산출물 API 세션 주인 대조 404 `artifact_not_found` |
 | v3.33.1 | 2026-11-13 | **CR-177 워크플로우 끝남 알림에 실패 이유** (§ 17-6). `workflow.done` 에 `error`(실패한 런만) |
 | v3.33.0 | 2026-11-13 | **CR-184 위젯 그림 만들기** (§ 30). 대화 요청 `image` 칸(`create`, `edit`), 스트림 `image_status` 와 `done.images`, 그림 받기 `GET /api/v1/chat/images/{image_id}`, 위젯 설정 `image_generation`, 오류 코드 `image_*` |
