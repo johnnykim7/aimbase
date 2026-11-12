@@ -19,7 +19,22 @@ export interface SendMessageArgs {
   rewindFromSeq?: number;
   /** CR-175: 깊게 생각하기를 켜면 "on". 보내지 않으면 연결 설정을 따른다. */
   thinking?: "on" | "off";
+  /** CR-177: 기능이 요청 본문에 더한 칸. 위젯 본체 칸(CORE_KEYS)과 겹치면 본체 값을 쓴다. */
+  extra?: Record<string, unknown>;
+  /** CR-177: 기능이 그릴 수 있다고 알린 응답 형식 이름 */
+  renderFeatures?: string[];
 }
+
+/** 기능이 덮어쓸 수 없는 요청 본문 칸 */
+export const CORE_KEYS: readonly string[] = [
+  "model", "session_id", "stream", "messages", "connection_id", "rag_source_id",
+  "actions_enabled", "rewind_from_seq", "thinking", "render_features",
+];
+
+/** 끝 이벤트(done)에서 위젯 본체가 읽는 칸. 나머지는 extra 로 기능에 보낸다. */
+const DONE_KEYS = new Set(["rag_used", "citations", "artifacts", "turn_id", "turn_seq", "model"]);
+
+const KNOWN_EVENTS = new Set(["delta", "thinking", "tool_use_start", "tool_result", "done", "error"]);
 
 /** 멈춤을 서버에 알린 뒤 저장 완료(done)가 이 시간 안에 오지 않으면 연결을 끊는다. */
 const STOP_GRACE_MS = 8000;
@@ -70,12 +85,17 @@ export class ChatClient {
     }
     messages.push({ role: "user", content: userContent });
 
-    const body: Record<string, unknown> = {
+    const body: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(args.extra ?? {})) {
+      if (!CORE_KEYS.includes(k)) body[k] = v;
+    }
+    Object.assign(body, {
       model: args.model ?? "auto",
       session_id: args.sessionId,
       stream: true,
       messages,
-    };
+    });
+    if (args.renderFeatures?.length) body.render_features = args.renderFeatures;
     if (args.ragSourceId) body.rag_source_id = args.ragSourceId;
     if (args.connectionId) body.connection_id = args.connectionId;
     if (args.actionsEnabled) body.actions_enabled = true;
@@ -104,6 +124,10 @@ export class ChatClient {
 
     try {
       for await (const ev of parseSseStream(res, ac.signal)) {
+        if (!KNOWN_EVENTS.has(ev.name)) {
+          onDelta({ type: "event", event: { name: ev.name, data: parseData(ev.data) } });
+          continue;
+        }
         try {
           const payload = JSON.parse(ev.data);
           switch (ev.name) {
@@ -140,12 +164,17 @@ export class ChatClient {
                   turn_id: typeof payload.turn_id === "string" ? payload.turn_id : undefined,
                   turn_seq: typeof payload.turn_seq === "number" ? payload.turn_seq : undefined,
                   model: typeof payload.model === "string" ? payload.model : undefined,
+                  extra: Object.fromEntries(Object.entries(payload ?? {}).filter(([k]) => !DONE_KEYS.has(k))),
                 },
               });
               break;
-            default:
-              // 알 수 없는 이벤트는 무시
+            case "error": {
+              // CR-177: 응답 도중 서버가 멈춘 이유. 받은 글은 그대로 두고 오류로 끝낸다.
+              const code = typeof payload?.code === "string" ? payload.code : undefined;
+              const message = typeof payload?.message === "string" ? payload.message : undefined;
+              onDelta({ type: "error", error: message ?? code ?? "error", errorCode: code });
               break;
+            }
           }
         } catch (e) {
           onDelta({ type: "error", error: `parse error: ${(e as Error).message}` });
@@ -199,5 +228,13 @@ export class ChatClient {
     } catch {
       // 서버에 abort 도달 실패해도 클라이언트는 이미 끊어놓음
     }
+  }
+}
+
+function parseData(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
   }
 }

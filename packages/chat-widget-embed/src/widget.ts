@@ -1,14 +1,43 @@
+import type { TokenizerAndRendererExtension } from "marked";
 import { AttachmentClient } from "./attachment-client";
 import { ChatClient } from "./chat-client";
 import { copyText } from "./clipboard";
+import { FEATURES } from "./features";
+import type {
+  AnswerActionSpec,
+  AnswerDecoratorSpec,
+  AnswerView,
+  ArtifactActionSpec,
+  ArtifactOpenerSpec,
+  ComposerModeSpec,
+  ComposerToolSpec,
+  ConversationView,
+  TitleTagSpec,
+  WidgetContext,
+  WidgetEvents,
+} from "./frame/context";
+import { Emitter } from "./frame/events";
+import {
+  DEFAULT_LOCALE,
+  type Locale,
+  normalizeLocale,
+  pickList,
+  pickText,
+  readStoredLocale,
+  storeLocale,
+  stringsView,
+} from "./frame/i18n";
+import { Menu } from "./frame/menu";
+import { Panes } from "./frame/panes";
 import { icon } from "./icons";
-import { renderRichInto } from "./rich-render";
-import { T } from "./strings";
+import { createMarked, renderRichInto } from "./rich-render";
+import { CORE } from "./strings";
 import { SttClient, SttError } from "./stt-client";
 import { WIDGET_CSS } from "./styles";
 import { TokenStore } from "./token-store";
 import type {
   ApprovalEvent,
+  Attachment,
   AttachmentDraft,
   ChatArtifact,
   ChatDelta,
@@ -49,13 +78,21 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function iconButton(name: Parameters<typeof icon>[0], label: string, extra = ""): HTMLButtonElement {
+function htmlButton(iconHtml: string, label: string, extra = ""): HTMLButtonElement {
   const b = el("button", `ib ${extra}`.trim());
   b.type = "button";
-  b.innerHTML = icon(name);
+  b.innerHTML = iconHtml;
+  setLabel(b, label);
+  return b;
+}
+
+function iconButton(name: Parameters<typeof icon>[0], label: string, extra = ""): HTMLButtonElement {
+  return htmlButton(icon(name), label, extra);
+}
+
+function setLabel(b: HTMLElement, label: string): void {
   b.setAttribute("aria-label", label);
   b.setAttribute("data-tip", label);
-  return b;
 }
 
 function genId(): string {
@@ -93,6 +130,20 @@ function storeFontSize(size: FontSize): void {
   }
 }
 
+function byOrder<S extends { order: number }>(list: S[]): S[] {
+  return [...list].sort((a, b) => a.order - b.order);
+}
+
+/** 기능 하나의 실패가 응답 그리기를 멈추지 않게 한다. */
+function guarded<R>(what: string, fn: () => R): R | undefined {
+  try {
+    return fn();
+  } catch (e) {
+    console.error(`[aimbase-chat] ${what} failed`, e);
+    return undefined;
+  }
+}
+
 interface ToolStep {
   id?: string;
   name: string;
@@ -121,11 +172,17 @@ interface AnswerVersion {
   rating?: FeedbackRating;
   feedbackOpen: boolean;
   followUps: string[];
+  /** CR-177: 끝 이벤트에서 위젯 본체가 쓰지 않은 칸 */
+  extra: Record<string, unknown>;
+  /** CR-177: 기능이 응답 도중 끼운 요소와 그때까지 받은 글 길이 */
+  mounts: Array<{ at: number; el: HTMLElement }>;
 }
 
 interface TurnView {
   folds: HTMLDivElement;
   body: HTMLDivElement;
+  /** 도는 중인 응답에서 글이 이어 붙는 마지막 조각 */
+  seg: HTMLDivElement | null;
   extras: HTMLDivElement;
   acts: HTMLDivElement;
   feedback: HTMLDivElement;
@@ -139,6 +196,8 @@ interface Turn {
   attachmentNames: string[];
   attachments: Array<{ attachmentId: string; mediaType: string }>;
   askedAt: Date;
+  /** CR-177: 이 질문을 보낼 때 기능이 더한 칸. 다시 생성, 질문 수정, 다시 시도에 그대로 쓴다. */
+  requestBody: Record<string, unknown>;
   versions: AnswerVersion[];
   shown: number;
   el: HTMLDivElement;
@@ -162,12 +221,18 @@ function newVersion(): AnswerVersion {
     rejected: false,
     feedbackOpen: false,
     followUps: [],
+    extra: {},
+    mounts: [],
   };
 }
 
 export function createWidget(options: WidgetOptions): WidgetHandle {
   const display: DisplayMode = options.display ?? "bubble";
   const theme = options.theme?.mode ?? "auto";
+
+  // CR-177: 첫 화면부터 그 언어로 그린다. 사용자가 고른 값, 붙이는 앱이 준 값, 한국어 순이다.
+  let locale: Locale = readStoredLocale() ?? normalizeLocale(options.locale) ?? DEFAULT_LOCALE;
+  let T = CORE[locale];
 
   const host = document.createElement("div");
   host.setAttribute("data-aimbase-widget", "true");
@@ -199,6 +264,8 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   const style = document.createElement("style");
   style.textContent = WIDGET_CSS;
   shadow.appendChild(style);
+  const featureStyles = document.createElement("style");
+  shadow.appendChild(featureStyles);
   if (options.theme?.cssVars) {
     const overrides = Object.entries(options.theme.cssVars)
       .map(([k, v]) => `${k}: ${v};`)
@@ -208,6 +275,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     shadow.appendChild(overrideStyle);
   }
   const root = el("div", "root");
+  root.lang = locale;
   shadow.appendChild(root);
 
   // ── 상태 ─────────────────────────
@@ -221,16 +289,35 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   let selectedModel: string | undefined = options.model;
   let thinkingOn = false;
   let titleFromServer = false;
+  let titleIsDefault = true;
   let expanded = false;
   let pinned = true;
+  let fontSize: FontSize = "medium";
   let workflowRuns = new Map<string, { stepEl: HTMLDivElement; steps: Map<string, HTMLElement> }>();
+  /** 언어가 바뀌면 다시 쓸 대화 칸 글(워크플로우 진행 칸). 새 대화에서 비운다. */
+  let relabelers: Array<() => void> = [];
+
+  // ── 틀에 등록된 것 ─────────────────────────
+  const events = new Emitter<WidgetEvents>();
+  const answerActions: AnswerActionSpec[] = [];
+  const answerDecorators: AnswerDecoratorSpec[] = [];
+  const artifactOpeners: ArtifactOpenerSpec[] = [];
+  const artifactActions: ArtifactActionSpec[] = [];
+  const markdownExtensions: TokenizerAndRendererExtension[] = [];
+  const composerTools: Array<{ spec: ComposerToolSpec; node: HTMLElement }> = [];
+  const requestFieldFns: Array<() => Record<string, unknown>> = [];
+  const featureErrorTexts: Record<string, () => string> = {};
+  const escapeHandlers: Array<() => boolean> = [];
+  let composerMode: ComposerModeSpec | null = null;
+  let titleTag: TitleTagSpec | null = null;
+  let markedInstance = createMarked(markdownExtensions);
 
   // ── 틀 ─────────────────────────
   let bubbleBtn: HTMLButtonElement | null = null;
   if (display === "bubble") {
     bubbleBtn = el("button", "bubble-btn");
     bubbleBtn.innerHTML = icon("chat", 24);
-    bubbleBtn.setAttribute("aria-label", "Open Aimbase chat");
+    bubbleBtn.setAttribute("aria-label", T.openChat);
     bubbleBtn.addEventListener("click", () => setOpen(true));
     root.appendChild(bubbleBtn);
   }
@@ -239,45 +326,36 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   backdrop.addEventListener("click", () => setExpanded(false));
   root.appendChild(backdrop);
 
+  // CR-177: 판은 [왼쪽 칸][대화][옆 창] 가로 배치다. 대화 쪽이 머리줄, 대화 칸, 입력칸, 메뉴를 가진다.
   const panel = el("div", `panel ${displayClass(display)} ${open ? "" : "hidden"}`);
   root.appendChild(panel);
+  const main = el("div", "main");
+  panel.appendChild(main);
 
-  // 머리줄: 제목, 새 대화, 크게 보기, 더보기(글자 크기), 닫기
+  // 머리줄: [왼쪽 칸 여닫기] 제목 [제목 꼬리표] 새 대화, 크게 보기, 더 보기, 닫기
   const header = el("div", "hd");
+  const titleWrap = el("div", "ttlwrap");
   const titleEl = el("div", "ttl", T.defaultTitle);
+  const titleTagEl = el("button", "ttag");
+  titleTagEl.type = "button";
+  titleTagEl.hidden = true;
+  titleTagEl.addEventListener("click", () => {
+    if (titleTag?.onClick) guarded("title tag click", () => titleTag?.onClick?.());
+  });
+  titleWrap.append(titleEl, titleTagEl);
   const newBtn = iconButton("pen", T.newConversation);
   const expandBtn = iconButton("max", T.expand);
   expandBtn.setAttribute("aria-pressed", "false");
   const moreBtn = iconButton("more", T.more);
-  header.append(titleEl, newBtn, expandBtn, moreBtn);
+  moreBtn.setAttribute("aria-haspopup", "menu");
+  header.append(titleWrap, newBtn, expandBtn, moreBtn);
+  let closeBtn: HTMLButtonElement | null = null;
   if (display === "bubble" || display === "panel") {
-    const closeBtn = iconButton("x", T.close);
+    closeBtn = iconButton("x", T.close);
     closeBtn.addEventListener("click", () => setOpen(false));
     header.appendChild(closeBtn);
   }
-  panel.appendChild(header);
-
-  const morePop = el("div", "pop");
-  morePop.style.top = "40px";
-  morePop.style.right = "8px";
-  const fontRow = el("div", "row");
-  fontRow.appendChild(el("span", "", T.fontSize));
-  const fontButtons = el("span", "fsz");
-  const fontLabels: Record<FontSize, string> = { small: T.fontSmall, medium: T.fontMedium, large: T.fontLarge };
-  const fontButtonMap = new Map<FontSize, HTMLButtonElement>();
-  for (const size of FONT_SIZES) {
-    const b = el("button", "chipb", fontLabels[size]);
-    b.type = "button";
-    b.addEventListener("click", () => {
-      setFontSize(size);
-      storeFontSize(size);
-    });
-    fontButtonMap.set(size, b);
-    fontButtons.appendChild(b);
-  }
-  fontRow.appendChild(fontButtons);
-  morePop.appendChild(fontRow);
-  panel.appendChild(morePop);
+  main.appendChild(header);
 
   // 대화 칸
   const stack = el("div", "stack");
@@ -286,36 +364,24 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   scrollEl.appendChild(thread);
   const toBottomBtn = el("button", "tobottom");
   toBottomBtn.type = "button";
-  toBottomBtn.innerHTML = `${icon("arrowdown", 14)}<span>${T.toBottom}</span>`;
   toBottomBtn.addEventListener("click", () => scrollToBottom(true));
   stack.append(scrollEl, toBottomBtn);
-  panel.appendChild(stack);
+  main.appendChild(stack);
 
   const emptyEl = el("div", "empty");
-  emptyEl.appendChild(el("h3", "", options.emptyTitle || T.defaultEmptyTitle));
-  if (options.emptySubtitle) emptyEl.appendChild(el("p", "", options.emptySubtitle));
-  const suggestions = (options.suggestions ?? []).filter((s) => s && s.trim()).slice(0, MAX_SUGGESTIONS);
-  if (suggestions.length) {
-    const sugs = el("div", "sugs");
-    for (const s of suggestions) {
-      const b = el("button", "sug", s);
-      b.type = "button";
-      b.addEventListener("click", () => void sendMessage(s));
-      sugs.appendChild(b);
-    }
-    emptyEl.appendChild(sugs);
-  }
   thread.appendChild(emptyEl);
 
-  // 입력칸
+  // 입력칸: 첨부 칩, 입력 모드 표시, 글, 단추 줄([+] ... 모델, 깊게 생각하기, 마이크, 기능 단추, 전송)
   const cwrap = el("div", "cwrap");
   const comp = el("div", "comp");
   const attachmentsEl = el("div", "attachments");
+  const modeEl = el("div", "cmode");
+  modeEl.hidden = true;
   const textarea = document.createElement("textarea");
-  textarea.placeholder = T.placeholder;
   textarea.rows = 1;
   const crow = el("div", "crow");
-  const attachBtn = iconButton("attach", T.attach);
+  const plusBtn = iconButton("plus", T.addFiles);
+  plusBtn.setAttribute("aria-haspopup", "menu");
   const fileInput = document.createElement("input");
   fileInput.type = "file";
   fileInput.accept = ACCEPT_MIME;
@@ -323,7 +389,6 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   fileInput.style.display = "none";
   const modelBtn = el("button", "model");
   modelBtn.type = "button";
-  modelBtn.setAttribute("aria-label", T.model);
   modelBtn.hidden = true;
   const modelLabel = el("span");
   modelBtn.appendChild(modelLabel);
@@ -331,20 +396,52 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   const thinkBtn = iconButton("spark", T.deepThinking);
   thinkBtn.setAttribute("aria-pressed", "false");
   thinkBtn.hidden = true;
-  const micBtn = iconButton("mic", "음성 입력 시작");
+  const micBtn = iconButton("mic", T.micStart);
   micBtn.setAttribute("aria-pressed", "false");
   micBtn.hidden = true;
+  const toolsEl = el("span", "ctools");
   const sendBtn = el("button", "send");
   sendBtn.type = "button";
-  crow.append(attachBtn, fileInput, el("span", "sp"), modelBtn, thinkBtn, micBtn, sendBtn);
-  comp.append(attachmentsEl, textarea, crow);
+  crow.append(plusBtn, fileInput, el("span", "sp"), modelBtn, thinkBtn, micBtn, toolsEl, sendBtn);
+  comp.append(attachmentsEl, modeEl, textarea, crow);
   cwrap.appendChild(comp);
-  panel.appendChild(cwrap);
+  main.appendChild(cwrap);
 
   const modelPop = el("div", "pop");
   modelPop.style.bottom = "56px";
   modelPop.style.right = "12px";
-  panel.appendChild(modelPop);
+  main.appendChild(modelPop);
+
+  const plusMenu = new Menu(plusBtn, main, "above-start");
+  const moreMenu = new Menu(moreBtn, main, "below-end");
+  plusMenu.onBeforeOpen = () => {
+    moreMenu.close();
+    modelPop.classList.remove("on");
+  };
+  moreMenu.onBeforeOpen = () => {
+    plusMenu.close();
+    modelPop.classList.remove("on");
+  };
+  plusMenu.addItem({
+    id: "upload-files",
+    order: 10,
+    group: 0,
+    icon: icon("attach"),
+    label: () => T.uploadFiles,
+    hint: () => T.uploadFilesHint,
+    onSelect: () => fileInput.click(),
+  });
+
+  const panes = new Panes({
+    panel,
+    main,
+    header,
+    setExpanded: (v) => setExpanded(v),
+    closeLabel: () => T.close,
+    iconButton: (html, label) => htmlButton(html, label),
+    leftToggleIcon: icon("panelLeft"),
+    closeIcon: icon("x"),
+  });
 
   const toast = el("div", "toast");
   panel.appendChild(toast);
@@ -355,12 +452,10 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   recordingOverlay.setAttribute("aria-live", "polite");
   const wave = el("span", "rec-wave", "▁▃▅▇▅▃▁");
   const timer = el("span", "rec-timer", "0:00");
-  const cancelRec = el("button", "btn", T.cancel);
+  const cancelRec = el("button", "btn");
   cancelRec.type = "button";
-  cancelRec.setAttribute("aria-label", "녹음 취소");
-  const stopRec = el("button", "btn pri", "■ 정지");
+  const stopRec = el("button", "btn pri");
   stopRec.type = "button";
-  stopRec.setAttribute("aria-label", "녹음 정지 후 변환");
   recordingOverlay.append(wave, timer, cancelRec, stopRec);
   panel.appendChild(recordingOverlay);
 
@@ -373,9 +468,11 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
 
   // ── 공통 동작 ─────────────────────────
   function setOpen(v: boolean): void {
+    if (open === v) return;
     open = v;
     panel.classList.toggle("hidden", !v);
     if (!v) setExpanded(false);
+    events.emit("panelToggle", { open: v });
   }
 
   function setExpanded(v: boolean): void {
@@ -386,14 +483,15 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     expandBtn.setAttribute("aria-pressed", String(v));
   }
 
-  function setFontSize(size: FontSize): void {
+  function applyFontSize(size: FontSize): void {
+    fontSize = size;
     host.setAttribute("data-font-size", size);
-    fontButtonMap.forEach((b, s) => b.classList.toggle("on", s === size));
   }
 
   function closePops(): boolean {
-    const wasOpen = morePop.classList.contains("on") || modelPop.classList.contains("on");
-    morePop.classList.remove("on");
+    const wasOpen = plusMenu.isOpen() || moreMenu.isOpen() || modelPop.classList.contains("on");
+    plusMenu.close();
+    moreMenu.close();
     modelPop.classList.remove("on");
     return wasOpen;
   }
@@ -409,6 +507,26 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   function setTitle(text: string): void {
     titleEl.textContent = text;
     titleEl.title = text;
+    titleIsDefault = false;
+  }
+
+  function setDefaultTitle(): void {
+    setTitle(T.defaultTitle);
+    titleIsDefault = true;
+  }
+
+  function renderTitleTag(): void {
+    titleTagEl.innerHTML = "";
+    titleTagEl.hidden = !titleTag;
+    if (!titleTag) return;
+    if (titleTag.icon) {
+      const ic = el("span", "ttag-ic");
+      ic.innerHTML = titleTag.icon;
+      titleTagEl.appendChild(ic);
+    }
+    titleTagEl.appendChild(el("span", "", titleTag.text));
+    titleTagEl.title = titleTag.text;
+    titleTagEl.disabled = !titleTag.onClick;
   }
 
   function nearBottom(): boolean {
@@ -435,8 +553,21 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     scrollToBottom();
   }
 
+  /** CR-177: 기능이 대화 칸에 남기는 회색 안내 줄. 오류 줄과 구분한다. */
+  function appendInfo(text: string): void {
+    emptyEl.remove();
+    thread.appendChild(el("div", "notice info", text));
+    scrollToBottom();
+  }
+
+  /** 오류 코드를 글로 바꾼다. 위젯 본체 문구, 기능이 더한 문구 순으로 찾는다. */
+  function codeText(code: string | undefined): string | undefined {
+    if (!code) return undefined;
+    return T.errors[code] ?? guarded(`error text ${code}`, () => featureErrorTexts[code]?.());
+  }
+
   function errorText(e: unknown): string {
-    if (e instanceof WidgetApiError) return T.errors[e.code] ?? e.code;
+    if (e instanceof WidgetApiError) return codeText(e.code) ?? e.code;
     return (e as Error)?.message ?? String(e);
   }
 
@@ -449,14 +580,12 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   function updateSendButton(): void {
     if (busy) {
       sendBtn.innerHTML = icon("stop", 14);
-      sendBtn.setAttribute("aria-label", T.stop);
-      sendBtn.setAttribute("data-tip", T.stop);
+      setLabel(sendBtn, T.stop);
       sendBtn.disabled = false;
       return;
     }
     sendBtn.innerHTML = icon("up");
-    sendBtn.setAttribute("aria-label", T.send);
-    sendBtn.setAttribute("data-tip", T.send);
+    setLabel(sendBtn, T.send);
     const hasUploading = draftAttachments.some((a) => a.status === "uploading");
     const hasText = textarea.value.trim().length > 0;
     const hasReady = draftAttachments.some((a) => a.status === "ready");
@@ -466,6 +595,86 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   function autosize(ta: HTMLTextAreaElement): void {
     ta.style.height = "auto";
     ta.style.height = `${Math.min(ta.scrollHeight, TEXTAREA_MAX_PX)}px`;
+  }
+
+  function renderEmpty(): void {
+    emptyEl.innerHTML = "";
+    emptyEl.appendChild(el("h3", "", pickText(options.emptyTitle, locale) || T.defaultEmptyTitle));
+    const subtitle = pickText(options.emptySubtitle, locale);
+    if (subtitle) emptyEl.appendChild(el("p", "", subtitle));
+    const suggestions = pickList(options.suggestions, locale)
+      .filter((s) => typeof s === "string" && s.trim())
+      .slice(0, MAX_SUGGESTIONS);
+    if (!suggestions.length) return;
+    const sugs = el("div", "sugs");
+    for (const s of suggestions) {
+      const b = el("button", "sug", s);
+      b.type = "button";
+      b.addEventListener("click", () => void sendMessage(s));
+      sugs.appendChild(b);
+    }
+    emptyEl.appendChild(sugs);
+  }
+
+  // ── 입력 모드와 기능 단추 ─────────────────────────
+  function renderMode(): void {
+    modeEl.innerHTML = "";
+    modeEl.hidden = !composerMode;
+    if (!composerMode) return;
+    const pill = el("span", "cmode-pill");
+    if (composerMode.icon) {
+      const ic = el("span", "cmode-ic");
+      ic.innerHTML = composerMode.icon;
+      pill.appendChild(ic);
+    }
+    pill.appendChild(el("span", "", guarded("mode label", () => composerMode?.label()) ?? ""));
+    const x = iconButton("x", T.close, "sm");
+    x.addEventListener("click", () => clearMode());
+    pill.appendChild(x);
+    modeEl.appendChild(pill);
+  }
+
+  function setMode(spec: ComposerModeSpec): void {
+    if (composerMode && composerMode.id !== spec.id) {
+      const prev = composerMode;
+      guarded(`mode ${prev.id} onClear`, () => prev.onClear?.());
+    }
+    composerMode = spec;
+    renderMode();
+  }
+
+  function clearMode(): void {
+    if (!composerMode) return;
+    const prev = composerMode;
+    composerMode = null;
+    renderMode();
+    guarded(`mode ${prev.id} onClear`, () => prev.onClear?.());
+  }
+
+  function addComposerTool(spec: ComposerToolSpec): void {
+    const node = guarded(`composer tool ${spec.id}`, () => spec.render());
+    if (!node) return;
+    composerTools.push({ spec, node });
+    composerTools.sort((a, b) => a.spec.order - b.spec.order);
+    for (const t of composerTools) toolsEl.appendChild(t.node);
+  }
+
+  /** 기능이 더한 칸, 입력 모드 칸, 이번에 보내며 준 칸 순으로 합친다. 뒤가 앞을 덮는다. */
+  function collectRequestFields(body?: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const fn of requestFieldFns) Object.assign(out, guarded("request fields", fn) ?? {});
+    if (composerMode) {
+      const mode = composerMode;
+      Object.assign(out, guarded(`mode ${mode.id} requestFields`, () => mode.requestFields()) ?? {});
+    }
+    if (body) Object.assign(out, body);
+    return out;
+  }
+
+  function collectRenderFeatures(): string[] {
+    const names = new Set<string>();
+    for (const d of answerDecorators) for (const n of d.renderFeatures ?? []) names.add(n);
+    return [...names];
   }
 
   // ── 모델과 깊게 생각하기 ─────────────────────────
@@ -482,6 +691,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   function renderModelControls(): void {
     const models = settings?.models ?? [];
     modelBtn.hidden = models.length < 2;
+    modelBtn.setAttribute("aria-label", T.model);
     modelLabel.textContent = modelLabelOf(selectedModel);
     modelPop.innerHTML = "";
     for (const m of models) {
@@ -494,14 +704,31 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
         item.appendChild(mark);
       }
       item.addEventListener("click", () => {
-        selectedModel = m.id;
         closePops();
-        renderModelControls();
+        selectModel(m.id, true);
       });
       modelPop.appendChild(item);
     }
     thinkBtn.hidden = !settings?.thinking_supported;
+    setLabel(thinkBtn, T.deepThinking);
     thinkBtn.setAttribute("aria-pressed", String(thinkingOn));
+  }
+
+  /** byUser 는 사람이 단추로 바꾼 것. 기능이 ctx 로 바꾼 것은 modelChange 를 보내지 않는다. */
+  function selectModel(id: string, byUser: boolean): boolean {
+    if (!(settings?.models ?? []).some((m) => m.id === id)) return false;
+    selectedModel = id;
+    renderModelControls();
+    if (byUser) events.emit("modelChange", { model: selectedModel, thinking: thinkingOn });
+    return true;
+  }
+
+  function setThinking(on: boolean, byUser: boolean): boolean {
+    if (!settings?.thinking_supported) return false;
+    thinkingOn = on;
+    renderModelControls();
+    if (byUser) events.emit("modelChange", { model: selectedModel, thinking: thinkingOn });
+    return true;
   }
 
   modelBtn.addEventListener("click", (e) => {
@@ -510,34 +737,92 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     closePops();
     modelPop.classList.toggle("on", willOpen);
   });
-  thinkBtn.addEventListener("click", () => {
-    thinkingOn = !thinkingOn;
-    thinkBtn.setAttribute("aria-pressed", String(thinkingOn));
-  });
-  moreBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const willOpen = !morePop.classList.contains("on");
-    closePops();
-    morePop.classList.toggle("on", willOpen);
-  });
-  morePop.addEventListener("click", (e) => e.stopPropagation());
+  thinkBtn.addEventListener("click", () => void setThinking(!thinkingOn, true));
   modelPop.addEventListener("click", (e) => e.stopPropagation());
   panel.addEventListener("click", () => closePops());
   expandBtn.addEventListener("click", () => setExpanded(!expanded));
   newBtn.addEventListener("click", () => void startNewConversation());
 
+  function applySettings(s: WidgetSettings): void {
+    settings = s;
+    const ids = s.models.map((m) => m.id);
+    if (!selectedModel || !ids.includes(selectedModel)) selectedModel = s.default_model;
+    thinkingOn = s.thinking_default === true;
+  }
+
   async function loadSettings(): Promise<void> {
     try {
-      settings = await api.settings(options.connectionId);
-      const ids = settings.models.map((m) => m.id);
-      if (!selectedModel || !ids.includes(selectedModel)) selectedModel = settings.default_model;
-      thinkingOn = settings.thinking_default === true;
+      applySettings(await api.settings(options.connectionId, locale));
     } catch (e) {
       // 설정을 못 읽어도 대화는 된다. 붙이는 앱이 준 모델(또는 auto)로 묻는다.
       settings = null;
       options.on?.onError?.(e as Error);
     }
     renderModelControls();
+    if (settings) events.emit("settingsLoaded", settings);
+  }
+
+  /** 화면 언어를 바꾸면 평가 이유 이름만 그 언어로 다시 받는다. 못 받으면 앞 이름을 그대로 쓴다. */
+  async function reloadSettingsFor(asked: Locale): Promise<void> {
+    try {
+      const s = await api.settings(options.connectionId, asked);
+      if (asked !== locale) return;
+      if (settings) settings.feedback_reasons = s.feedback_reasons;
+      else applySettings(s);
+      renderModelControls();
+      if (settings) events.emit("settingsLoaded", settings);
+    } catch {
+      // 평가 이유 이름은 앞 언어로 남는다.
+    }
+  }
+
+  // ── 화면 언어 ─────────────────────────
+  function setLocale(next: Locale): void {
+    storeLocale(next);
+    if (next === locale) return;
+    locale = next;
+    T = CORE[locale];
+    root.lang = locale;
+    closePops();
+    relabel();
+    panes.relabel();
+    events.emit("localeChange", { locale });
+    refreshMenus();
+    void reloadSettingsFor(locale);
+  }
+
+  /** 위젯 본체가 그린 글을 지금 언어로 다시 쓴다. 지난 오류 줄은 그때 언어로 남긴다. */
+  function relabel(): void {
+    if (bubbleBtn) bubbleBtn.setAttribute("aria-label", T.openChat);
+    if (titleIsDefault) setDefaultTitle();
+    setLabel(newBtn, T.newConversation);
+    setLabel(expandBtn, T.expand);
+    setLabel(moreBtn, T.more);
+    if (closeBtn) setLabel(closeBtn, T.close);
+    setLabel(plusBtn, T.addFiles);
+    textarea.placeholder = T.placeholder;
+    toBottomBtn.innerHTML = `${icon("arrowdown", 14)}<span>${T.toBottom}</span>`;
+    cancelRec.textContent = T.cancel;
+    cancelRec.setAttribute("aria-label", T.recCancel);
+    stopRec.textContent = `■ ${T.recStop}`;
+    stopRec.setAttribute("aria-label", T.recStopTitle);
+    setRecState(recState);
+    renderEmpty();
+    renderModelControls();
+    renderMode();
+    renderChips();
+    updateSendButton();
+    turns.forEach((turn, i) => {
+      for (const v of turn.versions) v.feedbackOpen = false;
+      renderUser(turn, i);
+      renderAnswer(turn);
+    });
+    for (const fn of relabelers) guarded("relabel", fn);
+  }
+
+  function refreshMenus(): void {
+    plusMenu.refreshButton();
+    moreMenu.refreshButton();
   }
 
   // ── 질문과 답 그리기 ─────────────────────────
@@ -587,17 +872,18 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     return turn.versions[turn.versions.length - 1]?.turnSeq;
   }
 
-  function buildTurn(question: string, attachmentNames: string[], payload: Turn["attachments"]): Turn {
+  function buildTurn(question: string, attachmentNames: string[], payload: Turn["attachments"], requestBody: Record<string, unknown>): Turn {
     const wrap = el("div");
     wrap.style.display = "contents";
     const userEl = el("div", "u");
     const answerEl = el("div", "a");
     wrap.append(userEl, answerEl);
-    const turn: Turn = {
+    return {
       question,
       attachmentNames,
       attachments: payload,
       askedAt: new Date(),
+      requestBody,
       versions: [],
       shown: 0,
       el: wrap,
@@ -605,14 +891,14 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       answerEl,
       view: buildAnswerShell(answerEl),
     };
-    return turn;
   }
 
   function buildAnswerShell(answerEl: HTMLDivElement): TurnView {
     answerEl.innerHTML = "";
     const view: TurnView = {
       folds: el("div"),
-      body: el("div", "md"),
+      body: el("div", "abody"),
+      seg: null,
       extras: el("div"),
       acts: el("div", "aacts"),
       feedback: el("div"),
@@ -622,7 +908,32 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     return view;
   }
 
-  /** 보이는 판의 답을 처음부터 다시 그린다. 스트리밍이 끝났거나 판을 넘겼을 때 쓴다. */
+  /** CR-177: 기능에 주는 응답 보기. */
+  function answerView(turn: Turn, v: AnswerVersion): AnswerView {
+    const isLastTurn = turns[turns.length - 1] === turn;
+    return {
+      sessionId,
+      turnId: v.turnId,
+      turnSeq: v.turnSeq,
+      question: turn.question,
+      text: v.text,
+      model: v.model,
+      citations: v.citations,
+      artifacts: v.artifacts,
+      stopped: v.stopped,
+      error: v.error,
+      latest: isLastTurn && turn.versions[turn.versions.length - 1] === v,
+      at: v.at,
+      requestBody: turn.requestBody,
+      extra: v.extra,
+    };
+  }
+
+  function rich(target: HTMLElement, markdown: string): void {
+    renderRichInto(target, markdown, { theme: resolvedTheme(), labels: T.rich, marked: markedInstance });
+  }
+
+  /** 보이는 판의 답을 처음부터 다시 그린다. 스트리밍이 끝났거나 판을 넘겼을 때, 언어를 바꿨을 때 쓴다. */
   function renderAnswer(turn: Turn): void {
     const v = turn.versions[turn.shown];
     turn.view = buildAnswerShell(turn.answerEl);
@@ -643,21 +954,80 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       view.toolsFold = fold;
     }
 
-    if (v.live) {
-      view.body.className = "md raw caret";
-      view.body.textContent = v.text;
-    } else if (v.text.trim()) {
-      view.body.className = "md";
-      renderRichInto(view.body, v.text, { theme: resolvedTheme() });
-    }
+    if (v.live) renderLiveBody(view, v);
+    else renderFinalBody(turn, view, v);
     if (v.stopped) view.body.after(el("div", "note", T.stopped));
     if (v.error) view.body.after(el("div", "note error", T.requestFailed(v.error)));
 
     if (v.citations.length) view.extras.appendChild(citationChips(v.citations));
-    if (v.artifacts.length) view.extras.appendChild(artifactChips(v.artifacts));
+    if (v.artifacts.length) view.extras.appendChild(artifactChips(turn, v));
 
     if (!v.live) renderActions(turn);
     renderFollowUps(turn);
+  }
+
+  /** 도는 중: 받은 글은 원문 그대로, 기능이 끼운 요소는 끼운 자리에 둔다. */
+  function renderLiveBody(view: TurnView, v: AnswerVersion): void {
+    let start = 0;
+    for (const m of v.mounts) {
+      const piece = v.text.slice(start, m.at);
+      if (piece) view.body.appendChild(el("div", "md raw", piece));
+      view.body.appendChild(m.el);
+      start = m.at;
+    }
+    const seg = el("div", "md raw caret");
+    seg.textContent = v.text.slice(start);
+    view.body.appendChild(seg);
+    view.seg = seg;
+  }
+
+  /** 끝난 답: 끼운 요소 사이의 글 조각마다 마크다운으로 그리고 기능의 손질을 부른다. */
+  function renderFinalBody(turn: Turn, view: TurnView, v: AnswerVersion): void {
+    view.seg = null;
+    const pieces: Array<{ text: string; after: HTMLElement | null }> = [];
+    let start = 0;
+    for (const m of v.mounts) {
+      pieces.push({ text: v.text.slice(start, m.at), after: m.el });
+      start = m.at;
+    }
+    pieces.push({ text: v.text.slice(start), after: null });
+    const av = answerView(turn, v);
+    const decorators = byOrder(answerDecorators);
+    const decorate = (seg: HTMLElement) => {
+      for (const d of decorators) guarded(`decorator ${d.id}`, () => d.decorate(seg, av));
+    };
+    for (const piece of pieces) {
+      if (piece.text.trim()) {
+        const seg = el("div", "md");
+        rich(seg, piece.text);
+        view.body.appendChild(seg);
+        decorate(seg);
+      }
+      if (piece.after) view.body.appendChild(piece.after);
+    }
+    // 글 없이 끝난 답(그림만 만든 답 등)도 기능이 그릴 자리를 받는다.
+    if (!v.text.trim() && !v.error) {
+      const seg = el("div", "md");
+      view.body.appendChild(seg);
+      decorate(seg);
+    }
+  }
+
+  /** CR-177: 기능이 도는 중인 응답의 지금 위치에 요소를 끼운다. 뒤 글은 그 아래로 이어진다. */
+  function mountInto(turn: Turn, v: AnswerVersion, node: HTMLElement): boolean {
+    if (!v.live || live?.version !== v) return false;
+    v.mounts.push({ at: v.text.length, el: node });
+    if (turn.versions[turn.shown] === v) {
+      const view = turn.view;
+      view.seg?.classList.remove("caret");
+      if (view.seg && !view.seg.textContent) view.seg.remove();
+      view.body.appendChild(node);
+      const seg = el("div", "md raw caret");
+      view.body.appendChild(seg);
+      view.seg = seg;
+      scrollToBottom();
+    }
+    return true;
   }
 
   function renderActions(turn: Turn): void {
@@ -706,6 +1076,14 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       dislike.setAttribute("aria-pressed", String(v.rating === "DOWN" || v.feedbackOpen));
       dislike.addEventListener("click", () => void rateDown(turn, v));
       acts.append(like, dislike);
+    }
+
+    if (answerActions.length) {
+      const av = answerView(turn, v);
+      for (const a of byOrder(answerActions)) {
+        const node = guarded(`answer action ${a.id}`, () => a.render(av));
+        if (node) acts.appendChild(node);
+      }
     }
 
     acts.appendChild(el("span", "time", formatTime(v.at)));
@@ -938,7 +1316,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   }
 
   // ── 보내기 ─────────────────────────
-  async function sendMessage(text: string): Promise<void> {
+  async function sendMessage(text: string, body?: Record<string, unknown>): Promise<void> {
     if (busy) return;
     const trimmed = text.trim();
     const readyAtts = draftAttachments.filter((a) => a.status === "ready" && a.serverMeta);
@@ -954,7 +1332,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
 
     emptyEl.remove();
     const previousLast = turns[turns.length - 1];
-    const turn = buildTurn(trimmed, names, payload);
+    const turn = buildTurn(trimmed, names, payload, collectRequestFields(body));
     turns.push(turn);
     thread.appendChild(turn.el);
     renderUser(turn, turns.length - 1);
@@ -998,6 +1376,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     setBusy(true);
     renderAnswer(turn);
     scrollToBottom();
+    events.emit("answerStart", answerView(turn, version));
 
     try {
       await chat.sendMessage(
@@ -1014,6 +1393,8 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
           rewindFromSeq,
           // 끔도 보낸다. Claude CLI 연결은 아무것도 안 보내면 생각하므로 단추를 끈 뜻이 전해지지 않는다.
           thinking: settings?.thinking_supported ? (thinkingOn ? "on" : "off") : undefined,
+          extra: turn.requestBody,
+          renderFeatures: collectRenderFeatures(),
         },
         (d) => onDelta(turn, version, d),
       );
@@ -1029,6 +1410,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       renderAnswer(turn);
       renderUser(turn, turns.indexOf(turn));
       scrollToBottom();
+      events.emit("answerDone", answerView(turn, version));
     }
     void loadFollowUps(turn, version);
     return version;
@@ -1064,7 +1446,9 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
           }
         }
         v.text += d.text ?? "";
-        view.body.textContent = v.text;
+        const from = v.mounts.length ? v.mounts[v.mounts.length - 1].at : 0;
+        if (view.seg) view.seg.textContent = v.text.slice(from);
+        if (d.text) events.emit("answerDelta", { answer: answerView(turn, v), text: d.text });
         break;
       }
       case "tool_use_start": {
@@ -1101,11 +1485,23 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
         v.model = d.done?.model;
         v.citations = d.done?.citations ?? [];
         v.artifacts = d.done?.artifacts ?? [];
+        v.extra = d.done?.extra ?? {};
         v.at = new Date();
         break;
       }
       case "error": {
-        v.error = d.error ?? "unknown error";
+        // CR-177: 응답 도중 서버가 보낸 오류. 받은 글은 남기고 오류로 끝낸다. 다시 시도 단추는 두지 않는다.
+        v.error = codeText(d.errorCode) ?? d.error ?? d.errorCode ?? "error";
+        break;
+      }
+      case "event": {
+        if (!d.event) break;
+        events.emit("streamEvent", {
+          name: d.event.name,
+          data: d.event.data,
+          answer: answerView(turn, v),
+          mount: (node) => mountInto(turn, v, node),
+        });
         break;
       }
     }
@@ -1122,6 +1518,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       if (res.title) {
         titleFromServer = true;
         setTitle(res.title);
+        events.emit("titleChange", { sessionId, title: res.title });
       }
       if (turns.includes(turn)) {
         renderFollowUps(turn);
@@ -1138,30 +1535,87 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     await chat.stop(options.baseUrl, sessionId);
   }
 
-  async function startNewConversation(): Promise<void> {
-    if (busy) await chat.abort(options.baseUrl, sessionId);
-    const previousSessionId = sessionId;
-    sessionId = genId();
-    turns = [];
-    live = null;
-    titleFromServer = false;
-    setBusy(false);
-    thread.innerHTML = "";
-    thread.appendChild(emptyEl);
-    workflowRuns = new Map();
+  /** 첨부해 둔 파일을 서버에서 지운다. 대화를 떠날 때 쓴다. */
+  function discardDrafts(inSession: string): void {
     for (const draft of draftAttachments) {
       if (draft.serverMeta) {
-        void attachments.delete({ baseUrl: options.baseUrl, sessionId: previousSessionId, attachmentId: draft.serverMeta.attachment_id }).catch(() => undefined);
+        void attachments.delete({ baseUrl: options.baseUrl, sessionId: inSession, attachmentId: draft.serverMeta.attachment_id }).catch(() => undefined);
       }
     }
     draftAttachments = [];
     renderChips();
-    setTitle(T.defaultTitle);
+  }
+
+  /** 대화 칸을 비운다. 새 대화와 지난 대화 열기가 같이 쓴다. */
+  function resetThread(): void {
+    turns = [];
+    live = null;
+    setBusy(false);
+    thread.innerHTML = "";
+    workflowRuns = new Map();
+    relabelers = [];
+  }
+
+  async function startNewConversation(): Promise<void> {
+    if (busy) await chat.abort(options.baseUrl, sessionId);
+    const previousSessionId = sessionId;
+    sessionId = genId();
+    resetThread();
+    titleFromServer = false;
+    thread.appendChild(emptyEl);
+    discardDrafts(previousSessionId);
+    clearMode();
+    setDefaultTitle();
     textarea.value = "";
     autosize(textarea);
     updateSendButton();
     textarea.focus();
     options.on?.onNewConversation?.({ previousSessionId, sessionId });
+    events.emit("newConversation", { previousSessionId, sessionId });
+  }
+
+  /** CR-177: 지난 대화를 대화 칸에 그린다. 새 대화 알림과 응답 끝 알림은 보내지 않는다. */
+  async function openConversation(view: ConversationView): Promise<void> {
+    if (busy) await chat.abort(options.baseUrl, sessionId);
+    discardDrafts(sessionId);
+    clearMode();
+    panes.closeSide();
+    sessionId = view.sessionId;
+    resetThread();
+    if (view.notice) thread.appendChild(el("div", "notice info", view.notice));
+    for (const t of view.turns) {
+      const names = (t.question.attachments ?? []).map((a) => a.filename);
+      const turn = buildTurn(t.question.text, names, [], t.answer.requestBody ?? {});
+      turn.askedAt = t.question.at ?? new Date();
+      const v = newVersion();
+      v.live = false;
+      v.text = t.answer.text;
+      v.model = t.answer.model;
+      v.at = t.answer.at ?? turn.askedAt;
+      v.stopped = t.answer.stopped ?? false;
+      v.tools = (t.answer.tools ?? []).map((name) => ({ name, arg: "", status: "done" as const }));
+      v.extra = t.answer.extra ?? {};
+      v.turnId = t.turnId;
+      v.turnSeq = t.turnSeq;
+      v.rating = t.feedback?.rating;
+      turn.versions = [v];
+      turns.push(turn);
+      thread.appendChild(turn.el);
+    }
+    turns.forEach((turn, i) => {
+      renderUser(turn, i);
+      renderAnswer(turn);
+    });
+    if (!turns.length) thread.appendChild(emptyEl);
+    if (view.title) {
+      setTitle(view.title);
+      titleFromServer = true;
+    } else {
+      setDefaultTitle();
+      titleFromServer = false;
+    }
+    updateSendButton();
+    scrollToBottom(true);
   }
 
   // ── CR-131: 도구 이름과 입력 요약 ─────────────────────────
@@ -1201,17 +1655,28 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     return wrap;
   }
 
-  /** CR-132: CLI 산출물을 이름과 크기를 단 다운로드 칩으로 그린다. */
-  function artifactChips(artifacts: ChatArtifact[]): HTMLDivElement {
+  /** CR-132: CLI 산출물 칩. CR-177: 기능의 열기가 받으면 그쪽으로 열고, 칩 끝에 기능 단추를 붙인다. */
+  function artifactChips(turn: Turn, v: AnswerVersion): HTMLDivElement {
     const wrap = el("div", "artifacts");
-    artifacts.forEach((a) => {
+    const av = answerView(turn, v);
+    v.artifacts.forEach((a) => {
+      const item = el("span", "artifact-item");
       const chip = el("button", "artifact");
       chip.type = "button";
       chip.innerHTML = icon("attach", 13);
       chip.appendChild(el("span", "", `${a.name} (${formatBytes(a.size)})`));
-      chip.title = `다운로드 · ${a.name}`;
-      chip.addEventListener("click", () => void downloadArtifact(a));
-      wrap.appendChild(chip);
+      chip.title = T.download(a.name);
+      chip.addEventListener("click", () => {
+        const opener = byOrder(artifactOpeners).find((o) => guarded(`artifact opener ${o.id}`, () => o.canOpen(a)));
+        if (opener) guarded(`artifact opener ${opener.id}`, () => opener.open(a, av));
+        else void downloadArtifact(a);
+      });
+      item.appendChild(chip);
+      for (const action of byOrder(artifactActions)) {
+        const node = guarded(`artifact action ${action.id}`, () => action.render(a, av));
+        if (node) item.appendChild(node);
+      }
+      wrap.appendChild(item);
     });
     return wrap;
   }
@@ -1233,7 +1698,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       // 브라우저가 내려받기를 시작할 시간을 준 뒤 해제한다.
       setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
     } catch (e) {
-      appendNotice(`다운로드 실패: ${(e as Error).message}`);
+      appendNotice(T.downloadFailed((e as Error).message));
     }
   }
 
@@ -1271,12 +1736,9 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   function validateFile(file: File): string | null {
     const isImage = file.type.startsWith("image/");
     const isPdf = file.type === "application/pdf";
-    if (!isImage && !isPdf) return "이미지(PNG/JPEG/GIF/WEBP) 또는 PDF 만 첨부 가능합니다";
+    if (!isImage && !isPdf) return T.fileTypeNotAllowed;
     const limit = isPdf ? MAX_PDF_BYTES : MAX_IMAGE_BYTES;
-    if (file.size > limit) {
-      const mb = Math.round(limit / 1024 / 1024);
-      return `파일이 너무 큽니다 (최대 ${mb}MB)`;
-    }
+    if (file.size > limit) return T.fileTooLarge(Math.round(limit / 1024 / 1024));
     return null;
   }
 
@@ -1290,14 +1752,18 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
         img.src = draft.previewDataUrl;
         img.alt = draft.file.name;
         chip.appendChild(img);
-      } else {
+      } else if (draft.file.type === "application/pdf") {
         chip.appendChild(el("span", "chip-thumb pdf", "PDF"));
+      } else {
+        const thumb = el("span", "chip-thumb pdf");
+        thumb.innerHTML = icon("attach", 13);
+        chip.appendChild(thumb);
       }
       const label = el("span", "chip-label");
       const pages = draft.serverMeta?.pages;
       const pageSuffix = pages ? ` · ${pages}p` : "";
       label.textContent = draft.status === "error"
-        ? `${draft.file.name} — ${draft.error ?? "실패"}`
+        ? `${draft.file.name}: ${draft.error ?? T.uploadFailed}`
         : `${draft.file.name}${pageSuffix}`;
       label.title = label.textContent ?? "";
       chip.appendChild(label);
@@ -1354,6 +1820,17 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     }
   }
 
+  /** CR-177: 기능이 이미 서버에 올린 파일을 첨부 칩으로 더한다. */
+  function attachUploaded(meta: Attachment): void {
+    draftAttachments.push({
+      localId: genLocalId(),
+      file: new File([], meta.filename, { type: meta.media_type }),
+      status: "ready",
+      serverMeta: meta,
+    });
+    renderChips();
+  }
+
   async function removeAttachment(localId: string): Promise<void> {
     const idx = draftAttachments.findIndex((a) => a.localId === localId);
     if (idx < 0) return;
@@ -1369,7 +1846,6 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     }
   }
 
-  attachBtn.addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => {
     const files = fileInput.files ? Array.from(fileInput.files) : [];
     for (const f of files) void addAttachment(f);
@@ -1447,8 +1923,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     recState = next;
     const recording = next === "recording";
     micBtn.setAttribute("aria-pressed", String(recording));
-    micBtn.setAttribute("aria-label", recording ? "녹음 정지" : "음성 입력 시작");
-    micBtn.setAttribute("data-tip", recording ? "녹음 정지" : "음성 입력 시작");
+    setLabel(micBtn, recording ? T.micStop : T.micStart);
     micBtn.innerHTML = icon(recording ? "stop" : "mic");
     micBtn.classList.toggle("rec-on", recording);
     recordingOverlay.classList.toggle("hidden", !recording);
@@ -1472,14 +1947,14 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   async function startRecording(): Promise<void> {
     if (recState !== "idle") return;
     if (!sttSupported()) {
-      appendNotice("이 브라우저·환경에서는 음성 입력을 사용할 수 없습니다 (HTTPS 필수)");
+      appendNotice(T.sttUnsupported);
       return;
     }
     setRecState("requesting-permission");
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      appendNotice("마이크 권한이 필요합니다. 브라우저 주소창의 자물쇠 아이콘을 눌러 허용해주세요");
+      appendNotice(T.micPermission);
       options.on?.onError?.(e as Error);
       setRecState("idle");
       return;
@@ -1490,7 +1965,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     } catch (e) {
       releaseMic();
       setRecState("idle");
-      appendNotice("이 브라우저의 MediaRecorder 포맷이 서버와 호환되지 않습니다");
+      appendNotice(T.recorderFormat);
       options.on?.onError?.(e as Error);
       return;
     }
@@ -1558,18 +2033,8 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   }
 
   function sttErrorMessage(err: SttError | Error): string {
-    if (err instanceof SttError) {
-      switch (err.code) {
-        case "STT_RATE_LIMITED":  return "음성 입력을 너무 자주 사용했습니다. 잠시 후 다시 시도해주세요";
-        case "STT_FILE_TOO_LARGE": return "녹음 파일이 너무 큽니다";
-        case "STT_FILE_TOO_LONG":  return "녹음 시간이 너무 깁니다";
-        case "STT_INVALID_MIME":   return "이 오디오 포맷은 서버에서 지원하지 않습니다";
-        case "STT_PROVIDER_UNAVAILABLE": return "음성 인식 서비스를 사용할 수 없습니다 (OpenAI 연결 확인 필요)";
-        case "STT_TIMEOUT":        return "음성 인식 응답이 지연됩니다. 다시 시도해주세요";
-        case "STT_NETWORK":        return "네트워크 오류로 음성을 전송하지 못했습니다";
-      }
-    }
-    return "음성 인식에 실패했습니다: " + err.message;
+    if (err instanceof SttError && T.sttErrors[err.code]) return T.sttErrors[err.code];
+    return T.sttFailed(err.message);
   }
 
   function insertTextAtCursor(ta: HTMLTextAreaElement, text: string): void {
@@ -1633,41 +2098,23 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     }
   });
 
-  // Esc 순서: 녹음 취소, 응답 중지, 열린 메뉴 닫기, 크게 보기 닫기
+  // Esc 순서: 기능(나중에 등록한 것 먼저), 녹음 취소, 응답 중지, 열린 메뉴, 겹친 왼쪽 칸, 옆 창, 크게 보기
   panel.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if (recState === "recording") {
-      e.stopPropagation();
-      cancelRecording();
-    } else if (busy) {
-      e.stopPropagation();
-      void stop();
-    } else if (closePops()) {
-      e.stopPropagation();
-    } else if (expanded) {
-      e.stopPropagation();
-      setExpanded(false);
-    }
+    const handled = [...escapeHandlers].reverse().some((fn) => guarded("escape handler", fn) === true)
+      || (recState === "recording" && (cancelRecording(), true))
+      || (busy && (void stop(), true))
+      || closePops()
+      || panes.closeOverlayLeft()
+      || panes.closeSide()
+      || (expanded && (setExpanded(false), true));
+    if (handled) e.stopPropagation();
   });
-
-  // ── 시작 ─────────────────────────
-  setFontSize(readStoredFontSize() ?? (FONT_SIZES.includes(options.fontSize as FontSize) ? (options.fontSize as FontSize) : "medium"));
-  updateSendButton();
-  renderModelControls();
-  (async () => {
-    try {
-      await tokens.ensureLoaded();
-      if (sttSupported() && tokens.hasScope("chat:stt")) micBtn.hidden = false;
-    } catch {
-      // 토큰을 못 읽으면 첫 요청에서 오류로 보인다.
-    }
-    await loadSettings();
-  })();
 
   // ── 워크플로우 ─────────────────────────
   async function subscribeWorkflow(runId: string): Promise<() => void> {
     const wfPanel = el("div", "workflow-panel");
-    const wfTitle = el("div", "title", `워크플로우 ${runId.slice(0, 8)}…`);
+    const wfTitle = el("div", "title");
     wfPanel.appendChild(wfTitle);
     const stepsList = el("div", "steps");
     wfPanel.appendChild(stepsList);
@@ -1675,10 +2122,15 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     thread.appendChild(wfPanel);
     const steps = new Map<string, HTMLElement>();
     workflowRuns.set(runId, { stepEl: wfPanel, steps });
+    let titleText = () => T.workflowTitle(`${runId.slice(0, 8)}…`);
+    const renderWfTitle = () => { wfTitle.textContent = titleText(); };
+    renderWfTitle();
+    relabelers.push(renderWfTitle);
 
     return workflow.subscribe(options.baseUrl, runId, {
       onSnapshot: (snap) => {
-        wfTitle.textContent = `워크플로우 ${snap.workflow_id ?? runId.slice(0, 8)} — ${snap.status}`;
+        titleText = () => `${T.workflowTitle(String(snap.workflow_id ?? runId.slice(0, 8)))} · ${snap.status}`;
+        renderWfTitle();
       },
       onStep: (ev: WorkflowStepEvent) => {
         options.on?.onWorkflowStep?.(ev);
@@ -1693,7 +2145,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
         stepEl.appendChild(el("span", `dot ${dotClass}`));
         stepEl.appendChild(el("span", "label", `${ev.step_id}${ev.duration_ms ? ` · ${ev.duration_ms}ms` : ""}`));
         if (ev.sub_workflow_id) {
-          const sub = el("span", "sub", ` → ${ev.sub_workflow_id}`);
+          const sub = el("span", "sub", ` · ${ev.sub_workflow_id}`);
           sub.style.color = "var(--aimbase-muted)";
           stepEl.appendChild(sub);
         }
@@ -1701,11 +2153,28 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       onApproval: (ev: ApprovalEvent) => {
         options.on?.onApprovalRequired?.(ev);
         const note = el("div", "workflow-step");
-        note.textContent = `승인 대기: ${ev.step_id} — ${ev.reason ?? ev.policy_id}`;
-        stepsList.appendChild(note);
+        const renderNote = () => { note.textContent = T.approvalWaiting(ev.step_id, ev.reason ?? ev.policy_id); };
+        renderNote();
+        relabelers.push(renderNote);
+        const holder = el("div", "workflow-approval");
+        stepsList.append(note, holder);
+        events.emit("workflowApproval", {
+          runId: ev.run_id,
+          stepId: ev.step_id,
+          policyId: ev.policy_id,
+          reason: ev.reason,
+          approvers: ev.approvers ?? [],
+          timeoutAt: ev.timeout_at,
+          mount: (node) => {
+            if (!holder.isConnected) return false;
+            holder.appendChild(node);
+            return true;
+          },
+        });
       },
       onDone: (ev) => {
-        wfTitle.textContent = `워크플로우 ${runId.slice(0, 8)}… — ${ev.status} (${ev.duration_ms}ms)`;
+        titleText = () => `${T.workflowTitle(`${runId.slice(0, 8)}…`)} · ${ev.status} (${ev.duration_ms}ms)`;
+        renderWfTitle();
         workflowRuns.delete(runId);
       },
       onError: (e) => {
@@ -1714,10 +2183,116 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     });
   }
 
+  // ── 기능에 주는 자리(CR-177) ─────────────────────────
+  const ctx: WidgetContext = {
+    locale: () => locale,
+    setLocale: (next) => setLocale(next),
+    strings: (pack) => stringsView(pack, () => locale),
+    text: (value) => pickText(value, locale),
+    list: (value) => pickList(value, locale),
+    sessionId: () => sessionId,
+    isBusy: () => busy,
+    isRecording: () => recState !== "idle",
+    widgetSettings: () => settings,
+    connectionId: () => options.connectionId ?? null,
+    on: (name, cb) => events.on(name, cb),
+    ui: {
+      plusMenu,
+      moreMenu,
+      leftPane: { mount: (spec) => panes.mountLeft(spec) },
+      sidePane: {
+        open: (spec) => {
+          closePops();
+          panes.openSide(spec);
+        },
+        close: () => void panes.closeSide(),
+        currentId: () => panes.currentSideId(),
+      },
+      composer: {
+        addTool: (spec) => addComposerTool(spec),
+        setMode: (spec) => setMode(spec),
+        clearMode: () => clearMode(),
+        currentMode: () => composerMode?.id ?? null,
+      },
+      answer: {
+        addAction: (spec) => void answerActions.push(spec),
+        addDecorator: (spec) => void answerDecorators.push(spec),
+        addArtifactOpener: (spec) => void artifactOpeners.push(spec),
+        addArtifactAction: (spec) => void artifactActions.push(spec),
+        addMarkdownExtension: (spec) => {
+          markdownExtensions.push(spec.extension);
+          markedInstance = createMarked(markdownExtensions);
+        },
+      },
+      header: {
+        setTitleTag: (spec) => {
+          titleTag = spec;
+          renderTitleTag();
+        },
+      },
+      addErrorTexts: (map) => void Object.assign(featureErrorTexts, map),
+      fontSize: () => fontSize,
+      setFontSize: (size) => {
+        applyFontSize(size);
+        storeFontSize(size);
+      },
+      layer: panel,
+      toast: (text) => showToast(text),
+      notice: (text) => appendInfo(text),
+      onEscape: (fn) => {
+        escapeHandlers.push(fn);
+        return () => {
+          const i = escapeHandlers.indexOf(fn);
+          if (i >= 0) escapeHandlers.splice(i, 1);
+        };
+      },
+    },
+    chat: {
+      send: (text, opts) => sendMessage(text, opts?.body),
+      abort: () => stop(),
+      open: (view) => openConversation(view),
+      selectModel: (id) => selectModel(id, false),
+      setThinking: (on) => setThinking(on, false),
+      setTitle: (text) => {
+        setTitle(text);
+        titleFromServer = true;
+      },
+      newConversation: () => startNewConversation(),
+      attach: (file) => addAttachment(file),
+      attachUploaded: (meta) => attachUploaded(meta),
+      addRequestFields: (fn) => void requestFieldFns.push(fn),
+    },
+    api: {
+      request: (method, path, body) => api.request(method, path, body),
+      requestBlob: (method, path, body, opts) => api.requestBlob(method, path, body, opts),
+      hasScope: (scope) => tokens.hasScope(scope),
+      wsUrl: (path) => api.wsUrl(path),
+    },
+  };
+
+  // ── 시작 ─────────────────────────
+  applyFontSize(readStoredFontSize() ?? (FONT_SIZES.includes(options.fontSize as FontSize) ? (options.fontSize as FontSize) : "medium"));
+  relabel();
+  for (const feature of FEATURES) {
+    if (feature.css) featureStyles.textContent += `\n${feature.css}`;
+    guarded(`feature ${feature.id} install`, () => feature.install(ctx));
+  }
+  refreshMenus();
+  events.on("settingsLoaded", () => refreshMenus());
+  (async () => {
+    try {
+      await tokens.ensureLoaded();
+      if (sttSupported() && tokens.hasScope("chat:stt")) micBtn.hidden = false;
+    } catch {
+      // 토큰을 못 읽으면 첫 요청에서 오류로 보인다.
+    }
+    await loadSettings();
+  })();
+
   return {
     open: () => setOpen(true),
     close: () => setOpen(false),
-    sendMessage,
+    sendMessage: (text: string) => sendMessage(text),
     abort: () => stop(),
     subscribeWorkflow: (runId: string) => {
       let unsub: (() => void) | null = null;
@@ -1725,6 +2300,9 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       return () => unsub?.();
     },
     destroy: () => {
+      events.emit("destroy", undefined);
+      events.clear();
+      panes.destroy();
       cancelRecording();
       if (busy) void chat.abort(options.baseUrl, sessionId);
       tokens.destroy();

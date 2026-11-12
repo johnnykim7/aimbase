@@ -1,17 +1,49 @@
 import { createWidget } from "./widget";
+import { LOCALES, type Locale, type LocalizedList, type LocalizedText } from "./frame/i18n";
 import type { FontSize, WidgetHandle, WidgetOptions } from "./types";
 
 const FONT_SIZES: FontSize[] = ["small", "medium", "large"];
 
-/** suggestions 속성은 JSON 글 배열이다. 깨진 값은 무시하고 첫 화면을 추천 질문 없이 보인다. */
-function parseSuggestions(raw: string | null): string[] | undefined {
+/**
+ * suggestions 속성은 JSON 글 배열이거나, 화면 언어마다 글 배열을 둔 JSON 객체다.
+ * 예: ["주문 현황"] 또는 {"ko":["주문 현황"],"en":["Order status"]}. 깨진 값은 무시하고 첫 화면을 추천 질문 없이 보인다.
+ */
+function parseSuggestions(raw: string | null): LocalizedList | undefined {
   if (!raw) return undefined;
+  const strings = (v: unknown): string[] | undefined =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined;
   try {
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : undefined;
+    if (Array.isArray(parsed)) return strings(parsed);
+    if (parsed && typeof parsed === "object") {
+      const out: Partial<Record<Locale, string[]>> = {};
+      for (const locale of LOCALES) {
+        const list = strings((parsed as Record<string, unknown>)[locale]);
+        if (list) out[locale] = list;
+      }
+      return out;
+    }
   } catch {
-    console.error("[aimbase-chat] suggestions attribute must be a JSON array of strings");
-    return undefined;
+    // 아래에서 알린다.
+  }
+  console.error("[aimbase-chat] suggestions attribute must be a JSON array of strings or an object of locale to array");
+  return undefined;
+}
+
+/** empty-title, empty-subtitle 은 글 그대로이거나, { 로 시작하면 화면 언어마다 글을 둔 JSON 객체다. */
+function parseLocalizedText(raw: string | null): LocalizedText | undefined {
+  if (raw === null) return undefined;
+  if (!raw.trimStart().startsWith("{")) return raw;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const out: Partial<Record<Locale, string>> = {};
+    for (const locale of LOCALES) {
+      const v = (parsed as Record<string, unknown>)?.[locale];
+      if (typeof v === "string") out[locale] = v;
+    }
+    return out;
+  } catch {
+    return raw;
   }
 }
 
@@ -47,6 +79,7 @@ export class AimbaseChatElement extends HTMLElement {
       "empty-title",
       "empty-subtitle",
       "font-size",
+      "locale",
     ];
   }
 
@@ -99,8 +132,9 @@ export class AimbaseChatElement extends HTMLElement {
       theme: themeAttr ? { mode: themeAttr } : undefined,
       contextProvider: this.contextProvider ?? undefined,
       suggestions: parseSuggestions(this.getAttribute("suggestions")),
-      emptyTitle: this.getAttribute("empty-title") ?? undefined,
-      emptySubtitle: this.getAttribute("empty-subtitle") ?? undefined,
+      emptyTitle: parseLocalizedText(this.getAttribute("empty-title")),
+      emptySubtitle: parseLocalizedText(this.getAttribute("empty-subtitle")),
+      locale: this.getAttribute("locale") ?? undefined,
       fontSize: fontSizeAttr && FONT_SIZES.includes(fontSizeAttr) ? fontSizeAttr : undefined,
       on: {
         // 붙이는 앱이 새 대화 번호를 따라가도록 엘리먼트 이벤트로 알린다.

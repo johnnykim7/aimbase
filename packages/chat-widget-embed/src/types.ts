@@ -1,6 +1,7 @@
 /**
  * Aimbase Chat Widget — 공개 타입
  */
+import type { LocalizedList, LocalizedText } from "./frame/i18n";
 
 export interface TokenResponse {
   token: string;
@@ -39,7 +40,7 @@ export interface ChatArtifact {
 }
 
 export interface ChatDelta {
-  type: "delta" | "thinking" | "tool_use_start" | "tool_result" | "done" | "error";
+  type: "delta" | "thinking" | "tool_use_start" | "tool_result" | "done" | "error" | "event";
   text?: string;
   tool?: { id?: string; name?: string; input?: Record<string, unknown> };
   toolResult?: { tool_use_id: string; output: string; is_error: boolean };
@@ -54,8 +55,14 @@ export interface ChatDelta {
     turn_seq?: number;
     /** CR-175: 실제로 답한 모델. */
     model?: string;
+    /** CR-177: 위젯 본체가 쓰지 않는 끝 이벤트 칸. 기능이 응답 보기(extra)로 읽는다. */
+    extra?: Record<string, unknown>;
   };
   error?: string;
+  /** CR-177: 응답 중 서버가 보낸 오류 이벤트의 코드 */
+  errorCode?: string;
+  /** CR-177: 위젯 본체가 모르는 이벤트. 기능에 그대로 알린다. */
+  event?: { name: string; data: unknown };
 }
 
 export interface WorkflowStepEvent {
@@ -101,12 +108,14 @@ export interface WidgetOptions {
   actionsEnabled?: boolean;
   /** 모델 명시 지정 — chat request 의 model 로 전달. 미지정 시 "auto". */
   model?: string;
-  /** CR-175: 첫 화면 추천 질문. 최대 4개까지 보인다. */
-  suggestions?: string[];
-  /** CR-175: 첫 화면 안내 제목. 없으면 위젯 기본 문구. */
-  emptyTitle?: string;
-  /** CR-175: 첫 화면 안내 한 줄. 없으면 비운다. */
-  emptySubtitle?: string;
+  /** CR-175: 첫 화면 추천 질문. 최대 4개까지 보인다. CR-177: 언어별 목록({ ko: [...], en: [...] })도 받는다. */
+  suggestions?: LocalizedList;
+  /** CR-175: 첫 화면 안내 제목. 없으면 위젯 기본 문구. CR-177: 언어별 값({ ko, en })도 받는다. */
+  emptyTitle?: LocalizedText;
+  /** CR-175: 첫 화면 안내 한 줄. 없으면 비운다. CR-177: 언어별 값({ ko, en })도 받는다. */
+  emptySubtitle?: LocalizedText;
+  /** CR-177: 화면 언어 기본값(ko, en). 사용자가 더 보기에서 바꾸면 그 브라우저에서는 그 값을 따른다. */
+  locale?: string;
   /** CR-175: 글자 크기 기본값. 사용자가 더보기에서 바꾸면 그 브라우저에서는 그 값을 따른다. */
   fontSize?: FontSize;
   /** 위젯 내 승인 UI 활성화 — 기본 false (이벤트만 발행) */

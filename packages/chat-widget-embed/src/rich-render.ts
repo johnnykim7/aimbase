@@ -15,18 +15,25 @@
  */
 
 import DOMPurify from "dompurify";
-import { marked } from "marked";
+import { Marked, type TokenizerAndRendererExtension } from "marked";
 import { copyText } from "./clipboard";
+import type { RichStrings } from "./strings";
 import { tableToXlsxBlob } from "./xlsx-writer";
 
-let markedConfigured = false;
-function configureMarked(): void {
-  if (markedConfigured) return;
-  marked.setOptions({
-    gfm: true,
-    breaks: true, // 채팅 응답은 단일 개행도 <br> 로 (claude.ai 유사)
-  });
-  markedConfigured = true;
+/**
+ * CR-177: 위젯마다 따로 둔다. 한 페이지에 위젯이 둘이어도 한쪽 기능의 마크다운 확장이 다른 쪽에 번지지 않는다.
+ * 채팅 응답은 단일 개행도 <br> 로 (claude.ai 유사).
+ */
+export function createMarked(extensions: TokenizerAndRendererExtension[]): Marked {
+  const m = new Marked({ gfm: true, breaks: true });
+  if (extensions.length) m.use({ extensions });
+  return m;
+}
+
+export interface RichOptions {
+  theme?: "light" | "dark";
+  labels: RichStrings;
+  marked: Marked;
 }
 
 // mermaid 는 페이지에서 1회만 초기화.
@@ -67,7 +74,8 @@ function sanitize(rawHtml: string): string {
       "img",
     ],
     ALLOWED_ATTR: ["href", "title", "class", "src", "alt", "align", "colspan", "rowspan"],
-    ALLOW_DATA_ATTR: false,
+    // CR-177: 기능의 마크다운 확장이 data-* 로 표시를 남긴다. 스크립트와 이벤트 속성은 그대로 막힌다.
+    ALLOW_DATA_ATTR: true,
     // 상대·http(s)·mailto·data(image) 만. javascript: 차단.
     ALLOWED_URI_REGEXP:
       /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$)|data:image\/)/i,
@@ -122,7 +130,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 let tableSeq = 0;
 
 /** 표마다 [CSV] [엑셀] [복사] 툴바를 위에 삽입. */
-function enhanceTables(container: HTMLElement): void {
+function enhanceTables(container: HTMLElement, labels: RichStrings): void {
   container.querySelectorAll("table").forEach((table) => {
     const rows = extractTable(table as HTMLTableElement);
     if (!rows.length) return;
@@ -142,14 +150,14 @@ function enhanceTables(container: HTMLElement): void {
       return b;
     };
 
-    const csvBtn = mkBtn("CSV", "CSV 다운로드");
+    const csvBtn = mkBtn(labels.csv, labels.csvTitle);
     csvBtn.addEventListener("click", () => {
       // Excel 한글 깨짐 방지 UTF-8 BOM.
       const blob = new Blob(["﻿" + tableToCsv(rows)], { type: "text/csv;charset=utf-8" });
       downloadBlob(blob, `table-${seq}.csv`);
     });
 
-    const xlsxBtn = mkBtn("엑셀", "엑셀(.xlsx) 다운로드");
+    const xlsxBtn = mkBtn(labels.excel, labels.excelTitle);
     xlsxBtn.addEventListener("click", async () => {
       xlsxBtn.disabled = true;
       const prev = xlsxBtn.textContent;
@@ -158,7 +166,7 @@ function enhanceTables(container: HTMLElement): void {
         const blob = await tableToXlsxBlob(rows, `Sheet${seq}`);
         downloadBlob(blob, `table-${seq}.xlsx`);
       } catch {
-        xlsxBtn.textContent = "실패";
+        xlsxBtn.textContent = labels.failed;
         setTimeout(() => { xlsxBtn.textContent = prev; }, 1500);
         xlsxBtn.disabled = false;
         return;
@@ -167,10 +175,10 @@ function enhanceTables(container: HTMLElement): void {
       xlsxBtn.disabled = false;
     });
 
-    const copyBtn = mkBtn("복사", "표를 클립보드에 복사 (탭 구분)");
+    const copyBtn = mkBtn(labels.copy, labels.copyTableTitle);
     copyBtn.addEventListener("click", async () => {
       const tsv = rows.map((r) => r.join("\t")).join("\n");
-      if (await copyText(tsv)) flashCopied(copyBtn, "복사");
+      if (await copyText(tsv)) flashCopied(copyBtn, labels.copy);
     });
 
     toolbar.appendChild(csvBtn);
@@ -194,7 +202,7 @@ function flashCopied(btn: HTMLButtonElement, restore: string): void {
 }
 
 /** 코드블록: 복사 버튼 + highlight.js 하이라이트(lazy). mermaid 는 제외. */
-async function enhanceCodeBlocks(container: HTMLElement, theme: "light" | "dark"): Promise<void> {
+async function enhanceCodeBlocks(container: HTMLElement, theme: "light" | "dark", labels: RichStrings): Promise<void> {
   const pres = Array.from(container.querySelectorAll("pre > code")) as HTMLElement[];
   const codeBlocks = pres.filter((code) => !isMermaidCode(code));
   if (!codeBlocks.length) return;
@@ -206,10 +214,10 @@ async function enhanceCodeBlocks(container: HTMLElement, theme: "light" | "dark"
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "rich-code-copy";
-    copyBtn.textContent = "복사";
-    copyBtn.title = "코드 복사";
+    copyBtn.textContent = labels.copy;
+    copyBtn.title = labels.copyCodeTitle;
     copyBtn.addEventListener("click", async () => {
-      if (await copyText(code.textContent ?? "")) flashCopied(copyBtn, "복사");
+      if (await copyText(code.textContent ?? "")) flashCopied(copyBtn, labels.copy);
     });
     pre.appendChild(copyBtn);
   }
@@ -277,14 +285,13 @@ async function enhanceMermaid(container: HTMLElement, theme: "light" | "dark"): 
 export function renderRichInto(
   target: HTMLElement,
   markdown: string,
-  opts?: { theme?: "light" | "dark" },
+  opts: RichOptions,
 ): void {
-  const theme = opts?.theme ?? "light";
-  configureMarked();
+  const theme = opts.theme ?? "light";
 
   let html: string;
   try {
-    html = marked.parse(markdown, { async: false }) as string;
+    html = opts.marked.parse(markdown, { async: false }) as string;
   } catch {
     // 파싱 실패 시 원문 유지 (textContent).
     target.textContent = markdown;
@@ -296,8 +303,8 @@ export function renderRichInto(
   target.classList.add("rich");
 
   hardenLinks(target);
-  enhanceTables(target);
+  enhanceTables(target, opts.labels);
   // 코드/mermaid 는 lazy — 비동기로 순차 강화 (렌더는 이미 끝났으므로 UX 영향 없음).
-  void enhanceCodeBlocks(target, theme);
+  void enhanceCodeBlocks(target, theme, opts.labels);
   void enhanceMermaid(target, theme);
 }

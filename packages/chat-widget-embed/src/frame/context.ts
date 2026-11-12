@@ -188,6 +188,8 @@ export interface WorkflowApprovalEvent {
 }
 
 export interface WidgetEvents {
+  /** 위젯 창을 열거나 닫았을 때. 늘 열려 있는 inline 은 오지 않는다 */
+  panelToggle: { open: boolean };
   localeChange: { locale: Locale };
   newConversation: { previousSessionId: string; sessionId: string };
   answerStart: AnswerView;

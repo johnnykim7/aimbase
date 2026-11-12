@@ -20,6 +20,29 @@ export type {
   WidgetSettings,
   WorkflowStepEvent,
 } from "./types";
+export type { Locale, LocalizedList, LocalizedText, StringPack } from "./frame/i18n";
+export type {
+  AnswerActionSpec,
+  AnswerDecoratorSpec,
+  AnswerView,
+  ArtifactActionSpec,
+  ArtifactOpenerSpec,
+  ComposerModeSpec,
+  ComposerToolSpec,
+  ConversationView,
+  LeftPaneHandle,
+  LeftPaneSpec,
+  MarkdownExtensionSpec,
+  MenuItemSpec,
+  MenuRowSpec,
+  MenuSlot,
+  SidePaneSpec,
+  TitleTagSpec,
+  WidgetContext,
+  WidgetEvents,
+  WidgetFeature,
+  WorkflowApprovalEvent,
+} from "./frame/context";
 export { SttClient, SttError } from "./stt-client";
 
 /** UMD/IIFE 번들 로드 시 자동으로 <aimbase-chat> 커스텀 엘리먼트 등록. */

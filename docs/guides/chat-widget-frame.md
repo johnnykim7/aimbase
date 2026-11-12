@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.5 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-186
+> 문서 버전: 1.6 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-186
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -75,11 +75,11 @@ export const exportChat: WidgetFeature = {
 | 7 | 응답 본문 손질 | `ctx.ui.answer.addDecorator(spec)`, `addMarkdownExtension(spec)` | CR-180 HTML, SVG 보기 단추, CR-183 그래프, 수식, CR-184 그림 |
 | 8 | 산출물 열기 | `ctx.ui.answer.addArtifactOpener(spec)` | CR-180 산출물 칩을 누르면 옆 창 |
 | 9 | 산출물 칩 단추 | `ctx.ui.answer.addArtifactAction(spec)` | CR-182 파일 공유 |
-| 10 | 문구표, 오류 문구 | `defineStrings`, `ctx.strings(pack)`, `ctx.ui.addErrorTexts(map)` | 모든 건, CR-184 그림 오류 |
+| 10 | 문구표, 오류 문구, 화면 언어 | `defineStrings`, `ctx.strings(pack)`, `ctx.text`, `ctx.list`, `ctx.setLocale`, `ctx.ui.addErrorTexts(map)` | 모든 건, CR-184 그림 오류 |
 | 11 | 알림 | `ctx.on(name, cb)` | CR-179, CR-181, CR-186 등 |
 | 12 | 대화 동작 | `ctx.chat.send`, `abort`, `open`, `selectModel`, `setThinking`, `setTitle`, `newConversation`, `attach`, `attachUploaded`, `addRequestFields` | CR-178, CR-179, CR-181, CR-186 등 |
-| 13 | 서버 호출 | `ctx.api.request(method, path, body?)`, `requestBlob(method, path)` | 서버를 부르는 건, CR-180 그림과 원본 파일 |
-| 14 | 덮개, 토스트, Esc | `ctx.ui.layer`, `toast`, `notice`, `onEscape` | 필요한 건 |
+| 13 | 서버 호출 | `ctx.api.request(method, path, body?)`, `requestBlob(method, path, body?, { signal }?)`, `hasScope`, `wsUrl` | 서버를 부르는 건, CR-180 그림과 원본 파일, CR-186 음성 대화 |
+| 14 | 덮개, 토스트, Esc, 글자 크기 | `ctx.ui.layer`, `toast`, `notice`, `onEscape`, `fontSize`, `setFontSize` | 필요한 건 |
 | 15 | 머리줄 제목 표시 | `ctx.ui.header.setTitleTag(spec)` | CR-178 프로젝트 표시 |
 | 16 | 위젯 설정 읽기 | `ctx.widgetSettings()`, `ctx.connectionId()`, 알림 `settingsLoaded` | CR-184 그림 만들기 보이기 |
 
@@ -118,6 +118,8 @@ interface MenuRowSpec {        // 글자 크기 줄처럼 안에 단추가 있�
 
 - 보이는 항목이 하나도 없는 메뉴는 단추째 숨는다. 눌러도 아무 일 없는 단추를 두지 않는다(BIZ-162).
 - + 단추는 첨부 클립 단추 자리에 있다. 파일 올리기는 위젯 본체가 등록한다.
+- 더 보기 group 1 은 글자 크기, 화면 언어 같은 설정 줄 자리다. 누르면 무언가 하는 항목은 group 0 에 둔다.
+- `ctx.ui.plusMenu.close()`, `ctx.ui.moreMenu.close()` 는 열린 메뉴를 닫는다. 줄(addRow) 안 단추에서 메뉴를 닫고 무언가 할 때 쓴다. 항목(addItem)은 고르면 위젯 본체가 닫는다.
 
 ### 3.2 왼쪽 칸
 
@@ -214,7 +216,7 @@ ctx.ui.answer.addMarkdownExtension({ id, extension });   // extension 은 marked
 - 응답 글이 비어도 오류가 아니면 응답 칸과 아래 줄을 그린다(그림만 있는 답).
 - 산출물 칩을 누르면 order 순으로 `canOpen` 이 참인 첫 열기가 받는다. 없으면 위젯 본체가 내려받는다.
 - 산출물 칩 단추는 칩 끝에 order 순으로 붙는 작은 단추다. 단추를 누르면 칩 열기는 불리지 않는다. null 을 돌려주면 그 칩에는 붙이지 않는다.
-- 마크다운 확장은 응답 원문을 HTML 로 바꾸는 단계에 끼어든다(수식 `$...$` 처럼 강조 해석보다 먼저 잡아야 하는 것). 답이 도는 중에도 쓰인다. 만든 HTML 은 위젯 본체의 소독(DOMPurify)을 거치므로 허용 태그와 `data-` 속성으로 자리만 남기고, 실제 그리기는 손질(decorate)에서 한다. 확장은 그 위젯에만 걸린다.
+- 마크다운 확장은 응답 원문을 HTML 로 바꾸는 단계에 끼어든다(수식 `$...$` 처럼 강조 해석보다 먼저 잡아야 하는 것). 끝난 응답을 그릴 때 쓰인다. 답이 도는 중에는 받은 원문 글을 그대로 보인다. 만든 HTML 은 위젯 본체의 소독(DOMPurify)을 거치므로 허용 태그와 `data-` 속성으로 자리만 남기고, 실제 그리기는 손질(decorate)에서 한다. 확장은 그 위젯에만 걸린다.
 
 ### 3.6 문구표
 
@@ -228,7 +230,8 @@ const t = ctx.strings(S);                            // t.key 를 읽을 때마�
 - 한국어 이름은 `docs/T1-10_용어표.md` 를 따른다. 용어표에 없는 화면 이름은 먼저 용어표에 올리고 사용자 승인을 받는다.
 - 서버가 주는 표시 글(아쉬워요 이유 등)은 서버가 언어별로 준다. 위젯 설정 조회에 `locale` 을 실어 부른다(위젯 본체가 한다).
 - 서버 오류 코드를 글로 바꿀 때 위젯 본체 문구표를 먼저 보고, 없으면 `ctx.ui.addErrorTexts({ code: () => t.text })` 로 등록된 글을 본다. 둘 다 없으면 서버가 준 글, 그것도 없으면 코드를 보인다.
-- 붙이는 앱이 주는 글(`emptyTitle`, `suggestions` 등)은 글 하나 또는 언어별 값(`{ ko, en }`)이다. 새 옵션도 같은 모양으로 받고 `ctx.text(value)` 로 지금 언어 값을 꺼낸다.
+- 붙이는 앱이 주는 글(`emptyTitle`, `suggestions` 등)은 글 하나 또는 언어별 값(`{ ko, en }`)이다. 새 옵션도 같은 모양으로 받고 `ctx.text(value)`(글), `ctx.list(value)`(글 목록)로 지금 언어 값을 꺼낸다.
+- 화면 언어는 사람이 고른 값(그 브라우저에 기억), 붙이는 앱이 준 `locale`, 한국어 순으로 정한다. `ctx.setLocale(locale)` 은 언어를 바꾸고 기억한다. 위젯 본체가 자기 글을 다시 그리고 `localeChange` 를 보낸 뒤 위젯 설정을 그 언어로 다시 받는다.
 
 ### 3.7 알림과 대화 동작
 
@@ -243,6 +246,7 @@ ctx.on("workflowApproval", ({ runId, stepId, policyId, reason, approvers, timeou
 ctx.on("modelChange", ({ model, thinking }) => ...); // 사람이 모델이나 깊게 생각하기를 바꿈. selectModel, setThinking 으로 바꾼 것은 오지 않는다
 ctx.on("titleChange", ({ sessionId, title }) => ...); // 서버가 대화 제목을 만들어 머리줄 제목이 바뀜. setTitle 로 바꾼 것은 오지 않는다
 ctx.on("settingsLoaded", (settings) => ...);      // 위젯 설정을 받았거나 다시 받음(화면 언어를 바꿀 때 포함)
+ctx.on("panelToggle", ({ open }) => ...);         // 위젯 창을 열거나 닫음(버블, 옆 패널). 늘 열려 있는 inline 은 오지 않는다. 닫힐 때 마이크, 소리를 멈춘다
 ctx.on("destroy", () => ...);                       // 위젯을 떼어 냄. 타이머, 마이크 등을 정리한다
 
 ctx.locale();            // "ko" | "en"
@@ -310,6 +314,8 @@ interface ConversationView {
 - `ctx.ui.layer` 는 위젯 판(panel) 요소다. 녹음 덮개, 발표 화면 같은 겹치는 요소를 여기에 붙인다.
 - `ctx.ui.onEscape(fn)` 은 Esc 를 위젯 본체보다 먼저 받는다. 처리했으면 참을 돌려준다.
 - `ctx.ui.toast(text)` 는 잠깐 보이는 알림, `ctx.ui.notice(text)` 는 대화 칸 회색 줄이다.
+- `ctx.ui.fontSize()` 는 지금 글자 크기(`small`, `medium`, `large`), `ctx.ui.setFontSize(size)` 는 바꾸고 그 브라우저에 기억한다.
+- `ctx.ui.header.setTitleTag({ text, icon?, onClick? })` 는 머리줄 제목 오른쪽에 작은 꼬리표를 단다. `null` 이면 뗀다. `onClick` 이 없으면 누를 수 없는 표시다. 글은 부르는 건이 지금 언어로 주고, 언어가 바뀌면 다시 부른다.
 
 ## 4. 이 문서에 없는 자리가 필요할 때
 

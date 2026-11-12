@@ -115,7 +115,7 @@ dict(id='IT-10-007', flow='화면 언어', kind='정상', title='영어 화면�
            '2. 답 안 표와 코드 블록의 단추에 마우스를 올린다\n'
            '3. 이미지도 PDF 도 아닌 파일(zip)을 「Upload files」로 고른다',
      expect='1. 표와 코드 블록이 있는 답이 온다\n'
-            '2. 표 단추 도움말("Download CSV", "Download Excel (.xlsx)", "Copy")과 코드 복사 도움말이 영어다\n'
+            '2. 표 단추 도움말("Download CSV", "Download Excel (.xlsx)", "Copy table (tab-separated)")과 코드 복사 도움말("Copy code")이 영어다\n'
             '3. 첨부할 수 없다는 알림이 영어로 보인다',
      judge=['합동', '합동', '합동'],
      pair={1: [1], 2: [2], 3: [3]},

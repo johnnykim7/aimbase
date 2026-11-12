@@ -56,6 +56,7 @@ export class Panes {
     host.panel.appendChild(this.sideEl);
 
     this.wide = host.panel.clientWidth >= WIDE_MIN_PX;
+    host.panel.classList.toggle("narrow", !this.wide);
     if (typeof ResizeObserver !== "undefined") {
       this.observer = new ResizeObserver(() => this.onResize());
       this.observer.observe(host.panel);
@@ -164,6 +165,7 @@ export class Panes {
     const wide = width >= WIDE_MIN_PX;
     if (wide === this.wide) return;
     this.wide = wide;
+    this.host.panel.classList.toggle("narrow", !wide);
     if (!wide) this.closeSide();
     this.setLeftOpen(wide && !this.side);
   }
