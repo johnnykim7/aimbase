@@ -1,4 +1,5 @@
-function lineIcon(paths: string, size = 16): string {
+/** 기능 파일이 자기 SVG 경로로 위젯 본체와 같은 모양의 선 아이콘을 만든다. */
+export function svgIcon(paths: string, size = 16): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 }
 
@@ -25,8 +26,11 @@ const P = {
   arrowdown: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
   spark: '<path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/>',
   text: '<path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  panelLeft: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
 };
 
 export type IconName = keyof typeof P;
 
-export const icon = (name: IconName, size = 16): string => lineIcon(P[name], size);
+export const icon = (name: IconName, size = 16): string => svgIcon(P[name], size);
