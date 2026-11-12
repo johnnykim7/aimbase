@@ -2835,12 +2835,12 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **변경 타입**: 신규
 - **원본 요구사항**: [docs/origins/원본_요구사항_CR175_채팅_위젯_대화_기본기와_모델_고르기_20261110.md](origins/원본_요구사항_CR175_채팅_위젯_대화_기본기와_모델_고르기_20261110.md) 2절 25번
 - **변경 내용**: CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 위젯 본체를 고치지 않고 기능을 등록하는 자리 16개(+ 메뉴, 더 보기 메뉴, 왼쪽 칸, 옆 창, 입력칸 단추와 모드, 응답 아래 단추, 응답 손질, 산출물 열기, 문구표, 알림, 대화 동작과 지난 대화 열기, 서버 호출 등)를 먼저 만든다. 클립 단추 자리에 + 단추와 「파일 올리기」, 글자 크기는 기능 파일로 옮긴다. 화면 글 전부를 한국어, 영어 문구표로 옮기고 더 보기 「화면 언어」, 붙이는 앱 `locale` 을 둔다. 서버는 위젯 설정 조회에 `locale` 을 받아 아쉬워요 이유 이름을 언어별로 준다. 틀 사용법은 [guides/chat-widget-frame.md](guides/chat-widget-frame.md), 설계 상세 [CR-177_위젯_틀_나누기와_영어_화면.md](CR-177_위젯_틀_나누기와_영어_화면.md)
-- **결정**: 실행맵 2번 행(11/13). 다른 건의 기능 자체는 만들지 않고 자리만 둔다. 다른 건의 자리 요청(CR-178, CR-179, CR-180, CR-181, CR-182, CR-183, CR-184, CR-186)은 11/13 전부 받아 틀 사용법 1.3 판에 반영
-- **영향 모듈**: 위젯 `packages/chat-widget-embed`(widget.ts, 신규 frame/, features/, strings.ts, rich-render.ts, chat-client.ts, widget-api.ts, types.ts, web-component.ts), platform-core `session`(ChatWidgetSettingsService), `api`(위젯 설정 조회 인자), 마스터 마이그레이션 V80
+- **결정**: 실행맵 2번 행(11/13). 다른 건의 기능 자체는 만들지 않고 자리만 둔다. 다른 건의 자리 요청(CR-178, CR-179, CR-180, CR-181, CR-182, CR-183, CR-184, CR-186)은 11/13 전부 받아 틀 사용법 1.3 판에 반영. CR-185 요청(워크플로우 끝남 알림과 실패 이유, 사용자 식별 여부, 승인 허용 옵션)은 11/13 컨타 승인(사용자 06:29 권장안 위임)으로 받아 틀 사용법 1.7 판, 서버 `workflow.done` 에 `error`
+- **영향 모듈**: 위젯 `packages/chat-widget-embed`(widget.ts, 신규 frame/, features/, strings.ts, rich-render.ts, chat-client.ts, widget-api.ts, types.ts, web-component.ts), platform-core `session`(ChatWidgetSettingsService), `api`(위젯 설정 조회 인자, WorkflowController 끝난 런 구독), `workflow`(WorkflowEvents, WorkflowEventPublisher, WorkflowRunSubscriberRegistry, WorkflowEngine, ApprovalTimeoutSweeper 끝남 알림 error), 마스터 마이그레이션 V80
 - **영향도**: Medium (위젯 화면 구조를 옮기는 일이라 CR-175 기능 회귀 위험. 서버는 인자 하나 추가)
 - **영향 범위**: 위젯을 붙인 소비앱(백오피스2 CS 문의 상세). `locale` 을 주지 않으면 지금처럼 한국어. 레포 간 요청 없음
-- **영향 설계서**: T1-1 v7.9, T1-3 v5.11, T1-7 v3.18, T1-10 v1.1, T3-1 v4.16, T3-2 v7.14, T3-3 v3.8, T3-4 v3.8, T3-5 v4.12. API 가이드, 위젯 붙이기 가이드는 구현 때 고친다. T1-5, T1-6, T2-1, T2-2 영향 없음
-- **상태**: 설계중 (2026-11-13 설계 캐스케이드, 화면 컨셉 승인 대기)
+- **영향 설계서**: T1-1 v7.9, T1-3 v5.11, T1-7 v3.18, T1-10 v1.1, T3-1 v4.16, T3-2 v7.14, T3-3 v3.8, T3-4 v3.8, T3-5 v4.12, T3-9(워크플로우 끝남 알림 error). API 가이드, 위젯 붙이기 가이드는 구현 때 고친다. T1-5, T1-6, T2-1, T2-2 영향 없음
+- **상태**: 구현중 (2026-11-13 2단계 로컬 확인 끝, dev 반영)
 ### CR-178 | 위젯 지난 대화 목록과 프로젝트 묶기
 - **대상 기능 ID**: PRD-420, PRD-421, PRD-422, PRD-423, PRD-424, PRD-425, PRD-426, PRD-427
 - **변경 타입**: 신규
