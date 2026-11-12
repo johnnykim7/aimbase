@@ -1,6 +1,6 @@
 # T1-5. FSM 상태 정의서
 
-> 설계 버전: 1.4 | 최종 수정: 2026-11-09 | 관련 CR: CR-001, CR-164, CR-166, CR-167, CR-174
+> 설계 버전: 1.5 | 최종 수정: 2026-11-13 | 관련 CR: CR-001, CR-164, CR-166, CR-167, CR-174, CR-185
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -15,7 +15,7 @@
 | MCPServer | `disconnected`, `connected` |
 | KnowledgeSource | `idle`, `syncing`, `completed`, `error` |
 | WorkflowRun | `running`, `pending_approval`, `completed`, `failed` |
-| PendingApproval | `pending`, `approved`, `rejected`, `timeout` |
+| PendingApproval | `pending`, `approved`, `rejected`, `timeout`, `cancelled` |
 | DevWorkItem | `IN_PROGRESS`, `COMPLETED`, `FAILED`, `CANCELLED` |
 | Tenant | `provisioning`, `active`, `suspended`, `deleted` |
 | User | `active`, `inactive` |
@@ -216,31 +216,42 @@ stateDiagram-v2
     pending --> approved : 승인
     pending --> rejected : 거부
     pending --> timeout : 시한 초과 (감시기, CR-174)
+    pending --> cancelled : 응답 중지, 스트림 끊김 (대화 승인, CR-185)
 ```
 
 ### pending | 대기
 - **설명**: 승인을 기다리는 상태
-- **진입 조건**: HUMAN_INPUT 스텝 도달 또는 REQUIRE_APPROVAL 정책 트리거
-- **허용 다음 상태**: `approved`, `rejected`, `timeout`
-- **관련 기능 ID**: PRD-063, PRD-364
+- **진입 조건**: HUMAN_INPUT 스텝 도달 또는 REQUIRE_APPROVAL 정책 트리거. 대화 턴에서 도구 실행 전 승인을 묻기 시작(`approval_channel = chat`, CR-185)
+- **허용 다음 상태**: `approved`, `rejected`, `timeout`, `cancelled`(대화 승인만)
+- **관련 기능 ID**: PRD-063, PRD-364, PRD-560
 
 ### approved | 승인됨
-- **설명**: 관리자가 승인한 상태
-- **진입 조건**: 승인 처리 (POST /approve)
+- **설명**: 관리자, 워크플로우 승인자, 대화 턴을 연 사용자가 승인한 상태
+- **진입 조건**: 승인 처리 (POST /approve). 대화 승인은 POST /chat/approvals/{approvalId} 도 (CR-185)
 - **허용 다음 상태**: 없음 (종결 상태)
-- **관련 기능 ID**: PRD-064
+- **관련 기능 ID**: PRD-064, PRD-562
 
 ### rejected | 거부됨
-- **설명**: 관리자가 거부한 상태
-- **진입 조건**: 거부 처리 (POST /reject)
-- **허용 다음 상태**: 없음 (종결 상태)
-- **관련 기능 ID**: PRD-065
+- **설명**: 관리자, 워크플로우 승인자, 대화 턴을 연 사용자가 거절한 상태
+- **진입 조건**: 거부 처리 (POST /reject). 대화 승인은 POST /chat/approvals/{approvalId} 도 (CR-185)
+- **허용 다음 상태**: 없음 (종결 상태). 대화 승인은 AI 에게 「사용자가 실행을 거절했습니다」 도구 오류 결과
+- **관련 기능 ID**: PRD-065, PRD-562
 
 ### timeout | 시한 초과 [CR-174]
 - **설명**: `timeout_at` 이 지나도록 승인도 거부도 없어 감시기가 닫은 상태
-- **진입 조건**: 승인 시한 감시기(PRD-364). `approval_channel = workflow` 인 줄만
-- **허용 다음 상태**: 없음 (종결 상태). 그 run 은 `failed`
+- **진입 조건**: 승인 시한 감시기(PRD-364). 대화 승인(`chat`)은 기다리던 관문이 마감에 닫고, 서버가 다시 떠 관문이 사라진 줄은 감시기가 닫는다(CR-185)
+- **허용 다음 상태**: 없음 (종결 상태). 워크플로우는 그 run 이 `failed`, 대화 승인은 AI 에게 「승인 시간이 지나 실행하지 않았습니다」 도구 오류 결과
 - **관련 기능 ID**: PRD-364
+
+### cancelled | 중지됨 [CR-185]
+- **설명**: 대화 승인을 기다리는 중에 응답 중지(abort)나 스트림 끊김으로 닫힌 상태
+- **진입 조건**: 관문이 응답 중지 신호나 스트림 끊김을 받음. `approval_channel = chat` 인 줄만
+- **허용 다음 상태**: 없음 (종결 상태). 도구를 실행하지 않고 그 턴을 끝낸다
+- **관련 기능 ID**: PRD-560
+
+### 금지 전이 [CR-185]
+- 종결 상태(`approved`, `rejected`, `timeout`, `cancelled`)에서 다른 상태로 가지 않는다. 결정 API 와 관리자 승인 API 는 `pending` 일 때만 바꾸는 한 번의 갱신으로 정하고, 아니면 409 `approval_closed`(BIZ-245)
+- 워크플로우 승인(`workflow`)은 `cancelled` 로 가지 않는다. 대화 승인(`chat`)은 워크플로우 run 을 바꾸지 않는다
 
 ---
 

@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.18 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184
+> 설계 버전: 7.19 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3561,6 +3561,95 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 ### 연결 config 칸 [PRD-544]
 
 `POST /api/v1/connections`, `PUT /api/v1/connections/{id}` 의 `config` 에 `image_connection_id`, `image_model`, `image_quality` 를 둔다(T3-1 connections.config 추가 칸). 경로는 늘지 않는다.
+
+---
+
+## 위젯 안 승인과 거절 [v7.19, CR-185]
+
+설계 상세: [CR-185_위젯_안_승인과_거절.md](CR-185_위젯_안_승인과_거절.md). 위젯 쪽 자리는 CR-177 틀 안내서 3.7 을 따른다.
+
+### 대화 승인 결정 [PRD-560, PRD-562]
+
+`POST /api/v1/chat/approvals/{approvalId}` (위젯 토큰 `chat:stream` 또는 관리 로그인)
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| decision | string | Y | `approve` 또는 `reject` |
+
+```json
+{"success": true, "data": {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_by": "cs-agent-12", "decided_at": "2026-11-13T06:40:12+09:00"}}
+```
+
+| 상태 | `error` | 경우 |
+|------|---------|------|
+| 400 | `invalid_decision` | decision 이 approve, reject 가 아님 |
+| 400 | `not_chat_approval` | 워크플로우 승인 번호 |
+| 403 | `not_requester` | 요청받은 사람이 아니고 관리자도 아님 |
+| 404 | `approval_not_found` | 없는 번호, 다른 테넌트 |
+| 409 | `approval_closed` | 이미 정해짐. `data.status` 에 지금 상태 |
+
+- `pending` 일 때만 바꾸는 한 번의 갱신으로 정한다. 둘이 함께 보내도 하나만 200 이다
+- 감사 기록 `APPROVAL_DECIDED`(approval_id, channel, decision, decided_by)
+
+### 대화 스트림 이벤트 추가 [PRD-560]
+
+`POST /api/v1/chat/completions` 스트림 응답에 두 이벤트가 는다. 위젯 본체는 이 이름을 모르고 틀의 `streamEvent` 로 승인 기능에 넘긴다.
+
+```
+event: approval_required
+data: {"approval_id": "5d0c2a7e-...", "tool_use_id": "toolu_01A...", "tool_name": "send_email", "description": "메일을 보냅니다", "input": {"to": "kim@example.com", "subject": "배송 지연 안내"}, "message": "메일 발송은 승인 후 실행합니다", "expires_at": "2026-11-13T06:42:12+09:00", "timeout_seconds": 120}
+
+event: approval_resolved
+data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-11-13T06:40:12+09:00"}
+```
+
+| 칸 | 설명 |
+|----|------|
+| description | 도구 설명 첫 줄 |
+| input | 도구 입력. 글 값마다 2,000자에서 자른다 |
+| message | 정책 규칙의 안내 문구. 없으면 빠진다 |
+| expires_at | 마감. 시간대를 포함한 ISO-8601 |
+| status | approved, rejected, timeout, cancelled |
+
+- 결정을 기다리는 동안 15초마다 주석 줄 `: keep-alive` 를 보낸다
+- 거절과 시간 지남은 도구 오류 결과로 AI 에게 가고 응답은 이어진다. 응답 중지는 그 턴을 끝내고 done 을 보낸다
+- 열린 스트림 턴이 아니면 묻지 않고 「승인이 필요한 도구라 위젯 대화에서만 실행할 수 있습니다」 도구 오류 결과(BIZ-241)
+
+### 워크플로우 승인 변경 [PRD-561, PRD-562]
+
+`POST /api/v1/workflows/runs/{runId}/approve` 요청은 그대로다.
+
+| 상태 | `error` | 경우 |
+|------|---------|------|
+| 403 | `scope_required` | 위젯 토큰에 `workflow:approve` 없음 |
+| 403 | `not_approver` | 단계 승인자 목록이 있는데 토큰 user_ref 가 없음 |
+| 409 | `approval_closed` | 이미 정해짐. 지금의 「승인 대기가 아니면 409」 를 이 코드로 정한다 |
+
+- 로그인 토큰과 소비앱 키는 지금처럼 정한다
+- 결정한 사람(인증 주체)과 시각을 pending_approvals `approved_by`, `resolved_at` 에 남긴다
+- run 의 `pending_approval` 을 바꾸는 갱신을 한 번에 한다
+
+### 관리자 승인 변경 [PRD-562]
+
+`POST /api/v1/admin/approvals/{id}/approve`, `POST /api/v1/admin/approvals/{id}/reject`
+
+- 결정한 사람을 본문 `approved_by`, `rejected_by` 가 아니라 로그인 주체로 남긴다. 본문의 두 칸은 쓰지 않는다
+- 대화 승인(`chat`)도 정하고, 기다리던 대화 턴을 깨운다
+- 이미 정해진 승인은 409 `approval_closed`
+
+### 정책 대상 도구 [PRD-563]
+
+`POST /api/v1/policies`, `PUT /api/v1/policies/{id}` 의 `matchRules` 에 `tools`(string[])를 받는다.
+
+```json
+{"id": "pol-mail-approval", "name": "메일 발송 승인", "priority": 100, "matchRules": {"tools": ["send_email"]}, "rules": [{"type": "REQUIRE_APPROVAL", "message": "메일 발송은 승인 후 실행합니다"}]}
+```
+
+| 상태 | `error` | 경우 |
+|------|---------|------|
+| 400 | `policy_tools_empty` | `tools` 가 빈 목록 |
+
+- `tools` 가 있는 정책은 도구 호출 평가에만 쓴다(BIZ-240). 규칙 타입은 REQUIRE_APPROVAL, DENY 가 뜻이 있다
 
 ---
 

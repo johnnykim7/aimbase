@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 3.22 | 최종 수정: 2026-11-13 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184
+> 설계 버전: 3.23 | 최종 수정: 2026-11-13 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -761,6 +761,18 @@ flowchart LR
 | PRD-544 | 연결 config 그림 칸, 위젯 설정 `image_generation` | PRD-540 | 단위시험 TC-CHT-100, 108 | BE | 설계중 |
 | FE-120 | 연결 편집 그림 모델, 그림 품질, 그림 연결 칸 | PRD-544 | 로컬 | FE | 설계중 |
 | PRD-543 | 위젯 그림 만들기(`features/image-gen.ts`) | 위 BE, CR-177 위젯 틀 | 통합 시험항목 영역 17 (CR-184 설계 9.2) | 위젯 | 설계중 |
+
+### CR-185: 위젯 안 승인과 거절 (BE + CLI 실행기 + 관리 화면 + 위젯) [v3.23, CR-185]
+
+설계 상세: [CR-185_위젯_안_승인과_거절.md](CR-185_위젯_안_승인과_거절.md) 10절.
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-560, PRD-563 | 테넌트 V88 pending_approvals 대화 칸, 마스터 V88 `chat.approval-timeout-seconds`, PolicyEngine 도구 평가, 정책 `tools` 저장 검사, ChatTurnRegistry, ToolApprovalGate(API 도구 실행, 서버 MCP 도구), 스트림 이벤트 2종 | CR-174, CR-175 | 단위시험 TC-CHT-110 ~ 113, 115, 로컬 Flyway | BE | 설계중 |
+| PRD-560 | 실행기 MCP 머리글 `X-Aimbase-Session-Id`(CR-183 과 같은 것), 서버 필터 | CR-183 | 단위시험 TC-CHT-116 | BE, CLI 실행기 | 설계중 |
+| PRD-561, PRD-562 | 결정 API, 워크플로우 승인 권한(`workflow:approve`, 승인자 목록), 결정한 사람 기록, 한 번만 정하기, 관리자 승인 API, 마감 감시기 대화 승인 | CR-174 | 단위시험 TC-CHT-114, 117, 118 | BE | 설계중 |
+| PRD-563, FE-130 | 관리 화면 Policies 「도구 실행 전 승인」 규칙 타입 | 위 BE | 통합 시험항목 영역 18 | 관리 FE | 설계중 |
+| PRD-560, PRD-561 | 위젯 `src/features/approval.ts`, 승인 요청 카드 2종, 등록부 한 줄, `allowApproval` 기본값 | CR-177 틀 dev 반영, 위 BE | 통합 시험항목 영역 18 | 위젯 | 설계중 |
 
 ---
 
