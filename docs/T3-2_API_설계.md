@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.14 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177
+> 설계 버전: 7.15 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3270,6 +3270,71 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다.
 ### 위젯 설정 조회 칸 추가 [PRD-480]
 
 `GET /api/v1/chat/widget-settings` 응답에 `document_binary_edit_supported`(boolean) 를 더한다. 연결이 실행기 연결이면 true. 위젯은 BLOCK 이거나, `has_source` 이거나, 이 값이 true 일 때만 고치기 입력칸을 보인다.
+
+
+## 위젯 답 읽어주기와 실시간 음성 [v7.15, CR-186]
+
+설계 상세: [CR-186_위젯_답_읽어주기와_실시간_음성.md](CR-186_위젯_답_읽어주기와_실시간_음성.md) 3절, 6절.
+
+| 메서드 | 경로 | 설명 | 인증 |
+|--------|------|------|------|
+| POST | `/chat/tts` | 답 읽어 주기 소리 | 위젯 토큰 `chat:tts` 또는 로그인 |
+| POST | `/chat/voice/tickets` | 음성 대화 입장권 | 위젯 토큰 `chat:voice` 또는 로그인 |
+| GET(웹소켓) | `/chat/voice/stream?ticket=` | 실시간 받아쓰기 중계 | 입장권(로그인 검사, 테넌트 머리글 검사 없음) |
+
+### POST `/chat/tts` [PRD-580]
+
+**Request Body**: `{ "session_id": "cs-9471-...", "text": "주문 3건이 2026-11-12 14:00 에 출고되었습니다." }`
+
+- `text` 는 위젯이 만든 읽을 글 한 조각이다(BIZ-250, BIZ-251). 목소리 `widget.tts.voice`, 속도 `widget.tts.speed`. 맥 엔진은 `widget.tts.local-timeout-seconds` 까지만 기다린다(BIZ-252)
+- **응답**: 200 `audio/mpeg`, 머리글 `X-Aimbase-TTS-Engine: local | openai`
+
+| 상태 | 오류 | 경우 |
+|------|------|------|
+| 400 | `tts_invalid:text` | 빈 글, `widget.tts.max-chars` 초과 |
+| 403 | `tts_forbidden` | 위젯 토큰에 `chat:tts` 없음 |
+| 409 | `tts_disabled` | `widget.tts.enabled` false |
+| 429 | `tts_rate_limited` | 세션 분당 요청 초과 |
+| 503 | `tts_unavailable` | 맥 엔진 실패에 전환 꺼짐, 쓸 수 있는 OpenAI 연결 없음 |
+| 502 | `tts_upstream_error` | OpenAI 오류 |
+
+### POST `/chat/voice/tickets` [PRD-582]
+
+**Request Body**: `{ "session_id": "cs-9471-..." }`
+
+**Response**: `{ "success": true, "data": { "ticket": "vt_...", "expires_in_seconds": 30, "stream_path": "/api/v1/chat/voice/stream" } }`
+
+| 상태 | 오류 | 경우 |
+|------|------|------|
+| 403 | `voice_forbidden` | 위젯 토큰에 `chat:voice` 없음 |
+| 409 | `voice_disabled` | `widget.voice.enabled` false |
+| 409 | `voice_session_busy` | 그 세션에 열린 중계가 있음 |
+| 429 | `voice_busy` | 열린 중계가 `widget.voice.max-concurrent-streams` 개 |
+| 503 | `voice_unavailable` | 테넌트에 활성 `stt_local` 연결 없음 |
+
+### 웹소켓 `/chat/voice/stream?ticket=` [PRD-582]
+
+한 연결이 한 번의 말이다. 손잡기에서 입장권을 꺼내 지우고 출처를 대조한 뒤, 그 테넌트 `stt_local` 연결의 `base_url`(ws, wss 로 바꿈) `/stream` 에 연결의 `api_key` 로 잇는다.
+
+| 방향 | 프레임 | 뜻 |
+|------|------|------|
+| 위젯에서 | 바이너리 | WebM(Opus) 소리 조각. 받아쓰기 서버로 옮긴다 |
+| 위젯에서 | `{"type":"end"}` | 말이 끝남. 받아쓰기 서버에 빈 프레임 |
+| 서버에서 | `{"type":"ready"}` | 받아쓰기 서버와 이어짐 |
+| 서버에서 | `{"type":"transcript","text":"...","buffer":"..."}` | 확정 글, 미확정 글 |
+| 서버에서 | `{"type":"final","text":"..."}` | 마지막 글. 보낸 뒤 1000 으로 닫음 |
+
+| 닫는 번호 | 뜻 |
+|------|------|
+| 4401 | 입장권 없음, 지남, 이미 씀 |
+| 4403 | 출처가 입장권의 허용 출처와 다름 |
+| 4408 | 발화가 `widget.voice.max-utterance-seconds` + 5초를 넘음 |
+| 4429 | 열린 중계 상한 |
+| 1011 | 받아쓰기 서버에 잇지 못함, 끊김, `end` 뒤 `widget.voice.final-timeout-seconds` 안에 마지막 글이 없음 |
+
+### GET `/chat/widget-settings` 칸 추가 [PRD-580, PRD-581]
+
+`tts_enabled`, `tts_max_chars`, `voice_chat_enabled`(설정이 켜졌고 테넌트에 활성 `stt_local` 연결이 있을 때), `voice_end_silence_ms`, `voice_speech_level`, `voice_max_utterance_seconds`, `voice_idle_end_seconds`.
 
 ---
 
