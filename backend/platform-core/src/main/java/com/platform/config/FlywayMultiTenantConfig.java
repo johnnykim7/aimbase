@@ -35,6 +35,11 @@ public class FlywayMultiTenantConfig {
             .locations("classpath:db/migration/master")
             .table("flyway_schema_history_master")
             .baselineOnMigrate(true)
+            // 운영은 CR 마다 따로 만든 가지로 올라가 설정 시드 번호가 dev 와 어긋난다(CR-168 V73 은 운영에 없고
+            // CR-175 V74 가 먼저 들어간다). 앞 번호가 나중에 오거나 파일이 없는 지난 판이 있어도 기동이 멈추지 않게
+            // 테넌트 경로(CR-049)와 같게 둔다.
+            .outOfOrder(true)
+            .ignoreMigrationPatterns("*:missing")
             .load();
         flyway.migrate();
         log.info("Master DB Flyway migration completed");
