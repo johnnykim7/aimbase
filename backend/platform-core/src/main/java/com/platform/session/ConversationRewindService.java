@@ -2,10 +2,12 @@ package com.platform.session;
 
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.ConnectionGroupSelector;
+import com.platform.repository.ChatGeneratedImageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,15 +27,18 @@ public class ConversationRewindService {
     private final CancellationRegistry cancellationRegistry;
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final ConnectionGroupSelector connectionGroupSelector;
+    private final ChatGeneratedImageRepository imageRepository;
 
     public ConversationRewindService(SessionStore sessionStore,
                                      CancellationRegistry cancellationRegistry,
                                      ConnectionAdapterFactory connectionAdapterFactory,
-                                     ConnectionGroupSelector connectionGroupSelector) {
+                                     ConnectionGroupSelector connectionGroupSelector,
+                                     ChatGeneratedImageRepository imageRepository) {
         this.sessionStore = sessionStore;
         this.cancellationRegistry = cancellationRegistry;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.connectionGroupSelector = connectionGroupSelector;
+        this.imageRepository = imageRepository;
     }
 
     /**
@@ -46,11 +51,25 @@ public class ConversationRewindService {
             throw new RewindRejectedException(RewindRejectedException.Reason.SESSION_BUSY);
         }
         sessionStore.rewind(sessionId, fromSeq);
+        softDeleteRewoundImages(sessionId);
         for (String connId : candidateConnections(connectionId, connectionGroupId)) {
             if (connectionAdapterFactory.isCliConnection(connId)) {
                 connectionAdapterFactory.getAdapter(connId).cleanupSession(sessionId);
                 log.info("Rewind: CLI worker for session {} closed on connection {}", sessionId, connId);
             }
+        }
+    }
+
+    /**
+     * CR-184 BIZ-231: 되감긴 묶음의 그림에도 지운 표시를 한다. 대화 기록은 이미 되감겼으므로 여기서 실패해도
+     * 요청을 실패로 돌리지 않는다. 남은 그림은 다음 되감기나 대화 지우기가 다시 지운다.
+     */
+    private void softDeleteRewoundImages(String sessionId) {
+        try {
+            int n = imageRepository.softDeleteOrphanedBySessionId(sessionId, OffsetDateTime.now());
+            if (n > 0) log.info("Rewind: {} generated image(s) of session {} soft-deleted", n, sessionId);
+        } catch (RuntimeException e) {
+            log.warn("Rewind: generated images of session {} not soft-deleted: {}", sessionId, e.getMessage());
         }
     }
 

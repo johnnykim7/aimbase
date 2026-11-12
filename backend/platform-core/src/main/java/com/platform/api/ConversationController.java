@@ -2,6 +2,7 @@ package com.platform.api;
 
 import com.platform.domain.ConversationMessageEntity;
 import com.platform.domain.ConversationSessionEntity;
+import com.platform.repository.ChatGeneratedImageRepository;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
 import com.platform.session.CancellationRegistry;
@@ -29,15 +30,18 @@ public class ConversationController {
     private final ConversationMessageRepository messageRepository;
     private final SessionStore sessionStore;
     private final CancellationRegistry cancellationRegistry;
+    private final ChatGeneratedImageRepository imageRepository;
 
     public ConversationController(ConversationSessionRepository sessionRepository,
                                    ConversationMessageRepository messageRepository,
                                    SessionStore sessionStore,
-                                   CancellationRegistry cancellationRegistry) {
+                                   CancellationRegistry cancellationRegistry,
+                                   ChatGeneratedImageRepository imageRepository) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.sessionStore = sessionStore;
         this.cancellationRegistry = cancellationRegistry;
+        this.imageRepository = imageRepository;
     }
 
     @GetMapping
@@ -96,6 +100,8 @@ public class ConversationController {
         session.setDeletedAt(now);
         sessionRepository.save(session);
         messageRepository.softDeleteBySessionId(sessionId, now);
+        // CR-184 BIZ-231: 그 대화에서 만든 그림도 지운 표시. 파일은 남긴다
+        imageRepository.softDeleteBySessionId(sessionId, now);
         sessionStore.clearSession(sessionId);
     }
 

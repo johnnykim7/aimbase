@@ -33,6 +33,8 @@ class ChatWidgetSettingsServiceTest {
     @Mock private ConnectionAdapterFactory connectionAdapterFactory;
     @Mock private LLMAdapterRegistry adapterRegistry;
     @Mock private ConnectionRepository connectionRepository;
+    @Mock private com.platform.image.ImageConnectionResolver imageConnectionResolver;
+    @Mock private com.platform.image.ImageGenerationSettings imageSettings;
     @Mock private LLMAdapter apiAdapter;
     @Mock private LLMAdapter cliAdapter;
 
@@ -41,7 +43,7 @@ class ChatWidgetSettingsServiceTest {
     @BeforeEach
     void setUp() {
         service = new ChatWidgetSettingsService(platformSettings, connectionAdapterFactory, adapterRegistry,
-                connectionRepository, new ObjectMapper());
+                connectionRepository, new ObjectMapper(), imageConnectionResolver, imageSettings);
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FEEDBACK_REASONS_KEY), anyString()))
                 .thenReturn("[{\"code\":\"WRONG_INFO\",\"label\":\"틀린 정보\"}]");
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FOLLOW_UPS_ENABLED_KEY), anyString()))
@@ -112,6 +114,35 @@ class ChatWidgetSettingsServiceTest {
         assertThat(body.get("default_model")).isEqualTo("anthropic/claude-sonnet-4-5");
         assertThat((List<?>) body.get("models")).hasSize(1);
         assertThat(body.get("thinking_default")).isEqualTo(false);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-108 1 그림_연결이_있는_연결만_그림_칸이_참이고_상한을_함께_준다")
+    void image_generation_follows_image_connection() {
+        stubCliConnection(ModelConfig.defaults());
+        when(imageConnectionResolver.isConfigured("cli-1")).thenReturn(true, false);
+        when(imageSettings.maxPromptChars()).thenReturn(4000);
+        when(imageSettings.maxSourceImages()).thenReturn(4);
+
+        Map<?, ?> on = (Map<?, ?>) service.settings("cli-1", null).get("image_generation");
+        Map<?, ?> off = (Map<?, ?>) service.settings("cli-1", null).get("image_generation");
+
+        assertThat(on.get("enabled")).isEqualTo(true);
+        assertThat(on.get("max_prompt_chars")).isEqualTo(4000);
+        assertThat(on.get("max_source_images")).isEqualTo(4);
+        assertThat(off.get("enabled")).isEqualTo(false);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-108 2 connection_id_가_없으면_그림_칸은_거짓")
+    void image_generation_off_without_connection() {
+        when(connectionAdapterFactory.platformDefaultModel()).thenReturn("anthropic/claude-sonnet-4-5");
+        when(adapterRegistry.hasAdapter("anthropic/claude-sonnet-4-5")).thenReturn(false);
+
+        Map<?, ?> image = (Map<?, ?>) service.settings(null, null).get("image_generation");
+
+        assertThat(image.get("enabled")).isEqualTo(false);
+        org.mockito.Mockito.verifyNoInteractions(imageConnectionResolver);
     }
 
     /** CR-180: HTML 실행 틀 출처는 설정 JSON 목록, JSON 이 아니면 빈 목록. */

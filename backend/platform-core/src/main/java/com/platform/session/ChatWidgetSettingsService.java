@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.config.PlatformSettingsService;
+import com.platform.image.ImageConnectionResolver;
+import com.platform.image.ImageGenerationSettings;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.LLMAdapterRegistry;
 import com.platform.llm.adapter.LLMAdapter;
@@ -40,17 +42,23 @@ public class ChatWidgetSettingsService {
     private final LLMAdapterRegistry adapterRegistry;
     private final ConnectionRepository connectionRepository;
     private final ObjectMapper objectMapper;
+    private final ImageConnectionResolver imageConnectionResolver;
+    private final ImageGenerationSettings imageSettings;
 
     public ChatWidgetSettingsService(PlatformSettingsService platformSettings,
                                      ConnectionAdapterFactory connectionAdapterFactory,
                                      LLMAdapterRegistry adapterRegistry,
                                      ConnectionRepository connectionRepository,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     ImageConnectionResolver imageConnectionResolver,
+                                     ImageGenerationSettings imageSettings) {
         this.platformSettings = platformSettings;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.adapterRegistry = adapterRegistry;
         this.connectionRepository = connectionRepository;
         this.objectMapper = objectMapper;
+        this.imageConnectionResolver = imageConnectionResolver;
+        this.imageSettings = imageSettings;
     }
 
     /**
@@ -81,7 +89,21 @@ public class ChatWidgetSettingsService {
         body.put("feedback_comment_max_chars", feedbackCommentMaxChars());
         body.put("follow_ups_enabled", followUpsEnabled());
         body.put("preview_html_script_sources", previewHtmlScriptSources());
+        body.put("image_generation", imageGeneration(connectionId));
         return body;
+    }
+
+    /**
+     * CR-184 PRD-544: 그 연결에 그림 연결이 있을 때만 위젯 + 메뉴에 「그림 만들기」 를 둔다(BIZ-230).
+     * 글자 수와 바탕 그림 장수는 위젯이 보내기 전에 막고 오류 문구에 쓰는 상한이다.
+     */
+    private Map<String, Object> imageGeneration(String connectionId) {
+        Map<String, Object> image = new LinkedHashMap<>();
+        image.put("enabled", connectionId != null && !connectionId.isBlank()
+                && imageConnectionResolver.isConfigured(connectionId));
+        image.put("max_prompt_chars", imageSettings.maxPromptChars());
+        image.put("max_source_images", imageSettings.maxSourceImages());
+        return image;
     }
 
     /**

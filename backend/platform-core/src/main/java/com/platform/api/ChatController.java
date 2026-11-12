@@ -42,6 +42,8 @@ import java.util.UUID;
 @Tag(name = "Chat", description = "LLM 채팅 API")
 public class ChatController {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatController.class);
+
     private final OrchestratorEngine orchestrator;
     private final WorkspaceProperties workspaceProperties;
     private final CancellationRegistry cancellationRegistry;
@@ -53,6 +55,8 @@ public class ChatController {
     private final com.platform.llm.ConnectionAdapterFactory connectionAdapterFactory;
     private final com.platform.session.ConversationRewindService rewindService;
     private final com.platform.session.ChatWidgetSettingsService widgetSettings;
+    private final com.platform.image.ImageGenerationService imageGeneration;
+    private final com.platform.image.ImageGenerationSettings imageSettings;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -64,7 +68,9 @@ public class ChatController {
                           com.platform.artifact.ArtifactService artifactService,
                           com.platform.llm.ConnectionAdapterFactory connectionAdapterFactory,
                           com.platform.session.ConversationRewindService rewindService,
-                          com.platform.session.ChatWidgetSettingsService widgetSettings) {
+                          com.platform.session.ChatWidgetSettingsService widgetSettings,
+                          com.platform.image.ImageGenerationService imageGeneration,
+                          com.platform.image.ImageGenerationSettings imageSettings) {
         this.orchestrator = orchestrator;
         this.workspaceProperties = workspaceProperties;
         this.cancellationRegistry = cancellationRegistry;
@@ -76,6 +82,8 @@ public class ChatController {
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.rewindService = rewindService;
         this.widgetSettings = widgetSettings;
+        this.imageGeneration = imageGeneration;
+        this.imageSettings = imageSettings;
     }
 
     /**
@@ -111,6 +119,11 @@ public class ChatController {
     public Object completions(@Valid @RequestBody ChatCompletionRequest request) {
         // CR-045 L0: working_directory 화이트리스트 조기 차단 (400)
         validateWorkingDirectory(request.workingDirectory());
+
+        // CR-184: 그림 질문은 모델을 부르지 않는다(BIZ-231)
+        if (request.image() != null) {
+            return imageCompletion(request);
+        }
 
         // CR-175: 모델, 깊게 생각하기 검사 뒤 되감기. 되감기는 스트림을 열기 전에 해야 오류를 HTTP 코드로 줄 수 있다.
         validateModel(request);
@@ -359,7 +372,26 @@ public class ChatController {
             // CR-175: 이 순번(끝 이벤트의 turn_seq)부터 뒤를 지우고 이번 질문으로 다시 답한다(BIZ-148)
             @JsonProperty("rewind_from_seq") Integer rewindFromSeq,
             // CR-175: on, off. 비우면 연결 설정 그대로(BIZ-150)
-            String thinking
+            String thinking,
+            // CR-184: 있으면 그림 연결로 그림 한 장을 만든다(PRD-540, PRD-541)
+            ImageDto image
+    ) {
+        /** CR-184 이전 15칸 호환(그림 없음) */
+        public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
+                                     boolean actionsEnabled, String connectionId, String connectionGroupId,
+                                     ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
+                                     String workingDirectory, String toolMode, String systemPromptOverride,
+                                     Integer rewindFromSeq, String thinking) {
+            this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
+                    toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
+                    thinking, null);
+        }
+    }
+
+    /** CR-184: 그림 요청. action 은 create, edit */
+    public record ImageDto(
+            String action,
+            @JsonProperty("source_image_id") String sourceImageId
     ) {}
 
     /** CR-006: 도구 필터링 DTO */
@@ -599,6 +631,116 @@ public class ChatController {
     }
 
     /** CR-175 BIZ-148: rewind_from_seq 가 오면 그 순번부터 지우고 답한다. */
+    // ─── CR-184 그림 만들기 ───
+
+    /** 스트림을 기다리는 여유. 공급처 시간 한도가 지난 뒤 저장과 끝 이벤트를 보낼 시간이다. */
+    private static final long IMAGE_STREAM_GRACE_MS = 60_000L;
+
+    private Object imageCompletion(ChatCompletionRequest request) {
+        String sessionId = request.sessionId() != null && !request.sessionId().isBlank()
+                ? request.sessionId() : UUID.randomUUID().toString();
+        List<com.platform.image.ImageGenerationService.RequestMessage> messages = request.messages().stream()
+                .map(m -> new com.platform.image.ImageGenerationService.RequestMessage(m.role(), m.content()))
+                .toList();
+        com.platform.image.ImageGenerationService.Prepared prepared = imageGeneration.prepare(
+                request.connectionId(), sessionId, request.image().action(), request.image().sourceImageId(),
+                messages);
+        rewindIfRequested(request);
+
+        if (request.stream()) {
+            return streamImage(prepared);
+        }
+        try {
+            return ApiResponse.ok(imageResponse(imageGeneration.generate(prepared), sessionId));
+        } catch (com.platform.image.ImageProviderException e) {
+            throw new ChatRejectedException(HttpStatus.BAD_GATEWAY, e.getCode());
+        }
+    }
+
+    private SseEmitter streamImage(com.platform.image.ImageGenerationService.Prepared prepared) {
+        SseEmitter emitter = new SseEmitter(imageSettings.timeoutMs() + IMAGE_STREAM_GRACE_MS);
+        final String propagatedTenantId = com.platform.tenant.TenantContext.getTenantId();
+        final org.springframework.security.core.context.SecurityContext propagatedSecurityContext =
+                org.springframework.security.core.context.SecurityContextHolder.getContext();
+        final String propagatedAgentId = com.platform.llm.adapter.RequestContext.getAgentId();
+        final String propagatedUserRef = com.platform.llm.adapter.RequestContext.getUserRef();
+        Thread.ofVirtual().start(() -> {
+            if (propagatedTenantId != null) {
+                com.platform.tenant.TenantContext.setTenantId(propagatedTenantId);
+            }
+            org.springframework.security.core.context.SecurityContextHolder.setContext(propagatedSecurityContext);
+            if (propagatedAgentId != null) {
+                com.platform.llm.adapter.RequestContext.setAgentId(propagatedAgentId);
+            }
+            if (propagatedUserRef != null) {
+                com.platform.llm.adapter.RequestContext.setUserRef(propagatedUserRef);
+            }
+            try {
+                emitter.send(SseEmitter.event().name("image_status").data(Map.of("state", "generating")));
+                com.platform.image.ImageGenerationService.Outcome outcome = imageGeneration.generate(prepared);
+                if (!outcome.aborted()) {
+                    emitter.send(SseEmitter.event().name("delta").data(Map.of("delta", outcome.markdown())));
+                }
+                emitter.send(SseEmitter.event().name("done").data(imageDone(outcome, prepared.sessionId())));
+                emitter.complete();
+            } catch (com.platform.image.ImageProviderException e) {
+                sendImageError(emitter, e.getCode());
+            } catch (IOException e) {
+                emitter.completeWithError(e);
+            } catch (RuntimeException e) {
+                log.warn("Image stream failed: session={} {}", prepared.sessionId(), e.toString());
+                sendImageError(emitter, com.platform.image.ImageProviderException.FAILED);
+            } finally {
+                com.platform.tenant.TenantContext.clear();
+            }
+        });
+        return emitter;
+    }
+
+    private static void sendImageError(SseEmitter emitter, String code) {
+        try {
+            emitter.send(SseEmitter.event().name("error").data(Map.of("code", code)));
+            emitter.complete();
+        } catch (IOException e) {
+            emitter.completeWithError(e);
+        }
+    }
+
+    private static Map<String, Object> imageDone(com.platform.image.ImageGenerationService.Outcome outcome,
+                                                 String sessionId) {
+        Map<String, Object> done = new HashMap<>();
+        done.put("done", true);
+        done.put("session_id", sessionId);
+        if (outcome.turnId() != null) done.put("turn_id", outcome.turnId());
+        if (outcome.turnSeq() != null) done.put("turn_seq", outcome.turnSeq());
+        if (outcome.model() != null) done.put("model", outcome.model());
+        done.put("images", imageItems(outcome));
+        return done;
+    }
+
+    private static Map<String, Object> imageResponse(com.platform.image.ImageGenerationService.Outcome outcome,
+                                                     String sessionId) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", outcome.model());
+        body.put("session_id", sessionId);
+        String text = outcome.aborted() ? "" : outcome.markdown();
+        body.put("content", List.of(Map.of("type", "text", "text", text)));
+        body.put("images", imageItems(outcome));
+        if (outcome.turnId() != null) body.put("turn_id", outcome.turnId());
+        if (outcome.turnSeq() != null) body.put("turn_seq", outcome.turnSeq());
+        return body;
+    }
+
+    private static List<Map<String, Object>> imageItems(com.platform.image.ImageGenerationService.Outcome outcome) {
+        if (outcome.image() == null) return List.of();
+        Map<String, Object> item = new HashMap<>();
+        item.put("id", outcome.image().getId());
+        item.put("media_type", outcome.image().getMediaType());
+        if (outcome.image().getWidth() != null) item.put("width", outcome.image().getWidth());
+        if (outcome.image().getHeight() != null) item.put("height", outcome.image().getHeight());
+        return List.of(item);
+    }
+
     private void rewindIfRequested(ChatCompletionRequest request) {
         if (request.rewindFromSeq() == null) return;
         if (request.sessionId() == null || request.sessionId().isBlank()) {

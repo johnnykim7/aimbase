@@ -27,13 +27,14 @@ class ConversationRewindServiceTest {
     @Mock private ConnectionAdapterFactory connectionAdapterFactory;
     @Mock private ConnectionGroupSelector connectionGroupSelector;
     @Mock private LLMAdapter cliAdapter;
+    @Mock private com.platform.repository.ChatGeneratedImageRepository imageRepository;
 
     private ConversationRewindService service;
 
     @BeforeEach
     void setUp() {
         service = new ConversationRewindService(sessionStore, cancellationRegistry,
-                connectionAdapterFactory, connectionGroupSelector);
+                connectionAdapterFactory, connectionGroupSelector, imageRepository);
     }
 
     @Test
@@ -58,6 +59,32 @@ class ConversationRewindServiceTest {
 
         verify(sessionStore).rewind("s-1", 2);
         verify(cliAdapter).cleanupSession("s-1");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-106 1 되감은_뒤_되감긴_묶음의_그림에_지운_표시를_한다")
+    void rewound_turn_images_are_soft_deleted() {
+        when(cancellationRegistry.isActive("s-1")).thenReturn(false);
+
+        service.rewind("s-1", 2, null, null);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(sessionStore, imageRepository);
+        order.verify(sessionStore).rewind("s-1", 2);
+        order.verify(imageRepository).softDeleteOrphanedBySessionId(
+                org.mockito.ArgumentMatchers.eq("s-1"), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-106 2 그림_지운_표시가_실패해도_되감기는_성공으로_끝난다")
+    void image_soft_delete_failure_does_not_fail_rewind() {
+        when(cancellationRegistry.isActive("s-1")).thenReturn(false);
+        when(imageRepository.softDeleteOrphanedBySessionId(
+                org.mockito.ArgumentMatchers.eq("s-1"), org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new RuntimeException("db down"));
+
+        service.rewind("s-1", 2, null, null);
+
+        verify(sessionStore).rewind("s-1", 2);
     }
 
     @Test

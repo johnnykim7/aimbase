@@ -261,6 +261,9 @@ aimbase:
   # CR-165: OpenAI 음성 합성 주소. 로컬에서 가짜 OpenAI 로 보낸 본문을 받아 볼 때 바꾼다
   speech:
     openai-tts-url: ${AIMBASE_SPEECH_OPENAI_TTS_URL:https://api.openai.com/v1/audio/speech}
+  # CR-184: 그림 공급처(OpenAI) 주소. 로컬에서 가짜 OpenAI 로 보낸 본문을 받아 볼 때 바꾼다
+  image:
+    openai-base-url: ${AIMBASE_IMAGE_OPENAI_BASE_URL:https://api.openai.com/v1}
   # CR-159 워크플로우 LLM 단계 첨부(config.attachments)
   workflow:
     attachment:
