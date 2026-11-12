@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 3.21 | 최종 수정: 2026-11-13 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184
+> 설계 버전: 3.22 | 최종 수정: 2026-11-13 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -725,7 +725,9 @@ flowchart LR
 | PRD-480 | 대화 요청 `document_edit`, 고치기 지시 프롬프트 틀 3개, 작업 폴더 바탕 판 맞추기와 되돌리기, `document` 이벤트, 위젯 설정 `document_binary_edit_supported` | PRD-481, CR-175, CR-182 | 단위시험 TC-CHT-073 ~ 077, 로컬 API 연결 html, 로컬 실행기 pptx | BE | 설계중 |
 | PRD-481 | CR-180 미리보기 API `version` 인자와 `has_source` | CR-180 서버 dev 반영 | 단위시험 TC-CHT-078 | BE | 설계중 |
 | PRD-482 | 되감기 때 판 지운 표시 | PRD-481, CR-175 | 단위시험 TC-CHT-079 | BE | 설계중 |
-| PRD-480, PRD-481 | 위젯 `src/features/` 고치기 입력칸, 판 선택, 고치는 중 덮개, 답 아래 판 카드 | CR-177, CR-180 위젯 dev 반영 | 통합 시험항목 영역 14 | 위젯 | 설계중 |
+| PRD-483 | 고치기 요청 `document_edit.selection`, 프롬프트 틀 `widget.document-edit.selection` | PRD-480 | 단위시험 TC-CHT-077 | BE | 설계중 |
+| PRD-484 | 되돌리기 API, 판 행 `made_by = RESTORE` | PRD-481 | 단위시험 TC-CHT-071 | BE | 설계중 |
+| PRD-480 ~ 484 | 위젯 `src/features/document-edit/` 고치기 입력칸, 선택한 부분 칩, 판 선택, 앞 판 안내 줄과 되돌리기, 고치는 중 덮개, 답 아래 판 카드 | CR-177, CR-180 위젯 dev 반영, CR-180 `onPreviewSelection` | 통합 시험항목 영역 14 | 위젯 | 설계중 |
 
 ### CR-186: 위젯 답 읽어주기와 실시간 음성 (BE + 위젯) [v3.19, CR-186]
 

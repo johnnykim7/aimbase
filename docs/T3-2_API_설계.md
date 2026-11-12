@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.17 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184
+> 설계 버전: 7.18 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3199,6 +3199,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 | document_edit | object | N | 이번 질문이 옆 창 문서를 고치는 요청일 때 |
 | document_edit.target | object | Y | CR-180 옆 창 대상. `{kind: "file", name}` 또는 `{kind: "block", turn_id, index, lang, source}` |
 | document_edit.base_version | int | N | 옆 창에 보이는 판. 없으면 마지막 판 |
+| document_edit.selection | object | N | 옆 창에서 선택한 글 `{text}`. 있으면 그 부분만 고치게 한다(PRD-483). 빈 글이면 없는 것으로 본다 |
 
 ```json
 {
@@ -3212,6 +3213,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 | 상태 | 코드 | 경우 |
 |------|------|------|
 | 400 | `document_edit_invalid:no_session` | `session_id` 없음 |
+| 400 | `document_edit_invalid:target` | `target` 이 없거나 종류, 이름, 답 번호, 순번, 언어가 틀림 |
 | 400 | `document_edit_invalid:source` | 처음 고치는 BLOCK 인데 `source` 없음 |
 | 400 | `document_edit_invalid:base_version` | 바탕 판이 없거나 지운 판 |
 | 400 | `document_edit_unsupported` | 원본 없는 파일인데 실행기 연결이 아님(BIZ-203) |
@@ -3250,7 +3252,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 }]
 ```
 
-BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다.
+BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의 `made_by` 는 `ORIGINAL`, `CHAT_EDIT`, `RESTORE` 이고, FILE 1판과 `RESTORE` 판은 `turn_id` 가 비어 있다.
 
 ### 판 본문 [PRD-481]
 
@@ -3259,6 +3261,23 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다.
 - BLOCK: `{"lang": "html", "content": "<!doctype html>..."}`
 - FILE: 파일 그대로(`Content-Disposition: attachment`, 확장자별 형식)
 - 404 `document_not_found`: 문서나 판이 없음, 지운 판, 다른 테넌트
+
+### 앞 판으로 되돌리기 [PRD-484]
+
+`POST /api/v1/chat/documents/{documentId}/versions/{version}/restore` 🔒 (`chat:stream`)
+
+그 판 내용을 그대로 마지막 판 다음 번호로 복사한다(BIZ-204). 요청 본문은 없다. FILE 은 작업 폴더의 `out/<이름>` 과 원본도 새 판으로 맞춘다.
+
+```json
+{"document_id": "6f1c...", "status": "UPDATED", "version": 4}
+```
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 200 | `UNCHANGED` | 마지막 판과 내용이 같음. 판을 만들지 않는다 |
+| 403 | `document_forbidden` | 다른 사람 세션의 문서 |
+| 404 | `document_not_found` | 문서나 판이 없음, 지운 판, 다른 테넌트 |
+| 409 | `session_busy` | 그 세션에 답이 도는 중 |
 
 ### CR-180 미리보기 API 인자 추가 [PRD-481]
 
