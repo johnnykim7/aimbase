@@ -24,6 +24,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -88,7 +89,8 @@ class ApprovalTimeoutSweeperTest {
         assertThat(r.getError()).containsEntry("reason", "approval_timeout")
                 .containsEntry("detail", a.getTimeoutAt().toString());
         assertThat(r.getCompletedAt()).isEqualTo(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
-        verify(publisher).runCompleted(eq(r.getId()), isNull(), eq("failed"), eq(3600_000L));
+        verify(publisher).runCompleted(eq(r.getId()), isNull(), eq("failed"), eq(3600_000L),
+                argThat(e -> "approval_timeout".equals(e.get("reason"))));
     }
 
     @Test
@@ -101,7 +103,7 @@ class ApprovalTimeoutSweeperTest {
 
         assertThat(r.getStatus()).isEqualTo("running");
         verify(runs, never()).save(any());
-        verify(publisher, never()).runCompleted(any(), any(), any(), anyLong());
+        verify(publisher, never()).runCompleted(any(), any(), any(), anyLong(), any());
     }
 
     @Test
