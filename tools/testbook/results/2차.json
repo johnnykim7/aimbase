@@ -338,6 +338,21 @@
    "tester": "Claude 헤드리스",
    "route": "절차대로",
    "rec": 0
+  },
+  "AIMBASE_09025": {
+   "testId": "AIMBASE_09025",
+   "result": "OK",
+   "steps": [
+    "pass",
+    "pass",
+    "pass"
+   ],
+   "comment": "로컬 api(18175, 0ad1690 뒤 로더 수정본). 1: curl 로 로더, esm, 타입, guide.html 이 Cache-Control no-cache, esm 을 Last-Modified 로 다시 물으면 304. 개발기 59 반영(17:52) 뒤 같은 결과이고 백오피스2 9471 은 캐시를 비운 뒤 두 번째 열 때 로더와 esm 이 304. 2: chunk-3AFQZDI5.js, katex-EHZX36WM.js 가 max-age=31536000, public, immutable(단위시험 2줄도 통과). 3: localhost:3999 화면에 로더를 ?v=t175 로 넣자 요청이 aimbase-chat.umd.global.js?v=t175, aimbase-chat.esm.js?v=t175, chunk-53NLFBUF.js 순으로 나가고 customElements.get(aimbase-chat) 이 정의됨. 표시 없이 부르면 esm 도 표시 없이 aimbase-chat.esm.js 로 부름.",
+   "date": "2026-11-12",
+   "at": "2026-11-12 17:58:12",
+   "tester": "Claude 헤드리스",
+   "route": "절차대로",
+   "rec": 0
   }
  }
 }

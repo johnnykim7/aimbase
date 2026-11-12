@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.30.0** | 2026-11-11 | Aimbase v8.18.0 기준
+> **v3.30.1** | 2026-11-12 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1420,6 +1420,8 @@ GET /api/v1/prompt-templates/preview?tenantId=...&projectId=...
 > - `/widget/v1/aimbase-chat.d.ts` — TypeScript 타입
 > - `/widget/v1/index.html` (또는 `/widget/v1/`) — HTML 렌더링된 통합 가이드
 > - `/widget/v1/sample-bff/server.js` — Node 샘플 BFF (외부 의존 0)
+>
+> **캐시** (CR-175): 이름이 고정인 로더, esm, 타입, 안내 파일은 `Cache-Control: no-cache`(열 때마다 다시 확인, 바뀌지 않았으면 304), 이름에 내용 해시가 붙은 조각은 `max-age=31536000, public, immutable`. 로더는 자기 주소의 쿼리(`?v=...`)를 esm 주소에 그대로 붙인다. 30일 캐시 시절에 받아 둔 사본을 건너뛰려면 소비앱이 로더 주소에 판 표시를 한 번 붙인다([통합 가이드](embed-chat-widget.md) 7절).
 
 소비앱(OMS/WMS/OpenMall/Rescue 등, 모두 Aimbase와 다른 도메인) 브라우저에 채팅 + 워크플로우 실행 가시화 + RAG 출처 카드를 얹기 위한 3-Tier 임베드 경로. **브라우저에 테넌트 API Key 노출 금지 원칙** 에 따라 소비앱 BFF 가 API Key 로 서버간 호출하여 단기 JWT(`type=widget`) 를 대리 발급받고 브라우저로 전달한다.
 
@@ -2623,6 +2625,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.30.1 | 2026-11-12 | **CR-175 위젯 파일 캐시** (§ 17, 문서만). 이름이 고정인 위젯 파일은 no-cache, 해시 붙은 조각만 1년 캐시. 로더가 자기 주소 쿼리를 esm 에 붙인다. 30일 캐시 시절 사본을 건너뛰는 판 표시 안내 |
 | v3.30.0 | 2026-11-11 | **CR-175 채팅 위젯 대화 기본기** (§ 28). 대화 요청에 `rewind_from_seq`, `thinking`, 허용 모델 검사. `done` 에 `turn_id`, `turn_seq`, `model`. 위젯 설정 `GET /api/v1/chat/widget-settings`, 응답 평가 `PUT`/`DELETE /api/v1/chat/feedback`, 평가 목록 `GET /api/v1/chat/feedback`, 후속 질문과 제목 `POST /api/v1/chat/sessions/{session_id}/follow-ups` |
 | v3.29.0 | 2026-11-10 | **CR-176 같은 글 다른 차례** (§ 27-2). 맡기기에 `take`(0 이상 10 이하, 빠지면 0)를 받아 같은 글을 다른 소리로 다시 만든다. 같은 글 돌려주기는 같은 차례일 때만. 응답에 `take`, 오류 `take_out_of_range`. 차례 0 은 전과 같은 소리다 |
 | v3.28.0 | 2026-11-09 | **CR-174 실행 종료 회신, 승인 시한, run 변수** (§ 4-4, § 4-6). 실행 입력 `_callback` 으로 run 이 끝나면 HTTP 연결로 결과를 POST 한다. HUMAN_INPUT `timeoutMs` 가 지나면 `failed(approval_timeout)`. 단계 틀 변수 `{{run.id}}` 등 |

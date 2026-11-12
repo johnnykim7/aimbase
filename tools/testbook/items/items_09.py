@@ -456,13 +456,15 @@ dict(id='IT-09-024', flow='읽기 편의', kind='정상', title='칸 안에 넣�
      req=['PRD-374'], src=['CR-175'], pri='Medium'),
 
 dict(id='IT-09-025', flow='위젯 파일 내주기', kind='정상', title='배포한 위젯 수정이 강력 새로고침 없이 이미 위젯을 열어 본 사용자 브라우저에도 닿는다(합동시험 2차 뒤 고친 결함 회귀)',
-     pre='위젯 파일을 내주는 aimbase api',
+     pre='위젯 파일을 내주는 aimbase api. 3 은 로컬 위젯 견본 화면(허용 출처 localhost:3999)',
      steps='1. 로더(aimbase-chat.umd.global.js), esm(aimbase-chat.esm.js), 타입(aimbase-chat.d.ts), 안내(guide.html)를 받는다\n'
-           '2. 이름 끝에 내용 해시 8자가 붙은 코드 조각을 받는다',
+           '2. 이름 끝에 내용 해시 8자가 붙은 코드 조각을 받는다\n'
+           '3. 위젯 허용 출처 화면에서 로더를 주소 끝에 ?v=t175 를 붙여 불러오고 위젯 파일 요청을 본다',
      expect='1. 네 파일 응답의 Cache-Control 이 no-cache 여서 브라우저가 열 때마다 바뀌었는지 묻는다\n'
-            '2. 코드 조각 응답의 Cache-Control 이 max-age=31536000, public, immutable 이다',
-     judge=['단위', '단위'],
-     pair={1: [1], 2: [2]},
+            '2. 코드 조각 응답의 Cache-Control 이 max-age=31536000, public, immutable 이다\n'
+            '3. esm 요청 주소가 aimbase-chat.esm.js?v=t175 로 로더와 같은 표시를 달고, aimbase-chat 요소가 정의된다',
+     judge=['단위', '단위', '합동'],
+     pair={1: [1], 2: [2], 3: [3]},
      src=['CR-175'], pri='Medium'),
 
 ]
