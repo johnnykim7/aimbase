@@ -3,6 +3,8 @@ package com.platform.service;
 import com.platform.domain.PromptTemplateEntity;
 import com.platform.domain.PromptTemplateEntityId;
 import com.platform.repository.PromptTemplateRepository;
+import com.platform.tenant.TenantContext;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -27,6 +29,12 @@ class PromptTemplateServiceTest {
     void setUp() {
         repository = mock(PromptTemplateRepository.class);
         service = new PromptTemplateService(repository);
+        TenantContext.setTenantId("t1");
+    }
+
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
     }
 
     // ─── getTemplate ───────────────────────────────────────────
@@ -74,6 +82,16 @@ class PromptTemplateServiceTest {
 
             String result = service.getTemplate("nonexistent.key.xyz");
             assertThat(result).isNull();
+        }
+
+        @Test
+        @DisplayName("CR-182 테넌트 없이 부르면 마스터 DB 에 없는 표를 조회하지 않고 파일을 쓴다")
+        void noTenant_skipsDb_usesFile() {
+            TenantContext.clear();
+
+            assertThat(service.getTemplate("test.fallback")).contains("file fallback template");
+            assertThat(service.getMergedTemplateText("test.fallback", "p1")).isNull();
+            verifyNoInteractions(repository);
         }
     }
 

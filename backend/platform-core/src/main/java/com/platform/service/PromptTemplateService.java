@@ -2,6 +2,7 @@ package com.platform.service;
 
 import com.platform.domain.PromptTemplateEntity;
 import com.platform.repository.PromptTemplateRepository;
+import com.platform.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
@@ -41,12 +42,15 @@ public class PromptTemplateService {
 
     /**
      * 프롬프트 템플릿 조회 (캐시 → DB → 파일 폴백).
+     * prompt_templates 는 테넌트 DB 에만 있다. 테넌트 없이 부르면(서버 MCP 도구 목록 맞추기 등) 마스터 DB 로 가서
+     * 없는 표 오류가 기록에 남으므로 DB 를 건너뛰고 파일을 쓴다.
      */
     public String getTemplate(String key) {
         CacheEntry entry = cache.get(key);
         if (entry != null && !entry.isExpired()) {
             return entry.value;
         }
+        if (!TenantContext.hasTenant()) return loadFromFile(key);
 
         try {
             Optional<PromptTemplateEntity> entity = repository.findActiveByKey(key);
@@ -120,6 +124,7 @@ public class PromptTemplateService {
         if (entry != null && !entry.isExpired()) {
             return entry.value;
         }
+        if (!TenantContext.hasTenant()) return null;
         try {
             List<PromptTemplateEntity> list = repository.findActiveByKeyAndScope(key, scope, projectId);
             if (!list.isEmpty()) {
