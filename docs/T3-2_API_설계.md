@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.13 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181
+> 설계 버전: 7.14 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3124,6 +3124,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 - 그 테넌트에 없는 연결이면 404 `connection_not_found`
 - `thinking_supported` 는 그 연결 어댑터가 요청마다 생각 설정을 바꿀 수 있는지다. Anthropic API 연결과 Claude CLI 연결은 참
 - `thinking_default` 는 깊게 생각하기 단추의 처음 상태다. 연결 config 에 생각 설정이 있으면 그 값, 없으면 어댑터 기본(Claude CLI 참, 그 밖 거짓)
+- `locale`(선택, CR-177): 아쉬워요 이유 이름의 언어. 아래 「위젯 틀과 영어 화면」
 
 ### 응답 평가 [PRD-370]
 
@@ -3167,6 +3168,23 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 ### 대화 meta 제목 수정 (기존 경로 동작 추가)
 
 `PUT /api/v1/conversations/{sessionId}/meta` 에 `title` 이 있으면 `title_source = USER` 로 둔다.
+
+## 위젯 틀과 영어 화면 [v7.14, CR-177]
+
+설계 상세: [CR-177_위젯_틀_나누기와_영어_화면.md](CR-177_위젯_틀_나누기와_영어_화면.md) 4.5절.
+
+### 위젯 설정 조회 언어 [PRD-402]
+
+`GET /api/v1/chat/widget-settings?connection_id={id}&locale=en`
+
+- `locale` 은 `ko`, `en`. `en-US` 처럼 지역이 붙으면 앞 두 글자로 본다. 없거나 모르는 값이면 `ko`
+- `feedback_reasons[].label` 은 런타임 설정 항목의 `labels[locale]`, 없으면 `label`. 응답 모양은 그대로다
+
+### 대화 스트림을 위젯이 받는 방법 [PRD-400]
+
+- 위젯 본체가 아는 이벤트는 `delta`, `thinking`, `tool_use_start`, `tool_result`, `done` 이다. 그 밖의 이름은 버리지 않고 위젯 기능에 그대로 전달한다(틀 사용법 `streamEvent`)
+- 응답 도중 `event: error`, `data: {"code": "...", "message": "..."}` 가 오면 그 응답을 오류로 끝낸다. 오류 글은 위젯 문구표, 기능이 등록한 오류 글, 서버 `message`, 코드 순으로 고른다
+- 대화 요청 본문에 칸을 더하는 건은 서버 `ChatCompletionRequest` 에 그 칸을 같은 건에서 더한다
 
 ## 위젯 옆 창 문서를 대화로 고치기 [v7.13, CR-181]
 
