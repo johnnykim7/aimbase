@@ -206,6 +206,18 @@ interface Turn {
   view: TurnView;
 }
 
+/**
+ * 서버가 런에 저장한 error 는 실패한 곳마다 모양이 달라(error, 거절의 reason 과 detail, 한도 초과의 reason) 사람이 쓴 글을 먼저 고른다.
+ */
+function failureReason(error: Record<string, unknown> | undefined): string | undefined {
+  if (!error) return undefined;
+  for (const key of ["error", "detail", "reason"]) {
+    const v = error[key];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return undefined;
+}
+
 function newVersion(): AnswerVersion {
   return {
     text: "",
@@ -2176,6 +2188,11 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
         titleText = () => `${T.workflowTitle(`${runId.slice(0, 8)}…`)} · ${ev.status} (${ev.duration_ms}ms)`;
         renderWfTitle();
         workflowRuns.delete(runId);
+        events.emit("workflowDone", {
+          runId: ev.run_id,
+          status: ev.status === "completed" || ev.status === "cancelled" ? ev.status : "failed",
+          reason: failureReason(ev.error),
+        });
       },
       onError: (e) => {
         options.on?.onError?.(e);
@@ -2195,6 +2212,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     isRecording: () => recState !== "idle",
     widgetSettings: () => settings,
     connectionId: () => options.connectionId ?? null,
+    allowApproval: () => options.allowApproval !== false,
     on: (name, cb) => events.on(name, cb),
     ui: {
       plusMenu,
@@ -2267,6 +2285,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       request: (method, path, body) => api.request(method, path, body),
       requestBlob: (method, path, body, opts) => api.requestBlob(method, path, body, opts),
       hasScope: (scope) => tokens.hasScope(scope),
+      hasUserRef: () => tokens.hasUserRef(),
       wsUrl: (path) => api.wsUrl(path),
     },
   };

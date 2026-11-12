@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.6 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-186
+> 문서 버전: 1.7 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-185, CR-186
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -78,10 +78,10 @@ export const exportChat: WidgetFeature = {
 | 10 | 문구표, 오류 문구, 화면 언어 | `defineStrings`, `ctx.strings(pack)`, `ctx.text`, `ctx.list`, `ctx.setLocale`, `ctx.ui.addErrorTexts(map)` | 모든 건, CR-184 그림 오류 |
 | 11 | 알림 | `ctx.on(name, cb)` | CR-179, CR-181, CR-186 등 |
 | 12 | 대화 동작 | `ctx.chat.send`, `abort`, `open`, `selectModel`, `setThinking`, `setTitle`, `newConversation`, `attach`, `attachUploaded`, `addRequestFields` | CR-178, CR-179, CR-181, CR-186 등 |
-| 13 | 서버 호출 | `ctx.api.request(method, path, body?)`, `requestBlob(method, path, body?, { signal }?)`, `hasScope`, `wsUrl` | 서버를 부르는 건, CR-180 그림과 원본 파일, CR-186 음성 대화 |
+| 13 | 서버 호출 | `ctx.api.request(method, path, body?)`, `requestBlob(method, path, body?, { signal }?)`, `hasScope`, `hasUserRef`, `wsUrl` | 서버를 부르는 건, CR-180 그림과 원본 파일, CR-185 승인 단추, CR-186 음성 대화 |
 | 14 | 덮개, 토스트, Esc, 글자 크기 | `ctx.ui.layer`, `toast`, `notice`, `onEscape`, `fontSize`, `setFontSize` | 필요한 건 |
 | 15 | 머리줄 제목 표시 | `ctx.ui.header.setTitleTag(spec)` | CR-178 프로젝트 표시 |
-| 16 | 위젯 설정 읽기 | `ctx.widgetSettings()`, `ctx.connectionId()`, 알림 `settingsLoaded` | CR-184 그림 만들기 보이기 |
+| 16 | 위젯 설정 읽기 | `ctx.widgetSettings()`, `ctx.connectionId()`, `ctx.allowApproval()`, 알림 `settingsLoaded` | CR-184 그림 만들기 보이기, CR-185 승인 단추 |
 
 ### 3.1 + 메뉴와 더 보기 메뉴
 
@@ -244,6 +244,7 @@ ctx.on("answerDelta", ({ answer, text }) => ...);  // 응답 글 조각이 옴. 
 ctx.on("answerDone", (a: AnswerView) => ...);      // 응답 하나가 끝남(중지, 오류 포함)
 ctx.on("streamEvent", ({ name, data, answer, mount }) => ...); // 대화 스트림에서 위젯 본체가 모르는 이벤트. mount 는 아래
 ctx.on("workflowApproval", ({ runId, stepId, policyId, reason, approvers, timeoutAt, mount }) => ...); // 워크플로우 진행 칸에 승인 대기가 옴
+ctx.on("workflowDone", ({ runId, status, reason }) => ...); // 워크플로우 진행 칸의 런이 끝남. status 는 completed, failed, cancelled. reason 은 실패나 거절 이유
 ctx.on("modelChange", ({ model, thinking }) => ...); // 사람이 모델이나 깊게 생각하기를 바꿈. selectModel, setThinking 으로 바꾼 것은 오지 않는다
 ctx.on("titleChange", ({ sessionId, title }) => ...); // 서버가 대화 제목을 만들어 머리줄 제목이 바뀜. setTitle 로 바꾼 것은 오지 않는다
 ctx.on("settingsLoaded", (settings) => ...);      // 위젯 설정을 받았거나 다시 받음(화면 언어를 바꿀 때 포함)
@@ -256,6 +257,7 @@ ctx.isBusy();            // 응답이 도는 중
 ctx.isRecording();       // 위젯 본체 마이크가 녹음 중이거나 글로 바꾸는 중
 ctx.widgetSettings();    // 위젯 본체가 받은 위젯 설정 응답 그대로(모르는 칸 포함). 받기 전이거나 실패면 null
 ctx.connectionId();      // 붙이는 앱이 준 연결 id, 없으면 null
+ctx.allowApproval();     // 붙이는 앱 옵션 allowApproval(속성 allow-approval="false" 로 끈다). 기본 참
 ctx.chat.send(text, { body });  // 입력칸에서 보낸 것과 같다. body 는 아래 요청 본문 덧붙임
 ctx.chat.abort();        // 응답 중지 단추와 같다. 돌고 있지 않으면 아무 일 없음
 ctx.chat.selectModel(id);   // 모델 고르기. 위젯 설정의 목록에 없으면 거짓
@@ -295,6 +297,7 @@ interface ConversationView {
 - `streamEvent` 의 `mount(el)` 은 도는 중인 응답의 지금 위치(그때까지 받은 글 바로 아래)에 요소를 끼운다. 그 뒤에 오는 글은 요소 아래에 이어 그린다. 응답이 끝나도 남는다. 응답이 이미 끝났으면 끼우지 않고 거짓을 돌려준다.
 - 끼운 요소는 응답 글(`AnswerView.text`)에 들어가지 않는다. 복사는 글만 복사하고, 다시 생성한 새 버전과 지난 대화 열기에는 없다. 손질(decorate)은 요소로 나뉜 글 조각마다 불린다.
 - `workflowApproval` 의 `mount(el)` 은 그 워크플로우 진행 칸의 승인 대기 줄 바로 아래에 요소를 끼운다. 붙이는 앱의 `onApprovalRequired` 는 그대로 불린다.
+- `workflowDone` 의 `reason` 은 서버가 그 런에 저장한 실패 이유에서 사람이 쓴 글(`error`, 없으면 거절의 `detail`, 없으면 `reason`)을 고른 것이다. 서버 글 그대로라 번역되지 않는다. 고를 글이 없으면 비운다.
 - 끼운 요소의 글은 기능이 `localeChange` 를 받아 다시 그린다.
 
 스트림 중간 오류: 서버가 응답 도중 `event: error`(`data: {"code": "...", "message": "..."}`)를 보내면 위젯 본체가 그 응답을 오류로 끝낸다. 받은 글은 남기고 「답을 받지 못했습니다: (오류 문구)」를 붙이며 다시 시도 단추는 두지 않는다(CR-175 T3-4 전송 7단계와 같다). 오류 문구는 3.6 의 규칙으로 고른다.
@@ -311,6 +314,7 @@ interface ConversationView {
 - 서버 호출은 `ctx.api.request<R>(method, path, body?)` 로 한다. 위젯 토큰을 싣고, body 가 `FormData` 면 multipart 로 그대로(파일 올리기), 그 밖에는 JSON 으로 싣는다. 실패하면 `WidgetApiError(status, code)` 를 던지고, 성공하면 `ApiResponse` 의 `data` 를 돌려준다. `widget-api.ts` 에 메서드를 더하지 않는다.
 - 그림, 파일, 소리처럼 JSON 이 아닌 응답은 `ctx.api.requestBlob(method, path, body?, { signal }?)` 로 받는다. 위젯 토큰을 싣고, body 는 `request` 와 같이 싣는다. 실패하면 `WidgetApiError` 를 던지고, 성공하면 `Blob` 을 돌려준다. 받는 중에 끊으려면 `AbortController` 의 `signal` 을 준다.
 - `ctx.api.hasScope(scope)` 는 위젯 토큰에 그 scope 가 있으면 참이다. 토큰을 받기 전에는 거짓이므로 `install` 에서 한 번 묻고 끝내지 말고 `settingsLoaded` 뒤나 단추를 그릴 때 묻는다.
+- `ctx.api.hasUserRef()` 는 붙이는 앱이 위젯 토큰을 받을 때 사용자 식별값(`user_ref`)을 줬으면 참이다. `hasScope` 와 같이 토큰을 받기 전에는 거짓이다. 화면을 정하는 데만 쓰고, 권한은 서버가 다시 검사한다.
 - `ctx.api.wsUrl(path)` 는 위젯 서버 주소로 만든 절대 웹소켓 주소다. 서버 주소가 http 면 ws, https 면 wss 다.
 - `ctx.ui.layer` 는 위젯 판(panel) 요소다. 녹음 덮개, 발표 화면 같은 겹치는 요소를 여기에 붙인다.
 - `ctx.ui.onEscape(fn)` 은 Esc 를 위젯 본체보다 먼저 받는다. 처리했으면 참을 돌려준다.

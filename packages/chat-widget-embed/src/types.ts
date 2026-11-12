@@ -118,7 +118,7 @@ export interface WidgetOptions {
   locale?: string;
   /** CR-175: 글자 크기 기본값. 사용자가 더보기에서 바꾸면 그 브라우저에서는 그 값을 따른다. */
   fontSize?: FontSize;
-  /** 위젯 내 승인 UI 활성화 — 기본 false (이벤트만 발행) */
+  /** 위젯 안에서 승인과 거절 단추를 둘지. 기본 true(CR-185). false 면 붙이는 앱이 onApprovalRequired 로 자기 결재 화면을 쓴다 */
   allowApproval?: boolean;
   theme?: {
     mode?: "light" | "dark" | "auto";

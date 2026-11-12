@@ -80,6 +80,7 @@ export class AimbaseChatElement extends HTMLElement {
       "empty-subtitle",
       "font-size",
       "locale",
+      "allow-approval",
     ];
   }
 
@@ -135,6 +136,7 @@ export class AimbaseChatElement extends HTMLElement {
       emptyTitle: parseLocalizedText(this.getAttribute("empty-title")),
       emptySubtitle: parseLocalizedText(this.getAttribute("empty-subtitle")),
       locale: this.getAttribute("locale") ?? undefined,
+      allowApproval: this.getAttribute("allow-approval") === "false" ? false : undefined,
       fontSize: fontSizeAttr && FONT_SIZES.includes(fontSizeAttr) ? fontSizeAttr : undefined,
       on: {
         // 붙이는 앱이 새 대화 번호를 따라가도록 엘리먼트 이벤트로 알린다.

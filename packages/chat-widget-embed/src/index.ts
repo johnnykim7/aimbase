@@ -42,6 +42,7 @@ export type {
   WidgetEvents,
   WidgetFeature,
   WorkflowApprovalEvent,
+  WorkflowDoneEvent,
 } from "./frame/context";
 export { SttClient, SttError } from "./stt-client";
 

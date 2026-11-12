@@ -5,7 +5,8 @@ export interface WorkflowHandlers {
   onSnapshot?: (snapshot: Record<string, unknown>) => void;
   onStep?: (ev: WorkflowStepEvent) => void;
   onApproval?: (ev: ApprovalEvent) => void;
-  onDone?: (ev: { run_id: string; status: string; duration_ms: number }) => void;
+  /** error 는 실패한 런에 서버가 저장한 값이다. 없으면 오지 않는다 */
+  onDone?: (ev: { run_id: string; status: string; duration_ms: number; error?: Record<string, unknown> }) => void;
   onError?: (e: Error) => void;
 }
 

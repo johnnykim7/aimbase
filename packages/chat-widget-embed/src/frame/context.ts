@@ -187,6 +187,13 @@ export interface WorkflowApprovalEvent {
   mount: (el: HTMLElement) => boolean;
 }
 
+export interface WorkflowDoneEvent {
+  runId: string;
+  status: "completed" | "failed" | "cancelled";
+  /** 실패나 거절 이유. 서버가 준 글 그대로이고 없으면 비운다 */
+  reason?: string;
+}
+
 export interface WidgetEvents {
   /** 위젯 창을 열거나 닫았을 때. 늘 열려 있는 inline 은 오지 않는다 */
   panelToggle: { open: boolean };
@@ -206,6 +213,8 @@ export interface WidgetEvents {
   titleChange: { sessionId: string; title: string };
   settingsLoaded: WidgetSettings;
   workflowApproval: WorkflowApprovalEvent;
+  /** 워크플로우 진행 칸의 런이 끝났을 때 */
+  workflowDone: WorkflowDoneEvent;
   destroy: void;
 }
 
@@ -221,6 +230,8 @@ export interface WidgetContext {
   isRecording(): boolean;
   widgetSettings(): WidgetSettings | null;
   connectionId(): string | null;
+  /** 붙이는 앱 옵션 allowApproval(속성 allow-approval). 기본 참 */
+  allowApproval(): boolean;
   on<K extends keyof WidgetEvents>(name: K, cb: (payload: WidgetEvents[K]) => void): () => void;
   ui: {
     plusMenu: MenuSlot;
@@ -271,6 +282,8 @@ export interface WidgetContext {
     requestBlob(method: string, path: string, body?: unknown, opts?: { signal?: AbortSignal }): Promise<Blob>;
     /** 위젯 토큰에 그 scope 가 있으면 참. 토큰을 받기 전에는 거짓이라 settingsLoaded 뒤나 쓰는 때에 묻는다 */
     hasScope(scope: string): boolean;
+    /** 위젯 토큰에 사용자 식별값(user_ref)이 있으면 참. hasScope 와 같이 토큰을 받기 전에는 거짓 */
+    hasUserRef(): boolean;
     /** 위젯 서버 주소로 만든 절대 웹소켓 주소. http 는 ws, https 는 wss */
     wsUrl(path: string): string;
   };
