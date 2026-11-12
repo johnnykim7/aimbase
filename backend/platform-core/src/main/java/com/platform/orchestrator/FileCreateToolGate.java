@@ -55,15 +55,21 @@ public class FileCreateToolGate {
             if (!exclude.contains(TOOL)) exclude.add(TOOL);
             return base == null ? ToolFilterContext.exclude(exclude) : copy(base, base.allowedTools(), exclude);
         }
+        // 스트리밍 도구 고리는 세션에 열린 도구만 남기는 거르기를 한 번 더 거친다. 붙인 도구로 실어야 거기서 빠지지 않는다.
+        List<String> attached = new ArrayList<>(base == null || base.attachedTools() == null
+                ? List.of() : base.attachedTools());
+        if (!attached.contains(TOOL)) attached.add(TOOL);
         if (base == null) {
-            return request.actionsEnabled() ? null : ToolFilterContext.allowOnly(List.of(TOOL));
+            return new ToolFilterContext(request.actionsEnabled() ? null : List.of(TOOL), null, null, null, null, null,
+                    attached);
         }
-        if (base.allowedTools() == null || base.allowedTools().isEmpty() || base.allowedTools().contains(TOOL)) {
-            return base;
+        List<String> allowed = base.allowedTools();
+        if (allowed != null && !allowed.isEmpty() && !allowed.contains(TOOL)) {
+            allowed = new ArrayList<>(allowed);
+            allowed.add(TOOL);
         }
-        List<String> allowed = new ArrayList<>(base.allowedTools());
-        allowed.add(TOOL);
-        return copy(base, allowed, base.excludeTools());
+        return new ToolFilterContext(allowed, base.excludeTools(), base.tags(), base.requiredCapabilities(),
+                base.maxPermission(), base.readOnlyMode(), attached);
     }
 
     private static ToolFilterContext copy(ToolFilterContext base, List<String> allowed, List<String> exclude) {

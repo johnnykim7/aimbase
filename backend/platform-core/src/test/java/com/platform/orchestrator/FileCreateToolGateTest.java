@@ -39,7 +39,20 @@ class FileCreateToolGateTest {
         assertThat(filter.allowedTools()).containsExactly(CreateFileTool.NAME);
         assertThat(filter.isToolAllowed(CreateFileTool.NAME)).isTrue();
         assertThat(filter.isToolAllowed("bash")).isFalse();
+        assertThat(filter.attaches(CreateFileTool.NAME)).isTrue();
         assertThat(gate.extraAllowed(req, false)).isNull();
+    }
+
+    @Test
+    @DisplayName("TC-CHT-083 스트리밍 고리의 세션 도구 거르기에 빠지지 않게 create_file 을 붙인 도구로 싣는다")
+    void file_create_is_attached_so_session_filter_keeps_it() {
+        ToolFilterContext all = gate.filter(request(true, null, true), null);
+        assertThat(all.allowedTools()).isNull();
+        assertThat(all.isToolAllowed("bash")).isTrue();
+        assertThat(all.attaches(CreateFileTool.NAME)).isTrue();
+
+        ToolFilterContext excluded = new ToolFilterContext(null, List.of(CreateFileTool.NAME), null);
+        assertThat(gate.filter(request(true, excluded, true), excluded).attaches(CreateFileTool.NAME)).isFalse();
     }
 
     @Test
@@ -99,7 +112,7 @@ class FileCreateToolGateTest {
 
         ToolFilterContext with = gate.filter(request(false, null, true), dataOnly);
         assertThat(with.allowedTools()).containsExactly("data_query", CreateFileTool.NAME);
-        assertThat(with.attachedTools()).containsExactly("data_query");
+        assertThat(with.attachedTools()).containsExactly("data_query", CreateFileTool.NAME);
         assertThat(with.isToolAllowed("bash")).isFalse();
 
         assertThat(gate.filter(request(false, null, false), dataOnly)).isSameAs(dataOnly);
