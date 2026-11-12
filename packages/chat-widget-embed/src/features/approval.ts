@@ -1,9 +1,10 @@
-import type { WidgetContext, WidgetFeature, WorkflowApprovalEvent } from "../frame/context";
+import type { WidgetContext, WidgetFeature, WorkflowApprovalEvent, WorkflowDoneEvent } from "../frame/context";
 import { defineStrings } from "../frame/i18n";
 
 /**
  * 승인 요청 카드(CR-185, PRD-560, PRD-561). 대화 중 도구 실행 전 승인과 워크플로우 승인을 위젯 안에서 정한다.
- * 도구 카드는 대화 스트림의 approval_required, approval_resolved 를 받고, 워크플로우 카드는 틀의 workflowApproval 을 받는다.
+ * 도구 카드는 대화 스트림의 approval_required, approval_resolved 를 받고, 워크플로우 카드는 틀의 workflowApproval 로 뜨고
+ * workflowDone 으로 닫힌다.
  * 기다림과 마감은 서버가 정한다. 카드는 보여 주고 결정을 보낼 뿐이다(T3-2 대화 승인 결정).
  */
 
@@ -25,6 +26,7 @@ const S = defineStrings({
     deadlineBy: (time: string) => `${time} 까지 정하지 않으면 실패합니다`,
     approversOnly: "승인자만 정할 수 있습니다",
     decidedByOther: "이미 다른 사람이 정했습니다",
+    deadlinePassed: "마감이 지나 실패했습니다",
   },
   en: {
     toolTitle: "Run this action?",
@@ -42,6 +44,7 @@ const S = defineStrings({
     deadlineBy: (time: string) => `It fails unless decided by ${time}`,
     approversOnly: "Only approvers can decide",
     decidedByOther: "Someone else already decided",
+    deadlinePassed: "Failed because the deadline passed",
   },
 });
 
@@ -50,6 +53,8 @@ type Texts = (typeof S)["ko"];
 const EVENT_REQUIRED = "approval_required";
 const EVENT_RESOLVED = "approval_resolved";
 const SCOPE_WORKFLOW_APPROVE = "workflow:approve";
+/** 감시기가 마감 지난 run 에 적는 error.reason(T3-2 워크플로우 승인 시한). */
+const REASON_APPROVAL_TIMEOUT = "approval_timeout";
 const INPUT_SUMMARY_LINES = 3;
 const INPUT_LINE_MAX_CHARS = 120;
 const TICK_MS = 1000;
@@ -153,7 +158,10 @@ type Outcome =
   | { kind: "timeout" }
   | { kind: "stopped" }
   | { kind: "other" }
-  | { kind: "approversOnly" };
+  | { kind: "deadlinePassed" }
+  | { kind: "approversOnly" }
+  /** 붙이는 앱이 allowApproval: false 로 자기 결재 화면을 쓴다. 단추도 안내도 두지 않는다. */
+  | { kind: "hostDecides" };
 
 function outcomeText(t: Texts, o: Outcome): string {
   switch (o.kind) {
@@ -165,8 +173,12 @@ function outcomeText(t: Texts, o: Outcome): string {
       return t.stopped;
     case "other":
       return t.decidedByOther;
+    case "deadlinePassed":
+      return t.deadlinePassed;
     case "approversOnly":
       return t.approversOnly;
+    case "hostDecides":
+      return "";
   }
 }
 
@@ -192,6 +204,7 @@ function appendDecision(
   decide: (approve: boolean) => void,
 ): void {
   if (state.outcome) {
+    if (state.outcome.kind === "hostDecides") return;
     const line = el("div", "apv-result", outcomeText(t, state.outcome));
     line.setAttribute("role", "status");
     root.append(line);
@@ -346,15 +359,22 @@ class WorkflowCard implements Card {
     private readonly ctx: WidgetContext,
     private readonly t: Texts,
     private readonly ev: WorkflowApprovalEvent,
-    canDecide: boolean,
+    closedAs: Outcome | null,
   ) {
-    if (!canDecide) this.outcome = { kind: "approversOnly" };
+    this.outcome = closedAs;
     this.root.setAttribute("role", "group");
     this.render();
   }
 
-  get waiting(): boolean {
-    return this.outcome === null;
+  get runId(): string {
+    return this.ev.runId;
+  }
+
+  /** 이 사용자가 정하지 않은 채 워크플로우가 끝났으면 끝난 까닭으로 닫는다. 보내는 중이면 그 응답이 닫는다. */
+  finish(done: WorkflowDoneEvent): void {
+    if (this.sending || this.outcome?.kind === "decided") return;
+    this.outcome = done.code === REASON_APPROVAL_TIMEOUT ? { kind: "deadlinePassed" } : { kind: "other" };
+    this.render();
   }
 
   dispose(): void {
@@ -416,6 +436,9 @@ class Approval {
       for (const card of this.toolCards.values()) if (card.waiting) card.close({ kind: "stopped" });
     });
     ctx.on("workflowApproval", (ev) => this.onWorkflow(ev));
+    ctx.on("workflowDone", (ev) => {
+      for (const card of this.workflowCards.values()) if (card.runId === ev.runId) card.finish(ev);
+    });
     ctx.on("localeChange", () => this.renderAll());
     ctx.on("newConversation", () => this.clear());
     ctx.on("destroy", () => this.clear());
@@ -442,12 +465,20 @@ class Approval {
     const key = `${ev.runId}/${ev.stepId}`;
     const prev = this.workflowCards.get(key);
     if (prev?.root.isConnected) return;
-    const card = new WorkflowCard(this.ctx, this.t, ev, this.canDecideWorkflow());
+    const card = new WorkflowCard(this.ctx, this.t, ev, this.workflowClosedAs(ev));
     if (ev.mount(card.root)) this.workflowCards.set(key, card);
   }
 
-  private canDecideWorkflow(): boolean {
-    return this.ctx.api.hasScope(SCOPE_WORKFLOW_APPROVE);
+  /**
+   * 단추를 둘 수 없으면 처음부터 닫힌 줄로 띄운다. 승인자 목록이 있으면 서버가 토큰의 user_ref 로 대조하므로
+   * user_ref 없는 토큰은 눌러도 403 이다.
+   */
+  private workflowClosedAs(ev: WorkflowApprovalEvent): Outcome | null {
+    if (!this.ctx.allowApproval()) return { kind: "hostDecides" };
+    const api = this.ctx.api;
+    if (!api.hasScope(SCOPE_WORKFLOW_APPROVE)) return { kind: "approversOnly" };
+    if (ev.approvers.length > 0 && !api.hasUserRef()) return { kind: "approversOnly" };
+    return null;
   }
 
   private renderAll(): void {
