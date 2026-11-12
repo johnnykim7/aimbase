@@ -129,8 +129,10 @@ public class FollowUpService {
             log.warn("Follow-ups adapter unavailable (connection={}, model={}): {}", connId, model, e.getMessage());
             throw failed();
         }
+        // 생각은 끈다. 연결 기본값이 켬이면 생각부터 해서 짧은 JSON 하나에 시간 한도를 넘긴다
+        // (개발기 CLI 연결에서 켬 11초, 끔 4초).
         LLMRequest request = new LLMRequest(model, List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt)),
-                null, ModelConfig.defaults(), false, callSessionId);
+                null, ModelConfig.defaults().withThinkingOverride(false), false, callSessionId);
 
         // CLI 어댑터는 chat() 안에서 끝날 때까지 막히므로 시간 한도를 걸려면 따로 돌린다.
         // 실행기 고르기에 쓰는 테넌트, 토큰 user_ref, 에이전트 id 를 그 스레드로 옮긴다.
