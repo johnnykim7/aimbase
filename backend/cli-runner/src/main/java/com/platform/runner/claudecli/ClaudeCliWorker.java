@@ -121,6 +121,12 @@ public class ClaudeCliWorker implements AutoCloseable {
      * 머리글 X-Aimbase-Session-Id 로 서버에 돌려준다(BIZ-222). start() 호출 전에만 setDataSessionId 로 변경 가능.
      */
     private volatile String dataSessionId;
+    /**
+     * CR-185: 이 워커의 run 번호. 대화에서는 run 번호가 대화 세션 번호라, 서버가 승인이 필요한 도구를 그 대화에
+     * 묻도록 aimbase-server 항목 머리글 X-Aimbase-Session-Id 로 싣는다. 계산 도구를 붙이지 않은 대화도 물어야 해서
+     * dataSessionId 와 따로 둔다. start() 호출 전에만 setRunId 로 변경 가능.
+     */
+    private volatile String runId;
     static final String DATA_SERVER_KEY = "aimbase-data";
     private static final String DATA_PATH = "/mcp-data";
     private static final String DATA_TOOL = "mcp__" + DATA_SERVER_KEY + "__" + DataQueryTool.NAME;
@@ -287,6 +293,14 @@ public class ClaudeCliWorker implements AutoCloseable {
             throw new IllegalStateException("Worker already started; cannot set dataSessionId after start()");
         }
         this.dataSessionId = (sessionId == null || sessionId.isBlank()) ? null : sessionId.trim();
+    }
+
+    /** CR-185: run 번호. 비어 있으면 대화 세션 머리글을 싣지 않는다. */
+    public void setRunId(String runId) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set runId after start()");
+        }
+        this.runId = (runId == null || runId.isBlank()) ? null : runId.trim();
     }
 
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
@@ -1224,7 +1238,8 @@ public class ClaudeCliWorker implements AutoCloseable {
      *
      * <p>CR-147: 스킬 지정이 있으면 X-Aimbase-Skill-Set 머리글도 같은 자리에 넣는다.
      *
-     * <p>CR-185: 대화 요청이면 X-Aimbase-Session-Id 도 넣는다. 서버가 승인이 필요한 도구를 그 대화에 묻는다.
+     * <p>CR-185: run 번호를 X-Aimbase-Session-Id 로 넣는다. 대화에서는 run 번호가 대화 세션이라 서버가 승인이 필요한
+     * 도구를 그 대화에 묻고, 워크플로우 run 은 열린 대화 턴이 없어 실행하지 않는다(BIZ-241).
      *
      * <p>셋 다 없거나 mcpConfig 에 aimbase-server 항목이 없으면 원본을 그대로 반환(기존 동작 보존).
      */
@@ -1445,7 +1460,7 @@ public class ClaudeCliWorker implements AutoCloseable {
             mcpAllowed = names;
         }
         // CR-117 작업장 경로, CR-147 스킬 지정, CR-185 대화 세션 머리글을 aimbase-server 항목에 싣는다.
-        String mcpConfig = injectServerHeaders(mcpConfigJson, workingDirectory, skillSet, dataSessionId);
+        String mcpConfig = injectServerHeaders(mcpConfigJson, workingDirectory, skillSet, runId);
         String nativeMcpConfig = null;
         if (nativeWithSkills) {
             nativeMcpConfig = skillsOnlyConfig(mcpConfig);

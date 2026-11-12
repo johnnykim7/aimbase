@@ -91,7 +91,7 @@ class ClaudeCliWorkerDataChannelTest {
     @Test
     @DisplayName("허용 도구 목록이 있으면 data_query 는 aimbase-data 이름으로만 허용한다")
     void allowedTools_useDataChannelName() throws IOException {
-        String args = runAndDumpArgs(List.of("file_write", "data_query"), "sess-1");
+        String args = runAndDumpArgs(List.of("file_write", "data_query"), "sess-1", null);
 
         assertThat(args).contains("--allowedTools mcp__aimbase-data__data_query");
         assertThat(args).contains("--allowedTools mcp__aimbase-server__file_write");
@@ -102,12 +102,29 @@ class ClaudeCliWorkerDataChannelTest {
     @Test
     @DisplayName("대화 세션이 없는 요청(워크플로우 단계)은 통로를 붙이지 않는다")
     void noDataSession_noDataChannel() throws IOException {
-        String args = runAndDumpArgs(List.of("file_write"), null);
+        String args = runAndDumpArgs(List.of("file_write"), null, null);
 
         assertThat(args).doesNotContain("aimbase-data");
     }
 
-    private String runAndDumpArgs(List<String> allowed, String dataSessionId) throws IOException {
+    @Test
+    @DisplayName("CR-185 TC-CHT-116: 계산 도구 통로가 없는 대화도 run 번호를 aimbase-server 대화 세션 머리글로 싣는다")
+    void runId_isSentAsChatSessionWithoutDataChannel() throws IOException {
+        String args = runAndDumpArgs(List.of("file_write"), null, "chat-sess-9");
+
+        assertThat(args).doesNotContain("aimbase-data");
+        assertThat(args).contains("\"X-Aimbase-Session-Id\":\"chat-sess-9\"");
+    }
+
+    @Test
+    @DisplayName("CR-185: run 번호가 없으면 대화 세션 머리글을 싣지 않는다")
+    void noRunId_noChatSessionHeader() throws IOException {
+        String args = runAndDumpArgs(List.of("file_write"), null, null);
+
+        assertThat(args).doesNotContain("X-Aimbase-Session-Id");
+    }
+
+    private String runAndDumpArgs(List<String> allowed, String dataSessionId, String runId) throws IOException {
         Path argsDump = tempDir.resolve("args-" + System.nanoTime() + ".txt");
         Path stub = writeStub("""
                 #!/bin/bash
@@ -123,6 +140,7 @@ class ClaudeCliWorkerDataChannelTest {
         worker.setToolMode(ClaudeCliCommandBuilder.ToolMode.AIMBASE);
         worker.setAllowedTools(allowed);
         if (dataSessionId != null) worker.setDataSessionId(dataSessionId);
+        if (runId != null) worker.setRunId(runId);
         worker.start();
         worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
         return Files.readString(argsDump);

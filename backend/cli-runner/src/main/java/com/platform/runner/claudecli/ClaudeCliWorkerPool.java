@@ -442,6 +442,7 @@ public class ClaudeCliWorkerPool {
         acquireSlot(rw, runId);
         try {
             ClaudeCliWorker worker = workerFactory.create(model, null, false, configDir);
+            worker.setRunId(runId); // CR-185: 대화 세션 머리글
             if (systemPrompt != null && !systemPrompt.isBlank()) {
                 worker.setSystemPromptOverride(systemPrompt);
             }
@@ -550,6 +551,7 @@ public class ClaudeCliWorkerPool {
             acquireSlot(rw, runId);
             try {
                 ClaudeCliWorker worker = workerFactory.create(model, parentSessionId, true, configDir);
+                worker.setRunId(runId); // CR-185: main 과 같은 대화 세션 머리글
                 worker.setSealedNativeTools(sealedNativeTools); // CR-126: main 과 동일 봉인 정책 적용
                 worker.start();
                 // run 에 올리기 전에 넘겨야, 그 사이 run 종료로 닫혀도 자리가 돌아온다.
