@@ -23,6 +23,9 @@ const S = defineStrings({
 /** 모델이 읽는 해상도. 긴 변이 이보다 크면 줄인다. */
 const MAX_EDGE = 2000;
 
+/** 첫 장면을 기다리는 최대 시간(ms). */
+const FRAME_WAIT_MS = 500;
+
 const CAPTURE_ICON =
   '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect width="10" height="8" x="7" y="8" rx="1"/>';
 
@@ -62,10 +65,14 @@ async function grabFrame(stream: MediaStream): Promise<Blob> {
   video.srcObject = stream;
   try {
     await video.play();
-    // 첫 장면이 그려진 뒤에 뜬다. 그 전에 그리면 빈 그림이 나온다.
+    // 첫 장면이 그려진 뒤에 그린다. 그 전에 그리면 빈 그림이 나온다. 화면이 멈춰 있으면 새 장면이 오지 않아
+    // 콜백이 끝내 뜨지 않으므로 잠시 기다린 뒤에는 그대로 그린다.
     await new Promise<void>((resolve) => {
-      if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(() => resolve());
-      else setTimeout(resolve, 150);
+      const timer = setTimeout(resolve, FRAME_WAIT_MS);
+      video.requestVideoFrameCallback?.(() => {
+        clearTimeout(timer);
+        resolve();
+      });
     });
     const w = video.videoWidth;
     const h = video.videoHeight;
