@@ -35,6 +35,7 @@ class ChatWidgetSettingsServiceTest {
     @Mock private ConnectionRepository connectionRepository;
     @Mock private com.platform.image.ImageConnectionResolver imageConnectionResolver;
     @Mock private com.platform.image.ImageGenerationSettings imageSettings;
+    @Mock private com.platform.speech.SttLocalConnections sttConnections;
     @Mock private LLMAdapter apiAdapter;
     @Mock private LLMAdapter cliAdapter;
     @Mock private com.platform.attachment.AttachmentService attachmentService;
@@ -48,7 +49,8 @@ class ChatWidgetSettingsServiceTest {
                 attachmentService,
                 org.mockito.Mockito.mock(com.platform.orchestrator.FileCreateToolGate.class),
                 org.mockito.Mockito.mock(com.platform.document.DocumentRenderer.class),
-                org.mockito.Mockito.mock(com.platform.share.ChatShareSettings.class));
+                org.mockito.Mockito.mock(com.platform.share.ChatShareSettings.class),
+                sttConnections);
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FEEDBACK_REASONS_KEY), anyString()))
                 .thenReturn("[{\"code\":\"WRONG_INFO\",\"label\":\"틀린 정보\"}]");
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FOLLOW_UPS_ENABLED_KEY), anyString()))
@@ -258,5 +260,36 @@ class ChatWidgetSettingsServiceTest {
         org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
                 new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
                         principal, null, principal.getAuthorities()));
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-122 읽어 주기와 음성 대화 칸. 활성 받아쓰기 연결이 있으면 음성 대화 참")
+    void voice_fields_are_on_when_stt_connection_exists() {
+        when(connectionAdapterFactory.platformDefaultModel()).thenReturn("anthropic/claude-sonnet-4-5");
+        when(adapterRegistry.hasAdapter("anthropic/claude-sonnet-4-5")).thenReturn(false);
+        when(platformSettings.getInt(eq(com.platform.speech.WidgetTtsService.KEY_MAX_CHARS), anyInt())).thenReturn(300);
+        when(platformSettings.getInt(eq(com.platform.speech.voice.VoiceTicketService.KEY_END_SILENCE_MS), anyInt())).thenReturn(1200);
+        when(platformSettings.getDouble(eq(com.platform.speech.voice.VoiceTicketService.KEY_SPEECH_LEVEL), org.mockito.ArgumentMatchers.anyDouble())).thenReturn(0.02);
+        when(platformSettings.getInt(eq(com.platform.speech.voice.VoiceRelayHandler.KEY_MAX_UTTERANCE), anyInt())).thenReturn(60);
+        when(platformSettings.getInt(eq(com.platform.speech.voice.VoiceTicketService.KEY_IDLE_END_SECONDS), anyInt())).thenReturn(120);
+        when(sttConnections.findActive()).thenReturn(java.util.Optional.of(new com.platform.domain.ConnectionEntity()));
+
+        Map<String, Object> body = service.settings(null, null);
+
+        assertThat(body).containsEntry("tts_enabled", true).containsEntry("tts_max_chars", 300)
+                .containsEntry("voice_chat_enabled", true).containsEntry("voice_end_silence_ms", 1200)
+                .containsEntry("voice_speech_level", 0.02).containsEntry("voice_max_utterance_seconds", 60)
+                .containsEntry("voice_idle_end_seconds", 120);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-122 활성 받아쓰기 연결이 없거나 음성 대화를 끄면 거짓")
+    void voice_chat_is_off_without_stt_connection_or_when_disabled() {
+        when(sttConnections.findActive()).thenReturn(java.util.Optional.empty());
+        assertThat(service.voiceChatEnabled()).isFalse();
+
+        when(platformSettings.getString(eq(com.platform.speech.voice.VoiceTicketService.KEY_ENABLED), anyString())).thenReturn("false");
+        assertThat(service.voiceChatEnabled()).isFalse();
+        org.mockito.Mockito.verify(sttConnections, org.mockito.Mockito.times(1)).findActive();
     }
 }

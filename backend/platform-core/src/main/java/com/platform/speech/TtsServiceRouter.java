@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.Optional;
 
 /**
@@ -56,6 +57,13 @@ public class TtsServiceRouter {
      *                         {@code PROVIDER_UNAVAILABLE}. OpenAI 로 요청을 보내지 못했을 때 {@code UPSTREAM_ERROR}
      */
     public Result synthesize(String text, String model, String voice, Double speed) {
+        return synthesize(text, model, voice, speed, null);
+    }
+
+    /**
+     * @param localTimeout 맥 엔진을 기다릴 시간. null 이면 연결 값. 넘으면 시간 초과로 보고 아래 전환 규칙을 탄다(CR-186, BIZ-252)
+     */
+    public Result synthesize(String text, String model, String voice, Double speed, Duration localTimeout) {
         Optional<TtsVoiceCatalog.Voice> listed = catalog.find(voice);
         if (listed.isEmpty()) {
             return viaOpenAi(text, model, voice, speed);
@@ -67,7 +75,7 @@ public class TtsServiceRouter {
         if (!PROVIDER_OPENAI.equalsIgnoreCase(settings.getString(KEY_PROVIDER, PROVIDER_LOCAL))) {
             try {
                 byte[] audio = local.synthesize(spoken, v.id(),
-                        speed != null ? speed : TtsVoiceCatalog.NORMAL_SPEED);
+                        speed != null ? speed : TtsVoiceCatalog.NORMAL_SPEED, localTimeout);
                 return new Result(200, audio, ENGINE_LOCAL);
             } catch (SpeechException e) {
                 if (!fallbackEnabled()) {

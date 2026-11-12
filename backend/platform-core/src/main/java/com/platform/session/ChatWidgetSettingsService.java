@@ -15,6 +15,10 @@ import com.platform.llm.adapter.LLMAdapter;
 import com.platform.orchestrator.FileCreateToolGate;
 import com.platform.repository.ConnectionRepository;
 import com.platform.share.ChatShareSettings;
+import com.platform.speech.SttLocalConnections;
+import com.platform.speech.WidgetTtsService;
+import com.platform.speech.voice.VoiceRelayHandler;
+import com.platform.speech.voice.VoiceTicketService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -59,6 +63,7 @@ public class ChatWidgetSettingsService {
     private final FileCreateToolGate fileCreateToolGate;
     private final DocumentRenderer documentRenderer;
     private final ChatShareSettings shareSettings;
+    private final SttLocalConnections sttConnections;
 
     public ChatWidgetSettingsService(PlatformSettingsService platformSettings,
                                      ConnectionAdapterFactory connectionAdapterFactory,
@@ -70,7 +75,8 @@ public class ChatWidgetSettingsService {
                                      AttachmentService attachmentService,
                                      FileCreateToolGate fileCreateToolGate,
                                      DocumentRenderer documentRenderer,
-                                     ChatShareSettings shareSettings) {
+                                     ChatShareSettings shareSettings,
+                                     SttLocalConnections sttConnections) {
         this.platformSettings = platformSettings;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.adapterRegistry = adapterRegistry;
@@ -82,6 +88,7 @@ public class ChatWidgetSettingsService {
         this.fileCreateToolGate = fileCreateToolGate;
         this.documentRenderer = documentRenderer;
         this.shareSettings = shareSettings;
+        this.sttConnections = sttConnections;
     }
 
     /**
@@ -126,7 +133,22 @@ public class ChatWidgetSettingsService {
         body.put("share_enabled", shareSettings.usable());
         body.put("share_ttl_days", shareSettings.ttlDays());
         body.put("document_binary_edit_supported", binaryDocumentEditSupported(connectionId));
+        // CR-186: 답 읽어 주기와 음성 대화(PRD-580, PRD-581)
+        boolean ttsEnabled = !"false".equalsIgnoreCase(platformSettings.getString(WidgetTtsService.KEY_ENABLED, "true"));
+        body.put("tts_enabled", ttsEnabled);
+        body.put("tts_max_chars", platformSettings.getInt(WidgetTtsService.KEY_MAX_CHARS, 300));
+        body.put("voice_chat_enabled", voiceChatEnabled());
+        body.put("voice_end_silence_ms", platformSettings.getInt(VoiceTicketService.KEY_END_SILENCE_MS, 1200));
+        body.put("voice_speech_level", platformSettings.getDouble(VoiceTicketService.KEY_SPEECH_LEVEL, 0.02));
+        body.put("voice_max_utterance_seconds", platformSettings.getInt(VoiceRelayHandler.KEY_MAX_UTTERANCE, 60));
+        body.put("voice_idle_end_seconds", platformSettings.getInt(VoiceTicketService.KEY_IDLE_END_SECONDS, 120));
         return body;
+    }
+
+    /** 음성 대화를 켜 두었고 그 테넌트에 맥 받아쓰기 서버 연결이 있을 때만 위젯이 단추를 보인다. */
+    public boolean voiceChatEnabled() {
+        if ("false".equalsIgnoreCase(platformSettings.getString(VoiceTicketService.KEY_ENABLED, "true"))) return false;
+        return sttConnections.findActive().isPresent();
     }
 
     /** CR-183: 파일 선택 창이 받는 확장자와 종류별 크기 상한(T3-2, BIZ-220). 위젯이 올리기 전에 같은 기준으로 거른다. */

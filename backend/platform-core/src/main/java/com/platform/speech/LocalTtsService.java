@@ -55,6 +55,14 @@ public class LocalTtsService {
      * @throws SpeechException 연결이 없거나, 닿지 않거나, 시간이 넘었거나, 엔진이 오류를 돌려줄 때
      */
     public byte[] synthesize(String text, String voice, double speed) {
+        return synthesize(text, voice, speed, null);
+    }
+
+    /**
+     * @param timeoutOverride null 이면 연결의 {@code timeout_seconds}. 위젯 읽기(CR-186, BIZ-252)는 사람이 기다리므로
+     *                        짧게 끊고 OpenAI 로 넘긴다. 브리핑처럼 긴 글은 연결 값을 그대로 쓴다.
+     */
+    public byte[] synthesize(String text, String voice, double speed, Duration timeoutOverride) {
         ConnectionEntity conn = connectionRepository.findAll().stream()
                 .filter(c -> CONNECTION_TYPE.equalsIgnoreCase(c.getType()))
                 .filter(c -> !"disabled".equalsIgnoreCase(String.valueOf(c.getStatus())))
@@ -74,7 +82,9 @@ public class LocalTtsService {
             throw new SpeechException(SpeechException.ErrorCode.PROVIDER_UNAVAILABLE,
                     "음성 합성 연결에서 키를 찾지 못했다: " + conn.getId());
         }
-        long timeoutSec = longOr(cfg.get("timeout_seconds"), DEFAULT_TIMEOUT_SECONDS);
+        long timeoutSec = timeoutOverride != null
+                ? Math.max(1L, timeoutOverride.toSeconds())
+                : longOr(cfg.get("timeout_seconds"), DEFAULT_TIMEOUT_SECONDS);
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("text", text);

@@ -130,6 +130,8 @@ public class TenantResolver implements Filter {
         if (path.startsWith(ADMIN_API_PREFIX)) return false;
         // CR-027: /auth/login은 이메일로 tenant 자동 resolve → tenant 필수 아님
         if (path.equals("/api/v1/auth/login")) return false;
+        // CR-186: 음성 대화 중계 웹소켓은 머리글을 붙일 수 없다. 테넌트는 입장권에 들어 있다(BIZ-253)
+        if (path.equals(com.platform.speech.voice.VoiceTicketService.STREAM_PATH)) return false;
         return true;
     }
 
