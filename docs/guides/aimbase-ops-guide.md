@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.28.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.29.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -763,6 +763,32 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | CLI 연결에서 한 모델만 답하지 못한다 | 실행기 CLI 판이 그 모델을 받지 않음 | 실행기로 물어 확인하고 목록에서 뺀다 |
 | 후속 질문 칩이 안 나온다 | `widget.follow-ups-enabled` 꺼짐, 또는 시간 한도를 넘김 | 설정을 확인하고, 실행기 연결이면 `widget.follow-ups-timeout-ms` 를 늘린다 |
 | CLI 연결에서 모델을 바꾼 뒤 앞 질문에 답한다 | 실행기가 2026-11-11 수정 전 판 | `./deploy.sh agents` 로 실행기를 다시 올린다 |
+
+### 2-15. 위젯 옆 창 문서 미리보기 운영 [CR-180]
+
+위젯 사용자가 AI 가 만든 파일(pptx, docx, pdf, xlsx, csv, HTML, SVG, 그림, 마크다운, 글)을 위젯 옆 창에서 보고, 응답 안 HTML 코드를 실행하는 기능입니다. API 는 API 가이드 § 29.
+
+**변환기.** pptx, docx 는 api 컨테이너 안 LibreOffice 가 PDF 로 바꾸고, 쪽마다 그림을 만듭니다. api 이미지에 LibreOffice 와 한글 글꼴이 들어 있어 따로 설치할 것은 없습니다. 실행 파일 위치는 환경변수 `AIMBASE_PREVIEW_SOFFICE_PATH`(처음 값 `soffice`, PATH 에서 찾음)입니다. 변환 결과는 세션 작업 폴더 `.preview/` 아래에 두고, 산출물 정리가 같은 보관 기한으로 지웁니다.
+
+**런타임 설정.** 사이드바 Super Admin 묶음 「런타임 설정」의 `widget` 분류에서 재기동 없이 바꿉니다.
+
+| 키 | 처음 값 | 뜻 |
+|---|---|---|
+| `widget.preview-max-file-mb` | 30 | 이보다 큰 파일은 미리보기 없이 받기만 |
+| `widget.preview-max-pages` | 300 | 이보다 쪽이 많으면 미리보기 없이 받기만 |
+| `widget.preview-page-width-px` | 1600 | 쪽 그림 가로 픽셀. 바꾸면 다음에 열 때 새로 그린다 |
+| `widget.preview-convert-timeout-seconds` | 90 | 변환 한 번의 시간 한도. 동시 변환 자리를 기다리는 시간도 이 안이다 |
+| `widget.preview-convert-concurrency` | 2 | 동시에 도는 변환 수. api 메모리에 맞춰 정한다 |
+| `widget.preview-sheet-max-rows` | 500 | 표 미리보기 시트당 최대 행 |
+| `widget.preview-sheet-max-cols` | 50 | 표 미리보기 시트당 최대 열 |
+| `widget.preview-html-script-sources` | `["https://cdnjs.cloudflare.com","https://cdn.jsdelivr.net"]` | HTML 실행 틀이 스크립트, 스타일, 글꼴, 그림을 불러올 수 있는 출처. https 출처만 받는다 |
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 「미리보기를 만드는 사람이 많습니다」 | 동시 변환 자리를 시간 한도 안에 얻지 못함(503 `preview_busy`) | `widget.preview-convert-concurrency` 를 올리거나 잠시 뒤 다시 연다 |
+| 「미리보기를 만들지 못했습니다」 | 파일이 깨졌거나 변환이 시간 한도를 넘김(422 `preview_failed:convert`, `preview_failed:timeout`) | 받아서 열어 보고, 큰 파일이면 `widget.preview-convert-timeout-seconds` 를 늘린다 |
+| 한글이 네모로 보인다 | api 이미지에 한글 글꼴이 없음(CR-180 전 이미지) | `./deploy.sh` 로 api 를 다시 올린다 |
+| HTML 실행에서 바깥 라이브러리를 못 불러온다 | 그 출처가 `widget.preview-html-script-sources` 에 없음 | 출처를 더한다. 붙이는 앱의 보안 정책(CSP)도 허용해야 한다 |
 
 ---
 
@@ -1968,6 +1994,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.29.0 | 2026-11-13 | **CR-180 위젯 옆 창 문서 미리보기** (§ 2-15). api 컨테이너 LibreOffice 변환기와 환경변수 `AIMBASE_PREVIEW_SOFFICE_PATH`, 런타임 설정 `widget.preview-*` 8개(마스터 V83), 증상별 조치 |
 | v3.28.0 | 2026-11-13 | **CR-177 위젯 영어 화면** (§ 2-14). 런타임 설정 `widget.feedback-reasons` 항목에 화면 언어별 이름 `labels`. 처음 값 그대로인 곳은 V80 이 영어 이름을 더한다 |
 | v3.27.0 | 2026-11-11 | **CR-175 채팅 위젯 대화 기본기** (§ 2-14). 연결 「허용 모델」, 깊게 생각하기 처음 상태, 런타임 설정 `llm.default-model` 과 `widget.feedback-*`, `widget.follow-ups-*`, 프롬프트 틀 `widget.follow-ups`, 「응답 평가」 화면, CLI 연결의 모델 바꾸기와 장애 대응 |
 | v3.26.1 | 2026-11-11 | **CR-174 수리 실행기 프로세스 상한** (§ 2-13). 운영 chaws 의 `aimbase-agent-3plgw` 에 `AIMBASE_RUNNER_MAX_PROCESSES` 4, 줄 대기 600초, `mem_limit` 3g. 수리 지시에 변환표 정규화 규칙(배송 속성 세 구분, 기존 구분 우선 매핑) |

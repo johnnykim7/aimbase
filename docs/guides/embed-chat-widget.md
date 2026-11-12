@@ -268,7 +268,7 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`: 위 속성과 같다 (CR-175)
 - `on.onNewConversation({previousSessionId, sessionId})`: 사용자가 새 대화를 시작했을 때. 엘리먼트로 붙였으면 `new-conversation` 이벤트(`detail` 에 같은 값). 앞 대화는 서버에 남는다 (CR-175)
 
-### 3-5. 위젯이 스스로 하는 것 (CR-175)
+### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-180)
 
 붙이는 앱이 따로 만들 것 없이 위젯 안에 들어 있다.
 
@@ -281,8 +281,10 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | 5 | 후속 질문 칩과 대화 제목 | 없음. 운영자가 런타임 설정에서 끌 수 있다 |
 | 6 | 첫 화면 추천 질문 | `suggestions` 로 질문을 준다 |
 | 7 | 글자 크기 | 기본값만 `font-size` 로 줄 수 있다 |
+| 8 | AI 가 만든 파일을 옆 창에서 미리보기(pptx, docx, pdf, xlsx, csv, HTML, SVG, 그림, 마크다운, 글). 슬라이드는 「발표」로 화면 가득 넘긴다 | 없음. 파일 칩을 누르면 열리고, 받기는 칩 끝과 옆 창의 「다운로드」 단추로 한다 |
+| 9 | 응답 안 HTML 코드 블록의 「실행」, SVG 코드 블록의 그림 보기와 「옆 창에서 보기」 | 없음. HTML 은 격리된 틀에서 돌고 바깥 주소로 데이터를 보내지 못한다 |
 
-위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 서버 API 는 API 가이드 § 28, 운영 설정은 운용 가이드 § 2-14.
+위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 파일 미리보기는 받기와 같은 권한이라 토큰 scopes 에 `chat:upload` 가 있어야 한다. 서버 API 는 API 가이드 § 28, § 29, 운영 설정은 운용 가이드 § 2-14.
 
 ---
 
@@ -310,6 +312,8 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | 깊게 생각하기 단추가 없다 | 그 연결이 요청마다 생각을 바꾸지 못함 | Anthropic API 나 Claude CLI 연결을 쓴다 |
 | 다시 생성, 평가 단추가 없다 | Aimbase 서버가 CR-175 전 판이라 `done` 에 `turn_seq` 가 없음 | 서버를 올린다 |
 | 마이크 단추가 없다 | 위젯에 넘긴 토큰 scopes 에 `chat:stt` 가 없음 | BFF 가 받은 scopes 를 그대로 넘긴다 |
+| 파일 칩을 눌러도 받기만 된다 | Aimbase 서버가 CR-180 전 판이라 파일 목록에 미리보기 종류가 없음 | 서버를 올린다 |
+| HTML 「실행」 화면에서 스크립트나 바깥 그림이 돌지 않는다 | 붙이는 앱 화면의 보안 정책(CSP)이 실행 틀에도 걸림 | 앱의 CSP 가 그 스크립트와 주소를 허용해야 한다 |
 
 ---
 
