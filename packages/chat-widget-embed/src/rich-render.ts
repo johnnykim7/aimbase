@@ -133,8 +133,8 @@ function downloadBlob(blob: Blob, filename: string): void {
 
 let tableSeq = 0;
 
-/** 표마다 [CSV] [엑셀] [복사] 툴바를 위에 삽입. */
-function enhanceTables(container: HTMLElement, labels: RichStrings): void {
+/** 표마다 [CSV] [엑셀] [복사] 툴바를 위에 삽입. CR-183 그래프의 표 보기도 같은 단추를 쓴다. */
+export function enhanceTables(container: HTMLElement, labels: RichStrings): void {
   container.querySelectorAll("table").forEach((table) => {
     const rows = extractTable(table as HTMLTableElement);
     if (!rows.length) return;
