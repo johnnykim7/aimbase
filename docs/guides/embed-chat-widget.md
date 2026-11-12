@@ -175,6 +175,7 @@ async def issue_token():
 - [ ] API Key 는 **환경변수**에만 저장. 코드·로그·클라이언트 번들에 절대 넣지 않는다.
 - [ ] BFF 엔드포인트 호출 전에 **자체 사용자 인증** 검증 (미인증 요청이 토큰을 받아가지 못하게).
 - [ ] `origin` 파라미터는 BFF 가 **고정값**으로 주입하거나 검증 — 클라이언트가 마음대로 바꿀 수 없게.
+- [ ] 지난 대화 목록과 프로젝트를 쓰려면 토큰 요청 본문에 그 사용자를 가리키는 `user_ref`(예: 상담원 id)를 BFF 가 로그인 정보로 채운다. 없으면 위젯에 대화 목록이 보이지 않는다 (CR-178, API 가이드 § 17-2, § 34).
 
 ---
 
@@ -252,7 +253,7 @@ const handle = createWidget({
 | `base-url` | URL | 필수 | Aimbase 서버 URL |
 | `token-endpoint` | URL | — | BFF 프록시 경로 (authResolver 를 JS 로 주입 시 생략 가능) |
 | `display` | `bubble` \| `inline` \| `panel` | `inline`(CE) | 렌더 모드 |
-| `session-id` | string | auto UUID | 대화 세션 |
+| `session-id` | string | auto UUID | 대화 세션. 그 대화가 이 사용자의 것으로 서버에 있으면 위젯이 뜰 때 내용을 읽어 보인다 (CR-178) |
 | `rag-source-id` | string | — | RAG 소스 지정 시 citations 자동 표시 |
 | `theme-mode` | `light` \| `dark` \| `auto` | `auto` | 테마 |
 | `connection-id` | string | 테넌트 기본 | 쓸 연결. 모델 목록과 깊게 생각하기 단추가 이 연결을 따른다 |
@@ -269,7 +270,7 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`, `locale`: 위 속성과 같다. 언어별 값은 `{ ko: ..., en: ... }` 객체로 준다 (CR-175, CR-177)
 - `on.onNewConversation({previousSessionId, sessionId})`: 사용자가 새 대화를 시작했을 때. 엘리먼트로 붙였으면 `new-conversation` 이벤트(`detail` 에 같은 값). 앞 대화는 서버에 남는다 (CR-175)
 
-### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-179, CR-180, CR-184, CR-182, CR-181)
+### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-179, CR-180, CR-184, CR-182, CR-181, CR-178)
 
 붙이는 앱이 따로 만들 것 없이 위젯 안에 들어 있다.
 
@@ -291,8 +292,9 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | 14 | 더 보기 「공유 링크 만들기」, 파일 칩 끝 「공유」. 그 순간의 사본을 링크를 가진 사람이 기한 안에 로그인 없이 연다 (CR-182) | 없음. 운영자가 공개 주소 `chat.share.public-base-url` 을 넣어야 보인다(운용 가이드 § 2-17) |
 | 15 | 더 보기 「기억과 선호」: 내 선호 글, 자동 기억 목록과 삭제, 켜고 끄기. 마지막에 선택한 모델과 깊게 생각하기를 새 대화에 다시 적용 (CR-179) | 토큰 발급 때 `user_ref` 를 사람마다 다르게 준다. 없으면 메뉴가 보이지 않는다. 새 대화의 처음 모델은 마지막에 선택한 모델, `model` 옵션, 연결 기본 모델 순이다 |
 | 16 | 옆 창 아래 입력칸으로 문서를 대화로 고치기, 선택한 부분만 고치기, 버전 「이전」, 「다음」과 「이 버전으로 되돌리기」 | 없음. 원본 없는 파일(사람이 올린 pptx 등)은 실행기 연결에서만 입력칸이 보인다. 파일 만들기(`chat.file-create.enabled`)를 끄면 AI 가 만든 파일에도 입력칸이 없다 |
+| 17 | 왼쪽 칸 지난 대화 목록(검색, 이어보기, 이름 바꾸기, 삭제)과 프로젝트(지시문, 자료). 더 보기 「프로젝트로 옮기기」, + 메뉴 「프로젝트 자료에서」 (CR-178) | 토큰을 받을 때 `user_ref` 를 싣는다(2-2). 없으면 목록 단추와 메뉴가 숨는다. 다른 화면에서 만든 지난 대화를 이어 물어도 맥락은 지금 화면의 `contextProvider` 값이 실린다 |
 
-위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 파일 미리보기는 받기와 같은 권한이라 토큰 scopes 에 `chat:upload` 가 있어야 한다. 서버 API 는 API 가이드 § 28, § 29, § 32, § 33, 운영 설정은 운용 가이드 § 2-14, § 2-18, § 2-19.
+위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 파일 미리보기는 받기와 같은 권한이라 토큰 scopes 에 `chat:upload` 가 있어야 한다. 서버 API 는 API 가이드 § 28, § 29, § 32, § 33, § 34, 운영 설정은 운용 가이드 § 2-14, § 2-18, § 2-19.
 
 ---
 

@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.36.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.37.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2993,10 +2993,118 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 - § 29-2 미리보기 정보, § 29-3 쪽 그림, 산출물 내려받기(`GET /api/v1/chat/artifacts/download`)에 `version` 인자를 붙이면 그 판 파일을 씁니다. 없으면 작업 폴더의 지금 파일(마지막 판)입니다.
 - 미리보기 정보에 `has_source`(만들 때 남긴 원본이 있는지)가 더해졌습니다. 원본이 있는 파일은 어느 연결로도 고칠 수 있고(위젯 설정 `file_create_enabled` 가 꺼져 있으면 고치지 못합니다), 없으면 `document_binary_edit_supported` 연결에서만 고칠 수 있습니다.
 
+## 34. 위젯 지난 대화 목록과 프로젝트 [CR-178]
+
+위젯 왼쪽 칸의 지난 대화 목록, 이어보기, 이름 바꾸기와 삭제, 프로젝트(이름, 지시문, 자료)로 묶기에 쓰는 API 입니다. 모두 `chat:stream` 위젯 토큰 또는 로그인으로 부릅니다.
+
+- 대화와 프로젝트의 주인은 위젯 토큰의 `user_ref`, 로그인이면 사용자 id 입니다. 남의 대화와 프로젝트는 없는 것으로 보고 404 를 돌려줍니다.
+- `user_ref` 가 없는 위젯 토큰으로 § 34-1 ~ § 34-4 를 부르면 403 `widget_user_required` 입니다. 위젯은 § 34-6 의 `history_enabled` 로 이를 알고 목록 칸과 메뉴를 숨깁니다. 대화 목록을 쓰려면 토큰을 발급할 때(§ 17-2) 상담원을 가리키는 `user_ref` 를 실어야 합니다.
+- 관리 화면용 `/api/v1/conversations/**` 는 위젯 토큰으로 부르면 403 `widget_forbidden` 입니다. 위젯이 자기 대화를 보는 길은 이 절의 API 뿐입니다.
+
+### 34-1. 대화 목록 (`GET /api/v1/chat/sessions?chat_project_id=&query=&page=&size=`)
+
+| 인자 | 설명 |
+|---|---|
+| chat_project_id | 프로젝트 id 면 그 프로젝트 대화만, `none` 이면 프로젝트에 없는 대화만, 비우면 전부 |
+| query | 제목 부분 일치(대소문자 무시). 주면 `chat_project_id` 를 보지 않고 전부에서 찾습니다 |
+| page, size | page 는 0 부터. size 기본은 런타임 설정 `widget.history-page-size`(기본 30), 최대 100 |
+
+- 대상은 지우지 않았고 메시지가 하나 이상인 위젯 대화입니다. 마지막 활동 시각 내림차순입니다.
+- 행: `session_id`, `title`, `chat_project_id`, `updated_at`(시간대 오프셋을 붙인 ISO-8601). 응답은 기존 쪽 형식입니다.
+
+### 34-2. 이어보기 (`GET /api/v1/chat/sessions/{session_id}/messages`)
+
+```json
+{"session_id": "8f1e...", "title": "11/7 박스 파손 회신", "chat_project_id": "3c2a...", "truncated": false,
+ "turns": [
+   {"turn_id": "0b6f...", "user_seq": 4,
+    "question": {"text": "파손 건 회신문 써줘", "created_at": "2026-11-07T14:20:03+09:00",
+                 "attachments": [{"attachment_id": "a1...", "filename": "사진1.jpg", "media_type": "image/jpeg", "available": true}]},
+    "answer": {"text": "회신문 초안입니다 ...", "model": "claude-sonnet-5-5", "created_at": "2026-11-07T14:20:31+09:00",
+               "stopped": false, "tool_uses": [{"name": "wes_order_lookup"}]},
+    "feedback": {"rating": "DOWN", "reason_codes": ["NO_LOOKUP"], "comment": "출고 이력을 안 봤어요"}}
+ ]}
+```
+
+- 질문 하나부터 다음 질문 앞까지가 한 묶음(`turns[]`)입니다. 붙이는 앱이 준 화면 맥락(`system` 메시지)과 도구 결과 본문은 싣지 않고, 도구는 이름만 싣습니다.
+- `user_seq` 는 다시 생성, 질문 수정(§ 28-1 `rewind_from_seq`)에 그대로 씁니다. CR-178 전 메시지는 `turn_id`, `user_seq` 가 비어 있습니다.
+- 답이 멈춘 것이면 `stopped = true` 이고 멈춤 표시 글은 뗍니다. 답이 저장되지 않은 질문은 `answer` 가 `null` 입니다.
+- 만료된 첨부는 `available = false` 이고 파일 이름과 종류는 그대로 보입니다.
+- 질문 묶음이 런타임 설정 `widget.history-turns-max`(기본 100) 보다 많으면 마지막 그만큼만 싣고 `truncated = true` 입니다.
+- 404 `session_not_found`: 없거나, 지웠거나, 요청자의 대화가 아님.
+
+### 34-3. 이름 바꾸기, 옮기기, 삭제
+
+`PATCH /api/v1/chat/sessions/{session_id}` 는 준 칸만 바꾸고 § 34-1 의 행을 돌려줍니다.
+
+```json
+{"title": "11/7 박스 파손 회신"}
+{"chat_project_id": "3c2a..."}
+{"chat_project_id": null}
+```
+
+- 제목을 바꾸면 자동 제목(§ 28-4)이 덮지 않습니다. `chat_project_id` 가 `null` 이면 프로젝트에서 뺍니다. 지시문은 다음 질문부터 적용됩니다.
+
+`DELETE /api/v1/chat/sessions/{session_id}` 는 답이 돌고 있으면 멈추고 대화와 메시지에 지운 표시를 합니다. 그 대화에서 만든 그림(§ 30)도 더 받을 수 없습니다.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `session_invalid:title` | 앞뒤 공백을 뺀 제목이 비었거나 500자를 넘음 |
+| 404 | `session_not_found` | 없거나, 지웠거나, 요청자의 대화가 아님 |
+| 404 | `project_not_found` | 옮길 프로젝트가 없거나 요청자의 것이 아님 |
+
+### 34-4. 프로젝트와 자료
+
+| 방법 | 경로 | 설명 |
+|---|---|---|
+| GET | /api/v1/chat/projects | 내 프로젝트 목록 |
+| POST | /api/v1/chat/projects | 만들기 `{"name", "instructions"}` |
+| GET | /api/v1/chat/projects/{project_id} | 한 건(지시문 전문, 자료 목록) |
+| PATCH | /api/v1/chat/projects/{project_id} | 준 칸만 바꾸기 `{"name"}`, `{"instructions"}` |
+| DELETE | /api/v1/chat/projects/{project_id} | 삭제. 대화는 지우지 않고 프로젝트에서 빠지며, 자료는 지웁니다 |
+| GET | /api/v1/chat/projects/{project_id}/files | 자료 목록 |
+| POST | /api/v1/chat/projects/{project_id}/files | 자료 올리기(multipart `file`). `chat:upload` 필요 |
+| DELETE | /api/v1/chat/projects/{project_id}/files/{file_id} | 자료 삭제 |
+| POST | /api/v1/chat/projects/{project_id}/files/{file_id}/attach | 그 대화의 첨부로 붙이기 `{"session_id"}`. `chat:upload` 필요 |
+
+- 목록 행: `id`, `name`, `has_instructions`, `file_count`, `session_count`, `last_active_at`. 정렬은 `last_active_at`(프로젝트를 고친 시각과 그 안 대화의 마지막 활동 중 늦은 것) 내림차순입니다.
+- 이름은 앞뒤 공백을 빼고 1 ~ 100자, 지시문은 비워도 되고 최대 런타임 설정 `widget.project-instructions-max-chars`(기본 4000) 자입니다.
+- 자료 행: `file_id`, `filename`, `media_type`, `size_bytes`, `pages`, `created_at`. 올릴 수 있는 종류와 크기는 채팅 첨부(§ 18-2)와 같고, 자료는 만료되지 않습니다.
+- 붙이기는 자료를 복사해 그 대화의 새 첨부를 만들고 § 18-2 와 같은 응답을 돌려줍니다. 그 첨부는 첨부 규칙(만료 포함)을 따르고, 대화가 아직 없으면(첫 질문 전) 그대로 붙습니다. 대화 요청에는 그 `attachment_id` 를 § 18-4 처럼 싣습니다.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `project_invalid:name` | 이름이 비었거나 100자를 넘음 |
+| 400 | `project_invalid:instructions` | 지시문이 최대 글자 수를 넘음 |
+| 409 | `project_files_full` | 자료가 런타임 설정 `widget.project-files-max-count`(기본 20) 개 있음 |
+| 400, 413 | | 첨부 올리기와 같은 종류, 크기 오류 |
+| 404 | `project_not_found`, `file_not_found`, `session_not_found` | 없거나 요청자의 것이 아님 |
+
+### 34-5. 대화 요청 칸 (`POST /api/v1/chat/completions`)
+
+| 필드 | 필수 | 설명 |
+|---|---|---|
+| chat_project_id | N | 대화를 처음 만들 때 그 프로젝트에 넣습니다. 이미 있는 대화면 쓰지 않습니다(옮기기는 § 34-3) |
+
+- 404 `project_not_found`: 없거나 요청자의 프로젝트가 아님. 응답을 시작하기 전에 거릅니다.
+- 대화가 프로젝트에 있고 지시문이 있으면 서버가 질문마다 시스템 지시 끝에 지시문을 붙입니다(테넌트 프롬프트 틀 `widget.project-instructions`). 대화 기록에는 남지 않고, 지시문을 고치면 다음 질문부터 바뀝니다. Claude CLI 연결도 작업자가 이어 쓰는 중이든 아니든 질문마다 붙습니다.
+
+### 34-6. 위젯 설정 칸
+
+`GET /api/v1/chat/widget-settings` 응답에 칸 세 개가 붙습니다.
+
+```json
+{"history_enabled": true, "project_instructions_max_chars": 4000, "project_files_max_count": 20}
+```
+
+- `history_enabled` 는 위젯 토큰에 `user_ref` 가 없으면 거짓, 로그인이면 참입니다. 위젯은 참일 때만 대화 목록 칸, 더 보기 「프로젝트로 옮기기」, + 메뉴 「프로젝트 자료에서」 를 보입니다.
+- 위젯을 뜨게 할 때 붙이는 앱이 `sessionId` 를 주었고 그 대화가 요청자의 것으로 있으면 위젯이 § 34-2 로 읽어 보입니다.
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.37.0 | 2026-11-13 | **CR-178 위젯 지난 대화 목록과 프로젝트** (§ 34). 대화 목록 `GET /api/v1/chat/sessions`, 이어보기 `GET /api/v1/chat/sessions/{session_id}/messages`, 이름 바꾸기와 옮기기 `PATCH`, 삭제 `DELETE`, 프로젝트와 자료 `/api/v1/chat/projects/**`, 대화 요청 `chat_project_id`, 위젯 설정 `history_enabled`, `project_instructions_max_chars`, `project_files_max_count`. `user_ref` 없는 위젯 토큰은 403 `widget_user_required`, 위젯 토큰으로 `/api/v1/conversations/**` 는 403 `widget_forbidden` |
 | v3.36.0 | 2026-11-13 | **CR-181 위젯 옆 창 문서를 대화로 고치기** (§ 33). 대화 요청 `document_edit`, 스트림 이벤트와 `done` 의 `document`. 세션 문서 목록 `GET /api/v1/chat/documents`, 판 본문 `GET /api/v1/chat/documents/{document_id}/versions/{version}`, 되돌리기 `POST .../restore`. 미리보기 정보, 쪽 그림, 내려받기에 `version` 인자, 미리보기 정보에 `has_source`, 위젯 설정에 `document_binary_edit_supported` (§ 28-2) |
 | v3.35.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 32). 내 선호 `GET`, `PUT /api/v1/chat/me/preferences`, 자동 기억 `GET`, `DELETE /api/v1/chat/me/memories`, `DELETE /api/v1/chat/me/memories/{id}`, 오류 코드 `memory_unavailable`, `memory_disabled`, `memory_not_found`, `preferences_too_long`. 대화 요청 모양은 그대로 |
 | v3.34.0 | 2026-11-13 | **CR-182 위젯 파일 만들기, 저장, 내보내기, 공유 링크** (§ 31). 대화 요청 `file_create` 와 서버 도구 `create_file`, 응답 저장 `GET /api/v1/chat/sessions/{id}/turns/{turn_id}/export`, 대화 내보내기 `GET /api/v1/chat/sessions/{id}/export`, 공유 링크 `POST`, `GET`, `DELETE /api/v1/chat/shares`, 받는 사람 `GET /share/{tenant_id}/{token}`. 위젯 설정 `file_create_enabled`, `export_formats`, `share_enabled`, `share_ttl_days`. 산출물 API 세션 주인 대조 404 `artifact_not_found` |
