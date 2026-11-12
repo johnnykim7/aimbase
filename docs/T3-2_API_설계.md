@@ -3617,8 +3617,8 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 | 400 | `image_invalid` | `action` 이 `create`, `edit` 가 아니거나 edit 에 `source_image_id` 가 없다 |
 | 400 | `image_not_configured` | `connection_id` 가 없거나 그 연결에 그림 연결이 없다 |
 | 400 | `image_prompt_empty` | 그림 설명 글이 비었다 |
-| 400 | `image_prompt_too_long` | 글이 `widget.image.max-prompt-chars` 초과. `limit` |
-| 400 | `image_too_many_sources` | 바탕 그림이 `widget.image.max-source-images` 초과. `limit` |
+| 400 | `image_prompt_too_long` | 글이 `widget.image.max-prompt-chars` 초과 |
+| 400 | `image_too_many_sources` | 바탕 그림이 `widget.image.max-source-images` 초과 |
 | 400 | `image_source_invalid` | 붙인 것 중 그림이 아닌 것이 있다 |
 | 404 | `image_not_found` | `source_image_id` 가 그 대화의 그림이 아니거나 지운 표시가 있다 |
 | 409 | `session_busy` | 지금 규칙 그대로(CR-175) |
@@ -3659,10 +3659,11 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 `GET /api/v1/chat/widget-settings?connection_id=` 응답에 더한다.
 
 ```json
-{"image_generation": {"enabled": true}}
+{"image_generation": {"enabled": true, "max_prompt_chars": 4000, "max_source_images": 4}}
 ```
 
-- 그 연결에 그림 연결이 있으면 참. `connection_id` 가 없으면 거짓
+- `enabled` 는 그 연결에 그림 연결이 있으면 참. `connection_id` 가 없으면 거짓
+- `max_prompt_chars`, `max_source_images` 는 `widget.image.max-prompt-chars`, `widget.image.max-source-images` 값이다. 오류 응답은 코드만 주므로 위젯은 상한을 여기서 읽어 오류 문구에 쓴다
 
 ### 연결 config 칸 [PRD-544]
 
