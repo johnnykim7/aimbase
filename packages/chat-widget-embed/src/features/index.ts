@@ -7,8 +7,9 @@ import { fileCreate } from "./file-create";
 import { fontSize } from "./font-size";
 import { imageGen } from "./image-gen";
 import { language } from "./language";
+import { memory } from "./memory";
 import { preview } from "./preview";
 import { saveExport } from "./save-export";
 import { shareLink } from "./share-link";
 
-export const FEATURES: WidgetFeature[] = [fontSize, language, preview, imageGen, fileCreate, saveExport, shareLink];
+export const FEATURES: WidgetFeature[] = [fontSize, language, preview, imageGen, fileCreate, saveExport, shareLink, memory];
