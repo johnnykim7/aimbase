@@ -1,5 +1,6 @@
 import type { TokenizerAndRendererExtension } from "marked";
-import { AttachmentClient } from "./attachment-client";
+import { AttachmentClient, AttachmentUploadError } from "./attachment-client";
+import { extensionOf, formatSize, groupIcon, groupOf, limitMb } from "./attachment-kind";
 import { ChatClient } from "./chat-client";
 import { copyText } from "./clipboard";
 import { FEATURES } from "./features";
@@ -54,9 +55,6 @@ import type {
 import { WidgetApi, WidgetApiError } from "./widget-api";
 import { WorkflowClient } from "./workflow-client";
 
-const ACCEPT_MIME = "image/png,image/jpeg,image/gif,image/webp,application/pdf";
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const MAX_PDF_BYTES = 32 * 1024 * 1024;
 const MAX_SUGGESTIONS = 4;
 const TEXTAREA_MAX_PX = 180;
 // 맨 아래에서 이만큼 안쪽이면 새 글을 따라 내려간다.
@@ -396,7 +394,6 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   plusBtn.setAttribute("aria-haspopup", "menu");
   const fileInput = document.createElement("input");
   fileInput.type = "file";
-  fileInput.accept = ACCEPT_MIME;
   fileInput.multiple = true;
   fileInput.style.display = "none";
   const modelBtn = el("button", "model");
@@ -760,6 +757,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     const ids = s.models.map((m) => m.id);
     if (!selectedModel || !ids.includes(selectedModel)) selectedModel = s.default_model;
     thinkingOn = s.thinking_default === true;
+    fileInput.accept = (s.attachments?.accept ?? []).map((ext) => `.${ext}`).join(",");
   }
 
   async function loadSettings(): Promise<void> {
@@ -867,8 +865,17 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   function renderUser(turn: Turn, index: number): void {
     const u = turn.userEl;
     u.innerHTML = "";
-    const lines = [turn.question, ...turn.attachmentNames.map((n) => T.attachmentLabel(n))].filter(Boolean);
-    u.appendChild(el("div", "bub", lines.join("\n")));
+    const bub = el("div", "bub");
+    if (turn.question) bub.appendChild(el("div", "q-text", turn.question));
+    for (const name of turn.attachmentNames) {
+      const row = el("div", "q-att");
+      row.title = T.attachmentLabel(name);
+      const mark = el("span", "q-att-icon");
+      mark.innerHTML = groupIcon(groupOf(name), 13);
+      row.append(mark, el("span", "q-att-name", name));
+      bub.appendChild(row);
+    }
+    u.appendChild(bub);
     const acts = el("div", "acts");
     const editable = latestSeq(turn) !== undefined;
     if (editable) {
@@ -1745,41 +1752,59 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   // ── CR-061: 첨부 ─────────────────────────
   function genLocalId(): string { return `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 
+  // 받는 종류와 크기 상한은 위젯 설정 조회 응답에서 온다(CR-183). 설정을 못 읽었으면 서버가 본다.
   // 틀 ctx.chat.checkAttachment 도 이 검사를 쓴다. 프로젝트 자료처럼 이미 서버에 있는 파일도 이름, 종류, 크기만으로 본다.
   function validateFile(file: Pick<File, "name" | "type" | "size">): string | null {
-    const isImage = file.type.startsWith("image/");
-    const isPdf = file.type === "application/pdf";
-    if (!isImage && !isPdf) return T.fileTypeNotAllowed;
-    const limit = isPdf ? MAX_PDF_BYTES : MAX_IMAGE_BYTES;
-    if (file.size > limit) return T.fileTooLarge(Math.round(limit / 1024 / 1024));
+    const rules = settings?.attachments;
+    if (!rules) return null;
+    if (!rules.accept.includes(extensionOf(file.name))) return T.fileTypeNotAllowed;
+    const group = groupOf(file.name);
+    const limit = group ? rules.max_bytes[group] : undefined;
+    if (limit && file.size > limit) return T.fileTooLarge(limitMb(limit));
     return null;
+  }
+
+  /** 서버가 거절한 첨부는 오류 코드로 문구를 고른다. 크기 상한은 바이트로 오므로 MB 로 바꾼다. */
+  function uploadErrorText(e: unknown): string {
+    if (e instanceof AttachmentUploadError && e.code) {
+      const text = T.attachErrors[e.code];
+      if (text) return text(e.code === "FG-ATT-4002" && e.limit ? limitMb(e.limit) : e.limit);
+      const other = codeText(e.code);
+      if (other) return other;
+    }
+    return (e as Error)?.message ?? String(e);
   }
 
   function renderChips(): void {
     attachmentsEl.innerHTML = "";
     for (const draft of draftAttachments) {
       const chip = el("div", `chip ${draft.status}`);
+      const group = groupOf(draft.file.name);
       if (draft.previewDataUrl) {
         const img = document.createElement("img");
         img.className = "chip-thumb";
         img.src = draft.previewDataUrl;
         img.alt = draft.file.name;
         chip.appendChild(img);
-      } else if (draft.file.type === "application/pdf") {
+      } else if (group === "pdf" || draft.file.type === "application/pdf") {
         chip.appendChild(el("span", "chip-thumb pdf", "PDF"));
       } else {
         const thumb = el("span", "chip-thumb pdf");
-        thumb.innerHTML = icon("attach", 13);
+        thumb.innerHTML = groupIcon(group, 14);
         chip.appendChild(thumb);
       }
       const label = el("span", "chip-label");
-      const pages = draft.serverMeta?.pages;
-      const pageSuffix = pages ? ` · ${pages}p` : "";
       label.textContent = draft.status === "error"
         ? `${draft.file.name}: ${draft.error ?? T.uploadFailed}`
-        : `${draft.file.name}${pageSuffix}`;
+        : draft.file.name;
       label.title = label.textContent ?? "";
       chip.appendChild(label);
+      if (draft.status !== "error") {
+        const size = draft.serverMeta?.size_bytes ?? draft.file.size;
+        const pages = draft.serverMeta?.pages;
+        const meta = [size ? formatSize(size) : "", pages ? `${pages}p` : ""].filter(Boolean).join(" · ");
+        if (meta) chip.appendChild(el("span", "chip-size", meta));
+      }
       if (draft.status === "uploading") {
         chip.appendChild(el("span", "chip-spinner"));
       } else {
@@ -1808,7 +1833,8 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     const err = validateFile(file);
     if (err) {
       options.on?.onError?.(new Error(err));
-      appendNotice(err);
+      draftAttachments.push({ localId: genLocalId(), file, status: "error", error: err });
+      renderChips();
       return;
     }
     const draft: AttachmentDraft = {
@@ -1826,7 +1852,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       draft.status = "ready";
     } catch (e) {
       draft.status = "error";
-      draft.error = (e as Error).message;
+      draft.error = uploadErrorText(e);
       options.on?.onError?.(e as Error);
     } finally {
       renderChips();

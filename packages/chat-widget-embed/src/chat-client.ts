@@ -63,7 +63,7 @@ export class ChatClient {
     const userContent: Array<Record<string, unknown>> = [];
     for (const att of args.attachments ?? []) {
       userContent.push({
-        type: att.mediaType === "application/pdf" ? "document" : "image",
+        type: att.mediaType.startsWith("image/") ? "image" : "document",
         attachment_id: att.attachmentId,
       });
     }

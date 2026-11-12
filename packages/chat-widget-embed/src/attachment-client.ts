@@ -50,8 +50,8 @@ export class AttachmentClient {
             reject(new Error(`invalid response JSON: ${(e as Error).message}`));
           }
         } else {
-          const msg = extractErrorMessage(xhr.responseText) ?? `status ${xhr.status}`;
-          reject(new Error(msg));
+          const err = parseError(xhr.responseText);
+          reject(new AttachmentUploadError(err.message ?? `status ${xhr.status}`, err.code, err.limit));
         }
       };
       xhr.onerror = () => reject(new Error("network error"));
@@ -76,14 +76,24 @@ export class AttachmentClient {
   }
 }
 
-function extractErrorMessage(raw: string): string | null {
-  if (!raw) return null;
+/** CR-183: 서버가 준 오류 코드와 상한(크기는 바이트, 행과 열은 개수). 위젯은 코드로 문구를 고른다. */
+export class AttachmentUploadError extends Error {
+  constructor(message: string, readonly code?: string, readonly limit?: number) {
+    super(message);
+    this.name = "AttachmentUploadError";
+  }
+}
+
+function parseError(raw: string): { message?: string; code?: string; limit?: number } {
+  if (!raw) return {};
   try {
     const body = JSON.parse(raw);
-    if (typeof body.error === "string") return body.error;
-    if (typeof body.message === "string") return body.message;
-    return null;
+    return {
+      message: typeof body.error === "string" ? body.error : typeof body.message === "string" ? body.message : undefined,
+      code: typeof body.code === "string" ? body.code : undefined,
+      limit: typeof body.limit === "number" ? body.limit : undefined,
+    };
   } catch {
-    return raw.slice(0, 200);
+    return { message: raw.slice(0, 200) };
   }
 }

@@ -312,6 +312,11 @@ button { font: inherit; color: inherit; }
   background: var(--aimbase-assistant-bg); border: 1px solid var(--aimbase-border);
 }
 .chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.chip-size { color: var(--aimbase-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.u .bub .q-att { display: flex; align-items: center; gap: 4px; font-size: 12px; opacity: .8; white-space: nowrap; min-width: 0; }
+.u .bub .q-text + .q-att { margin-top: 4px; }
+.q-att-icon { display: inline-flex; flex-shrink: 0; }
+.q-att-name { overflow: hidden; text-overflow: ellipsis; }
 .chip-remove { background: none; border: none; cursor: pointer; color: var(--aimbase-muted); font-size: 14px; padding: 0 2px; line-height: 1; }
 .chip-remove:hover { color: var(--aimbase-danger); }
 .chip-spinner {
