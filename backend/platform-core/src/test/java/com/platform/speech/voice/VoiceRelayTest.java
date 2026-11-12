@@ -258,6 +258,21 @@ class VoiceRelayTest {
     }
 
     @Test
+    @DisplayName("TC-CHT-126 받아쓰기 서버가 준비될 때까지 연결 대기 시간만큼 기다리고, 연결된 뒤에야 ready 를 보낸다")
+    void waitsForSttBeforeReady() throws Exception {
+        settingValues.put(VoiceRelayHandler.KEY_CONNECT_TIMEOUT, "45");
+        stt.pending = new CompletableFuture<>();
+        Ws ws = connect(issue("s1"), ORIGIN);
+
+        assertThat(stt.connectTimeout).isEqualTo(Duration.ofSeconds(45));
+        assertThat(ws.sent).isEmpty();
+        assertThat(ws.closed.get()).isNull();
+
+        stt.pending.complete(stt.stream);
+        assertThat(ws.sent).containsExactly("{\"type\":\"ready\"}");
+    }
+
+    @Test
     @DisplayName("TC-CHT-126 end 뒤 마지막 글이 시한 안에 없으면 1011")
     void closesWhenFinalTimesOut() throws Exception {
         settingValues.put(VoiceRelayHandler.KEY_FINAL_TIMEOUT, "1");
@@ -365,20 +380,26 @@ class VoiceRelayTest {
 
     static final class FakeStt implements SttStreamClient {
         volatile boolean fail;
+        /** 비어 있지 않으면 받아쓰기 서버가 아직 준비 중인 것처럼 이 약속을 돌려준다. */
+        volatile CompletableFuture<Stream> pending;
         int opens;
         String baseUrl;
         String apiKey;
         String sessionId;
+        Duration connectTimeout;
         Listener listener;
         final FakeStream stream = new FakeStream();
 
         @Override
-        public CompletableFuture<Stream> open(String baseUrl, String apiKey, String sessionId, Listener listener) {
+        public CompletableFuture<Stream> open(String baseUrl, String apiKey, String sessionId, Duration connectTimeout,
+                                              Listener listener) {
             opens++;
             this.baseUrl = baseUrl;
             this.apiKey = apiKey;
             this.sessionId = sessionId;
+            this.connectTimeout = connectTimeout;
             this.listener = listener;
+            if (pending != null) return pending;
             return fail ? CompletableFuture.failedFuture(new IOException("connection refused"))
                     : CompletableFuture.completedFuture(stream);
         }

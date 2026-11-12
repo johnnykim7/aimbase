@@ -1,5 +1,6 @@
 package com.platform.speech.voice;
 
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -28,8 +29,9 @@ public interface SttStreamClient {
 
     /**
      * @param baseUrl 연결 config 의 {@code base_url}(http 또는 https)
+     * @param connectTimeout 받아쓰기 서버는 모델이 준비된 뒤에야 연결을 받으므로, 막 켜진 서버면 그만큼 기다린다
      */
-    CompletableFuture<Stream> open(String baseUrl, String apiKey, String sessionId, Listener listener);
+    CompletableFuture<Stream> open(String baseUrl, String apiKey, String sessionId, Duration connectTimeout, Listener listener);
 
     /** {@code http://host:port/} 를 {@code ws://host:port/stream?api_key=..&session_id=..} 로 바꾼다. */
     static String streamUrl(String baseUrl, String apiKey, String sessionId) {

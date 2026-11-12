@@ -17,6 +17,7 @@ Aimbase Transcribe Sidecar — 회의녹음 배치 전사 (faster-whisper)
                        인터넷에 노출되므로 반드시 설정한다. 미설정이면 기동을 거부한다.
 """
 
+import asyncio
 import hmac
 import logging
 import os
@@ -24,6 +25,7 @@ import platform
 import shutil
 import tempfile
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, WebSocket
@@ -59,7 +61,20 @@ if not API_KEY:
         "인증 없이 기동하지 않는다. run.sh 또는 환경변수에 키를 설정할 것."
     )
 
-app = FastAPI(title="Aimbase Transcribe Sidecar", version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 스트리밍 받아쓰기는 MLX 전용이다. 첫 연결이 모델 올리기(실측 약 10초)를 기다리지 않게
+    # 기동 때 뒤에서 올려 둔다. 그동안 배치 전사와 /health 는 그대로 받는다.
+    if BACKEND == "mlx":
+        from streaming import preload
+
+        app.state.stream_preload = asyncio.create_task(preload())
+    yield
+
+
+app = FastAPI(title="Aimbase Transcribe Sidecar", version="0.1.0", lifespan=lifespan)
 
 _model = None
 
@@ -191,7 +206,16 @@ def health():
         "model": MODEL_SIZE,
         "device": DEVICE,
         "loaded": _model is not None,
+        "stream_loaded": stream_ready(),
     }
+
+
+def stream_ready() -> bool:
+    if BACKEND != "mlx":
+        return False
+    from streaming import asr_ready
+
+    return asr_ready()
 
 
 @app.get("/stream-test")
@@ -211,7 +235,7 @@ async def stream(websocket: WebSocket):
     인증: WS 는 커스텀 헤더를 못 붙이는 클라이언트가 많아 쿼리 파라미터로 받는다.
           ws://host:8291/stream?api_key=...
     """
-    from streaming import handle_stream
+    from streaming import get_asr, handle_stream
 
     provided = websocket.query_params.get("api_key")
     if not provided or not hmac.compare_digest(provided, API_KEY):
@@ -219,8 +243,16 @@ async def stream(websocket: WebSocket):
         await websocket.close(code=1008, reason="invalid or missing api_key")
         return
 
-    await websocket.accept()
     session_id = websocket.query_params.get("session_id", "anonymous")
+    # 모델이 준비되기 전에 받으면 상대는 듣는 중으로 알고 말하는데 말은 쌓이기만 한다.
+    # 준비된 뒤에 받아서 첫 연결도 받는 순간부터 바로 듣게 한다.
+    try:
+        await get_asr()
+    except Exception:
+        log.exception("[CR-135] 스트리밍 ASR 을 올리지 못해 연결을 받지 않음: session=%s", session_id)
+        await websocket.close(code=1011, reason="stream model unavailable")
+        return
+    await websocket.accept()
     log.info("[CR-135] 스트리밍 연결: session=%s", session_id)
     await handle_stream(websocket, session_id)
 

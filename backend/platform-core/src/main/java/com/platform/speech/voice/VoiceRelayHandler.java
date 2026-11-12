@@ -19,6 +19,7 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -42,6 +43,7 @@ public class VoiceRelayHandler extends AbstractWebSocketHandler {
 
     public static final String KEY_MAX_UTTERANCE = "widget.voice.max-utterance-seconds";
     public static final String KEY_FINAL_TIMEOUT = "widget.voice.final-timeout-seconds";
+    public static final String KEY_CONNECT_TIMEOUT = "widget.voice.connect-timeout-seconds";
 
     static final int CLOSE_TOO_LONG = 4408;
     static final int CLOSE_FULL = 4429;
@@ -192,9 +194,9 @@ public class VoiceRelayHandler extends AbstractWebSocketHandler {
                 finish(CLOSE_UPSTREAM, "unavailable");
                 return;
             }
-            long limit = Math.max(1L, settings.getLong(KEY_MAX_UTTERANCE, 60L)) + UTTERANCE_GRACE_SECONDS;
-            utteranceTimer = timers.schedule(() -> finish(CLOSE_TOO_LONG, "too_long"), limit, TimeUnit.SECONDS);
-            streamClient.open(String.valueOf(baseUrl), SttLocalConnections.apiKey(cfg), ticket.sessionId(), this)
+            Duration connectTimeout = Duration.ofSeconds(Math.max(1L, settings.getLong(KEY_CONNECT_TIMEOUT, 30L)));
+            streamClient.open(String.valueOf(baseUrl), SttLocalConnections.apiKey(cfg), ticket.sessionId(),
+                            connectTimeout, this)
                     .whenComplete((stream, error) -> {
                         if (error != null) {
                             log.warn("[CR-186] 받아쓰기 서버에 잇지 못했다: {}", error.getMessage());
@@ -206,6 +208,9 @@ public class VoiceRelayHandler extends AbstractWebSocketHandler {
                             stream.close();
                             return;
                         }
+                        // 받아쓰기 서버가 준비되기를 기다린 시간은 발화가 아니므로 듣기 시작할 때부터 잰다.
+                        long limit = Math.max(1L, settings.getLong(KEY_MAX_UTTERANCE, 60L)) + UTTERANCE_GRACE_SECONDS;
+                        utteranceTimer = timers.schedule(() -> finish(CLOSE_TOO_LONG, "too_long"), limit, TimeUnit.SECONDS);
                         send("{\"type\":\"ready\"}");
                     });
         }

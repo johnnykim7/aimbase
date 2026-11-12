@@ -70,13 +70,50 @@ async def get_asr():
     global _asr
     async with _asr_lock:
         if _asr is None:
-            from whisper_online import MLXWhisper
-
-            log.info("스트리밍 ASR 로드 시작: %s (lang=%s)", STREAM_MODEL, STREAM_LANG)
-            started = time.time()
-            _asr = MLXWhisper(lan=STREAM_LANG, modelsize=STREAM_MODEL)
-            log.info("스트리밍 ASR 로드 완료 (%.1fs)", time.time() - started)
+            # 올리는 동안 이벤트 루프를 막으면 배치 전사와 /health 까지 멈춘다.
+            _asr = await asyncio.get_running_loop().run_in_executor(None, _load_asr)
     return _asr
+
+
+def _load_asr():
+    from whisper_online import MLXWhisper
+
+    log.info("스트리밍 ASR 로드 시작: %s (lang=%s)", STREAM_MODEL, STREAM_LANG)
+    started = time.time()
+    asr = MLXWhisper(lan=STREAM_LANG, modelsize=STREAM_MODEL)
+    # MLXWhisper 는 모델 경로만 기억하고 가중치는 첫 추론에서 올린다(실측 첫 추론 8.5초).
+    # 여기서 한 번 돌려 둬야 첫 사용자의 첫 말이 그 시간을 떠안지 않는다.
+    asr.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32))
+    log.info("스트리밍 ASR 준비 완료 (%.1fs)", time.time() - started)
+    _keep_resident()
+    return asr
+
+
+def _keep_resident():
+    """
+    오래 쉬면 맥이 모델 메모리를 스왑으로 내보내 첫 말의 추론이 다시 느려진다.
+    올린 가중치만큼 묶어 두면 내보내지 않는다. 묶지 못해도 받아쓰기는 그대로 돈다.
+    """
+    import mlx.core as mx
+
+    try:
+        weights = mx.get_active_memory()
+        mx.set_wired_limit(weights)
+        log.info("스트리밍 ASR 메모리 %.1fGB 를 묶어 둠", weights / 1e9)
+    except Exception:
+        log.exception("스트리밍 ASR 메모리를 묶지 못했다. 오래 쉰 뒤 첫 말이 느릴 수 있다")
+
+
+async def preload():
+    """기동 때 부른다. 실패해도 서버는 떠 있고 첫 연결에서 다시 올린다."""
+    try:
+        await get_asr()
+    except Exception:
+        log.exception("스트리밍 ASR 을 미리 올리지 못했다. 첫 연결에서 다시 시도한다")
+
+
+def asr_ready() -> bool:
+    return _asr is not None
 
 
 _vad_ready = False
@@ -135,13 +172,16 @@ async def handle_stream(websocket: WebSocket, session_id: str):
 
     pcm_buffer = bytearray()
     confirmed = ""
-    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
     async def decode_loop():
-        """FFmpeg stdout 에서 PCM 을 읽어 청크 단위로 추론하고 결과를 밀어낸다."""
+        """
+        FFmpeg stdout 에서 PCM 을 읽어 청크 단위로 추론하고 결과를 밀어낸다.
+        말 끝 신호 뒤에도 FFmpeg 가 stdout 을 닫을 때까지 읽는다. 그 전에 멈추면
+        stdin 을 닫으며 FFmpeg 가 내보낸 마지막 말소리가 버려져 끝말이 잘린다(실측).
+        """
         nonlocal pcm_buffer, confirmed
-        loop = asyncio.get_event_loop()
-        while not stop.is_set():
+        while True:
             try:
                 chunk = await ffmpeg.stdout.read(4096)
             except Exception:
@@ -205,7 +245,6 @@ async def handle_stream(websocket: WebSocket, session_id: str):
     except Exception as e:
         log.warning("[%s] 수신 중단: %s", session_id, e)
     finally:
-        stop.set()
         # stdin 을 닫아야 FFmpeg 가 남은 프레임을 flush 하고 stdout 을 닫는다.
         try:
             ffmpeg.stdin.close()
@@ -222,8 +261,16 @@ async def handle_stream(websocket: WebSocket, session_id: str):
         # 남은 버퍼를 마지막으로 확정해서 끝말이 잘리지 않게 한다.
         # 단 finish() 는 잔여 오디오가 짧거나 무음이면 환각을 낸다("조조조…", "자막제작").
         # 반복 패턴이면 버린다 — 끝말을 조금 잃는 편이 쓰레기를 남기는 것보다 낫다.
+        def finish():
+            # 청크 하나에 못 미쳐 추론에 들어가지 못한 마지막 말소리도 넣는다.
+            if pcm_buffer:
+                rest = np.frombuffer(bytes(pcm_buffer), dtype=np.int16).astype(np.float32) / 32768.0
+                if float(np.sqrt(np.mean(rest ** 2))) >= SILENCE_RMS:
+                    online.insert_audio_chunk(rest)
+            return online.finish()
+
         try:
-            tail = (online.finish()[2] or "").strip()
+            tail = ((await loop.run_in_executor(None, finish))[2] or "").strip()
             if tail and not _looks_hallucinated(tail):
                 confirmed += (" " if confirmed else "") + tail
             await websocket.send_json({"type": "final", "text": confirmed})

@@ -20,15 +20,14 @@ import java.util.concurrent.CompletionStage;
 public class JdkSttStreamClient implements SttStreamClient {
 
     private static final Logger log = LoggerFactory.getLogger(JdkSttStreamClient.class);
-    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
-
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
+    private final HttpClient http = HttpClient.newHttpClient();
 
     @Override
-    public CompletableFuture<Stream> open(String baseUrl, String apiKey, String sessionId, Listener listener) {
+    public CompletableFuture<Stream> open(String baseUrl, String apiKey, String sessionId, Duration connectTimeout,
+                                          Listener listener) {
         URI uri = URI.create(SttStreamClient.streamUrl(baseUrl, apiKey, sessionId));
         return http.newWebSocketBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
+                .connectTimeout(connectTimeout)
                 .buildAsync(uri, new Bridge(listener))
                 .thenApply(JdkStream::new);
     }
