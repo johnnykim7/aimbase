@@ -711,6 +711,10 @@ public class ToolCallHandler {
                 latch.countDown();
                 return;
             }
+            if (chunk.observedTool() != null) {
+                sink.accept(StreamEvent.ofObservedTool(chunk));
+                return;
+            }
             if (chunk.delta() == null) return;
             if ("thinking".equals(chunk.type())) {
                 sink.accept(new StreamEvent.ThinkingDelta(chunk.delta()));

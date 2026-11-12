@@ -725,6 +725,7 @@ public class OrchestratorEngine {
                             observedBuf.add(new com.platform.llm.model.ObservedToolEvent(
                                     ot.toolName(), ot.input(), ot.output(), ot.durationMs()));
                         }
+                        streamSinkWithCitations.accept(com.platform.orchestrator.stream.StreamEvent.ofObservedTool(chunk));
                         return;
                     }
                     if (chunk.delta() == null) return;
