@@ -3,9 +3,12 @@
  * 목록 순서는 화면 순서와 상관없다. 쓰는 법은 docs/guides/chat-widget-frame.md 다.
  */
 import type { WidgetFeature } from "../frame/context";
+import { fileCreate } from "./file-create";
 import { fontSize } from "./font-size";
 import { imageGen } from "./image-gen";
 import { language } from "./language";
 import { preview } from "./preview";
+import { saveExport } from "./save-export";
+import { shareLink } from "./share-link";
 
-export const FEATURES: WidgetFeature[] = [fontSize, language, preview, imageGen];
+export const FEATURES: WidgetFeature[] = [fontSize, language, preview, imageGen, fileCreate, saveExport, shareLink];
