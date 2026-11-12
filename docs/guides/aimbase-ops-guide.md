@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.33.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.34.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -854,7 +854,6 @@ location /share/ { proxy_pass http://127.0.0.1:8280; }
 | 받는 사람이 링크를 열면 Aimbase 화면이 아닌 404 가 뜬다 | 앞단 nginx 에 `/share/` 경로가 없다 | 위 `location /share/` 를 더하고 nginx 를 다시 읽힌다 |
 | 「링크가 없거나 끝났습니다」 | 끊긴 링크, 기한 지난 링크, 틀린 주소 | 보낸 사람이 공유 창에서 새 링크를 만든다 |
 | 파일을 만들어 달라고 해도 파일 칩이 오지 않는다 | `chat.file-create.enabled` 꺼짐 또는 위젯이 CR-182 전 판 | 설정과 위젯 판을 확인한다 |
-
 ### 2-18. 위젯 사용자 선호 기억 운영 [CR-179]
 
 위젯 더 보기 메뉴 「기억과 선호」 에서 사용자가 「내 선호」 글을 적고, AI 가 대화에서 뽑은 「자동 기억」 을 보고 삭제하는 기능입니다. 마지막에 선택한 모델과 깊게 생각하기도 사람마다 기억합니다. API 는 API 가이드 § 32.
@@ -904,6 +903,57 @@ location /share/ { proxy_pass http://127.0.0.1:8280; }
 | 「이 연결은 이 파일을 고치지 못합니다」 | 원본 없는 파일인데 실행기 연결이 아님, 또는 원본 있는 파일인데 파일 만들기 설정(`chat.file-create.enabled`)이 꺼짐(400 `document_edit_unsupported`) | 실행기 연결로 대화하거나, 파일 만들기 설정을 켜거나, 그 파일을 대화로 다시 만들게 한다 |
 | 「파일이 정리되어 고치지 못합니다」 | 산출물 보관 기한(`aimbase.artifact.ttl-hours`)이 지나 작업 폴더 파일이 지워짐(410 `document_source_gone`) | 다시 만들게 한다. 이미 버전이 있는 파일은 저장소의 버전으로 고친다 |
 | 「문서가 바뀌지 않았습니다」 | 답이 문서를 바꾸지 않았거나 바뀐 내용이 앞 버전과 같음 | 요청을 더 구체적으로 다시 보낸다 |
+
+### 2-20. 위젯 답 읽어 주기와 음성 대화 운영 [CR-186]
+
+위젯 사용자가 응답을 소리로 듣고(「읽어 주기」), 말로 묻고 답을 소리로 듣는(「음성 대화」) 기능입니다. API 는 API 가이드 § 31.
+
+**필요한 것.** 읽어 주기는 테넌트의 `tts_local` 연결(맥 음성 엔진, § 2-11)이나 쓸 수 있는 OpenAI 연결이 있어야 합니다. 음성 대화는 테넌트의 활성 `stt_local` 연결(맥 받아쓰기 서버)이 있어야 하고, 그 서버의 `/stream` 이 실시간 모델(large-v3-turbo)을 올린 판이어야 합니다. 위젯 토큰 scopes 에 `chat:tts`, `chat:voice` 가 있어야 단추가 보입니다. 마스터 V89 가 `widget.allowed-scopes` 에 둘을 덧붙입니다.
+
+**앞단 nginx.** 위젯이 붙는 주소의 nginx 에 음성 중계 경로만 웹소켓 전환을 엽니다. `/api/v1/chat/` 의 `Connection ""` 설정은 그대로 둡니다.
+
+```nginx
+location = /api/v1/chat/voice/stream {
+    proxy_pass http://api:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header Origin $http_origin;
+    proxy_read_timeout 90s;
+}
+```
+
+`proxy_pass` 는 그 nginx 의 기존 `/api/` 경로와 같은 곳으로 둡니다. `proxy_read_timeout` 은 `widget.voice.max-utterance-seconds` 에 30초를 더한 값입니다.
+
+**런타임 설정.** 사이드바 Super Admin 묶음 「런타임 설정」의 `widget` 분류에서 재기동 없이 바꿉니다.
+
+| 키 | 처음 값 | 뜻 |
+|---|---|---|
+| `widget.tts.enabled` | true | 답 읽어 주기 사용 |
+| `widget.tts.voice` | (비움) | 위젯이 읽을 목소리. 목록 목소리 id 면 맥 엔진 먼저, 그 밖의 값(`nova` 등)은 OpenAI. 비면 목록의 기본 목소리 |
+| `widget.tts.speed` | 1.0 | 읽는 속도 |
+| `widget.tts.max-chars` | 300 | 한 요청 글자 수 상한. 위젯이 응답을 이 길이 이하 조각으로 나눈다 |
+| `widget.tts.rate-limit-per-minute` | 60 | 세션의 분당 읽기 요청 수 |
+| `widget.tts.local-timeout-seconds` | 20 | 맥 엔진을 기다리는 시간. 넘으면 OpenAI 로 전환 |
+| `widget.voice.enabled` | true | 음성 대화 사용 |
+| `widget.voice.ticket-ttl-seconds` | 30 | 입장권 유효 시간 |
+| `widget.voice.max-concurrent-streams` | 3 | 동시에 열 수 있는 음성 중계 수(맥 받아쓰기 서버 하나가 감당하는 수) |
+| `widget.voice.end-silence-ms` | 1200 | 말이 끝났다고 보는 조용한 시간 |
+| `widget.voice.speech-level` | 0.02 | 말소리로 보는 크기(0 ~ 1). 주변이 시끄러우면 올린다 |
+| `widget.voice.max-utterance-seconds` | 60 | 말 한 번의 최대 길이 |
+| `widget.voice.idle-end-seconds` | 120 | 듣는 중 말이 없으면 음성 대화를 끝내는 시간 |
+| `widget.voice.final-timeout-seconds` | 10 | 말이 끝난 뒤 마지막 글을 기다리는 시간 |
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 「읽어 주기」 단추가 없다 | `widget.tts.enabled` 꺼짐, 또는 위젯 토큰에 `chat:tts` 없음 | 설정을 켜고, 붙이는 앱이 scopes 를 위젯에 그대로 넘기는지 본다 |
+| 「음성 대화」 단추가 없다 | `widget.voice.enabled` 꺼짐, 테넌트에 활성 `stt_local` 연결 없음, 토큰에 `chat:voice` 없음, 또는 브라우저가 WebM(Opus) 녹음을 못 함 | 연결과 scopes 를 확인한다 |
+| 「읽어 드리지 못했습니다」 | 맥 엔진이 시간 한도를 넘겼고 OpenAI 연결이 없음(503 `tts_unavailable`) | 맥 엔진 상태를 보고, 필요하면 OpenAI 연결을 둔다 |
+| 「음성 인식 서버에 연결하지 못했습니다」 | 맥 받아쓰기 서버가 꺼졌거나 앞단이 웹소켓 전환을 막음 | 받아쓰기 서버와 위 nginx 경로를 확인한다. 감사 로그 `VOICE_STREAM` 의 `end_reason` 을 본다 |
+| 「지금은 음성 대화 자리가 없습니다」 | 열린 중계가 `widget.voice.max-concurrent-streams` 개 | 잠시 뒤 다시 하거나 상한을 올린다(받아쓰기 서버 부하를 함께 본다) |
+| 말을 했는데 「잘 듣지 못했습니다」 | 받아쓴 글이 비었음 | 마이크 소리가 작으면 `widget.voice.speech-level` 을 내린다 |
+| 말이 끝나기 전에 끊긴다, 또는 끝났는데 한참 기다린다 | 조용한 시간 기준이 환경에 맞지 않음 | `widget.voice.end-silence-ms` 를 늘리거나 줄인다 |
 
 ---
 
@@ -2109,6 +2159,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.34.0 | 2026-11-13 | **CR-186 위젯 답 읽어 주기와 음성 대화** (§ 2-20). 필요한 연결(`tts_local`, `stt_local`), 앞단 nginx 음성 중계 경로, 런타임 설정 `widget.tts.*` 6개와 `widget.voice.*` 8개(마스터 V89), 위젯 토큰 scope `chat:tts`, `chat:voice`, 증상별 조치 |
 | v3.33.0 | 2026-11-13 | **CR-181 위젯 옆 창 문서 고치기** (§ 2-19). 고칠 수 있는 문서 조건, 버전 보관(테넌트 V84), 프롬프트 템플릿 `widget.document-edit.*` 4개, 증상별 조치 |
 | v3.32.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 2-18). 런타임 설정 `widget.memory-*` 5개와 `widget.preferences-max-chars`, 프롬프트 틀 `widget.memory-extract`, `widget.user-memory`, 사람 구분은 위젯 토큰 `user_ref` |
 | v3.31.0 | 2026-11-13 | **CR-182 위젯 파일 만들기, 저장, 내보내기, 공유 링크** (§ 2-17). api 이미지 `fonts-nanum` 과 환경변수 `AIMBASE_DOCUMENT_PDF_FONT_DIR`, 런타임 설정 `chat.file-create.*`, `chat.export.*`, `chat.share.*`, 앞단 nginx `location /share/`, 프롬프트 틀 `tool.create-file.description` |

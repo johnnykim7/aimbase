@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.37.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.38.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2883,7 +2883,6 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 ### 31-6. 산출물 API 세션 주인 대조
 
 `GET /api/v1/chat/artifacts`, `/download`, `/preview`, `/preview/page` 는 위젯 토큰이면 그 세션 주인(`user_ref`)만 엽니다. 남의 세션이면 404 `artifact_not_found` 입니다. 소비앱 키와 로그인은 지금처럼 테넌트 안에서 엽니다.
-
 ## 32. 위젯 사용자 선호 기억 [CR-179]
 
 위젯 사용자가 「내 선호」 글을 적어 두면 AI 가 대화마다 참고하고, 대화에서 밝힌 선호를 AI 가 「자동 기억」 으로 남겨 다음 대화에 씁니다. 마지막에 선택한 모델과 깊게 생각하기도 기억해 새 대화에 다시 적용합니다. 다섯 API 모두 `chat:stream` 위젯 토큰으로 부르고, 주인은 토큰의 `user_ref` 입니다. BFF 가 토큰을 발급할 때(§ 17-2) `user_ref` 를 사람마다 다르게 줘야 기억이 사람마다 갈립니다.
@@ -3099,11 +3098,93 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 
 - `history_enabled` 는 위젯 토큰에 `user_ref` 가 없으면 거짓, 로그인이면 참입니다. 위젯은 참일 때만 대화 목록 칸, 더 보기 「프로젝트로 옮기기」, + 메뉴 「프로젝트 자료에서」 를 보입니다.
 - 위젯을 뜨게 할 때 붙이는 앱이 `sessionId` 를 주었고 그 대화가 요청자의 것으로 있으면 위젯이 § 34-2 로 읽어 보입니다.
+## 35. 위젯 답 읽어 주기와 음성 대화 [CR-186]
+
+위젯의 「읽어 주기」(응답을 소리로 읽기)와 「음성 대화」(말로 묻고 답을 소리로 듣기)가 쓰는 API 입니다. 위젯이 알아서 부르므로 붙이는 앱이 직접 부를 일은 없고, 위젯 토큰 scopes 에 `chat:tts`, `chat:voice` 만 있으면 됩니다. 로그인 사용자는 scope 없이 됩니다.
+
+### 35-1. 위젯 설정 조회에 더해진 칸
+
+`GET /api/v1/chat/widget-settings` (§ 28-2) 응답에 더해집니다. 위젯은 이 값으로 단추를 보이거나 숨깁니다.
+
+```json
+{"tts_enabled": true, "tts_max_chars": 300, "voice_chat_enabled": true, "voice_end_silence_ms": 1200,
+ "voice_speech_level": 0.02, "voice_max_utterance_seconds": 60, "voice_idle_end_seconds": 120}
+```
+
+- `voice_chat_enabled` 는 런타임 설정 `widget.voice.enabled` 가 켜져 있고 그 테넌트에 활성 `stt_local` 연결이 있을 때만 참입니다.
+
+### 35-2. 읽을 소리 (`POST /api/v1/chat/tts`)
+
+```json
+{"session_id": "cs-9471-...", "text": "주문 3건이 2026-11-12 14:00 에 출고되었습니다."}
+```
+
+- 200 `audio/mpeg`. 머리글 `X-Aimbase-TTS-Engine` 은 `local`(맥 음성 엔진) 또는 `openai` 입니다.
+- 글은 위젯이 마크다운을 걷어 내고 `tts_max_chars` 이하로 나눈 조각입니다. 서버는 마크다운을 다시 다루지 않습니다.
+- 목소리와 속도는 런타임 설정 `widget.tts.voice`, `widget.tts.speed` 입니다. 맥 엔진을 `widget.tts.local-timeout-seconds` 까지 기다리고, 넘으면 음성 합성의 기존 전환 규칙대로 OpenAI 로 보냅니다.
+- 감사 로그 `WIDGET_TTS` 에 세션, 글자 수, 엔진, 걸린 시간을 남깁니다. 글 본문은 남기지 않습니다.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `tts_invalid:text` | 글이 비었거나 `widget.tts.max-chars` 를 넘음 |
+| 403 | `tts_forbidden` | 위젯 토큰에 `chat:tts` 없음 |
+| 409 | `tts_disabled` | `widget.tts.enabled` 가 false |
+| 429 | `tts_rate_limited` | 세션의 분당 요청이 `widget.tts.rate-limit-per-minute` 를 넘음 |
+| 502 | `tts_upstream_error` | OpenAI 가 오류를 돌려줌 |
+| 503 | `tts_unavailable` | 맥 엔진이 실패했는데 OpenAI 전환이 꺼졌거나 쓸 수 있는 OpenAI 연결이 없음 |
+
+### 35-3. 음성 대화 입장권 (`POST /api/v1/chat/voice/tickets`)
+
+브라우저 웹소켓은 Authorization 머리글을 붙일 수 없어서, 위젯은 토큰으로 한 번 쓰는 입장권을 받아 중계 주소에 붙입니다.
+
+```json
+{"session_id": "cs-9471-..."}
+```
+
+```json
+{"success": true, "data": {"ticket": "vt_7Q...", "expires_in_seconds": 30, "stream_path": "/api/v1/chat/voice/stream"}}
+```
+
+- 입장권은 한 번만 쓰고 `widget.voice.ticket-ttl-seconds` 가 지나면 버립니다. 요청 출처(Origin)를 함께 기억합니다.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 400 | `voice_invalid:session_id` | `session_id` 가 비었음 |
+| 403 | `voice_forbidden` | 위젯 토큰에 `chat:voice` 없음 |
+| 409 | `voice_disabled` | `widget.voice.enabled` 가 false |
+| 409 | `voice_session_busy` | 그 세션에 이미 열린 음성 중계가 있음 |
+| 429 | `voice_busy` | 열린 음성 중계가 `widget.voice.max-concurrent-streams` 개 |
+| 503 | `voice_unavailable` | 그 테넌트에 활성 `stt_local` 연결이 없음 |
+
+### 35-4. 실시간 받아쓰기 중계 (웹소켓 `GET /api/v1/chat/voice/stream?ticket=`)
+
+연결 하나가 말 한 번입니다. 위젯은 듣기를 시작할 때마다 입장권을 받고 새로 엽니다. 서버가 맥 받아쓰기 서버의 `/stream` 과 양쪽을 잇고, 소리는 저장하지 않습니다.
+
+| 방향 | 프레임 | 뜻 |
+|---|---|---|
+| 위젯에서 서버 | 바이너리 | MediaRecorder 의 WebM(Opus) 조각 |
+| 위젯에서 서버 | 글 `{"type":"end"}` | 말이 끝났다 |
+| 서버에서 위젯 | 글 `{"type":"ready"}` | 받아쓰기 서버와 이어졌다. 이때부터 소리를 보낸다 |
+| 서버에서 위젯 | 글 `{"type":"transcript","text":"...","buffer":"..."}` | 확정 글과 아직 바뀔 수 있는 글 |
+| 서버에서 위젯 | 글 `{"type":"final","text":"..."}` | 마지막 글. 보낸 뒤 서버가 1000 으로 닫는다 |
+
+| 닫는 번호 | 뜻 |
+|---|---|
+| 4401 | 입장권이 없거나 지났거나 이미 썼다 |
+| 4403 | 입장권을 받은 출처와 다른 출처에서 열었다 |
+| 4408 | 말이 `widget.voice.max-utterance-seconds` 에 5초를 더한 시간을 넘었다 |
+| 4429 | 열린 중계가 상한이거나 같은 세션의 중계가 아직 열려 있다 |
+| 1011 | 받아쓰기 서버에 잇지 못했거나 끊겼거나, `end` 뒤 `widget.voice.final-timeout-seconds` 안에 마지막 글이 오지 않았다 |
+
+- `widget.allowed-origins` 에 없는 출처는 손잡기 전에 403 으로 막힙니다(브라우저에는 닫는 번호 1006 으로 보입니다).
+- 이 경로는 로그인 검사와 테넌트 머리글 검사 없이 입장권으로만 들어옵니다. 앞단 nginx 는 이 경로만 웹소켓 전환(`Upgrade`)을 열어야 합니다(운용 가이드 § 2-17).
+- 감사 로그 `VOICE_STREAM` 에 세션, 이은 시간(`duration_ms`), 받은 소리 바이트(`audio_bytes`), 끝난 까닭(`end_reason`: `final`, `final_timeout`, `too_long`, `upstream_closed`, `client_closed` 등)을 남깁니다. 받아쓴 글은 남기지 않습니다.
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.38.0 | 2026-11-13 | **CR-186 위젯 답 읽어 주기와 음성 대화** (§ 35). 읽을 소리 `POST /api/v1/chat/tts`, 음성 대화 입장권 `POST /api/v1/chat/voice/tickets`, 실시간 받아쓰기 중계 웹소켓 `/api/v1/chat/voice/stream`, 위젯 설정 칸 7개, 위젯 토큰 scope `chat:tts`, `chat:voice` |
 | v3.37.0 | 2026-11-13 | **CR-178 위젯 지난 대화 목록과 프로젝트** (§ 34). 대화 목록 `GET /api/v1/chat/sessions`, 이어보기 `GET /api/v1/chat/sessions/{session_id}/messages`, 이름 바꾸기와 옮기기 `PATCH`, 삭제 `DELETE`, 프로젝트와 자료 `/api/v1/chat/projects/**`, 대화 요청 `chat_project_id`, 위젯 설정 `history_enabled`, `project_instructions_max_chars`, `project_files_max_count`. `user_ref` 없는 위젯 토큰은 403 `widget_user_required`, 위젯 토큰으로 `/api/v1/conversations/**` 는 403 `widget_forbidden` |
 | v3.36.0 | 2026-11-13 | **CR-181 위젯 옆 창 문서를 대화로 고치기** (§ 33). 대화 요청 `document_edit`, 스트림 이벤트와 `done` 의 `document`. 세션 문서 목록 `GET /api/v1/chat/documents`, 판 본문 `GET /api/v1/chat/documents/{document_id}/versions/{version}`, 되돌리기 `POST .../restore`. 미리보기 정보, 쪽 그림, 내려받기에 `version` 인자, 미리보기 정보에 `has_source`, 위젯 설정에 `document_binary_edit_supported` (§ 28-2) |
 | v3.35.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 32). 내 선호 `GET`, `PUT /api/v1/chat/me/preferences`, 자동 기억 `GET`, `DELETE /api/v1/chat/me/memories`, `DELETE /api/v1/chat/me/memories/{id}`, 오류 코드 `memory_unavailable`, `memory_disabled`, `memory_not_found`, `preferences_too_long`. 대화 요청 모양은 그대로 |
