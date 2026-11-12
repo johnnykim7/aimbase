@@ -1745,7 +1745,8 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   // ── CR-061: 첨부 ─────────────────────────
   function genLocalId(): string { return `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 
-  function validateFile(file: File): string | null {
+  // 틀 ctx.chat.checkAttachment 도 이 검사를 쓴다. 프로젝트 자료처럼 이미 서버에 있는 파일도 이름, 종류, 크기만으로 본다.
+  function validateFile(file: Pick<File, "name" | "type" | "size">): string | null {
     const isImage = file.type.startsWith("image/");
     const isPdf = file.type === "application/pdf";
     if (!isImage && !isPdf) return T.fileTypeNotAllowed;
@@ -2280,6 +2281,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       newConversation: () => startNewConversation(),
       attach: (file) => addAttachment(file),
       attachUploaded: (meta) => attachUploaded(meta),
+      checkAttachment: (file) => validateFile(file),
       addRequestFields: (fn) => void requestFieldFns.push(fn),
     },
     api: {

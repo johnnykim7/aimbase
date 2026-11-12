@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.8 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-185, CR-186
+> 문서 버전: 1.9 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-178, CR-185, CR-186
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -77,7 +77,7 @@ export const exportChat: WidgetFeature = {
 | 9 | 산출물 칩 단추 | `ctx.ui.answer.addArtifactAction(spec)` | CR-182 파일 공유 |
 | 10 | 문구표, 오류 문구, 화면 언어 | `defineStrings`, `ctx.strings(pack)`, `ctx.text`, `ctx.list`, `ctx.setLocale`, `ctx.ui.addErrorTexts(map)` | 모든 건, CR-184 그림 오류 |
 | 11 | 알림 | `ctx.on(name, cb)` | CR-179, CR-181, CR-186 등 |
-| 12 | 대화 동작 | `ctx.chat.send`, `abort`, `open`, `selectModel`, `setThinking`, `setTitle`, `newConversation`, `attach`, `attachUploaded`, `addRequestFields` | CR-178, CR-179, CR-181, CR-186 등 |
+| 12 | 대화 동작 | `ctx.chat.send`, `abort`, `open`, `selectModel`, `setThinking`, `setTitle`, `newConversation`, `attach`, `attachUploaded`, `checkAttachment`, `addRequestFields` | CR-178, CR-179, CR-181, CR-186 등 |
 | 13 | 서버 호출 | `ctx.api.request(method, path, body?)`, `requestBlob(method, path, body?, { signal }?)`, `hasScope`, `hasUserRef`, `wsUrl` | 서버를 부르는 건, CR-180 그림과 원본 파일, CR-185 승인 단추, CR-186 음성 대화 |
 | 14 | 덮개, 토스트, Esc, 글자 크기 | `ctx.ui.layer`, `toast`, `notice`, `onEscape`, `fontSize`, `setFontSize` | 필요한 건 |
 | 15 | 머리줄 제목 표시 | `ctx.ui.header.setTitleTag(spec)` | CR-178 프로젝트 표시 |
@@ -265,6 +265,7 @@ ctx.chat.setThinking(on);   // 깊게 생각하기. 그 연결이 지원하지 �
 ctx.chat.newConversation();
 ctx.chat.attach(file);   // 입력칸 첨부 칩으로 더한다(검사, 올리기 포함)
 ctx.chat.attachUploaded(meta);  // 서버가 이미 만든 첨부(Attachment 모양)를 올린 상태의 칩으로 더한다
+ctx.chat.checkAttachment({ name, type, size });  // + 메뉴 「파일 올리기」와 같은 기준. 받으면 null, 아니면 지금 언어 거절 문구. 받는 종류가 넓어지면(CR-183) 따라온다
 ctx.chat.addRequestFields(() => ({ ... }));  // 보낼 때마다 불러 대화 요청 본문에 더한다. 없으면 {} 를 돌려준다
 ctx.chat.setTitle(text); // 머리줄 대화 제목만 바꾼다. 서버에는 쓰지 않는다
 ctx.chat.open(view);     // 지난 대화를 연다. 아래 ConversationView

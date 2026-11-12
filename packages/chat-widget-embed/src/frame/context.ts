@@ -275,6 +275,8 @@ export interface WidgetContext {
     newConversation(): Promise<void>;
     attach(file: File): Promise<void>;
     attachUploaded(meta: Attachment): void;
+    /** + 메뉴 「파일 올리기」와 같은 기준으로 본다. 받으면 null, 아니면 지금 언어 거절 문구 */
+    checkAttachment(file: { name: string; type: string; size: number }): string | null;
     addRequestFields(fn: () => Record<string, unknown>): void;
   };
   api: {
