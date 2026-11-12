@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.39.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.40.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1132,7 +1132,7 @@ GET /api/v1/agents/active
 | POST | `/workflows/{id}/run` | 실행 |
 | POST | `/workflows/runs/{runId}/cancel` | 실행 중지 (협조적) [CR-105] / `?force=true` 강제 취소 — CLI worker 즉시 kill [CR-116] |
 | POST | `/workflows/runs/{runId}/rerun` | 재실행 — 같은 입력으로 새 run [CR-116] |
-| POST | `/workflows/runs/{runId}/approve` | HUMAN_INPUT 스텝 승인/거부 |
+| POST | `/workflows/runs/{runId}/approve` | HUMAN_INPUT 스텝 승인/거부. 위젯 토큰은 `workflow:approve` 필요 [CR-185] |
 | GET | `/workflows/{id}/runs` | 실행 이력 |
 | GET | `/workflows/{id}/runs/{runId}` | 실행 결과 조회 |
 
@@ -1150,6 +1150,7 @@ GET /api/v1/agents/active
 |--------|------|------|
 | POST | `/chat` | LLM 대화 (정책 적용, 도구 호출 포함) |
 | POST | `/chat/stream` | 스트리밍 대화 |
+| POST | `/chat/approvals/{approvalId}` | 대화 중 도구 실행 승인, 거절 [CR-185] |
 | POST | `/chat/{sessionId}/abort` | 진행 중 스트림 즉시 중지 [CR-046] |
 | DELETE | `/conversations/{sessionId}` | 대화방 Soft Delete (본인만, deleted_at 마킹) [CR-046] |
 
@@ -1598,7 +1599,7 @@ data: {"run_id":"...","status":"failed","duration_ms":910,
 - [ ] 브라우저는 `Authorization: Bearer` 헤더 + SSE 는 `?access_token=` 쿼리로 전송
 - [ ] 토큰 만료 5 분 전(`refresh_after` 필드) 에 `/my-bff/aimbase-token` 재호출 → 신규 토큰 교체 (진행 중 SSE 는 유지)
 - [ ] 운영자가 `widget.allowed-origins` 에 소비앱 도메인 추가했는지 확인
-- [ ] `allowApproval: false` 기본 — `workflow.approval` 이벤트는 소비앱 자체 결재 플로우로 전달
+- [ ] `allowApproval` 기본 true(CR-185). 위젯 안 카드로 정한다. 소비앱 자체 결재를 쓰면 `allowApproval: false` 로 단추를 끄고 `workflow.approval` 을 자기 결재로 넘긴다
 
 ### 17-8. 클라이언트 측 단순 예시 (React)
 
@@ -2780,7 +2781,6 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 
 - `enabled` 는 그 연결에 그림 연결이 있으면 참이고, `connection_id` 가 없으면 거짓입니다. 위젯은 참일 때만 + 메뉴에 「그림 만들기」 를 보입니다.
 - 오류 응답은 코드만 주므로 상한은 여기서 읽어 오류 문구에 씁니다.
-
 ## 31. 위젯 파일 만들기, 저장, 내보내기, 공유 링크 [CR-182]
 
 모델이 워드, PDF, 엑셀, PPT, CSV 파일을 만들고, 사용자가 응답 하나나 대화 전체를 파일로 받고, 대화나 만든 파일의 그 순간 사본을 링크로 나눕니다. 설정 키는 운용 가이드 § 2-17 을 봅니다.
@@ -3291,10 +3291,82 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 
 위젯은 파일 선택 창의 종류와 올리기 전 크기 검사를 이 값으로 합니다. 화면 문구는 [embed-chat-widget.md](embed-chat-widget.md) 를 보세요.
 
+---
+
+## 37. 위젯 안 승인과 거절 [CR-185]
+
+대화 중 AI 가 승인이 필요한 도구를 부르면 서버가 실행 전에 멈추고 위젯에 승인 요청 카드를 띄운다. 워크플로우 HUMAN_INPUT 승인도 위젯 진행 칸의 같은 카드로 정한다.
+
+### 37-1. 도구 실행 전 승인 정책
+
+관리자가 정책을 만든다. `match_rules.tools` 에 대상 도구 이름, `rules` 에 `REQUIRE_APPROVAL` 을 둔다.
+
+```json
+{
+  "name": "환불 실행 전 승인",
+  "priority": 100,
+  "match_rules": { "tools": ["refund_order"] },
+  "rules": [{ "type": "REQUIRE_APPROVAL", "message": "환불 금액을 확인하세요" }]
+}
+```
+
+- `match_rules.tools` 가 빈 목록이면 400 `policy_tools_empty`
+- 대상 도구 정책은 도구를 부를 때만 본다. 대화 요청 전체를 보는 기존 정책 평가에는 끼지 않는다
+- 규칙이 `DENY` 면 도구를 실행하지 않고 그 사유를 AI 에게 돌려준다
+- `REQUIRE_APPROVAL` 도구는 위젯 대화 스트림(`POST /api/v1/chat/completions`, `stream=true`)에서만 실행된다. 그 밖의 길(스트림이 아닌 대화, 워크플로우 단계, 예약 실행, 관리 화면 도구 실행, 바깥 MCP 호출)에서 부르면 실행하지 않고 「승인이 필요한 도구라 위젯 대화에서만 실행할 수 있습니다」를 도구 오류 결과로 돌려준다
+- 기다리는 시간은 플랫폼 설정 `chat.approval-timeout-seconds`(기본 120, 10 ~ 240초)
+
+### 37-2. 대화 스트림 이벤트
+
+```
+event: approval_required
+data: {"approval_id":"7b1e...","tool_use_id":"toolu_01...","tool_name":"refund_order",
+       "description":"주문을 환불한다","input":{"order_id":"A-1001","amount":120000},
+       "message":"환불 금액을 확인하세요","expires_at":"2026-11-13T07:30:00Z","timeout_seconds":120}
+
+event: approval_resolved
+data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:28:41Z"}
+```
+
+- `status` 는 `approved`, `rejected`, `timeout`, `cancelled` 가운데 하나
+- `input` 의 값은 2000자에서 자른다. `description`, `message` 는 없으면 빠진다
+- 기다리는 동안 15초마다 SSE 주석 줄(`: keep-alive`)이 온다. 연결이 끊기면 서버가 그 응답을 중지하고 승인을 `cancelled` 로 닫는다
+- 같은 대화에서 새 응답을 시작하면 앞 응답이 기다리던 승인은 `cancelled`
+- 거절, 시간 지남, 중지면 도구를 실행하지 않고 그 사유를 AI 에게 돌려주어 AI 가 응답을 이어 쓴다
+- 승인이 필요한 도구를 한 응답에서 여러 번 부르면 부른 순서대로 하나씩 묻는다
+
+### 37-3. 대화 승인 결정 `POST /api/v1/chat/approvals/{approvalId}`
+
+```json
+{ "decision": "approve" }
+```
+
+`decision` 은 `approve` 또는 `reject`. 성공하면 `data` 가 `{"approval_id","status","decided_by","decided_at"}` 이다.
+
+| 경우 | 응답 |
+|---|---|
+| `decision` 이 approve, reject 가 아님 | 400 `invalid_decision` |
+| 없는 승인 | 404 `approval_not_found` |
+| 대화 승인이 아님 | 400 `not_chat_approval` |
+| 승인을 부른 사용자도 관리자도 아님 | 403 `not_requester` |
+| 이미 정해짐(승인, 거절, 시간 지남, 중지) | 409 `approval_closed`, `data.status` 에 지금 상태 |
+
+- 위젯 토큰(`chat:stream`)은 그 승인을 부른 사용자(토큰 `user_ref`)만 정한다. 관리자 로그인은 누구의 승인이든 정한다
+- 정하면 감사 기록 `APPROVAL_DECIDED` 를 남긴다
+
+### 37-4. 워크플로우 승인에서 바뀐 점 `POST /api/v1/workflows/runs/{runId}/approve`
+
+- 위젯 토큰이면 권한 `workflow:approve` 가 있어야 한다. 없으면 403 `scope_required`. 이 권한은 `widget.allowed-scopes` 기본값에 없다. 테넌트가 런타임 설정에 넣고, 붙이는 앱이 토큰을 받을 때 요청해야 열린다
+- 단계에 승인자 목록이 있으면 토큰 `user_ref` 가 그 안에 있어야 한다. 없으면 403 `not_approver`
+- 정한 사람을 승인 기록(`approved_by`)에 남긴다
+- 두 사람이 함께 누르면 먼저 닿은 하나만 지나고 나머지는 409 `approval_closed`, `data.status` 에 지금 상태
+- 관리자 승인 API `POST /api/v1/admin/approvals/{id}/approve`, `/reject` 도 대화 승인을 정하고, 이미 정해졌으면 409 `approval_closed`
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.40.0 | 2026-11-13 | **CR-185 위젯 안 승인과 거절** (§ 37). 정책 `match_rules.tools` 와 `REQUIRE_APPROVAL` 로 도구 실행 전 승인, 대화 스트림 `approval_required`, `approval_resolved`, 결정 API `POST /api/v1/chat/approvals/{approvalId}`. 워크플로우 승인에 권한 `workflow:approve`, 승인자 확인, 정한 사람 기록, 409 |
 | v3.39.0 | 2026-11-13 | **CR-183 위젯 데이터 첨부, 계산, 그래프, 수식** (§ 36). 첨부가 xlsx, xls, csv, tsv, docx, txt, md 를 받고 오류 코드 `FG-ATT-4003` ~ `FG-ATT-4006`, 오류 본문 `code`, `limit`. 대화 요청 `render_features`, `document` 블록이 데이터, 텍스트 첨부도 받음. 계산 도구 `data_query`. 위젯 설정 `attachments` |
 | v3.38.0 | 2026-11-13 | **CR-186 위젯 답 읽어 주기와 음성 대화** (§ 35). 읽을 소리 `POST /api/v1/chat/tts`, 음성 대화 입장권 `POST /api/v1/chat/voice/tickets`, 실시간 받아쓰기 중계 웹소켓 `/api/v1/chat/voice/stream`, 위젯 설정 칸 7개, 위젯 토큰 scope `chat:tts`, `chat:voice` |
 | v3.37.1 | 2026-11-13 | **CR-178 Claude CLI 커넥터 실행기 순서 보정** (§ 4-1 LLM_CALL 라우팅 안내). 커넥터 `config.agent_name` 이 위젯 토큰 `user_ref` 보다 먼저다. `user_ref` 는 `agent_name` 이 없는 커넥터에서만 사용자 PC 실행기를 찾는다 |
