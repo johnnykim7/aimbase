@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.36.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.36.1** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -905,7 +905,7 @@ location /share/ { proxy_pass http://127.0.0.1:8280; }
 | 「문서가 바뀌지 않았습니다」 | 답이 문서를 바꾸지 않았거나 바뀐 내용이 앞 버전과 같음 | 요청을 더 구체적으로 다시 보낸다 |
 ### 2-20. 위젯 답 읽어 주기와 음성 대화 운영 [CR-186]
 
-위젯 사용자가 응답을 소리로 듣고(「읽어 주기」), 말로 묻고 답을 소리로 듣는(「음성 대화」) 기능입니다. API 는 API 가이드 § 31.
+위젯 사용자가 응답을 소리로 듣고(「읽어 주기」), 말로 묻고 답을 소리로 듣는(「음성 대화」) 기능입니다. API 는 API 가이드 § 35.
 
 **필요한 것.** 읽어 주기는 테넌트의 `tts_local` 연결(맥 음성 엔진, § 2-11)이나 쓸 수 있는 OpenAI 연결이 있어야 합니다. 음성 대화는 테넌트의 활성 `stt_local` 연결(맥 받아쓰기 서버)이 있어야 하고, 그 서버의 `/stream` 이 실시간 모델(large-v3-turbo)을 올린 판이어야 합니다. 위젯 토큰 scopes 에 `chat:tts`, `chat:voice` 가 있어야 단추가 보입니다. 마스터 V89 가 `widget.allowed-scopes` 에 둘을 덧붙입니다.
 
@@ -943,6 +943,9 @@ location = /api/v1/chat/voice/stream {
 | `widget.voice.max-utterance-seconds` | 60 | 말 한 번의 최대 길이 |
 | `widget.voice.idle-end-seconds` | 120 | 듣는 중 말이 없으면 음성 대화를 끝내는 시간 |
 | `widget.voice.final-timeout-seconds` | 10 | 말이 끝난 뒤 마지막 글을 기다리는 시간 |
+| `widget.voice.connect-timeout-seconds` | 30 | 받아쓰기 서버가 준비될 때까지 음성 중계가 기다리는 시간 |
+
+**맥 서버를 다시 켰을 때.** 받아쓰기 서버는 켜진 뒤 약 10초 동안 모델을 올리고, 그동안 음성 대화는 「연결하는 중」에서 기다립니다. `GET /health` 의 `stream_loaded` 가 true 면 준비된 것입니다. 맥 음성 엔진과 받아쓰기 서버는 오래 쉬어도 첫 사용이 느려지지 않게 모델 메모리를 묶어 두므로, 두 서버가 맥 메모리를 약 6GB 늘 차지합니다.
 
 | 증상 | 원인 | 조치 |
 |---|---|---|
@@ -2232,6 +2235,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.36.1 | 2026-11-13 | **CR-186** (§ 2-20) 설정 `widget.voice.connect-timeout-seconds`, 맥 서버를 다시 켰을 때 안내. API 가이드 절 번호 § 35 로 바로잡음 |
 | v3.36.0 | 2026-11-13 | **CR-185 도구 실행 전 승인** (§ 3-2, § 4 시나리오 Q, § 5). 정책 규칙 타입 「도구 실행 전 승인」(대상 도구, 안내 문구), 플랫폼 설정 `chat.approval-timeout-seconds`, 대상 도구는 위젯 대화 밖에서 실행되지 않음, CLI 연결은 실행기 재배포 필요 |
 | v3.35.0 | 2026-11-13 | **CR-183 위젯 데이터 첨부, 계산, 그래프, 수식** (§ 2-21). 첨부 종류 확대, 런타임 설정 `widget.attachment.max-data-bytes`, `max-text-bytes`, `max-text-chars`, `widget.data.*` 7개(마스터 V86), 프롬프트 틀 `widget.data.guide`, `widget.render.chart`, `widget.render.math`(테넌트 V86), CLI 실행기 판, 증상과 조치 |
 | v3.34.0 | 2026-11-13 | **CR-186 위젯 답 읽어 주기와 음성 대화** (§ 2-20). 필요한 연결(`tts_local`, `stt_local`), 앞단 nginx 음성 중계 경로, 런타임 설정 `widget.tts.*` 6개와 `widget.voice.*` 8개(마스터 V89), 위젯 토큰 scope `chat:tts`, `chat:voice`, 증상별 조치 |

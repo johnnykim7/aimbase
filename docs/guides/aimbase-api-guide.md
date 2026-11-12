@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.40.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.40.1** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -3167,7 +3167,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 |---|---|---|
 | 위젯에서 서버 | 바이너리 | MediaRecorder 의 WebM(Opus) 조각 |
 | 위젯에서 서버 | 글 `{"type":"end"}` | 말이 끝났다 |
-| 서버에서 위젯 | 글 `{"type":"ready"}` | 받아쓰기 서버와 이어졌다. 이때부터 소리를 보낸다 |
+| 서버에서 위젯 | 글 `{"type":"ready"}` | 받아쓰기 서버와 이어졌다. 이때부터 소리를 보낸다. 받아쓰기 서버가 막 켜졌으면 준비될 때까지(`widget.voice.connect-timeout-seconds`) 늦게 온다 |
 | 서버에서 위젯 | 글 `{"type":"transcript","text":"...","buffer":"..."}` | 확정 글과 아직 바뀔 수 있는 글 |
 | 서버에서 위젯 | 글 `{"type":"final","text":"..."}` | 마지막 글. 보낸 뒤 서버가 1000 으로 닫는다 |
 
@@ -3177,10 +3177,10 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 | 4403 | 입장권을 받은 출처와 다른 출처에서 열었다 |
 | 4408 | 말이 `widget.voice.max-utterance-seconds` 에 5초를 더한 시간을 넘었다 |
 | 4429 | 열린 중계가 상한이거나 같은 세션의 중계가 아직 열려 있다 |
-| 1011 | 받아쓰기 서버에 잇지 못했거나 끊겼거나, `end` 뒤 `widget.voice.final-timeout-seconds` 안에 마지막 글이 오지 않았다 |
+| 1011 | 받아쓰기 서버에 잇지 못했거나(`widget.voice.connect-timeout-seconds` 안에 준비되지 않음 포함) 끊겼거나, `end` 뒤 `widget.voice.final-timeout-seconds` 안에 마지막 글이 오지 않았다 |
 
 - `widget.allowed-origins` 에 없는 출처는 손잡기 전에 403 으로 막힙니다(브라우저에는 닫는 번호 1006 으로 보입니다).
-- 이 경로는 로그인 검사와 테넌트 머리글 검사 없이 입장권으로만 들어옵니다. 앞단 nginx 는 이 경로만 웹소켓 전환(`Upgrade`)을 열어야 합니다(운용 가이드 § 2-17).
+- 이 경로는 로그인 검사와 테넌트 머리글 검사 없이 입장권으로만 들어옵니다. 앞단 nginx 는 이 경로만 웹소켓 전환(`Upgrade`)을 열어야 합니다(운용 가이드 § 2-20).
 - 감사 로그 `VOICE_STREAM` 에 세션, 이은 시간(`duration_ms`), 받은 소리 바이트(`audio_bytes`), 끝난 까닭(`end_reason`: `final`, `final_timeout`, `too_long`, `upstream_closed`, `client_closed` 등)을 남깁니다. 받아쓴 글은 남기지 않습니다.
 ## 36. 위젯 데이터 첨부, 계산, 그래프, 수식 [CR-183]
 
@@ -3366,6 +3366,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.40.1 | 2026-11-13 | **CR-186** (§ 35-4) ready 가 받아쓰기 서버 준비를 기다리는 것과 1011 경우 보정, 운용 가이드 절 번호 § 2-20 으로 바로잡음 |
 | v3.40.0 | 2026-11-13 | **CR-185 위젯 안 승인과 거절** (§ 37). 정책 `match_rules.tools` 와 `REQUIRE_APPROVAL` 로 도구 실행 전 승인, 대화 스트림 `approval_required`, `approval_resolved`, 결정 API `POST /api/v1/chat/approvals/{approvalId}`. 워크플로우 승인에 권한 `workflow:approve`, 승인자 확인, 정한 사람 기록, 409 |
 | v3.39.0 | 2026-11-13 | **CR-183 위젯 데이터 첨부, 계산, 그래프, 수식** (§ 36). 첨부가 xlsx, xls, csv, tsv, docx, txt, md 를 받고 오류 코드 `FG-ATT-4003` ~ `FG-ATT-4006`, 오류 본문 `code`, `limit`. 대화 요청 `render_features`, `document` 블록이 데이터, 텍스트 첨부도 받음. 계산 도구 `data_query`. 위젯 설정 `attachments` |
 | v3.38.0 | 2026-11-13 | **CR-186 위젯 답 읽어 주기와 음성 대화** (§ 35). 읽을 소리 `POST /api/v1/chat/tts`, 음성 대화 입장권 `POST /api/v1/chat/voice/tickets`, 실시간 받아쓰기 중계 웹소켓 `/api/v1/chat/voice/stream`, 위젯 설정 칸 7개, 위젯 토큰 scope `chat:tts`, `chat:voice` |

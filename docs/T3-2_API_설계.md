@@ -3447,7 +3447,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 |------|------|------|
 | 위젯에서 | 바이너리 | WebM(Opus) 소리 조각. 받아쓰기 서버로 옮긴다 |
 | 위젯에서 | `{"type":"end"}` | 말이 끝남. 받아쓰기 서버에 빈 프레임 |
-| 서버에서 | `{"type":"ready"}` | 받아쓰기 서버와 이어짐 |
+| 서버에서 | `{"type":"ready"}` | 받아쓰기 서버와 이어짐. 막 켜진 받아쓰기 서버면 모델이 준비될 때까지 `widget.voice.connect-timeout-seconds` 안에서 기다린 뒤 보냄 |
 | 서버에서 | `{"type":"transcript","text":"...","buffer":"..."}` | 확정 글, 미확정 글 |
 | 서버에서 | `{"type":"final","text":"..."}` | 마지막 글. 보낸 뒤 1000 으로 닫음 |
 
@@ -3457,7 +3457,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 | 4403 | 출처가 입장권의 허용 출처와 다름 |
 | 4408 | 발화가 `widget.voice.max-utterance-seconds` + 5초를 넘음 |
 | 4429 | 열린 중계 상한, 또는 같은 세션의 중계가 아직 열려 있음 |
-| 1011 | 받아쓰기 서버에 잇지 못함, 끊김, `end` 뒤 `widget.voice.final-timeout-seconds` 안에 마지막 글이 없음 |
+| 1011 | 받아쓰기 서버에 잇지 못함(`widget.voice.connect-timeout-seconds` 안에 준비되지 않음 포함), 끊김, `end` 뒤 `widget.voice.final-timeout-seconds` 안에 마지막 글이 없음 |
 
 ### GET `/chat/widget-settings` 칸 추가 [PRD-580, PRD-581]
 
