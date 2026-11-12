@@ -20,11 +20,17 @@ const selfScript =
     : null;
 const selfSrc = selfScript?.src ?? "";
 
-/** 자기 스크립트 URL 기준으로 ESM 엔트리 절대 URL 계산. */
+/**
+ * 자기 스크립트 URL 기준으로 ESM 엔트리 절대 URL 계산.
+ * 로더 주소의 쿼리를 그대로 붙인다. 30일 캐시 시절(CR-175 전)에 받아 둔 esm 사본은 브라우저가
+ * 다시 묻지 않으므로, 소비앱이 로더 주소의 표시를 바꾸면 esm 도 새 주소로 받게 하려는 것이다.
+ */
 function resolveEsmUrl(): string {
   try {
-    // .../aimbase-chat.umd.global.js → .../aimbase-chat.esm.js
-    return new URL("./aimbase-chat.esm.js", selfSrc).href;
+    const self = new URL(selfSrc);
+    const esm = new URL("./aimbase-chat.esm.js", self);
+    esm.search = self.search;
+    return esm.href;
   } catch {
     return "./aimbase-chat.esm.js";
   }
