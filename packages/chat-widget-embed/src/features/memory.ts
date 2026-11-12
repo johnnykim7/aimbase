@@ -117,9 +117,11 @@ function spinner(): HTMLSpanElement {
 
 class Memory {
   private readonly t: Texts;
-  /** 뜰 때 내 선호 조회가 성공했는지. 주인이 없거나(403) 테넌트가 껐으면(409) 메뉴를 숨긴다 */
+  /** 뜰 때 내 선호 조회가 성공했는지. 테넌트가 껐으면(409) 메뉴를 숨긴다 */
   private available = false;
   private settingsSeen = false;
+  /** 토큰은 설정을 받을 때 처음 오므로 user_ref 여부는 첫 settingsLoaded 에서 한 번만 본다 */
+  private availabilityAsked = false;
   private lastModel: string | null = null;
   private lastThinking: boolean | null = null;
 
@@ -167,13 +169,17 @@ class Memory {
     // 위젯 본체는 설정을 다시 받을 때(화면 언어를 바꿀 때 포함) 깊게 생각하기를 처음 값으로 돌리므로 받을 때마다 다시 고른다
     ctx.on("settingsLoaded", () => {
       this.settingsSeen = true;
+      if (!this.availabilityAsked) {
+        this.availabilityAsked = true;
+        // 주인이 없는 토큰은 서버가 403 으로 거절하므로 묻지 않고 메뉴를 숨긴 채 둔다(BIZ-180)
+        if (ctx.api.hasUserRef()) void this.loadAvailability();
+      }
       this.applyLast();
     });
     ctx.on("newConversation", () => this.applyLast());
     ctx.on("modelChange", ({ model, thinking }) => this.rememberModel(model, thinking));
     ctx.on("localeChange", () => this.render());
     ctx.on("destroy", () => this.close());
-    void this.loadAvailability();
   }
 
   private async loadAvailability(): Promise<void> {
