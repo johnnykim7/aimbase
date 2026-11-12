@@ -370,6 +370,14 @@ public class ClaudeCliRunnerClient {
         if (allowedTools == null && exposedTools != null && !exposedTools.isEmpty()) {
             allowedTools = exposedTools;
         }
+        // CR-182: 파일 만들기처럼 이 요청에만 더 여는 서버 도구. 목록이 없어 전체를 여는 요청은 이미 들어 있다.
+        if (allowedTools != null && request.extraAllowedTools() != null && !request.extraAllowedTools().isEmpty()) {
+            List<String> merged = new java.util.ArrayList<>(allowedTools);
+            for (String extra : request.extraAllowedTools()) {
+                if (extra != null && !extra.isBlank() && !merged.contains(extra)) merged.add(extra);
+            }
+            allowedTools = merged;
+        }
         if (allowedTools != null) {
             body.put("allowed_tools", allowedTools);
         }

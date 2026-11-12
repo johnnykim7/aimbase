@@ -10,6 +10,7 @@ import com.platform.repository.ChatGeneratedImageRepository;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
 import com.platform.repository.MessageFeedbackRepository;
+import com.platform.share.ChatShareService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -54,6 +55,7 @@ public class ChatHistoryService {
     private final SessionStore sessionStore;
     private final PlatformSettingsService settings;
     private final ChatGeneratedImageRepository imageRepository;
+    private final ChatShareService shareService;
 
     public ChatHistoryService(ConversationSessionRepository sessionRepository,
                               ConversationMessageRepository messageRepository,
@@ -63,7 +65,8 @@ public class ChatHistoryService {
                               CancellationRegistry cancellationRegistry,
                               SessionStore sessionStore,
                               PlatformSettingsService settings,
-                              ChatGeneratedImageRepository imageRepository) {
+                              ChatGeneratedImageRepository imageRepository,
+                              ChatShareService shareService) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.attachmentRepository = attachmentRepository;
@@ -73,6 +76,7 @@ public class ChatHistoryService {
         this.sessionStore = sessionStore;
         this.settings = settings;
         this.imageRepository = imageRepository;
+        this.shareService = shareService;
     }
 
     public Page<Map<String, Object>> list(String owner, String chatProjectId, String query, int page, Integer size) {
@@ -193,6 +197,8 @@ public class ChatHistoryService {
         messageRepository.softDeleteBySessionId(sessionId, now);
         // CR-184 BIZ-231: 그 대화에서 만든 그림도 지운 표시. 파일은 남긴다
         imageRepository.softDeleteBySessionId(sessionId, now);
+        // CR-182 3.5.4: 지운 대화가 공유 링크로 계속 보이지 않게 끊는다
+        shareService.revokeAllForSession(sessionId);
         sessionStore.clearSession(sessionId);
     }
 

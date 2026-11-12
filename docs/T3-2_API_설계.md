@@ -3501,7 +3501,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 
 `GET /api/v1/chat/widget-settings` 응답에 `preview_html_script_sources`(글 배열)를 더한다. 값은 런타임 설정 `widget.preview-html-script-sources`.
 
-## 채팅 위젯 파일 만들기, 저장, 내보내기, 공유 링크 [v7.13, CR-182]
+## 채팅 위젯 파일 만들기, 저장, 내보내기, 공유 링크 [v7.20, CR-182]
 
 설계 상세: [CR-182_위젯_파일_만들기_저장_내보내기_공유_링크.md](CR-182_위젯_파일_만들기_저장_내보내기_공유_링크.md) 3절, 6절. 공개 열기 하나를 빼면 권한은 모두 `chat:stream` 위젯 토큰 또는 로그인이고, 위젯 토큰은 세션 주인만 부른다.
 

@@ -43,6 +43,8 @@ public class TenantResolver implements Filter {
     private static final String AUTH_API_PREFIX = "/api/v1/auth";
     private static final String ADMIN_API_PREFIX = "/api/v1/admin";
     private static final String API_PREFIX = "/api/v1/";
+    /** CR-182 공유 링크 공개 경로. 테넌트는 경로에서 고르고 머리글, 토큰, 서브도메인은 믿지 않는다. */
+    private static final String SHARE_PREFIX = "/share/";
     private static final String BEARER_PREFIX = "Bearer ";
     private static final Pattern APP_API_PATTERN = Pattern.compile("^/api/v1/apps/([^/]+)(/.*)?$");
 
@@ -74,7 +76,9 @@ public class TenantResolver implements Filter {
         }
 
         try {
-            if (path.startsWith(PLATFORM_API_PREFIX)) {
+            if (path.startsWith(SHARE_PREFIX)) {
+                log.debug("Share path, tenant chosen by controller from path: {}", path);
+            } else if (path.startsWith(PLATFORM_API_PREFIX)) {
                 // 슈퍼어드민 API → Master DB만 사용
                 log.debug("Platform API path, using Master DB: {}", path);
 

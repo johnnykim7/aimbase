@@ -47,11 +47,19 @@ dependencies {
 
     // ── Document Parsing (RAG - Phase 3) ──
     implementation("org.apache.tika:tika-core:3.1.0")
-    implementation("org.apache.pdfbox:pdfbox:3.0.4")
+    // openhtmltopdf 1.1.113 이 pdfbox 3.0.8 을 끌어온다. 판이 몰래 올라가지 않게 같은 판을 적는다.
+    implementation("org.apache.pdfbox:pdfbox:3.0.8")
     implementation("org.apache.poi:poi-ooxml:5.4.0")
 
     // ── 첨부 데이터 파일 계산 (CR-183): 호출마다 메모리 DB 를 열고 닫는다. 판은 Spring Boot BOM 관리 ──
     implementation("com.h2database:h2")
+
+    // ── 채팅 문서 그리기 (CR-182): 마크다운 해석과 HTML 을 PDF 로 ──
+    implementation("org.commonmark:commonmark:0.32.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.32.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.32.0")
+    implementation("org.commonmark:commonmark-ext-autolink:0.32.0")
+    implementation("io.github.openhtmltopdf:openhtmltopdf-pdfbox:1.1.113")
 
     // ── Skill Bundle zip (CR-147): 심볼릭 링크 항목을 가려내려면 zip 의 유닉스 모드가 필요하다 ──
     implementation("org.apache.commons:commons-compress:1.27.1")

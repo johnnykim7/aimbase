@@ -1,5 +1,6 @@
 package com.platform.api;
 
+import com.platform.document.DocumentRenderException;
 import com.platform.session.ChatRejectedException;
 import com.platform.llm.adapter.CliAccountLimitedException;
 import com.platform.session.BlockingLimitException;
@@ -34,6 +35,15 @@ public class GlobalExceptionHandler {
         body.put("code", ex.getCode());
         if (ex.getLimit() != null) body.put("limit", ex.getLimit());
         return ResponseEntity.status(ex.getStatusCode()).body(body);
+    }
+
+    /** CR-182: PDF 글꼴이 없을 때만 503 이고, 그 밖의 그리기 실패는 서버 오류다. */
+    @ExceptionHandler(DocumentRenderException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDocumentRender(DocumentRenderException ex) {
+        HttpStatus status = DocumentRenderException.PDF_FONT_MISSING.equals(ex.getCode())
+                ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.INTERNAL_SERVER_ERROR;
+        log.warn("Document render failed: {}", ex.getCode());
+        return ResponseEntity.status(status).body(ApiResponse.error(ex.getCode()));
     }
 
     @ExceptionHandler(IllegalStateException.class)

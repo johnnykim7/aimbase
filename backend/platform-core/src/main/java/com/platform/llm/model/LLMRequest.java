@@ -25,6 +25,8 @@ import java.util.Map;
  *                       서버에 돌려준다(BIZ-123). null 이면 지정 없음(기존 동작).
  * @param dataSessionId  CR-183: 대화 요청일 때만 채우는 대화 세션 번호(BIZ-222). CLI 경로는 러너가 계산 도구
  *                       통로(aimbase-data)를 붙이고 이 값을 MCP 머리글로 서버에 돌려준다. null 이면 붙이지 않는다.
+ * @param extraAllowedTools CR-182: 도구 고리를 돌지 않는 CLI 요청에서 허용 도구 목록에 더할 서버 도구.
+ *                       허용 목록이 없어 전체를 여는 요청에는 더하지 않는다. null 이면 더하지 않음.
  */
 public record LLMRequest(
         String model,
@@ -39,36 +41,37 @@ public record LLMRequest(
         String toolModeOverride,
         String systemPromptOverrideReq,
         List<SkillRef> skillSet,
-        String dataSessionId
+        String dataSessionId,
+        List<String> extraAllowedTools
 ) {
     public LLMRequest(String model, List<UnifiedMessage> messages) {
-        this(model, messages, null, ModelConfig.defaults(), false, null, null, null, null, null, null, null, null);
+        this(model, messages, null, ModelConfig.defaults(), false, null, null, null, null, null, null, null, null, null);
     }
 
     /** toolChoice 없는 기존 호환용 생성자 */
     public LLMRequest(String model, List<UnifiedMessage> messages, List<UnifiedToolDef> tools,
                       ModelConfig config, boolean stream, String sessionId) {
-        this(model, messages, tools, config, stream, sessionId, null, null, null, null, null, null, null);
+        this(model, messages, tools, config, stream, sessionId, null, null, null, null, null, null, null, null);
     }
 
     /** responseSchema 없는 기존 호환용 생성자 */
     public LLMRequest(String model, List<UnifiedMessage> messages, List<UnifiedToolDef> tools,
                       ModelConfig config, boolean stream, String sessionId, String toolChoice) {
-        this(model, messages, tools, config, stream, sessionId, toolChoice, null, null, null, null, null, null);
+        this(model, messages, tools, config, stream, sessionId, toolChoice, null, null, null, null, null, null, null);
     }
 
     /** workingDirectory 없는 기존 호환용 생성자 (responseSchema 까지) */
     public LLMRequest(String model, List<UnifiedMessage> messages, List<UnifiedToolDef> tools,
                       ModelConfig config, boolean stream, String sessionId, String toolChoice,
                       Map<String, Object> responseSchema) {
-        this(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, null, null, null, null, null);
+        this(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, null, null, null, null, null, null);
     }
 
     /** workingDirectory 까지 있는 기존 호환용 생성자 (override 2필드 없음) */
     public LLMRequest(String model, List<UnifiedMessage> messages, List<UnifiedToolDef> tools,
                       ModelConfig config, boolean stream, String sessionId, String toolChoice,
                       Map<String, Object> responseSchema, String workingDirectory) {
-        this(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, null, null, null, null);
+        this(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, null, null, null, null, null);
     }
 
     /** override 2필드까지 있는 기존 호환용 생성자 (CR-147 skillSet 없음) */
@@ -77,7 +80,7 @@ public record LLMRequest(
                       Map<String, Object> responseSchema, String workingDirectory,
                       String toolModeOverride, String systemPromptOverrideReq) {
         this(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory,
-                toolModeOverride, systemPromptOverrideReq, null, null);
+                toolModeOverride, systemPromptOverrideReq, null, null, null);
     }
 
     /** CR-147 skillSet 까지 있는 기존 호환용 생성자 (CR-183 dataSessionId 없음) */
@@ -86,36 +89,51 @@ public record LLMRequest(
                       Map<String, Object> responseSchema, String workingDirectory,
                       String toolModeOverride, String systemPromptOverrideReq, List<SkillRef> skillSet) {
         this(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory,
-                toolModeOverride, systemPromptOverrideReq, skillSet, null);
+                toolModeOverride, systemPromptOverrideReq, skillSet, null, null);
+    }
+
+    /** CR-183 dataSessionId 까지 있는 기존 호환용 생성자 (CR-182 더할 허용 도구 없음) */
+    public LLMRequest(String model, List<UnifiedMessage> messages, List<UnifiedToolDef> tools,
+                      ModelConfig config, boolean stream, String sessionId, String toolChoice,
+                      Map<String, Object> responseSchema, String workingDirectory,
+                      String toolModeOverride, String systemPromptOverrideReq, List<SkillRef> skillSet,
+                      String dataSessionId) {
+        this(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory,
+                toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId, null);
     }
 
     /** 모델만 교체한 복사본 반환 (Fallback Chain용) */
     public LLMRequest withModel(String newModel) {
-        return new LLMRequest(newModel, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId);
+        return new LLMRequest(newModel, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId, extraAllowedTools);
     }
 
     /** workingDirectory 만 교체한 복사본 (CLI cwd 전파용) */
     public LLMRequest withWorkingDirectory(String dir) {
-        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, dir, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId);
+        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, dir, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId, extraAllowedTools);
     }
 
     /** CR-117: messages 만 교체한 복사본 (CLI 어댑터의 시스템 프롬프트 정리용) */
     public LLMRequest withMessages(List<UnifiedMessage> newMessages) {
-        return new LLMRequest(model, newMessages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId);
+        return new LLMRequest(model, newMessages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId, extraAllowedTools);
     }
 
     /** CR-128(갭B): 요청 단위 tool_mode / system_prompt override 를 실은 복사본 */
     public LLMRequest withCliOverrides(String toolModeOverride, String systemPromptOverrideReq) {
-        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId);
+        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId, extraAllowedTools);
     }
 
     /** CR-147: 단계가 고정한 스킬과 판을 실은 복사본 */
     public LLMRequest withSkillSet(List<SkillRef> skills) {
-        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skills, dataSessionId);
+        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skills, dataSessionId, extraAllowedTools);
     }
 
     /** CR-183: 계산 도구 통로를 붙일 대화 세션 번호를 실은 복사본 */
     public LLMRequest withDataSessionId(String chatSessionId) {
-        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, chatSessionId);
+        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, chatSessionId, extraAllowedTools);
+    }
+
+    /** CR-182: 허용 도구 목록에 더할 서버 도구를 실은 복사본 */
+    public LLMRequest withExtraAllowedTools(List<String> names) {
+        return new LLMRequest(model, messages, tools, config, stream, sessionId, toolChoice, responseSchema, workingDirectory, toolModeOverride, systemPromptOverrideReq, skillSet, dataSessionId, names);
     }
 }

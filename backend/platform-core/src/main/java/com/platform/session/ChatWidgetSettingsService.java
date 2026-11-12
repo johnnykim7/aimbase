@@ -8,10 +8,13 @@ import com.platform.attachment.AttachmentService;
 import com.platform.config.PlatformSettingsService;
 import com.platform.image.ImageConnectionResolver;
 import com.platform.image.ImageGenerationSettings;
+import com.platform.document.DocumentRenderer;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.LLMAdapterRegistry;
 import com.platform.llm.adapter.LLMAdapter;
+import com.platform.orchestrator.FileCreateToolGate;
 import com.platform.repository.ConnectionRepository;
+import com.platform.share.ChatShareSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -47,6 +50,9 @@ public class ChatWidgetSettingsService {
     private final ImageConnectionResolver imageConnectionResolver;
     private final ImageGenerationSettings imageSettings;
     private final AttachmentService attachmentService;
+    private final FileCreateToolGate fileCreateToolGate;
+    private final DocumentRenderer documentRenderer;
+    private final ChatShareSettings shareSettings;
 
     public ChatWidgetSettingsService(PlatformSettingsService platformSettings,
                                      ConnectionAdapterFactory connectionAdapterFactory,
@@ -55,7 +61,10 @@ public class ChatWidgetSettingsService {
                                      ObjectMapper objectMapper,
                                      ImageConnectionResolver imageConnectionResolver,
                                      ImageGenerationSettings imageSettings,
-                                     AttachmentService attachmentService) {
+                                     AttachmentService attachmentService,
+                                     FileCreateToolGate fileCreateToolGate,
+                                     DocumentRenderer documentRenderer,
+                                     ChatShareSettings shareSettings) {
         this.platformSettings = platformSettings;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.adapterRegistry = adapterRegistry;
@@ -64,6 +73,9 @@ public class ChatWidgetSettingsService {
         this.imageConnectionResolver = imageConnectionResolver;
         this.imageSettings = imageSettings;
         this.attachmentService = attachmentService;
+        this.fileCreateToolGate = fileCreateToolGate;
+        this.documentRenderer = documentRenderer;
+        this.shareSettings = shareSettings;
     }
 
     /**
@@ -102,6 +114,11 @@ public class ChatWidgetSettingsService {
         body.put("project_files_max_count", platformSettings.getInt(
                 "widget.project-files-max-count", ChatProjectService.DEFAULT_FILES_MAX));
         body.put("attachments", attachments());
+        // CR-182: 위젯이 파일 만들기를 요청에 싣고, 저장과 내보내기 형식, 공유 단추를 이것으로 정한다.
+        body.put("file_create_enabled", fileCreateToolGate.enabled());
+        body.put("export_formats", exportFormats());
+        body.put("share_enabled", shareSettings.usable());
+        body.put("share_ttl_days", shareSettings.ttlDays());
         return body;
     }
 
@@ -229,6 +246,11 @@ public class ChatWidgetSettingsService {
             log.warn("Runtime setting {} is not a JSON list: {}", PREVIEW_HTML_SOURCES_KEY, e.getMessage());
             return List.of();
         }
+    }
+
+    /** PDF 는 글꼴이 있을 때만 준다(BIZ-211). 워드와 마크다운은 늘 된다. */
+    public List<String> exportFormats() {
+        return documentRenderer.pdfAvailable() ? List.of("pdf", "docx", "md") : List.of("docx", "md");
     }
 
     public int feedbackCommentMaxChars() {

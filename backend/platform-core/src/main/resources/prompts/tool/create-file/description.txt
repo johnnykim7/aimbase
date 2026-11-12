@@ -1,0 +1,9 @@
+Create a file the user can download: Word (docx), PDF, Excel (xlsx), PowerPoint (pptx), CSV, Markdown (md), HTML or plain text (txt).
+Call this only when the user asks for a file or a document to download. Only files made with this tool are shown to the user as downloads.
+- docx, pdf, html: write the body in `content` as Markdown (headings, lists, tables, code blocks). `title` becomes the top heading.
+- md, txt: `content` is written as is.
+- xlsx: put tables in `sheets`. The first row of each sheet is the header.
+- csv: the first sheet in `sheets`, or `content` when there are no sheets.
+- pptx: put `slides`, each with a title, bullets and optional speaker notes. `title` adds a cover slide.
+`file_name` has no extension; the format adds it. To revise a file you made earlier in this conversation, call again with the same `file_name` and `overwrite` true.
+After the file is made, do not repeat its contents in your reply. Say briefly what you made.

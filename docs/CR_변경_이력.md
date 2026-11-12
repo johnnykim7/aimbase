@@ -2934,7 +2934,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 모듈**: platform-core `tool`(신규 CreateFileTool), `document`(신규 DocumentRenderer), `api`(ChatController 요청 칸 file_create, 신규 ChatExportController, ChatShareController, ShareViewController, WidgetSettingsController 칸 추가, ArtifactController 주인 확인), `orchestrator`(작업장 배정을 모든 연결로), `mcp`(ServerMcpToolDispatcher, McpExposurePolicy), `artifact`(지움 주기와 공유 사본 분리), `repository`(신규 ChatShareRepository), 마이그레이션 테넌트 V85, 마스터 V85, api 이미지 한글 글꼴, packages/chat-widget-embed(features 셋), 운영 nginx `/share/`
 - **영향도**: Medium (새 공개 경로가 생긴다. 실패는 모두 같은 404, 샌드박스 CSP, 열기 횟수 제한. 대화 요청 칸과 위젯 설정 칸은 추가만이라 기존 소비앱은 영향 없음. 산출물 주인 확인은 남의 대화 파일을 받던 경로만 막는다)
 - **영향 범위**: 위젯을 붙인 소비앱(옵션 추가만), 백오피스2 CS 문의 상세 「AI 에게 질문」(공유 링크 노출 여부를 앱이 정한다)
-- **영향 설계서**: T1-1 v7.8, T1-3 v5.10(BIZ-210~213), T1-7 v3.17, T1-10 v1.1(신조 이름 7개, 승인 대기), T2-1 v2.10(commonmark-java, openhtmltopdf, 한글 글꼴), T3-1 v4.15, T3-2 v7.13, T3-3 v3.8, T3-4 v3.7, T3-5 v4.11(TC-CHT-080~089). T1-5, T1-6, T2-2 는 확인 결과 영향 없음
+- **영향 설계서**: T1-1 v7.15, T1-3 v5.17(BIZ-210~213), T1-7 v3.24, T1-10 v1.7(신조 이름 7개, 2026-11-13 승인), T2-1 v2.12(commonmark-java, openhtmltopdf, 한글 글꼴), T3-1 v4.22, T3-2 v7.20, T3-3 v3.15, T3-4 v3.14, T3-5 v4.18(TC-CHT-080~089). T1-5, T1-6, T2-2 는 확인 결과 영향 없음
 - **상태**: 설계중
 
 ## CR 후보 (발번 전)

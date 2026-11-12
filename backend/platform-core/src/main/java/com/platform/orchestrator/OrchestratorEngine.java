@@ -2,7 +2,6 @@ package com.platform.orchestrator;
 
 import com.platform.action.ActionExecutor;
 import com.platform.action.model.*;
-import com.platform.config.WorkspaceProperties;
 import com.platform.hook.HookDecision;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookEvent;
@@ -105,10 +104,12 @@ public class OrchestratorEngine {
     private final ChatRunRecorder chatRunRecorder;
     /** CR-183: 대화 API 요청의 계산 도구 붙이기와 그릴 수 있는 형식 안내(BIZ-222, BIZ-223). */
     private final ChatFeatureSupport chatFeatures;
-    /** CR-132 후속: 채팅 세션 workspace 자동 할당(산출물 out/ 의 부모)의 base 경로 산정용. */
-    private final WorkspaceProperties workspaceProperties;
     /** CR-178: 질문마다 붙는 시스템 지시(프로젝트 지시문)를 넣는 곳. */
     private final TurnInstructions turnInstructions;
+    /** CR-132 후속: 채팅 세션 workspace 자동 할당(산출물 out/ 의 부모). */
+    private final com.platform.session.ChatWorkspaceAssigner chatWorkspaceAssigner;
+    /** CR-182: 대화 요청에 파일 만들기 도구를 줄지. */
+    private final FileCreateToolGate fileCreateToolGate;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -141,14 +142,16 @@ public class OrchestratorEngine {
             MemoryAutoExtractService memoryAutoExtractService,
             CancellationRegistry cancellationRegistry,
             ChatRunRecorder chatRunRecorder,
-            WorkspaceProperties workspaceProperties,
             TurnInstructions turnInstructions,
-            ChatFeatureSupport chatFeatures
+            ChatFeatureSupport chatFeatures,
+            com.platform.session.ChatWorkspaceAssigner chatWorkspaceAssigner,
+            FileCreateToolGate fileCreateToolGate
     ) {
         this.turnInstructions = turnInstructions;
         this.chatFeatures = chatFeatures;
         this.chatRunRecorder = chatRunRecorder;
-        this.workspaceProperties = workspaceProperties;
+        this.chatWorkspaceAssigner = chatWorkspaceAssigner;
+        this.fileCreateToolGate = fileCreateToolGate;
         this.modelRouter = modelRouter;
         this.fallbackChainExecutor = fallbackChainExecutor;
         this.connectionAdapterFactory = connectionAdapterFactory;
@@ -375,13 +378,14 @@ public class OrchestratorEngine {
         List<Map<String, Object>> actionsExecuted = List.of();
         // CR-183: 대화 요청이면 계산 도구를 붙인다. API 는 도구를 끈 대화여도 데이터 파일이 있으면
         // 계산 도구 하나만 실은 도구 루프를 탄다. CLI 는 러너가 계산 도구 통로를 붙인다(BIZ-222).
+        // CR-182: 파일 만들기도 같은 식이다. CLI 는 고리 없이 허용 도구 목록에 더하고, 그 밖은 고리로 준다.
         boolean cliAdapter = com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider());
         com.platform.tool.ToolFilterContext toolFilter = chatFeatures.attachDataTools(request, sessionId, cliAdapter);
         boolean dataQueryOnly = !request.actionsEnabled() && !cliAdapter
                 && ChatFeatureSupport.attachesDataQuery(toolFilter);
         String dataSessionId = ChatFeatureSupport.attachesDataQuery(toolFilter) ? sessionId : null;
         try {
-            if ((request.actionsEnabled() && toolRegistry.hasTools()) || dataQueryOnly) {
+            if ((fileCreateToolGate.loop(request, cliAdapter) && toolRegistry.hasTools()) || dataQueryOnly) {
                 // Tool use 루프 — 최대 5회 반복 (CR-006 + CR-029: ToolContext + lineage)
                 com.platform.tool.ToolCallHandler.beginActionTracking();
                 try {
@@ -389,7 +393,7 @@ public class OrchestratorEngine {
                     llmResponse = toolCallHandler.executeLoop(
                             adapter, resolvedModel, trimmedMessages,
                             modelConfig, sessionId, toolRegistry,
-                            dataQueryOnly ? ChatFeatureSupport.dataQueryOnly(toolFilter) : toolFilter,
+                            loopToolFilter(request, toolFilter, dataQueryOnly),
                             request.toolChoice(), toolContext,
                             resolvedSchema,
                             // CR-128(갭B): 요청 단위 CLI override 를 도구루프 경로에도 전달
@@ -406,7 +410,8 @@ public class OrchestratorEngine {
                         modelConfig, false, sessionId, null, resolvedSchema, workspacePath)
                         // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (CLI 어댑터만 사용, 그 외 무시)
                         .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride())
-                        .withDataSessionId(dataSessionId);   // CR-183: CLI 어댑터만 읽는다
+                        .withDataSessionId(dataSessionId)   // CR-183: CLI 어댑터만 읽는다
+                        .withExtraAllowedTools(fileCreateToolGate.extraAllowed(request, cliAdapter));
                 try {
                     if (request.connectionId() == null || request.connectionId().isBlank()) {
                         // CR-082: CLI adapter 는 fallback chain 우회 — 다른 provider 로 떨어지면
@@ -719,18 +724,18 @@ public class OrchestratorEngine {
         // CR-045 Phase 2-B: 도구 루프 통합 스트리밍
         LLMResponse finalResponse;
         boolean streamSuccess = false;
-        // CR-183: 계산 도구 붙이기. 판단은 비스트리밍 경로와 같다(BIZ-222).
+        // CR-183, CR-182: 계산 도구와 파일 만들기 붙이기. 판단은 비스트리밍 경로와 같다(BIZ-222, BIZ-210).
         boolean streamCliAdapter = com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider());
         com.platform.tool.ToolFilterContext streamToolFilter =
                 chatFeatures.attachDataTools(request, sessionId, streamCliAdapter);
         boolean streamDataQueryOnly = !request.actionsEnabled() && !streamCliAdapter
                 && ChatFeatureSupport.attachesDataQuery(streamToolFilter);
         try {
-            if ((request.actionsEnabled() && toolRegistry.hasTools()) || streamDataQueryOnly) {
+            if ((fileCreateToolGate.loop(request, streamCliAdapter) && toolRegistry.hasTools()) || streamDataQueryOnly) {
                 finalResponse = toolCallHandler.executeLoopStream(
                         adapter, resolvedModel, trimmedMessages,
                         streamModelConfig, sessionId, toolRegistry,
-                        streamDataQueryOnly ? ChatFeatureSupport.dataQueryOnly(streamToolFilter) : streamToolFilter,
+                        loopToolFilter(request, streamToolFilter, streamDataQueryOnly),
                         request.toolChoice(), toolContext,
                         streamSinkWithCitations, cancelled);
             } else {
@@ -742,7 +747,8 @@ public class OrchestratorEngine {
                         // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (스트리밍 경로)
                         .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride())
                         // CR-183: CLI 어댑터만 읽는다. 러너가 계산 도구 통로를 붙인다(BIZ-222)
-                        .withDataSessionId(ChatFeatureSupport.attachesDataQuery(streamToolFilter) ? sessionId : null);
+                        .withDataSessionId(ChatFeatureSupport.attachesDataQuery(streamToolFilter) ? sessionId : null)
+                        .withExtraAllowedTools(fileCreateToolGate.extraAllowed(request, streamCliAdapter));
                 StringBuilder textBuf = new StringBuilder();
                 final TokenUsage[] usageHolder = new TokenUsage[]{null};
                 final String[] idHolder = new String[]{""};
@@ -1085,27 +1091,18 @@ public class OrchestratorEngine {
     private String autoAssignChatWorkspace(ChatRequest request, String sessionId) {
         if (sessionId == null || sessionId.isBlank()) return null;
         if (!connectionAdapterFactory.isCliConnection(request.connectionId())) return null;
+        return chatWorkspaceAssigner.assign(sessionId);
+    }
 
-        String base = workspaceProperties.getBase();
-        if (base == null || base.isBlank()) return null;
-
-        try {
-            java.nio.file.Path dir = java.nio.file.Path.of(base, "chat", sessionId).toAbsolutePath().normalize();
-            // whitelist 밖이면 포기 — 임의 경로에 폴더를 만들지 않는다.
-            if (!workspaceProperties.isInsideWhitelist(dir)) {
-                log.warn("[CR132] 채팅 workspace 자동할당 취소 — whitelist 밖: {}", dir);
-                return null;
-            }
-            java.nio.file.Files.createDirectories(dir);
-            String assigned = dir.toString();
-            sessionStore.setWorkspaceRefIfAbsent(sessionId, assigned);
-            log.info("[CR132] 채팅 workspace 자동할당: session={}, path={}", sessionId, assigned);
-            return assigned;
-        } catch (Exception e) {
-            // 산출물 전달은 부가기능 — 실패해도 대화 자체는 계속되어야 한다.
-            log.warn("[CR132] 채팅 workspace 자동할당 실패 session={}: {}", sessionId, e.getMessage());
-            return null;
-        }
+    /**
+     * 도구 고리에 넘길 거르기. 도구를 켜지 않은 대화는 계산 도구(CR-183)와 파일 만들기(CR-182)만 연다.
+     */
+    private com.platform.tool.ToolFilterContext loopToolFilter(ChatRequest request,
+                                                              com.platform.tool.ToolFilterContext toolFilter,
+                                                              boolean dataQueryOnly) {
+        com.platform.tool.ToolFilterContext base = request.actionsEnabled() ? toolFilter
+                : dataQueryOnly ? ChatFeatureSupport.dataQueryOnly(toolFilter) : null;
+        return fileCreateToolGate.filter(request, base);
     }
 
 

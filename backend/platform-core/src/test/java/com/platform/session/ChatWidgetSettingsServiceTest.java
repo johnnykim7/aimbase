@@ -45,7 +45,10 @@ class ChatWidgetSettingsServiceTest {
     void setUp() {
         service = new ChatWidgetSettingsService(platformSettings, connectionAdapterFactory, adapterRegistry,
                 connectionRepository, new ObjectMapper(), imageConnectionResolver, imageSettings,
-                attachmentService);
+                attachmentService,
+                org.mockito.Mockito.mock(com.platform.orchestrator.FileCreateToolGate.class),
+                org.mockito.Mockito.mock(com.platform.document.DocumentRenderer.class),
+                org.mockito.Mockito.mock(com.platform.share.ChatShareSettings.class));
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FEEDBACK_REASONS_KEY), anyString()))
                 .thenReturn("[{\"code\":\"WRONG_INFO\",\"label\":\"틀린 정보\"}]");
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FOLLOW_UPS_ENABLED_KEY), anyString()))

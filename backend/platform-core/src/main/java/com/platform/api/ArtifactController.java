@@ -2,6 +2,9 @@ package com.platform.api;
 
 import com.platform.artifact.ArtifactPreviewService;
 import com.platform.artifact.ArtifactService;
+import com.platform.auth.UserPrincipal;
+import com.platform.document.FileMediaTypes;
+import com.platform.session.ChatSessionOwnership;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.core.io.PathResource;
@@ -13,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -22,7 +26,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -40,19 +43,25 @@ public class ArtifactController {
 
     /** CR-180: 쪽 그림 주소에 위젯이 수정 시각을 붙여 부르므로 파일이 바뀌면 새 주소가 된다. */
     private static final CacheControl PAGE_CACHE = CacheControl.maxAge(1, TimeUnit.DAYS).cachePrivate();
+    private static final String WIDGET_ROLE = "WIDGET";
 
     private final ArtifactService service;
     private final ArtifactPreviewService previewService;
+    private final ChatSessionOwnership ownership;
 
-    public ArtifactController(ArtifactService service, ArtifactPreviewService previewService) {
+    public ArtifactController(ArtifactService service, ArtifactPreviewService previewService,
+                              ChatSessionOwnership ownership) {
         this.service = service;
         this.previewService = previewService;
+        this.ownership = ownership;
     }
 
     @GetMapping
     @PreAuthorize("hasAuthority('SCOPE_chat:upload') or isAuthenticated()")
     @Operation(summary = "세션 산출물 목록")
-    public ApiResponse<Map<String, Object>> list(@RequestParam("session_id") String sessionId) {
+    public ApiResponse<Map<String, Object>> list(@AuthenticationPrincipal UserPrincipal principal,
+                                                 @RequestParam("session_id") String sessionId) {
+        requireOwner(principal, sessionId);
         List<ArtifactService.ArtifactInfo> artifacts = service.listArtifacts(sessionId);
         List<Map<String, Object>> items = artifacts.stream()
                 .map(a -> artifactItem(sessionId, a))
@@ -64,8 +73,10 @@ public class ArtifactController {
     @PreAuthorize("hasAuthority('SCOPE_chat:upload') or isAuthenticated()")
     @Operation(summary = "CR-180 산출물 미리보기 정보")
     public ApiResponse<Map<String, Object>> preview(
+            @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam("session_id") String sessionId,
             @RequestParam("name") String name) {
+        requireOwner(principal, sessionId);
         return ApiResponse.ok(previewService.info(sessionId, name));
     }
 
@@ -73,9 +84,11 @@ public class ArtifactController {
     @PreAuthorize("hasAuthority('SCOPE_chat:upload') or isAuthenticated()")
     @Operation(summary = "CR-180 산출물 쪽 그림(PNG)")
     public ResponseEntity<Resource> previewPage(
+            @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam("session_id") String sessionId,
             @RequestParam("name") String name,
             @RequestParam("page") int page) {
+        requireOwner(principal, sessionId);
         Path png = previewService.page(sessionId, name, page);
         return ResponseEntity.ok()
                 .cacheControl(PAGE_CACHE)
@@ -99,8 +112,10 @@ public class ArtifactController {
     @PreAuthorize("hasAuthority('SCOPE_chat:upload') or isAuthenticated()")
     @Operation(summary = "산출물 파일 다운로드")
     public ResponseEntity<Resource> download(
+            @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam("session_id") String sessionId,
             @RequestParam("file") String file) {
+        requireOwner(principal, sessionId);
 
         Path target;
         try {
@@ -118,7 +133,7 @@ public class ArtifactController {
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .contentType(mediaTypeFor(target))
+                .contentType(MediaType.parseMediaType(FileMediaTypes.forName(target.getFileName().toString())))
                 .contentLength(sizeSafe(target))
                 .body(new PathResource(target));
     }
@@ -142,28 +157,14 @@ public class ArtifactController {
         }
     }
 
-    private static MediaType mediaTypeFor(Path p) {
-        String name = p.getFileName().toString().toLowerCase(Locale.ROOT);
-        int dot = name.lastIndexOf('.');
-        String ext = dot >= 0 ? name.substring(dot + 1) : "";
-        return switch (ext) {
-            case "pptx" -> MediaType.parseMediaType(
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-            case "xlsx" -> MediaType.parseMediaType(
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            case "docx" -> MediaType.parseMediaType(
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-            case "pdf" -> MediaType.APPLICATION_PDF;
-            case "csv" -> MediaType.parseMediaType("text/csv");
-            case "json" -> MediaType.APPLICATION_JSON;
-            case "png" -> MediaType.IMAGE_PNG;
-            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
-            case "gif" -> MediaType.IMAGE_GIF;
-            case "webp" -> MediaType.parseMediaType("image/webp");
-            case "svg" -> MediaType.parseMediaType("image/svg+xml");
-            case "html" -> MediaType.TEXT_HTML;
-            case "txt", "md" -> MediaType.TEXT_PLAIN;
-            default -> MediaType.APPLICATION_OCTET_STREAM;
-        };
+    /**
+     * CR-182 3.7: 위젯 토큰은 세션 주인만 연다. 공유 링크가 파일을 밖으로 내보내는 길이 생겨 남의 세션
+     * 산출물을 먼저 막는다. 소비앱 키와 로그인은 지금처럼 테넌트 안에서 연다.
+     */
+    private void requireOwner(UserPrincipal principal, String sessionId) {
+        if (principal != null && WIDGET_ROLE.equals(principal.getRole())
+                && !ownership.ownedOrUnclaimed(principal.getId(), sessionId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "artifact_not_found");
+        }
     }
 }

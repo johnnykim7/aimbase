@@ -10,6 +10,7 @@ import com.platform.repository.ChatGeneratedImageRepository;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
 import com.platform.repository.MessageFeedbackRepository;
+import com.platform.share.ChatShareService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -59,6 +60,7 @@ class ChatHistoryServiceTest {
     @Mock private SessionStore sessionStore;
     @Mock private PlatformSettingsService settings;
     @Mock private ChatGeneratedImageRepository imageRepository;
+    @Mock private ChatShareService shareService;
 
     private ChatHistoryService service;
     private int seq;
@@ -66,7 +68,8 @@ class ChatHistoryServiceTest {
     @BeforeEach
     void setUp() {
         service = new ChatHistoryService(sessionRepository, messageRepository, attachmentRepository,
-                feedbackRepository, projectService, cancellationRegistry, sessionStore, settings, imageRepository);
+                feedbackRepository, projectService, cancellationRegistry, sessionStore, settings, imageRepository,
+                shareService);
         lenient().when(settings.getInt(anyString(), anyInt())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(feedbackRepository.findByTurnIdInAndUserRef(any(), anyString())).thenReturn(List.of());
         lenient().when(sessionRepository.findWidgetHistory(anyString(), anyInt(), any(), any(), any(Pageable.class)))
@@ -299,6 +302,8 @@ class ChatHistoryServiceTest {
         verify(sessionRepository).save(s);
         verify(messageRepository).softDeleteBySessionId(eq(s.getSessionId()), any(OffsetDateTime.class));
         verify(imageRepository).softDeleteBySessionId(eq(s.getSessionId()), any(OffsetDateTime.class));
+        // CR-182 TC-CHT-089: 지운 대화의 공유 링크를 끊는다
+        verify(shareService).revokeAllForSession(s.getSessionId());
         verify(sessionStore).clearSession(s.getSessionId());
     }
 

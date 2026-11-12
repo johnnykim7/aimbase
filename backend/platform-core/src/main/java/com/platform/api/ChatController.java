@@ -196,7 +196,8 @@ public class ChatController {
         ).withThinkingOverride(thinkingOverride)
                 .withWidgetTurn(new ChatRequest.WidgetTurn(owner, chatProjectId, questionDisplay(request)))
                 // CR-183: 대화 API 요청 표시(계산 도구 붙이기)와 위젯이 그릴 수 있는 형식(BIZ-222, BIZ-223)
-                .withChatFeatures(true, renderFeatures);
+                .withChatFeatures(true, renderFeatures)
+                .withFileCreate(Boolean.TRUE.equals(request.fileCreate()));
 
         if (request.stream()) {
             return streamResponse(chatRequest);
@@ -402,7 +403,9 @@ public class ChatController {
             // CR-178: 세션을 처음 만들 때 넣을 위젯 프로젝트. 이미 있는 세션이면 쓰지 않는다(PRD-424)
             @JsonProperty("chat_project_id") String chatProjectId,
             // CR-183: 위젯이 그릴 수 있는 형식(chart, math). 값마다 widget.render.<값> 틀을 붙인다(BIZ-223)
-            @JsonProperty("render_features") List<String> renderFeatures
+            @JsonProperty("render_features") List<String> renderFeatures,
+            // CR-182: 파일 만들기 도구를 준다. 런타임 설정이 꺼져 있으면 무시한다(BIZ-210)
+            @JsonProperty("file_create") Boolean fileCreate
     ) {
         /** CR-184 이전 15칸 호환(그림 없음) */
         public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
@@ -412,7 +415,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, null, null, null);
+                    thinking, null, null, null, null);
         }
 
         /** CR-184 다음 16칸 호환(위젯 프로젝트, 그리기 형식 없음) */
@@ -423,7 +426,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking, ImageDto image) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, null, null);
+                    thinking, image, null, null, null);
         }
 
         /** CR-183 이전 17칸 호환(그리기 형식 없음) */
@@ -434,7 +437,19 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, null);
+                    thinking, image, chatProjectId, null, null);
+        }
+
+        /** CR-182 이전 18칸 호환(파일 만들기 없음) */
+        public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
+                                     boolean actionsEnabled, String connectionId, String connectionGroupId,
+                                     ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
+                                     String workingDirectory, String toolMode, String systemPromptOverride,
+                                     Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId,
+                                     List<String> renderFeatures) {
+            this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
+                    toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
+                    thinking, image, chatProjectId, renderFeatures, null);
         }
     }
 

@@ -9,7 +9,8 @@ WORKDIR /app
 #                   BE 가 직접 exec 한다 — 사이드카 경유는 중개 낭비라는 CR-120 결론을 따른다.
 #                   기존 ffmpeg 는 transcribe-sidecar(사용자 맥, 오디오 전용)에만 있어
 #                   운영 서버 Java 컨테이너에서는 쓸 수 없었다.
-RUN apt-get update && apt-get install -y curl poppler-utils ffmpeg && \
+# CR-182: fonts-nanum 은 위젯 저장, 내보내기 PDF 의 한글 글꼴(aimbase.document.pdf-font-dir)
+RUN apt-get update && apt-get install -y curl poppler-utils ffmpeg fonts-nanum && \
     curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
     apt-get install -y nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*

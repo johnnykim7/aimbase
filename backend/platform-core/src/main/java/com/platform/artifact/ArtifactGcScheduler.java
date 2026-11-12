@@ -1,6 +1,7 @@
 package com.platform.artifact;
 
 import com.platform.config.WorkspaceProperties;
+import com.platform.tool.builtin.CreateFileTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -78,6 +79,9 @@ public class ArtifactGcScheduler {
 
     private int purgeOutDir(Path outDir, Instant cutoff) {
         int deleted = 0;
+        // CR-182: 파일 만들기 도구가 남긴 원본 내용도 같은 기한으로 지운다. .source 안에는 .source 가 없어 한 번만 내려간다.
+        Path sources = outDir.resolve(CreateFileTool.SOURCE_DIR);
+        if (Files.isDirectory(sources)) deleted += purgeOutDir(sources, cutoff);
         try (Stream<Path> files = Files.list(outDir)) {
             for (Path f : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
                 try {

@@ -18,6 +18,9 @@ aimbase:
     whitelist-roots:
       - ${AIMBASE_WORKSPACE_WHITELIST:${user.home}/Documents/GitHub/bp-fulfillment-infra}
       - ${AIMBASE_WORKSPACE_BASE:${user.home}/aimbase-workspace}
+  # CR-182: 맥에는 나눔 글꼴 폴더가 없어 사용자 글꼴 폴더의 ttf 를 쓴다.
+  document:
+    pdf-font-dir: ${AIMBASE_DOCUMENT_PDF_FONT_DIR:${user.home}/Library/Fonts}
   # CR-147: 로컬 실행 컨테이너는 포트 레지스트리의 18147. 열쇠는 docker-compose.yml 의 로컬 기본값과 같다.
   skill-sandbox:
     url: ${SKILL_SANDBOX_URL:http://localhost:18147}

@@ -2,7 +2,6 @@ package com.platform.orchestrator;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.action.ActionExecutor;
-import com.platform.config.WorkspaceProperties;
 import com.platform.context.AssemblyResult;
 import com.platform.context.AssemblyTrace;
 import com.platform.context.ContextAssemblyEngine;
@@ -105,9 +104,11 @@ class OrchestratorOneShotWorkerTest {
                 mock(TraceService.class), mock(SchemaRegistry.class), mock(SchemaValidator.class),
                 new ObjectMapper(), responseCache, mock(MemoryService.class), mock(QuotaService.class),
                 contextAssembly, mock(RuntimeRegistry.class), hooks, mock(MemoryAutoExtractService.class),
-                cancellation, mock(ChatRunRecorder.class), mock(WorkspaceProperties.class), turnInstructions,
+                cancellation, mock(ChatRunRecorder.class), turnInstructions,
                 new ChatFeatureSupport(mock(com.platform.attachment.AttachmentService.class),
-                        mock(com.platform.service.PromptTemplateService.class)));
+                        mock(com.platform.service.PromptTemplateService.class)),
+                mock(com.platform.session.ChatWorkspaceAssigner.class),
+                new FileCreateToolGate(mock(com.platform.config.PlatformSettingsService.class)));
     }
 
     private static ChatRequest request(String sessionId) {

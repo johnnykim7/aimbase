@@ -25,6 +25,7 @@ import java.util.Map;
  * @param thinkingOverride   CR-175: 요청 단위 깊게 생각하기. true 켬, false 끔, null 이면 연결 설정 그대로(BIZ-150).
  * @param dataTools          CR-183: 대화 API 요청이면 true. 데이터 파일 계산 도구를 붙일 수 있다(BIZ-222).
  * @param renderFeatures     CR-183: 위젯이 그릴 수 있는 형식. 값마다 widget.render.<값> 틀을 시스템 안내에 덧붙인다(BIZ-223).
+ * @param fileCreate         CR-182: 파일 만들기 도구를 준다. 런타임 설정이 꺼져 있으면 무시한다(BIZ-210).
  */
 public record ChatRequest(
         String model,
@@ -49,7 +50,8 @@ public record ChatRequest(
         Boolean thinkingOverride,
         WidgetTurn widgetTurn,
         boolean dataTools,
-        List<String> renderFeatures
+        List<String> renderFeatures,
+        boolean fileCreate
 ) {
     /**
      * CR-178: 위젯 대화 요청이 같이 싣는 값. 요청을 받은 스레드에서 정해 둔다(응답을 흘리는 스레드에는 로그인 정보가 없다).
@@ -60,6 +62,23 @@ public record ChatRequest(
      */
     public record WidgetTurn(String ownerRef, java.util.UUID chatProjectId,
                              java.util.Map<String, Object> questionDisplay) {}
+
+    /** CR-182 이전 23-arg 호환 (파일 만들기 없음) */
+    public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
+                       boolean stream, boolean actionsEnabled, String userId,
+                       String ragSourceId, String connectionId,
+                       ToolFilterContext toolFilter, String toolChoice,
+                       ResponseFormat responseFormat, String connectionGroupId,
+                       String workingDirectory,
+                       String workflowRunId, String workflowStepId, String subagentRunId,
+                       String toolModeOverride, String systemPromptOverride,
+                       List<SkillRef> skillSet, Boolean thinkingOverride, WidgetTurn widgetTurn,
+                       boolean dataTools, List<String> renderFeatures) {
+        this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride,
+                skillSet, thinkingOverride, widgetTurn, dataTools, renderFeatures, false);
+    }
 
     /** CR-183 이전 21-arg 호환 (계산 도구, 그리기 형식 없음) */
     public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
@@ -74,7 +93,7 @@ public record ChatRequest(
         this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride,
-                skillSet, thinkingOverride, widgetTurn, false, null);
+                skillSet, thinkingOverride, widgetTurn, false, null, false);
     }
 
     /** CR-178 이전 20-arg 호환 (위젯 값 없음) */
@@ -90,7 +109,7 @@ public record ChatRequest(
         this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride,
-                skillSet, thinkingOverride, null, false, null);
+                skillSet, thinkingOverride, null, false, null, false);
     }
 
     /** CR-175 이전 19-arg 호환 (깊게 생각하기 지정 없음) */
@@ -193,7 +212,7 @@ public record ChatRequest(
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
-                thinkingOverride, widgetTurn, dataTools, renderFeatures);
+                thinkingOverride, widgetTurn, dataTools, renderFeatures, fileCreate);
     }
 
     /** CR-175: 깊게 생각하기를 지정한 사본. */
@@ -201,7 +220,7 @@ public record ChatRequest(
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet, on,
-                widgetTurn, dataTools, renderFeatures);
+                widgetTurn, dataTools, renderFeatures, fileCreate);
     }
 
     /** CR-178: 위젯 값을 실은 사본. */
@@ -209,7 +228,15 @@ public record ChatRequest(
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
-                thinkingOverride, turn, dataTools, renderFeatures);
+                thinkingOverride, turn, dataTools, renderFeatures, fileCreate);
+    }
+
+    /** CR-182: 파일 만들기 도구를 달라는 사본. */
+    public ChatRequest withFileCreate(boolean on) {
+        return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
+                thinkingOverride, widgetTurn, dataTools, renderFeatures, on);
     }
 
     /** CR-161: 그룹이 고른 멤버로 단일 커넥션 요청을 만든다. 그룹은 지워 안에서 다시 고르지 않게 한다. */
@@ -217,7 +244,7 @@ public record ChatRequest(
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, memberConnectionId,
                 toolFilter, toolChoice, responseFormat, null, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
-                thinkingOverride, widgetTurn, dataTools, renderFeatures);
+                thinkingOverride, widgetTurn, dataTools, renderFeatures, fileCreate);
     }
 
     /**
@@ -228,7 +255,7 @@ public record ChatRequest(
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
-                thinkingOverride, widgetTurn, dataTools, renderFeatures);
+                thinkingOverride, widgetTurn, dataTools, renderFeatures, fileCreate);
     }
 
     public boolean hasConnectionGroup() {

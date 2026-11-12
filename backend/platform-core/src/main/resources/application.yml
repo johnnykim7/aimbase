@@ -215,6 +215,9 @@ aimbase:
     base: ${AIMBASE_WORKSPACE_BASE:/data/workspaces}
     whitelist-roots:
       - ${AIMBASE_WORKSPACE_WHITELIST:${user.home}/Documents/GitHub/bp-fulfillment-infra}
+  # CR-182: PDF 에 넣을 한글 글꼴 폴더. 이미지마다 깔린 자리가 달라 global_config 가 아니라 여기 둔다.
+  document:
+    pdf-font-dir: ${AIMBASE_DOCUMENT_PDF_FONT_DIR:/usr/share/fonts/truetype/nanum}
   # CR-147: 스킬 스크립트 실행 컨테이너. 주소와 열쇠는 환경마다 달라 global_config 가 아니라 여기 둔다.
   # 열쇠는 실행 컨테이너와 같은 SKILL_SANDBOX_API_KEY 를 읽는다(운영 .env 한 줄을 둘이 같이 쓴다).
   skill-sandbox:

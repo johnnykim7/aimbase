@@ -73,6 +73,8 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/**", "/swagger-ui/**", "/api-docs/**", "/ws/**").permitAll()
                 // CR-058: 위젯 번들·가이드 정적 리소스 — 인증 없이 공개 (소비앱이 CDN 처럼 소비)
                 .requestMatchers("/widget/**").permitAll()
+                // CR-182: 공유 링크는 받는 사람이 로그인 없이 연다. 링크 비밀값과 기한으로 막는다.
+                .requestMatchers("/share/**").permitAll()
                 // 기타 SSE 는 인증 없음
                 .requestMatchers("/sse/**").permitAll()
                 // CR-150: 관리 도구 MCP 는 X-API-Key 또는 로그인 토큰으로 인증. 테넌트 대조는 AdminMcpTenantGuard

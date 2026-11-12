@@ -24,7 +24,7 @@ public class PlatformSettingsService {
     private static final long CACHE_TTL_MS = 5 * 60 * 1000L; // 5분
 
     // CR-147: skills 는 스킬 묶음 상한과 스킬 도구 한도(T3-17 3.11). 여기 없으면 런타임 설정 화면에 안 나온다.
-    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget", "llm", "skills");
+    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget", "llm", "skills", "chat");
 
     private final GlobalConfigRepository configRepository;
     private final AuditLogger auditLogger;
