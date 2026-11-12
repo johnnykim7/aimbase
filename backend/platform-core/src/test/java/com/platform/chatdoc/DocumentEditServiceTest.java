@@ -6,6 +6,7 @@ import com.platform.domain.ConversationMessageEntity;
 import com.platform.domain.ConversationSessionEntity;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.ConnectionGroupSelector;
+import com.platform.orchestrator.FileCreateToolGate;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
 import com.platform.service.PromptTemplateService;
@@ -50,13 +51,14 @@ class DocumentEditServiceTest {
     @Mock ChatWidgetSettingsService widgetSettings;
     @Mock ConnectionAdapterFactory connectionAdapterFactory;
     @Mock ConnectionGroupSelector connectionGroupSelector;
+    @Mock FileCreateToolGate fileCreateGate;
 
     DocumentEditService service;
 
     @BeforeEach
     void setUp() {
         service = new DocumentEditService(docs, messageRepository, sessionRepository, cancellationRegistry,
-                promptTemplateService, widgetSettings, connectionAdapterFactory, connectionGroupSelector);
+                promptTemplateService, widgetSettings, connectionAdapterFactory, connectionGroupSelector, fileCreateGate);
     }
 
     @Test
@@ -159,6 +161,37 @@ class DocumentEditServiceTest {
     }
 
     @Test
+    void prepare_fileWithSource_givesFileCreateTool() {
+        ChatDocumentEntity d = ChatDocumentServiceTest.fileDoc("a.docx", 1);
+        ChatDocumentVersionEntity v1 = ChatDocumentServiceTest.fileVersion(d.getId(), 1, "p/a.docx", "p/a.docx.json", "sha1");
+        when(docs.outFile("s1", "a.docx")).thenReturn(Path.of("out", "a.docx"));
+        when(docs.findFile("s1", "a.docx")).thenReturn(Optional.of(d));
+        when(docs.liveVersion(d.getId(), 1)).thenReturn(Optional.of(v1));
+        when(fileCreateGate.enabled()).thenReturn(true);
+        when(docs.readSource(v1)).thenReturn("{\"file_name\":\"a.docx\"}");
+        when(promptTemplateService.render(eq(DocumentEditService.TEMPLATE_FILE_SOURCE), anyMap())).thenReturn("SRC");
+
+        PreparedEdit edit = service.prepare("s1", fileRequest("a.docx"), "c1", null);
+
+        assertThat(edit.fileCreate()).isTrue();
+        assertThat(edit.instruction()).isEqualTo("SRC");
+        verify(widgetSettings, never()).binaryDocumentEditSupported(any());
+    }
+
+    @Test
+    void prepare_fileWithSourceWhileFileCreateOff_isUnsupported() {
+        ChatDocumentEntity d = ChatDocumentServiceTest.fileDoc("a.docx", 1);
+        ChatDocumentVersionEntity v1 = ChatDocumentServiceTest.fileVersion(d.getId(), 1, "p/a.docx", "p/a.docx.json", "sha1");
+        when(docs.outFile("s1", "a.docx")).thenReturn(Path.of("out", "a.docx"));
+        when(docs.findFile("s1", "a.docx")).thenReturn(Optional.of(d));
+        when(docs.liveVersion(d.getId(), 1)).thenReturn(Optional.of(v1));
+        when(fileCreateGate.enabled()).thenReturn(false);
+
+        assertRejected(() -> service.prepare("s1", fileRequest("a.docx"), "c1", null),
+                HttpStatus.BAD_REQUEST, "document_edit_unsupported");
+    }
+
+    @Test
     void prepare_fileGoneFromOutDir_isGone(@TempDir Path outDir) {
         when(docs.outFile("s1", "a.pptx")).thenReturn(outDir.resolve("a.pptx"));
         when(docs.findFile("s1", "a.pptx")).thenReturn(Optional.empty());
@@ -213,7 +246,7 @@ class DocumentEditServiceTest {
         Files.writeString(file, "same");
         String sha = ChatDocumentService.sha256(file);
         ChatDocumentEntity d = ChatDocumentServiceTest.fileDoc("a.pptx", 1);
-        PreparedEdit edit = new PreparedEdit(d.getId(), ChatDocumentEntity.Kind.FILE, "s1", "a.pptx", null, 1, sha, "I");
+        PreparedEdit edit = new PreparedEdit(d.getId(), ChatDocumentEntity.Kind.FILE, "s1", "a.pptx", null, 1, sha, "I", false);
         when(docs.outFile("s1", "a.pptx")).thenReturn(file);
         when(docs.find(d.getId())).thenReturn(Optional.of(d));
 
@@ -229,7 +262,7 @@ class DocumentEditServiceTest {
         Path file = outDir.resolve("a.pptx");
         Files.writeString(file, "changed");
         ChatDocumentEntity d = ChatDocumentServiceTest.fileDoc("a.pptx", 1);
-        PreparedEdit edit = new PreparedEdit(d.getId(), ChatDocumentEntity.Kind.FILE, "s1", "a.pptx", null, 1, "old", "I");
+        PreparedEdit edit = new PreparedEdit(d.getId(), ChatDocumentEntity.Kind.FILE, "s1", "a.pptx", null, 1, "old", "I", false);
         UUID turn = UUID.randomUUID();
         ChatDocumentService.StoredFile stored = new ChatDocumentService.StoredFile("p2", null, 7, "new");
         ChatDocumentVersionEntity v2 = ChatDocumentServiceTest.fileVersion(d.getId(), 2, "p2", null, "new");
@@ -334,7 +367,7 @@ class DocumentEditServiceTest {
 
     private static PreparedEdit blockEdit(String baseContent) {
         return new PreparedEdit(UUID.randomUUID(), ChatDocumentEntity.Kind.BLOCK, "s1", null, "html", 1,
-                ChatDocumentService.blockSha256(baseContent), "I");
+                ChatDocumentService.blockSha256(baseContent), "I", false);
     }
 
     private static DocumentEditRequest blockRequest(UUID turn, String selection) {

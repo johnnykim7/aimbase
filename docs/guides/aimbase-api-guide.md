@@ -2956,7 +2956,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 | 400 | `document_edit_invalid:target` | `target` 이 없거나 종류, 이름, 답 번호, 순번, 언어가 틀림 |
 | 400 | `document_edit_invalid:source` | 처음 고치는 코드 블록인데 `source` 없음 |
 | 400 | `document_edit_invalid:base_version` | 바탕 판이 없거나 지운 판 |
-| 400 | `document_edit_unsupported` | 원본 없는 파일인데 실행기 연결이 아님 |
+| 400 | `document_edit_unsupported` | 원본 없는 파일인데 실행기 연결이 아님, 또는 원본 있는 파일인데 파일 만들기 설정(`chat.file-create.enabled`)이 꺼짐 |
 | 404 | `document_not_found` | 코드 블록의 `turn_id` 가 이 세션 답이 아님 |
 | 409 | `session_busy` | 그 세션에 답이 도는 중 |
 | 410 | `document_source_gone` | 처음 고치는 파일인데 작업 폴더에 없음(보관 기한이 지나 지워짐) |

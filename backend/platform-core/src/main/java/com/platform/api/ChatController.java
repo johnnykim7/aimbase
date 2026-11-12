@@ -205,7 +205,7 @@ public class ChatController {
                         com.platform.session.ChatOwner.isWidget(com.platform.session.ChatOwner.currentPrincipal())))
                 // CR-183: 대화 API 요청 표시(계산 도구 붙이기)와 위젯이 그릴 수 있는 형식(BIZ-222, BIZ-223)
                 .withChatFeatures(true, renderFeatures)
-                .withFileCreate(Boolean.TRUE.equals(request.fileCreate()))
+                .withFileCreate(Boolean.TRUE.equals(request.fileCreate()) || (documentEdit != null && documentEdit.fileCreate()))
                 .withTurnInstruction(documentEdit != null ? documentEdit.instruction() : null);
 
         if (request.stream()) {

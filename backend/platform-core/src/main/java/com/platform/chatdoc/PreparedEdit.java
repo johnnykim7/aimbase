@@ -19,10 +19,11 @@ public final class PreparedEdit {
     private final int baseVersion;
     private final String baseSha256;
     private final String instruction;
+    private final boolean fileCreate;
     private final AtomicBoolean finished = new AtomicBoolean(false);
 
     public PreparedEdit(UUID documentId, ChatDocumentEntity.Kind kind, String sessionId, String name, String lang,
-                        int baseVersion, String baseSha256, String instruction) {
+                        int baseVersion, String baseSha256, String instruction, boolean fileCreate) {
         this.documentId = documentId;
         this.kind = kind;
         this.sessionId = sessionId;
@@ -31,6 +32,7 @@ public final class PreparedEdit {
         this.baseVersion = baseVersion;
         this.baseSha256 = baseSha256;
         this.instruction = instruction;
+        this.fileCreate = fileCreate;
     }
 
     public UUID documentId() { return documentId; }
@@ -41,6 +43,9 @@ public final class PreparedEdit {
     public int baseVersion() { return baseVersion; }
     public String baseSha256() { return baseSha256; }
     public String instruction() { return instruction; }
+
+    /** 원본으로 고치는 파일은 create_file 로 다시 만들므로 요청이 file_create 를 싣지 않아도 이 답에는 그 도구를 준다. */
+    public boolean fileCreate() { return fileCreate; }
 
     /** 처음 부를 때만 참. */
     boolean markFinished() {

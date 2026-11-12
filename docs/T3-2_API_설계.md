@@ -3322,7 +3322,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 | 400 | `document_edit_invalid:target` | `target` 이 없거나 종류, 이름, 답 번호, 순번, 언어가 틀림 |
 | 400 | `document_edit_invalid:source` | 처음 고치는 BLOCK 인데 `source` 없음 |
 | 400 | `document_edit_invalid:base_version` | 바탕 판이 없거나 지운 판 |
-| 400 | `document_edit_unsupported` | 원본 없는 파일인데 실행기 연결이 아님(BIZ-203) |
+| 400 | `document_edit_unsupported` | 원본 없는 파일인데 실행기 연결이 아님, 또는 원본 있는 파일인데 파일 만들기 설정이 꺼짐(BIZ-203) |
 | 404 | `document_not_found` | BLOCK 의 `turn_id` 가 이 세션 답이 아님 |
 | 409 | `session_busy` | 그 세션에 답이 도는 중(CR-175) |
 | 410 | `document_source_gone` | 처음 고치는 FILE 인데 `out/<이름>` 이 없음 |

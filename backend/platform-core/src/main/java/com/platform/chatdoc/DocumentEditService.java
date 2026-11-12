@@ -4,6 +4,7 @@ import com.platform.domain.ChatDocumentEntity;
 import com.platform.domain.ChatDocumentVersionEntity;
 import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.ConnectionGroupSelector;
+import com.platform.orchestrator.FileCreateToolGate;
 import com.platform.domain.ConversationSessionEntity;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
@@ -55,6 +56,7 @@ public class DocumentEditService {
     private final ChatWidgetSettingsService widgetSettings;
     private final ConnectionAdapterFactory connectionAdapterFactory;
     private final ConnectionGroupSelector connectionGroupSelector;
+    private final FileCreateToolGate fileCreateGate;
 
     public DocumentEditService(ChatDocumentService docs,
                                ConversationMessageRepository messageRepository,
@@ -63,7 +65,8 @@ public class DocumentEditService {
                                PromptTemplateService promptTemplateService,
                                ChatWidgetSettingsService widgetSettings,
                                ConnectionAdapterFactory connectionAdapterFactory,
-                               ConnectionGroupSelector connectionGroupSelector) {
+                               ConnectionGroupSelector connectionGroupSelector,
+                               FileCreateToolGate fileCreateGate) {
         this.docs = docs;
         this.messageRepository = messageRepository;
         this.sessionRepository = sessionRepository;
@@ -72,6 +75,7 @@ public class DocumentEditService {
         this.widgetSettings = widgetSettings;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.connectionGroupSelector = connectionGroupSelector;
+        this.fileCreateGate = fileCreateGate;
     }
 
     /**
@@ -122,7 +126,7 @@ public class DocumentEditService {
         String instruction = render(TEMPLATE_BLOCK, Map.of("lang", doc.getLang(), "content", base.getContent(),
                 "selection", selectionPart(request)));
         return new PreparedEdit(doc.getId(), ChatDocumentEntity.Kind.BLOCK, sessionId, null, doc.getLang(),
-                base.getVersion(), base.getSha256(), instruction);
+                base.getVersion(), base.getSha256(), instruction, false);
     }
 
     private PreparedEdit prepareFile(String sessionId, DocumentEditRequest request,
@@ -136,7 +140,7 @@ public class DocumentEditService {
             if (file == null || !Files.isRegularFile(file)) throw sourceGone();
             Path source = docs.sourceFile(sessionId, name);
             boolean hasSource = source != null && Files.isRegularFile(source);
-            if (!hasSource && !binaryEditSupported(connectionId, connectionGroupId)) throw unsupported();
+            if (!fileEditable(hasSource, connectionId, connectionGroupId)) throw unsupported();
             try {
                 doc = docs.createFile(sessionId, name, docs.storeFile(name, file, source));
             } catch (DataIntegrityViolationException race) {
@@ -147,7 +151,7 @@ public class DocumentEditService {
         }
         ChatDocumentVersionEntity base = baseVersion(doc, request.baseVersion());
         boolean hasSource = base.getSourceStoragePath() != null;
-        if (!hasSource && !binaryEditSupported(connectionId, connectionGroupId)) throw unsupported();
+        if (!fileEditable(hasSource, connectionId, connectionGroupId)) throw unsupported();
         if (file == null) throw sourceGone();
         try {
             docs.writeToOutDir(doc, base);
@@ -160,7 +164,7 @@ public class DocumentEditService {
                 : render(TEMPLATE_FILE, Map.of("path", com.platform.artifact.ArtifactService.OUT_DIR + "/" + name,
                         "selection", selectionPart(request)));
         return new PreparedEdit(doc.getId(), ChatDocumentEntity.Kind.FILE, sessionId, name, null,
-                base.getVersion(), base.getSha256(), instruction);
+                base.getVersion(), base.getSha256(), instruction, hasSource);
     }
 
     /**
@@ -226,6 +230,14 @@ public class DocumentEditService {
         int version = requested != null ? requested : doc.getLatestVersion();
         return docs.liveVersion(doc.getId(), version)
                 .orElseThrow(() -> new ChatRejectedException(HttpStatus.BAD_REQUEST, "document_edit_invalid:base_version"));
+    }
+
+    /**
+     * 원본 있는 파일은 create_file 로 다시 만들므로 파일 만들기 설정(CR-182)이 켜져 있어야 한다. 실행기 연결이
+     * 이진 파일을 직접 고치게 돌리면 원본이 고친 파일과 어긋나 다음 고치기가 옛 내용으로 돌아간다.
+     */
+    private boolean fileEditable(boolean hasSource, String connectionId, String connectionGroupId) {
+        return hasSource ? fileCreateGate.enabled() : binaryEditSupported(connectionId, connectionGroupId);
     }
 
     /** BIZ-203: 원본 없는 파일은 실행기 연결만 고칠 수 있다. 연결 묶음은 모든 멤버가 실행기일 때만. */
