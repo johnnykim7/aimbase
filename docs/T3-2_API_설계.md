@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.11 | 최종 수정: 2026-11-10 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175
+> 설계 버전: 7.12 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3167,6 +3167,46 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 ### 대화 meta 제목 수정 (기존 경로 동작 추가)
 
 `PUT /api/v1/conversations/{sessionId}/meta` 에 `title` 이 있으면 `title_source = USER` 로 둔다.
+
+---
+
+## 위젯 옆 창 문서 미리보기 [v7.12, CR-180]
+
+설계 상세: [CR-180_위젯_옆_창_문서_미리보기.md](CR-180_위젯_옆_창_문서_미리보기.md) 3절, 6절. 권한은 내려받기와 같다(`chat:upload` 위젯 토큰 또는 로그인). 세션 작업 폴더는 현재 테넌트 DB 에서만 찾는다(BIZ-194).
+
+### 미리보기 정보 [PRD-460, PRD-461, PRD-462]
+
+`GET /api/v1/chat/artifacts/preview?session_id={id}&name={파일 이름}`
+
+| 응답 칸 | 타입 | 뜻 |
+|---|---|---|
+| name, size, modified_at | 글, 정수, ISO-8601 UTC | 원본 파일 |
+| preview_kind | `PAGES`, `SHEET`, `HTML`, `SVG`, `IMAGE`, `MARKDOWN`, `TEXT`, `NONE` | 미리보기 종류. 확장자로 정한다 |
+| page_count, page_width, page_height | 정수 | PAGES 만. 쪽 수와 첫 쪽 그림 크기(픽셀) |
+| sheets | `[{name, rows, row_count, col_count, truncated}]` | SHEET 만. rows 는 글 2차원 배열, 한도까지(BIZ-193) |
+| reason | `too_large`, `too_many_pages`, `unsupported` | NONE 만 |
+
+| 상태 | 코드 | 언제 |
+|---|---|---|
+| 404 | artifact_not_found | 세션 작업 폴더나 파일이 없음, 산출물 확장자가 아님 |
+| 403 | artifact_access_denied | 경로 탈출, 허용 폴더 밖 |
+| 422 | preview_failed:convert, preview_failed:timeout | 변환 실패, 시간 한도 넘음 |
+| 503 | preview_busy | 시간 한도 안에 동시 변환 자리를 얻지 못함 |
+
+### 쪽 그림 [PRD-461, PRD-465]
+
+`GET /api/v1/chat/artifacts/preview/page?session_id={id}&name={파일 이름}&page={n}`
+
+- `image/png`, 가로 `widget.preview-page-width-px` 픽셀. page 는 1부터. `Cache-Control: private, max-age=86400`
+- 변환 전이면 먼저 변환한다. 범위 밖 쪽은 404 `page_not_found`. 그 밖의 오류는 미리보기 정보와 같다
+
+### 대화 끝 산출물 칸 추가 [PRD-460]
+
+스트리밍 `done`, 비스트리밍 결과의 `artifacts[]` 원소에 `modified_at`(ISO-8601 UTC), `preview_kind` 를 더한다. 기존 `name`, `size`, `download_url` 은 그대로다.
+
+### 위젯 설정 칸 추가 [PRD-463]
+
+`GET /api/v1/chat/widget-settings` 응답에 `preview_html_script_sources`(글 배열)를 더한다. 값은 런타임 설정 `widget.preview-html-script-sources`.
 
 ---
 
