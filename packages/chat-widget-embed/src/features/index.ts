@@ -11,7 +11,9 @@ import { imageGen } from "./image-gen";
 import { language } from "./language";
 import { memory } from "./memory";
 import { preview } from "./preview";
+import { readAloud } from "./read-aloud";
 import { saveExport } from "./save-export";
 import { shareLink } from "./share-link";
+import { voiceChat } from "./voice-chat";
 
-export const FEATURES: WidgetFeature[] = [fontSize, language, preview, imageGen, fileCreate, saveExport, shareLink, memory, documentEdit, history];
+export const FEATURES: WidgetFeature[] = [fontSize, language, preview, imageGen, fileCreate, saveExport, shareLink, memory, documentEdit, history, readAloud, voiceChat];
