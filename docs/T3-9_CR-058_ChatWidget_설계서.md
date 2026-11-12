@@ -1,7 +1,7 @@
 # T3-9 | CR-058 Aimbase Chat Widget SDK 상세 설계서
 
 **문서 번호**: T3-9
-**관련 CR**: CR-058
+**관련 CR**: CR-058, CR-177(워크플로우 끝남 알림 error, 2026-11-13)
 **작성일**: 2026-04-24
 **상태**: ✅ Sprint 52 + Sprint 53 완료 (2026-04-24). 서버 3 Phase + 프론트 축소 MVP(Web Component + UMD 번들 17KB) + 샘플 BFF + 샘플 consumer HTML. 후속 CR-059~062 로 분리.
 **원본 요구사항**: [docs/origins/원본_요구사항_CR058_ChatWidget_20260424.md](origins/원본_요구사항_CR058_ChatWidget_20260424.md)
@@ -542,7 +542,13 @@ data: {"run_id":"...","step_id":"confirm_refund","policy_id":"refund_over_100k",
 
 event: workflow.done
 data: {"run_id":"...","status":"completed","duration_ms":3420}
+
+event: workflow.done
+data: {"run_id":"...","status":"failed","duration_ms":910,
+       "error":{"reason":"Human approval rejected","detail":"금액 확인 필요"}}
 ```
+
+`error` 는 실패한 런에 저장한 값이고 없으면 칸이 없다(CR-177).
 
 ---
 

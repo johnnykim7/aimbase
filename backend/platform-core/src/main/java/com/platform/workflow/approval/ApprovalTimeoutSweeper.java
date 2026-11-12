@@ -109,7 +109,7 @@ public class ApprovalTimeoutSweeper {
                 : 0L;
         log.info("CR-174 run {} 승인 시한 초과(시한 {}). failed 로 닫음", saved.getId(), approval.getTimeoutAt());
         if (eventPublisher != null) {
-            eventPublisher.runCompleted(saved.getId(), saved.getParentRunId(), "failed", durationMs);
+            eventPublisher.runCompleted(saved.getId(), saved.getParentRunId(), "failed", durationMs, saved.getError());
         }
     }
 }

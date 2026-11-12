@@ -119,7 +119,7 @@ class WorkflowEngineDevWorkTest {
 
         WorkflowRunEntity run = engine.execute("wf", Map.of(), null);
 
-        verify(publisher, timeout(3000)).runCompleted(eq(run.getId()), isNull(), eq("completed"), anyLong());
+        verify(publisher, timeout(3000)).runCompleted(eq(run.getId()), isNull(), eq("completed"), anyLong(), any());
     }
 
     @Test
@@ -133,6 +133,6 @@ class WorkflowEngineDevWorkTest {
 
         engine.resume(paused.getId(), false, "no");
 
-        verify(publisher).runCompleted(eq(paused.getId()), isNull(), eq("failed"), anyLong());
+        verify(publisher).runCompleted(eq(paused.getId()), isNull(), eq("failed"), anyLong(), any());
     }
 }

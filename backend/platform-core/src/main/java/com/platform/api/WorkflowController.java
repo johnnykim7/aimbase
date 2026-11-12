@@ -375,14 +375,15 @@ public class WorkflowController {
         String status = run.getStatus();
         if ("completed".equals(status) || "failed".equals(status) || "cancelled".equals(status)) {
             try {
-                emitter.send(SseEmitter.event().name("workflow.done")
-                        .data(Map.of(
-                                "run_id", run.getId().toString(),
-                                "status", status,
-                                "duration_ms", run.getCompletedAt() != null && run.getStartedAt() != null
-                                        ? run.getCompletedAt().toInstant().toEpochMilli()
-                                          - run.getStartedAt().toInstant().toEpochMilli()
-                                        : 0L)));
+                Map<String, Object> done = new LinkedHashMap<>();
+                done.put("run_id", run.getId().toString());
+                done.put("status", status);
+                done.put("duration_ms", run.getCompletedAt() != null && run.getStartedAt() != null
+                        ? run.getCompletedAt().toInstant().toEpochMilli()
+                          - run.getStartedAt().toInstant().toEpochMilli()
+                        : 0L);
+                if (run.getError() != null && !run.getError().isEmpty()) done.put("error", run.getError());
+                emitter.send(SseEmitter.event().name("workflow.done").data(done));
             } catch (IOException ignored) {}
             emitter.complete();
             return emitter;

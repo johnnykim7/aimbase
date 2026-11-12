@@ -434,7 +434,7 @@ public class WorkflowEngine {
             WorkflowRunEntity rejected = workflowRunRepository.save(run);
             // CR-164: 거절도 run 의 끝이라 종료 신호를 받는 쪽(실행 구독, 개발 작업)이 알아야 한다
             if (eventPublisher != null) {
-                eventPublisher.runCompleted(rejected.getId(), rejected.getParentRunId(), "failed", runDurationMs(rejected));
+                eventPublisher.runCompleted(rejected.getId(), rejected.getParentRunId(), "failed", runDurationMs(rejected), rejected.getError());
             }
             return rejected;
         }
@@ -609,7 +609,7 @@ public class WorkflowEngine {
             if (eventPublisher != null) {
                 long durationMs = savedChild.getStartedAt() != null
                         ? System.currentTimeMillis() - savedChild.getStartedAt().toInstant().toEpochMilli() : 0L;
-                eventPublisher.runCompleted(savedChild.getId(), parentRunId, "failed", durationMs);
+                eventPublisher.runCompleted(savedChild.getId(), parentRunId, "failed", durationMs, savedChild.getError());
             }
             // 부모 스텝 실패로 전파
             throw new RuntimeException(
@@ -839,7 +839,7 @@ public class WorkflowEngine {
                                 null, Instant.ofEpochMilli(failedAtMs), e.getMessage());
                         long durationMs = run.getStartedAt() != null
                                 ? failedAtMs - run.getStartedAt().toInstant().toEpochMilli() : 0L;
-                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", durationMs);
+                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", durationMs, run.getError());
                     }
                     // CR-090: STEP_FAILED (attempts 는 executeWithRetry 안 retry 횟수 반영 — 메시지 파싱 대신 errorHandling.retryMaxAttempts+1 상한으로 근사)
                     if (eventRecorder != null) {
@@ -879,7 +879,7 @@ public class WorkflowEngine {
                 long durationMs = run.getCompletedAt() != null && run.getStartedAt() != null
                         ? run.getCompletedAt().toInstant().toEpochMilli() - run.getStartedAt().toInstant().toEpochMilli()
                         : 0L;
-                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", durationMs);
+                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", durationMs, run.getError());
             }
         }
     }
@@ -1208,7 +1208,7 @@ public class WorkflowEngine {
                     platformMetrics.recordWorkflowExecution("failed");
                     if (eventPublisher != null) {
                         long d = runDurationMs(run);
-                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", d);
+                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", d, run.getError());
                     }
                     // CR-090: STEP_FAILED (cyclic step budget)
                     if (eventRecorder != null) {
@@ -1271,7 +1271,7 @@ public class WorkflowEngine {
                     if (eventPublisher != null) {
                         eventPublisher.stepFailed(run.getId(), run.getParentRunId(), step.id(),
                                 null, Instant.ofEpochMilli(failedAtMs), e.getMessage());
-                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", runDurationMs(run));
+                        eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", runDurationMs(run), run.getError());
                     }
                     // CR-090: STEP_FAILED (cyclic)
                     if (eventRecorder != null) {
@@ -1322,7 +1322,7 @@ public class WorkflowEngine {
             run.setCompletedAt(OffsetDateTime.now());
             workflowRunRepository.saveAndFlush(run);
             if (eventPublisher != null) {
-                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", runDurationMs(run));
+                eventPublisher.runCompleted(run.getId(), run.getParentRunId(), "failed", runDurationMs(run), run.getError());
             }
         }
     }
@@ -1376,7 +1376,7 @@ public class WorkflowEngine {
         workflowRunRepository.saveAndFlush(run);
         platformMetrics.recordWorkflowExecution(status);
         if (eventPublisher != null) {
-            eventPublisher.runCompleted(run.getId(), run.getParentRunId(), status, runDurationMs(run));
+            eventPublisher.runCompleted(run.getId(), run.getParentRunId(), status, runDurationMs(run), run.getError());
         }
         log.info("Cyclic run '{}' completed: {} step results", run.getId(), context.stepResults().size());
     }

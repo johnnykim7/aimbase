@@ -92,7 +92,13 @@ public class WorkflowEventPublisher {
     }
 
     public void runCompleted(UUID runId, UUID parentRunId, String status, long durationMs) {
-        safePublish(new WorkflowEvents.RunCompleted(runId, parentRunId, status, durationMs));
+        runCompleted(runId, parentRunId, status, durationMs, null);
+    }
+
+    /** error 는 그 런에 저장한 error 다. 실패한 런은 이것으로 알려야 구독자가 실패 이유를 받는다. */
+    public void runCompleted(UUID runId, UUID parentRunId, String status, long durationMs,
+                             Map<String, Object> error) {
+        safePublish(new WorkflowEvents.RunCompleted(runId, parentRunId, status, durationMs, error));
     }
 
     private void safePublish(Object event) {

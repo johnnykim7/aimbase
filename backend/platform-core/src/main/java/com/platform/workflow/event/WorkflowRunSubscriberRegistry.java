@@ -61,6 +61,7 @@ public class WorkflowRunSubscriberRegistry {
         if (ev.parentRunId() != null) payload.put("parent_run_id", ev.parentRunId().toString());
         payload.put("status", ev.status());
         payload.put("duration_ms", ev.durationMs());
+        if (ev.error() != null && !ev.error().isEmpty()) payload.put("error", ev.error());
         broadcast(ev.runId(), ev.parentRunId(), "workflow.done", payload);
     }
 

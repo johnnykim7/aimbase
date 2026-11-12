@@ -60,11 +60,19 @@ public final class WorkflowEvents {
             Instant timeoutAt
     ) {}
 
-    /** 전체 런 종료(completed / failed / cancelled). */
+    /**
+     * 전체 런 종료(completed / failed / cancelled).
+     * error 는 실패한 런에 저장한 error 와 같은 값이다(CR-177, 위젯 승인 카드가 실패 이유를 보인다). 없으면 null.
+     */
     public record RunCompleted(
             UUID runId,
             UUID parentRunId,
             String status,
-            long durationMs
-    ) {}
+            long durationMs,
+            Map<String, Object> error
+    ) {
+        public RunCompleted(UUID runId, UUID parentRunId, String status, long durationMs) {
+            this(runId, parentRunId, status, durationMs, null);
+        }
+    }
 }

@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.33.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.33.1** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1582,7 +1582,13 @@ data: {"run_id":"...","step_id":"confirm_refund","policy_id":"confirm_refund",
 
 event: workflow.done
 data: {"run_id":"...","status":"completed","duration_ms":3420}
+
+event: workflow.done
+data: {"run_id":"...","status":"failed","duration_ms":910,
+       "error":{"reason":"Human approval rejected","detail":"금액 확인 필요"}}
 ```
+
+`workflow.done` 의 `error` 는 실패한 런에 저장한 값(`GET /workflows/runs/{runId}` 의 `error` 와 같다)이고 없으면 오지 않는다. 실패한 곳마다 모양이 다르다(`error`, 거절의 `reason`과 `detail`, 한도 초과의 `reason`).
 
 **부모-자식 라우팅**: 서브워크플로우 자식 이벤트(`parent_run_id != null`)는 자식 구독자와 부모 구독자 모두에게 fan-out. 부모 위젯이 서브워크플로우를 트리로 표시할 수 있게 한다.
 
@@ -2773,6 +2779,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.33.1 | 2026-11-13 | **CR-177 워크플로우 끝남 알림에 실패 이유** (§ 17-6). `workflow.done` 에 `error`(실패한 런만) |
 | v3.33.0 | 2026-11-13 | **CR-184 위젯 그림 만들기** (§ 30). 대화 요청 `image` 칸(`create`, `edit`), 스트림 `image_status` 와 `done.images`, 그림 받기 `GET /api/v1/chat/images/{image_id}`, 위젯 설정 `image_generation`, 오류 코드 `image_*` |
 | v3.32.0 | 2026-11-13 | **CR-180 위젯 옆 창 문서 미리보기** (§ 29). 미리보기 정보 `GET /api/v1/chat/artifacts/preview`, 쪽 그림 `GET /api/v1/chat/artifacts/preview/page`. 대화 끝 `artifacts[]` 와 산출물 목록에 `modified_at`, `preview_kind`. 산출물 확장자에 svg, jpg, jpeg, gif, webp. 위젯 설정에 `preview_html_script_sources` (§ 28-2) |
 | v3.31.0 | 2026-11-13 | **CR-177 위젯 영어 화면** (§ 28-2). 위젯 설정 조회에 `locale` 인자. `feedback_reasons` 의 `label` 을 그 언어 이름으로 준다 |
