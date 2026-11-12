@@ -164,6 +164,7 @@ class QwenEngine:
             started = time.time()
             self.model = load_model(self.repo)
             log.info("모델 올림: %s (%.1fs)", self.repo, time.time() - started)
+            keep_resident()
 
     def generate(self, text: str, voice: Voice) -> np.ndarray:
         import mlx.core as mx
@@ -180,7 +181,25 @@ class QwenEngine:
             top_p=voice.top_p,
             repetition_penalty=voice.repetition_penalty,
         )
-        return np.concatenate([np.array(r.audio) for r in results])
+        audio = [np.array(r.audio) for r in results]
+        if not audio:
+            raise RuntimeError("엔진이 소리를 만들지 않았다(첫 걸음에 끝). 목소리 견본을 확인할 것")
+        return np.concatenate(audio)
+
+
+def keep_resident() -> None:
+    """
+    오래 쉬면 맥이 모델 메모리를 스왑으로 내보내 다음 첫 읽기가 24초 걸렸다(위젯 대기 20초 초과).
+    올린 가중치만큼 묶어 두면 내보내지 않는다. 묶지 못해도 엔진은 그대로 돈다.
+    """
+    import mlx.core as mx
+
+    try:
+        weights = mx.get_active_memory()
+        mx.set_wired_limit(weights)
+        log.info("모델 메모리 %.1fGB 를 묶어 둠", weights / 1e9)
+    except Exception:
+        log.exception("모델 메모리를 묶지 못했다. 오래 쉰 뒤 첫 읽기가 느릴 수 있다")
 
 
 VOICES = load_voices(VOICES_DIR)
