@@ -2991,7 +2991,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 ### 33-5. 미리보기와 내려받기의 판 인자
 
 - § 29-2 미리보기 정보, § 29-3 쪽 그림, 산출물 내려받기(`GET /api/v1/chat/artifacts/download`)에 `version` 인자를 붙이면 그 판 파일을 씁니다. 없으면 작업 폴더의 지금 파일(마지막 판)입니다.
-- 미리보기 정보에 `has_source`(만들 때 남긴 원본이 있는지)가 더해졌습니다. 원본이 있는 파일은 어느 연결로도 고칠 수 있고, 없으면 `document_binary_edit_supported` 연결에서만 고칠 수 있습니다.
+- 미리보기 정보에 `has_source`(만들 때 남긴 원본이 있는지)가 더해졌습니다. 원본이 있는 파일은 어느 연결로도 고칠 수 있고(위젯 설정 `file_create_enabled` 가 꺼져 있으면 고치지 못합니다), 없으면 `document_binary_edit_supported` 연결에서만 고칠 수 있습니다.
 
 ## 변경 이력
 

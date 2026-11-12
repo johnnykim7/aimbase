@@ -241,8 +241,9 @@ class DocumentEdit {
     if (target.kind === "block") return target.lang === "html" || target.lang === "svg";
     if (target.sessionId !== this.ctx.sessionId()) return false;
     const settings = this.ctx.widgetSettings() as unknown as Record<string, unknown> | null;
-    if (settings?.["document_binary_edit_supported"] === true) return true;
-    return hasSource(this.ctx, { ...target, version: undefined });
+    // 원본 있는 파일은 파일 만들기로 다시 만들므로 그 설정이 꺼지면 서버가 고치지 않는다(BIZ-203)
+    if (await hasSource(this.ctx, { ...target, version: undefined })) return settings?.["file_create_enabled"] !== false;
+    return settings?.["document_binary_edit_supported"] === true;
   }
 
   private selected(text: string): void {
