@@ -20,11 +20,12 @@ import java.util.function.Consumer;
 /**
  * CR-071 Phase 4: LLMAdapter 구현 — ClaudeCliRunner HTTP 호출 경로.
  *
- * <p>호출 흐름 (CR-075 — 라우팅 우선순위 폴백):
+ * <p>호출 흐름 (실행기 고르는 순서는 {@code resolveEndpoint} 참고, CR-178):
  * <ol>
- *   <li>헤더 {@code X-Aimbase-Agent-Id} 명시 → {@link AgentRegistryService#resolveActiveRunner(String)}</li>
- *   <li>위젯 토큰 user_ref 클레임 → {@link AgentRegistryService#resolveActiveByUserRef(String)} (정상 흐름)</li>
- *   <li>둘 다 없으면 400</li>
+ *   <li>헤더 {@code X-Aimbase-Agent-Id} 명시: {@link AgentRegistryService#resolveActiveRunner(String)}</li>
+ *   <li>커넥터 config agent_name: {@link AgentRegistryService#resolveActiveByAgentName(String)}</li>
+ *   <li>위젯 토큰 user_ref 클레임: {@link AgentRegistryService#resolveActiveByUserRef(String)}</li>
+ *   <li>모두 없으면 400</li>
  *   <li>{@link ClaudeCliRunnerClient} 로 Runner 호출</li>
  * </ol>
  *
@@ -319,12 +320,13 @@ public class ClaudeCliAdapter implements LLMAdapter {
     /**
      * 라우팅 우선순위
      *   1) {@code X-Aimbase-Agent-Id} 헤더 명시 (디버깅/특수 케이스 호환, CR-071)
-     *   2) 위젯 토큰 {@code user_ref} 클레임 (위젯 정상 흐름, CR-075)
-     *   3) 커넥터 config {@code agent_name} (워크플로우 정상 흐름, CR-103)
+     *   2) 커넥터 config {@code agent_name} (서버 실행기 연결, 워크플로우, CR-103)
+     *   3) 위젯 토큰 {@code user_ref} 클레임 (사용자 PC 실행기 연결, CR-075)
      *   4) 모두 없으면 400
      *
-     * <p>헤더/user_ref 가 커넥터 기본값(agent_name)보다 우선 — 호출자가 명시한 라우팅이
-     * 커넥터에 박힌 기본값을 덮는다. 워크플로우 경로는 1·2 가 비어 있으므로 3 이 동작한다.
+     * <p>CR-178: 위젯 토큰의 user_ref 는 대화 목록과 기억의 주인을 가리키는 값이기도 하다. 서버 실행기를 지정한
+     * 연결에서 user_ref 가 그 지정을 덮으면, 대화 목록을 쓰려고 user_ref 를 실은 화면의 질문이 사용자 PC 실행기를
+     * 찾다 끊긴다. 그래서 연결에 지정된 실행기가 먼저이고, 지정이 없는 연결만 user_ref 로 사용자 PC 실행기를 찾는다.
      */
     private AgentEndpoint resolveEndpoint() {
         // 1) 헤더 명시 우선
@@ -341,24 +343,24 @@ public class ClaudeCliAdapter implements LLMAdapter {
             return ep.get();
         }
 
-        // 2) user_ref 자동 라우팅 (CR-075)
-        String userRef = RequestContext.getUserRef();
-        if (userRef != null && !userRef.isBlank()) {
-            Optional<AgentEndpoint> ep = agentRegistry.resolveActiveByUserRef(userRef);
-            if (ep.isEmpty()) {
-                throw new RuntimeException("cli_agent_offline:user=" + userRef
-                        + " (사용자 PC 의 aimbase-agent 가 기동되지 않았거나 runner_capability=false)");
-            }
-            return ep.get();
-        }
-
-        // 3) 커넥터 config agent_name 자동 라우팅 (CR-103 — 워크플로우 LLM_CALL/AGENT_CALL 경로)
+        // 2) 커넥터 config agent_name 자동 라우팅 (CR-103 — 워크플로우 LLM_CALL/AGENT_CALL 경로)
         if (routingAgentName != null && !routingAgentName.isBlank()) {
             Optional<AgentEndpoint> ep = agentRegistry.resolveActiveByAgentName(routingAgentName);
             if (ep.isEmpty()) {
                 // CR-082 와 동일 — 인프라 문제는 RuntimeException 으로 일관 (SSE ASYNC dispatch 회피).
                 throw new RuntimeException("cli_agent_offline:agent-name=" + routingAgentName
                         + " (해당 이름의 agent 가 inactive 또는 runner_capability=false)");
+            }
+            return ep.get();
+        }
+
+        // 3) user_ref 자동 라우팅 (CR-075)
+        String userRef = RequestContext.getUserRef();
+        if (userRef != null && !userRef.isBlank()) {
+            Optional<AgentEndpoint> ep = agentRegistry.resolveActiveByUserRef(userRef);
+            if (ep.isEmpty()) {
+                throw new RuntimeException("cli_agent_offline:user=" + userRef
+                        + " (사용자 PC 의 aimbase-agent 가 기동되지 않았거나 runner_capability=false)");
             }
             return ep.get();
         }
