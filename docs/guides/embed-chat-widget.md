@@ -269,7 +269,7 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`, `locale`: 위 속성과 같다. 언어별 값은 `{ ko: ..., en: ... }` 객체로 준다 (CR-175, CR-177)
 - `on.onNewConversation({previousSessionId, sessionId})`: 사용자가 새 대화를 시작했을 때. 엘리먼트로 붙였으면 `new-conversation` 이벤트(`detail` 에 같은 값). 앞 대화는 서버에 남는다 (CR-175)
 
-### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-180, CR-184)
+### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-180, CR-184, CR-182)
 
 붙이는 앱이 따로 만들 것 없이 위젯 안에 들어 있다.
 
@@ -286,6 +286,9 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | 9 | 응답 안 HTML 코드 블록의 「실행」, SVG 코드 블록의 그림 보기와 「옆 창에서 보기」 | 없음. HTML 은 격리된 틀에서 돌고 바깥 주소로 데이터를 보내지 못한다 |
 | 10 | + 메뉴 「그림 만들기」 와 그림 아래 크게 보기, 다운로드, 「그림 고치기」 (CR-184) | 없음. 운영자가 그 대화 연결에 「그림 연결」 을 선택해야 메뉴가 보인다(운용 가이드 § 2-16) |
 | 11 | 화면 언어(한국어, English) | 기본값만 `locale` 로 줄 수 있다. 붙이는 앱이 주는 글은 언어별로 줄 수 있다 (CR-177) |
+| 12 | AI 가 만든 워드, PDF, 엑셀, PPT, CSV 파일을 파일 칩으로 받기 (CR-182) | 없음. 운영자가 런타임 설정 `chat.file-create.enabled` 로 끌 수 있다 |
+| 13 | 응답 아래 「저장」(PDF, 워드), 더 보기 「대화 내보내기」(PDF, 워드, 마크다운) (CR-182) | 없음. PDF 는 Aimbase 서버에 한글 글꼴이 있을 때만 보인다 |
+| 14 | 더 보기 「공유 링크 만들기」, 파일 칩 끝 「공유」. 그 순간의 사본을 링크를 가진 사람이 기한 안에 로그인 없이 연다 (CR-182) | 없음. 운영자가 공개 주소 `chat.share.public-base-url` 을 넣어야 보인다(운용 가이드 § 2-17) |
 
 위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 파일 미리보기는 받기와 같은 권한이라 토큰 scopes 에 `chat:upload` 가 있어야 한다. 서버 API 는 API 가이드 § 28, § 29, 운영 설정은 운용 가이드 § 2-14.
 
@@ -317,6 +320,8 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | 마이크 단추가 없다 | 위젯에 넘긴 토큰 scopes 에 `chat:stt` 가 없음 | BFF 가 받은 scopes 를 그대로 넘긴다 |
 | 파일 칩을 눌러도 받기만 된다 | Aimbase 서버가 CR-180 전 판이라 파일 목록에 미리보기 종류가 없음 | 서버를 올린다 |
 | HTML 「실행」 화면에서 스크립트나 바깥 그림이 돌지 않는다 | 붙이는 앱 화면의 보안 정책(CSP)이 실행 틀에도 걸림 | 앱의 CSP 가 그 스크립트와 주소를 허용해야 한다 |
+| 「공유 링크 만들기」, 「공유」 가 없다 | Aimbase 런타임 설정에 공개 주소가 없음 | 운영자에게 `chat.share.public-base-url` 을 요청한다 |
+| 「저장」, 「대화 내보내기」 가 없다 | Aimbase 서버가 CR-182 전 판이라 위젯 설정에 형식 목록이 없음 | 서버를 올린다 |
 
 ---
 
