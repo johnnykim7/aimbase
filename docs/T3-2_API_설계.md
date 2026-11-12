@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.12 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180
+> 설계 버전: 7.13 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3167,6 +3167,91 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 ### 대화 meta 제목 수정 (기존 경로 동작 추가)
 
 `PUT /api/v1/conversations/{sessionId}/meta` 에 `title` 이 있으면 `title_source = USER` 로 둔다.
+
+## 위젯 옆 창 문서를 대화로 고치기 [v7.13, CR-181]
+
+설계 상세: [CR-181_위젯_옆_창_문서를_대화로_고치기.md](CR-181_위젯_옆_창_문서를_대화로_고치기.md). 옆 창 문서를 가리키는 값과 미리보기 API 는 CR-180 이 정본이다.
+
+### 대화 요청 칸 추가 [PRD-480]
+
+`POST /api/v1/chat/completions` 🔒 (`chat:stream`)
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| document_edit | object | N | 이번 질문이 옆 창 문서를 고치는 요청일 때 |
+| document_edit.target | object | Y | CR-180 옆 창 대상. `{kind: "file", name}` 또는 `{kind: "block", turn_id, index, lang, source}` |
+| document_edit.base_version | int | N | 옆 창에 보이는 판. 없으면 마지막 판 |
+
+```json
+{
+  "session_id": "sess-...",
+  "stream": true,
+  "messages": [{"role": "user", "content": [{"type": "text", "text": "표지 제목을 2026 상반기 보고로 바꿔 줘"}]}],
+  "document_edit": {"target": {"kind": "file", "name": "report.pptx"}, "base_version": 2}
+}
+```
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 400 | `document_edit_invalid:no_session` | `session_id` 없음 |
+| 400 | `document_edit_invalid:source` | 처음 고치는 BLOCK 인데 `source` 없음 |
+| 400 | `document_edit_invalid:base_version` | 바탕 판이 없거나 지운 판 |
+| 400 | `document_edit_unsupported` | 원본 없는 파일인데 실행기 연결이 아님(BIZ-203) |
+| 404 | `document_not_found` | BLOCK 의 `turn_id` 가 이 세션 답이 아님 |
+| 409 | `session_busy` | 그 세션에 답이 도는 중(CR-175) |
+| 410 | `document_source_gone` | 처음 고치는 FILE 인데 `out/<이름>` 이 없음 |
+
+**스트림 이벤트 `document`** (고치기 요청일 때만, done 바로 앞)
+
+```json
+{"document_id": "6f1c...", "status": "UPDATED", "version": 3}
+```
+
+| 필드 | 설명 |
+|------|------|
+| document_id | 문서 번호 |
+| status | `UPDATED`, `UNCHANGED`(BIZ-201), `FAILED`(중지, 오류) |
+| version | `UPDATED` 일 때 만든 판 |
+
+비스트리밍 응답은 `result.document` 에 같은 값을 싣는다.
+
+### 세션 문서 목록 [PRD-481]
+
+`GET /api/v1/chat/documents?session_id=` 🔒 (`chat:stream`)
+
+현재 테넌트 DB 에서 그 세션의 문서와 지우지 않은 판을 준다. 없으면 빈 목록.
+
+```json
+[{
+  "document_id": "6f1c...", "kind": "FILE", "name": "report.pptx",
+  "turn_id": null, "index": null, "lang": null, "latest_version": 3,
+  "versions": [
+    {"version": 1, "base_version": null, "made_by": "ORIGINAL", "turn_id": "a1...", "size": 28243, "created_at": "2026-11-13T10:00:00+09:00"},
+    {"version": 2, "base_version": 1, "made_by": "CHAT_EDIT", "turn_id": "a1...", "size": 28511, "created_at": "2026-11-13T10:00:40+09:00"}
+  ]
+}]
+```
+
+BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다.
+
+### 판 본문 [PRD-481]
+
+`GET /api/v1/chat/documents/{documentId}/versions/{version}` 🔒 (`chat:stream`)
+
+- BLOCK: `{"lang": "html", "content": "<!doctype html>..."}`
+- FILE: 파일 그대로(`Content-Disposition: attachment`, 확장자별 형식)
+- 404 `document_not_found`: 문서나 판이 없음, 지운 판, 다른 테넌트
+
+### CR-180 미리보기 API 인자 추가 [PRD-481]
+
+| API | 추가 | 설명 |
+|-----|------|------|
+| `GET /api/v1/chat/artifacts/preview` | 인자 `version`, 응답 `has_source` | `version` 이 있으면 판 저장소의 그 판 파일을 변환 대상으로 쓴다. 변환 캐시 열쇠에 판 해시를 넣는다. `has_source` 는 `out/.source/<이름>.json` 이 있는지 |
+| `GET /api/v1/chat/artifacts/preview/page` | 인자 `version` | 위와 같다 |
+
+### 위젯 설정 조회 칸 추가 [PRD-480]
+
+`GET /api/v1/chat/widget-settings` 응답에 `document_binary_edit_supported`(boolean) 를 더한다. 연결이 실행기 연결이면 true. 위젯은 BLOCK 이거나, `has_source` 이거나, 이 값이 true 일 때만 고치기 입력칸을 보인다.
 
 ---
 
