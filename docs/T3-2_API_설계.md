@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.21 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182
+> 설계 버전: 7.21 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3848,6 +3848,53 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 - `tools` 가 있는 정책은 도구 호출 평가에만 쓴다(BIZ-240). 규칙 타입은 REQUIRE_APPROVAL, DENY 가 뜻이 있다
 
 ---
+
+## 위젯 사용자 선호 기억 [v7.21, CR-179]
+
+설계 상세: [CR-179_위젯_사용자_선호_기억.md](CR-179_위젯_사용자_선호_기억.md) 4절, 6절. 권한은 모두 `chat:stream` 위젯 토큰이다. 주인은 토큰 user_ref 다(BIZ-180).
+
+| 오류 | 경우 |
+|---|---|
+| 403 `memory_unavailable` | 토큰에 user_ref 가 없음, 위젯 토큰이 아님(로그인 사용자, API 키) |
+| 409 `memory_disabled` | 테넌트 스위치 `widget.memory-enabled` 가 꺼짐 |
+
+### 내 선호 조회와 저장 [PRD-440, PRD-442]
+
+`GET /api/v1/chat/me/preferences`
+
+```json
+{"instructions": "저는 CS 상담원입니다. 답은 짧게, 존댓말로 주세요.", "instructions_max_chars": 1500,
+ "memory_enabled": true, "last_model": "claude-sonnet-5-5", "last_thinking": false}
+```
+
+- 행이 없으면 `instructions` 빈 글, `memory_enabled` 참, `last_model`, `last_thinking` 은 null.
+
+`PUT /api/v1/chat/me/preferences`
+
+| 칸 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| instructions | 글 | 선택 | 내 선호 글. 빈 글이면 지운다 |
+| memory_enabled | 참거짓 | 선택 | 자동 기억 켬 |
+| last_model | 글 | 선택 | 마지막에 선택한 모델 id |
+| last_thinking | 참거짓 | 선택 | 마지막에 선택한 깊게 생각하기 |
+
+- 본문에 온 칸만 바꾼다. 돌려주는 모양은 조회와 같다.
+- 400 `preferences_too_long`: `instructions` 가 `widget.preferences-max-chars` 자를 넘음. 400 `model_invalid`: `last_model` 이 100자를 넘음.
+
+### 자동 기억 목록과 지우기 [PRD-441]
+
+| 방법 | 경로 | 뜻 |
+|---|---|---|
+| GET | /api/v1/chat/me/memories | `[{"id": "uuid", "content": "답은 짧게 받기를 원함", "created_at": "2026-11-13T10:00:00+09:00"}]` 오래된 것부터 |
+| DELETE | /api/v1/chat/me/memories/{id} | 하나 지운다. 없거나 남의 것이면 404 `memory_not_found` |
+| DELETE | /api/v1/chat/me/memories | 그 사람 자동 기억을 모두 지운다. `{"deleted": 3}` |
+
+- 자동 기억을 꺼도 목록과 지우기는 된다(BIZ-184).
+- 테넌트 스위치가 꺼지면 위 다섯 API 모두 409 `memory_disabled` 다.
+
+### 대화 요청
+
+요청 본문에 칸을 더하지 않는다. 주인이 있는 위젯 대화면 서버가 내 선호와 자동 기억을 시스템 지시 뒤에 넣고(BIZ-181), 응답이 정상으로 끝나면 응답과 따로 기억을 뽑는다(BIZ-182).
 
 ## 작성 가이드
 
