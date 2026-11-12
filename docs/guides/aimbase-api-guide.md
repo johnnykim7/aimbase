@@ -356,7 +356,7 @@ curl -X POST /api/v1/workflows \
 
 > **주의**: 스텝 타입은 `TOOL_CALL`입니다 (`TOOL_USE` 아님). config에서 도구 이름은 `tool` (`tool_name` 아님), 입력은 `input` (`arguments` 아님).
 
-> **`LLM_CALL`이 Claude CLI 커넥터(`adapter=anthropic-cli`)를 가리킬 때의 라우팅 (CR-103)** — 어느 PC/서버의 agent(Runner)로 보낼지는 다음 우선순위로 결정된다: ① 요청 헤더 `X-Aimbase-Agent-Id` → ② 위젯 토큰의 `user_ref` 클레임(CR-075) → ③ **커넥터 `config.agent_name`** → ④ 모두 없으면 400(`cli_routing_missing`). 워크플로우는 헤더/토큰 없이 실행되므로 보통 ③번 — 커넥터 `config.agent_name`에 라우팅 대상 agent 이름을 박아두면 소비앱이 agent-id를 몰라도 자동 라우팅된다. 대상 agent가 미등록/오프라인이면 `cli_agent_offline`로 스텝 실패한다.
+> **`LLM_CALL`이 Claude CLI 커넥터(`adapter=anthropic-cli`)를 가리킬 때의 라우팅 (CR-103)** — 어느 PC/서버의 agent(Runner)로 보낼지는 다음 순서로 결정된다: ① 요청 헤더 `X-Aimbase-Agent-Id`, ② **커넥터 `config.agent_name`**, ③ 위젯 토큰의 `user_ref` 클레임(CR-075, 커넥터에 `agent_name` 이 없을 때만), ④ 모두 없으면 400(`cli_routing_missing`). 서버 실행기를 지정한 커넥터는 위젯 토큰에 `user_ref` 가 있어도 그 실행기로 간다(CR-178). 워크플로우는 헤더/토큰 없이 실행되므로 보통 ②번 — 커넥터 `config.agent_name`에 라우팅 대상 agent 이름을 박아두면 소비앱이 agent-id를 몰라도 자동 라우팅된다. 대상 agent가 미등록/오프라인이면 `cli_agent_offline`로 스텝 실패한다.
 
 **ROUTER 스텝 (N-way 동적 라우팅, CR-084)** — `CONDITION`의 true/false 2갈래를 일반화. `routes` 배열을 정의 순서대로 평가해 `when` 표현식이 참인 첫 route의 `to`로 분기, 모두 실패 시 `default:true` route 사용:
 
@@ -3297,6 +3297,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 |------|------|----------|
 | v3.39.0 | 2026-11-13 | **CR-183 위젯 데이터 첨부, 계산, 그래프, 수식** (§ 36). 첨부가 xlsx, xls, csv, tsv, docx, txt, md 를 받고 오류 코드 `FG-ATT-4003` ~ `FG-ATT-4006`, 오류 본문 `code`, `limit`. 대화 요청 `render_features`, `document` 블록이 데이터, 텍스트 첨부도 받음. 계산 도구 `data_query`. 위젯 설정 `attachments` |
 | v3.38.0 | 2026-11-13 | **CR-186 위젯 답 읽어 주기와 음성 대화** (§ 35). 읽을 소리 `POST /api/v1/chat/tts`, 음성 대화 입장권 `POST /api/v1/chat/voice/tickets`, 실시간 받아쓰기 중계 웹소켓 `/api/v1/chat/voice/stream`, 위젯 설정 칸 7개, 위젯 토큰 scope `chat:tts`, `chat:voice` |
+| v3.37.1 | 2026-11-13 | **CR-178 Claude CLI 커넥터 실행기 순서 보정** (§ 4-1 LLM_CALL 라우팅 안내). 커넥터 `config.agent_name` 이 위젯 토큰 `user_ref` 보다 먼저다. `user_ref` 는 `agent_name` 이 없는 커넥터에서만 사용자 PC 실행기를 찾는다 |
 | v3.37.0 | 2026-11-13 | **CR-178 위젯 지난 대화 목록과 프로젝트** (§ 34). 대화 목록 `GET /api/v1/chat/sessions`, 이어보기 `GET /api/v1/chat/sessions/{session_id}/messages`, 이름 바꾸기와 옮기기 `PATCH`, 삭제 `DELETE`, 프로젝트와 자료 `/api/v1/chat/projects/**`, 대화 요청 `chat_project_id`, 위젯 설정 `history_enabled`, `project_instructions_max_chars`, `project_files_max_count`. `user_ref` 없는 위젯 토큰은 403 `widget_user_required`, 위젯 토큰으로 `/api/v1/conversations/**` 는 403 `widget_forbidden` |
 | v3.36.0 | 2026-11-13 | **CR-181 위젯 옆 창 문서를 대화로 고치기** (§ 33). 대화 요청 `document_edit`, 스트림 이벤트와 `done` 의 `document`. 세션 문서 목록 `GET /api/v1/chat/documents`, 판 본문 `GET /api/v1/chat/documents/{document_id}/versions/{version}`, 되돌리기 `POST .../restore`. 미리보기 정보, 쪽 그림, 내려받기에 `version` 인자, 미리보기 정보에 `has_source`, 위젯 설정에 `document_binary_edit_supported` (§ 28-2) |
 | v3.35.0 | 2026-11-13 | **CR-179 위젯 사용자 선호 기억** (§ 32). 내 선호 `GET`, `PUT /api/v1/chat/me/preferences`, 자동 기억 `GET`, `DELETE /api/v1/chat/me/memories`, `DELETE /api/v1/chat/me/memories/{id}`, 오류 코드 `memory_unavailable`, `memory_disabled`, `memory_not_found`, `preferences_too_long`. 대화 요청 모양은 그대로 |
