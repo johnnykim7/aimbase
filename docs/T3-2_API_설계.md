@@ -3432,6 +3432,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 
 | 상태 | 오류 | 경우 |
 |------|------|------|
+| 400 | `voice_invalid:session_id` | `session_id` 가 비었음 |
 | 403 | `voice_forbidden` | 위젯 토큰에 `chat:voice` 없음 |
 | 409 | `voice_disabled` | `widget.voice.enabled` false |
 | 409 | `voice_session_busy` | 그 세션에 열린 중계가 있음 |
@@ -3455,7 +3456,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 | 4401 | 입장권 없음, 지남, 이미 씀 |
 | 4403 | 출처가 입장권의 허용 출처와 다름 |
 | 4408 | 발화가 `widget.voice.max-utterance-seconds` + 5초를 넘음 |
-| 4429 | 열린 중계 상한 |
+| 4429 | 열린 중계 상한, 또는 같은 세션의 중계가 아직 열려 있음 |
 | 1011 | 받아쓰기 서버에 잇지 못함, 끊김, `end` 뒤 `widget.voice.final-timeout-seconds` 안에 마지막 글이 없음 |
 
 ### GET `/chat/widget-settings` 칸 추가 [PRD-580, PRD-581]
