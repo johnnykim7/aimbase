@@ -148,7 +148,7 @@ public class ArtifactPreviewService {
         try {
             Path path = artifactService.resolveDownloadPath(sessionId, name);
             long size = Files.size(path);
-            Instant modifiedAt = Files.getLastModifiedTime(path).toInstant();
+            Instant modifiedAt = Instant.ofEpochMilli(Files.getLastModifiedTime(path).toMillis());
             Path cacheDir = artifactService.resolvePreviewRoot(sessionId)
                     .resolve(cacheKey(name, modifiedAt, size));
             return new Source(name, path, size, modifiedAt, PreviewKind.of(name), cacheDir);
