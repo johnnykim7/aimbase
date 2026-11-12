@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.15 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186
+> 설계 버전: 7.16 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3375,6 +3375,98 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다.
 ### 위젯 설정 칸 추가 [PRD-463]
 
 `GET /api/v1/chat/widget-settings` 응답에 `preview_html_script_sources`(글 배열)를 더한다. 값은 런타임 설정 `widget.preview-html-script-sources`.
+
+---
+
+## 위젯 데이터 첨부 계산 그래프 수식 [v7.16, CR-183]
+
+설계 상세: [CR-183_위젯_데이터_첨부_계산_그래프_수식.md](CR-183_위젯_데이터_첨부_계산_그래프_수식.md). 위젯 쪽 자리는 CR-177 틀 안내서 3.5 를 따른다.
+
+### 첨부 올리기 변경 [PRD-520]
+
+`POST /api/v1/chat/attachments` (인증, `chat:upload`). 요청은 그대로다. 받는 종류와 크기 상한 설정:
+
+| 종류 | 확장자 | 판정 | 크기 상한 설정 |
+|------|--------|------|---------------|
+| 이미지 | png, jpg, jpeg, gif, webp | 파일 앞 바이트(지금) | widget.attachment.max-image-bytes |
+| PDF | pdf | 파일 앞 바이트(지금) | widget.attachment.max-pdf-bytes |
+| 엑셀 | xlsx, xls | 확장자, zip 안 `xl/workbook.xml` 또는 OLE 머리 | widget.attachment.max-data-bytes |
+| CSV, TSV | csv, tsv | 확장자, 글 파일(UTF-8 또는 CP949, NUL 없음) | widget.attachment.max-data-bytes |
+| 워드 | docx | 확장자, zip 안 `word/document.xml` | widget.attachment.max-text-bytes |
+| 텍스트 | txt, md | 확장자, 글 파일 | widget.attachment.max-text-bytes |
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 400 | `FG-ATT-4001` | 받지 않는 확장자(지금 코드) |
+| 400 | `FG-ATT-4002` | 크기 상한 초과(지금 코드). `limit` |
+| 400 | `FG-ATT-4003` | 암호가 설정된 엑셀, 워드 |
+| 400 | `FG-ATT-4004` | 열리지 않는 엑셀, 워드 |
+| 400 | `FG-ATT-4005` | 표 하나가 행 상한 초과. `limit` |
+| 400 | `FG-ATT-4006` | 표 하나가 열 상한 초과. `limit` |
+| 422 | `FG-ATT-4221` | 확장자와 내용이 다름(지금 코드) |
+
+첨부 오류 응답 본문(모든 FG-ATT 코드):
+
+```json
+{"success": false, "error": "rows 100001 exceed limit 100000 in sheet 1", "code": "FG-ATT-4005", "limit": 100000}
+```
+
+### 대화 요청 칸 추가 [PRD-520, PRD-525]
+
+`POST /api/v1/chat/completions` (인증, `chat:stream`)
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| render_features | string[] | N | 화면이 그릴 수 있는 형식. 이번 값 `chart`, `math`. 영문 소문자, 숫자, 하이픈, 최대 10개 |
+| messages[].content[] `document` 블록 | object | N | `attachment_id` 가 PDF 면 지금과 같고, 워드와 텍스트면 본문 글 블록, 데이터 파일이면 데이터 요약 글 블록으로 바꿔 보낸다 |
+
+| 상태 | 코드 | 경우 |
+|------|------|------|
+| 400 | `render_features_invalid` | 형식 이름 규칙 위반 또는 10개 초과 |
+
+- 값마다 테넌트 프롬프트 틀 `widget.render.<값>` 이 있고 활성이면 시스템 안내 끝에 붙인다. 없는 값과 중복은 무시한다
+
+### 위젯 설정 칸 추가 [PRD-520]
+
+`GET /api/v1/chat/widget-settings` 응답에 `attachments` 를 더한다.
+
+```json
+{"attachments": {"accept": ["png","jpg","jpeg","gif","webp","pdf","xlsx","xls","csv","tsv","docx","txt","md"],
+                 "max_bytes": {"image": 10485760, "pdf": 33554432, "data": 10485760, "text": 10485760}}}
+```
+
+### 서버 도구 `data_query` [PRD-521]
+
+입력:
+
+```json
+{"file_id": "3f2a9c1e-...", "sql": "SELECT \"지점\", SUM(\"매출액\") AS \"합계\" FROM t1 GROUP BY \"지점\" ORDER BY 2 DESC"}
+```
+
+출력:
+
+```json
+{"columns": [{"name": "지점", "type": "VARCHAR"}, {"name": "합계", "type": "DECFLOAT"}],
+ "rows": [["강남", 38750000], ["서초", 21400000]], "truncated": false, "elapsed_ms": 42}
+```
+
+| 오류 글 | 경우 |
+|--------|------|
+| `file not found` | 세션 없음, 다른 세션 파일, 보관 기간 지남, 데이터 파일 아님 |
+| `no data file in this conversation` | 그 세션에 데이터 파일이 없음 |
+| `only a single SELECT or WITH statement is allowed` | 문장 검사 위반 |
+| `query timed out after N seconds` | 시간 상한 |
+| H2 오류 글 그대로 | 없는 표, 열, 문법 오류. 모델이 고쳐 다시 부른다 |
+
+| 연결 | 붙는 조건 | 길 |
+|------|----------|-----|
+| API | 세션에 보관 중인 데이터 파일이 있음. `tool_filter.exclude_tools` 에 있으면 빼고, `allowed_tools` 가 있으면 더한다 | 도구 정의 |
+| 실행기 AIMBASE, HYBRID | 대화 API 요청 | `/mcp` 허용 도구에 더한다 |
+| 실행기 NATIVE | 대화 API 요청 | `/mcp-data` 통로 `aimbase-data`, `--allowedTools mcp__aimbase-data__data_query` |
+
+### 서버 MCP 통로 `/mcp-data` [PRD-521]
+
+`data_query` 하나만 등록한 MCP 통로. 인증과 요청 스레드 실행은 `/mcp-skills` 와 같다. 머리글 `X-Aimbase-Session-Id`(실행기가 싣는 세션 번호, 도구 문맥의 세션). 워크플로우 단계 요청에는 붙이지 않는다.
 
 ---
 
