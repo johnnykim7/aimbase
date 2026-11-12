@@ -219,7 +219,9 @@ class SaveExport {
 }
 
 const CSS = `
-.sx-row .sx-label { display: inline-flex; align-items: center; gap: 9px; }
+.sx-row { flex-wrap: wrap; row-gap: 6px; }
+.sx-row .sx-label { display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; }
+.sx-row .chipb { white-space: nowrap; }
 .sx-row.sx-off { opacity: .45; }
 .sx-row .chipb:disabled { cursor: default; }
 .sx-wrap { position: relative; display: inline-flex; }
