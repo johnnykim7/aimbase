@@ -2231,6 +2231,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
         },
       },
       addErrorTexts: (map) => void Object.assign(featureErrorTexts, map),
+      renderMarkdown: (target, text) => rich(target, text),
       fontSize: () => fontSize,
       setFontSize: (size) => {
         applyFontSize(size);

@@ -242,6 +242,8 @@ export interface WidgetContext {
     };
     header: { setTitleTag(spec: TitleTagSpec | null): void };
     addErrorTexts(map: Record<string, () => string>): void;
+    /** 응답 본문과 같은 모양(표 단추, 코드 강조, 등록된 마크다운 확장, 지금 언어 문구)으로 마크다운을 그린다 */
+    renderMarkdown(target: HTMLElement, text: string): void;
     fontSize(): FontSize;
     /** 글자 크기를 바꾸고 그 브라우저에 기억한다 */
     setFontSize(size: FontSize): void;

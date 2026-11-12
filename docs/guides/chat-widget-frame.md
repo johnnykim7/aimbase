@@ -72,7 +72,7 @@ export const exportChat: WidgetFeature = {
 | 4 | 옆 창 | `ctx.ui.sidePane.open(spec)`, `close()` | CR-180 미리보기, CR-181 고치기 |
 | 5 | 입력칸 단추, 입력칸 모드 | `ctx.ui.composer.addTool(spec)`, `setMode(spec)` | CR-186 음성 대화, CR-184 그림 만들기 |
 | 6 | 응답 아래 단추 | `ctx.ui.answer.addAction(spec)` | CR-182 응답 저장, CR-186 읽어 주기 |
-| 7 | 응답 본문 손질 | `ctx.ui.answer.addDecorator(spec)`, `addMarkdownExtension(spec)` | CR-180 HTML, SVG 보기 단추, CR-183 그래프, 수식, CR-184 그림 |
+| 7 | 응답 본문 손질, 마크다운 그리기 | `ctx.ui.answer.addDecorator(spec)`, `addMarkdownExtension(spec)`, `ctx.ui.renderMarkdown` | CR-180 HTML, SVG 보기 단추, CR-183 그래프, 수식, CR-184 그림 |
 | 8 | 산출물 열기 | `ctx.ui.answer.addArtifactOpener(spec)` | CR-180 산출물 칩을 누르면 옆 창 |
 | 9 | 산출물 칩 단추 | `ctx.ui.answer.addArtifactAction(spec)` | CR-182 파일 공유 |
 | 10 | 문구표, 오류 문구, 화면 언어 | `defineStrings`, `ctx.strings(pack)`, `ctx.text`, `ctx.list`, `ctx.setLocale`, `ctx.ui.addErrorTexts(map)` | 모든 건, CR-184 그림 오류 |
@@ -216,6 +216,7 @@ ctx.ui.answer.addMarkdownExtension({ id, extension });   // extension 은 marked
 - 응답 글이 비어도 오류가 아니면 응답 칸과 아래 줄을 그린다(그림만 있는 답).
 - 산출물 칩을 누르면 order 순으로 `canOpen` 이 참인 첫 열기가 받는다. 없으면 위젯 본체가 내려받는다.
 - 산출물 칩 단추는 칩 끝에 order 순으로 붙는 작은 단추다. 단추를 누르면 칩 열기는 불리지 않는다. null 을 돌려주면 그 칩에는 붙이지 않는다.
+- 옆 창 미리보기처럼 응답 밖에서 마크다운을 그릴 때는 `ctx.ui.renderMarkdown(target, text)` 를 쓴다. 표 단추, 코드 강조, 등록된 마크다운 확장, 지금 언어 문구가 응답 본문과 같다. `rich-render.ts` 를 직접 부르면 문구가 한국어로 고정된다. 언어가 바뀌면 부르는 건이 다시 그린다.
 - 마크다운 확장은 응답 원문을 HTML 로 바꾸는 단계에 끼어든다(수식 `$...$` 처럼 강조 해석보다 먼저 잡아야 하는 것). 끝난 응답을 그릴 때 쓰인다. 답이 도는 중에는 받은 원문 글을 그대로 보인다. 만든 HTML 은 위젯 본체의 소독(DOMPurify)을 거치므로 허용 태그와 `data-` 속성으로 자리만 남기고, 실제 그리기는 손질(decorate)에서 한다. 확장은 그 위젯에만 걸린다.
 
 ### 3.6 문구표

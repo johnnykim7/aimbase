@@ -17,7 +17,7 @@
 import DOMPurify from "dompurify";
 import { Marked, type TokenizerAndRendererExtension } from "marked";
 import { copyText } from "./clipboard";
-import type { RichStrings } from "./strings";
+import { CORE, type RichStrings } from "./strings";
 import { tableToXlsxBlob } from "./xlsx-writer";
 
 /**
@@ -32,9 +32,13 @@ export function createMarked(extensions: TokenizerAndRendererExtension[]): Marke
 
 export interface RichOptions {
   theme?: "light" | "dark";
-  labels: RichStrings;
-  marked: Marked;
+  /** 없으면 한국어 문구. 기능은 이 함수를 직접 부르지 말고 ctx.ui.renderMarkdown 으로 지금 언어 문구를 쓴다 */
+  labels?: RichStrings;
+  /** 없으면 확장 없는 공용 해석기 */
+  marked?: Marked;
 }
+
+let plainMarked: Marked | null = null;
 
 // mermaid 는 페이지에서 1회만 초기화.
 let mermaidInitPromise: Promise<typeof import("mermaid").default> | null = null;
@@ -285,13 +289,15 @@ async function enhanceMermaid(container: HTMLElement, theme: "light" | "dark"): 
 export function renderRichInto(
   target: HTMLElement,
   markdown: string,
-  opts: RichOptions,
+  opts: RichOptions = {},
 ): void {
   const theme = opts.theme ?? "light";
+  const labels = opts.labels ?? CORE.ko.rich;
+  const marked = opts.marked ?? (plainMarked ??= createMarked([]));
 
   let html: string;
   try {
-    html = opts.marked.parse(markdown, { async: false }) as string;
+    html = marked.parse(markdown, { async: false }) as string;
   } catch {
     // 파싱 실패 시 원문 유지 (textContent).
     target.textContent = markdown;
@@ -303,8 +309,8 @@ export function renderRichInto(
   target.classList.add("rich");
 
   hardenLinks(target);
-  enhanceTables(target, opts.labels);
+  enhanceTables(target, labels);
   // 코드/mermaid 는 lazy — 비동기로 순차 강화 (렌더는 이미 끝났으므로 UX 영향 없음).
-  void enhanceCodeBlocks(target, theme, opts.labels);
+  void enhanceCodeBlocks(target, theme, labels);
   void enhanceMermaid(target, theme);
 }
