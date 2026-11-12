@@ -35,7 +35,7 @@ class FileCreateToolGateTest {
         ChatRequest req = request(false, null, true);
 
         assertThat(gate.loop(req, false)).isTrue();
-        ToolFilterContext filter = gate.filter(req);
+        ToolFilterContext filter = gate.filter(req, null);
         assertThat(filter.allowedTools()).containsExactly(CreateFileTool.NAME);
         assertThat(filter.isToolAllowed(CreateFileTool.NAME)).isTrue();
         assertThat(filter.isToolAllowed("bash")).isFalse();
@@ -79,20 +79,34 @@ class FileCreateToolGateTest {
     void actions_enabled_request_excludes_or_adds_create_file() {
         ToolFilterContext base = new ToolFilterContext(List.of("bash"), null, null);
 
-        ToolFilterContext without = gate.filter(request(true, base, false));
+        ToolFilterContext without = gate.filter(request(true, base, false), base);
         assertThat(without.excludeTools()).contains(CreateFileTool.NAME);
         assertThat(without.allowedTools()).containsExactly("bash");
 
-        ToolFilterContext with = gate.filter(request(true, base, true));
+        ToolFilterContext with = gate.filter(request(true, base, true), base);
         assertThat(with.allowedTools()).containsExactly("bash", CreateFileTool.NAME);
 
-        ToolFilterContext none = gate.filter(request(true, null, false));
+        ToolFilterContext none = gate.filter(request(true, null, false), null);
         assertThat(none.isToolAllowed(CreateFileTool.NAME)).isFalse();
         assertThat(gate.extraAllowed(request(true, null, true), true)).isNull();
     }
 
+    @Test
+    @DisplayName("TC-CHT-083 도구를 켜지 않은 대화에 계산 도구가 붙어 있으면 create_file 을 함께 열고, 없으면 계산 도구만 둔다")
+    void data_query_only_base_gets_create_file_added() {
+        ToolFilterContext dataOnly = new ToolFilterContext(List.of("data_query"), null, null,
+                null, null, null, List.of("data_query"));
+
+        ToolFilterContext with = gate.filter(request(false, null, true), dataOnly);
+        assertThat(with.allowedTools()).containsExactly("data_query", CreateFileTool.NAME);
+        assertThat(with.attachedTools()).containsExactly("data_query");
+        assertThat(with.isToolAllowed("bash")).isFalse();
+
+        assertThat(gate.filter(request(false, null, false), dataOnly)).isSameAs(dataOnly);
+    }
+
     private static ChatRequest request(boolean actionsEnabled, ToolFilterContext filter, boolean fileCreate) {
         return new ChatRequest("m", "s1", List.of(), false, actionsEnabled, "user-a", null, null, filter,
-                null, null, null, null, null, null, null, null, null, null, null, fileCreate);
+                null, null, null, null, null, null, null, null, null, null, null, null).withFileCreate(fileCreate);
     }
 }

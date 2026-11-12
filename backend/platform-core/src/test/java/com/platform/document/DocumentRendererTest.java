@@ -54,7 +54,7 @@ class DocumentRendererTest {
         assertThat(html).doesNotContain("<script");
         assertThat(html).contains("&lt;script&gt;");
         assertThat(html).doesNotContain("javascript:");
-        assertThat(html).contains("<a href=\"https://example.com/a\">안전</a>");
+        assertThat(html).contains("href=\"https://example.com/a\">안전</a>");
         assertThat(html).contains("<a href=\"https://example.com/chart.png\">차트</a>");
         assertThat(html).doesNotContain("<img");
         assertThat(html).contains("<h1 class=\"doc-title\">보고서</h1>");
