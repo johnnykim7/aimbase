@@ -59,9 +59,21 @@ public record ChatRequest(
      * @param ownerRef        세션 주인(BIZ-170). 위젯 토큰 user_ref, 로그인 사용자 id
      * @param chatProjectId   세션을 처음 만들 때 넣을 위젯 프로젝트. 이미 있는 세션이면 null
      * @param questionDisplay 이어보기 화면에 보일 질문 글과 첨부({@code text}, {@code attachments})
+     * @param widget          CR-179: 위젯 토큰 요청인지. 내 선호와 자동 기억은 위젯 사용자에게만 쓴다(BIZ-180)
      */
     public record WidgetTurn(String ownerRef, java.util.UUID chatProjectId,
-                             java.util.Map<String, Object> questionDisplay) {}
+                             java.util.Map<String, Object> questionDisplay, boolean widget) {
+
+        /** CR-179: 기억과 선호의 주인. 위젯 토큰이고 user_ref 가 있을 때만 값이 있다(BIZ-180). */
+        public String memoryOwner() {
+            return widget ? ownerRef : null;
+        }
+
+        /** CR-179: 사용자가 쓴 이번 질문 글. 첨부에서 꺼낸 글은 들지 않는다(BIZ-182). 세션 없는 요청이면 null. */
+        public String questionText() {
+            return questionDisplay != null && questionDisplay.get("text") instanceof String text ? text : null;
+        }
+    }
 
     /** CR-182 이전 23-arg 호환 (파일 만들기 없음) */
     public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,

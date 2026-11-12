@@ -1,206 +1,298 @@
 package com.platform.session;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.domain.ConversationMemoryEntity;
+import com.platform.domain.UsageLogEntity;
+import com.platform.llm.ConnectionAdapterFactory;
 import com.platform.llm.LLMAdapterRegistry;
 import com.platform.llm.adapter.LLMAdapter;
-import com.platform.llm.model.ContentBlock;
+import com.platform.llm.adapter.RequestContext;
 import com.platform.llm.model.LLMRequest;
 import com.platform.llm.model.LLMResponse;
+import com.platform.llm.model.ModelConfig;
 import com.platform.llm.model.UnifiedMessage;
+import com.platform.orchestrator.ChatRequest;
 import com.platform.repository.ConversationMemoryRepository;
+import com.platform.repository.UsageLogRepository;
+import com.platform.service.PromptTemplateService;
+import com.platform.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
- * CR-031 PRD-213: Extract Memories 자동화.
+ * CR-179: 위젯 대화 질문에서 그 사람의 선호와 자기 정보를 뽑아 자동 기억으로 남긴다(PRD-441, BIZ-182, BIZ-183).
  *
- * 대화 5턴(10메시지) 이상 완료 시 비동기(Virtual Thread)로 Haiku를 호출하여
- * 향후 재사용할 핵심 정보를 자동 추출한다.
- *
- * <ul>
- *   <li>4가지 타입: task-specific, person context, pattern/best practice, personal preferences</li>
- *   <li>기존 LONG_TERM 메모리와 content 비교하여 중복 방지</li>
- *   <li>fire-and-forget 비동기 — 대화 흐름 미영향</li>
- *   <li>턴 기반 throttle — 동일 세션 연속 추출 방지</li>
- * </ul>
+ * <p>응답이 정상으로 끝나 저장된 뒤 응답과 따로 돈다. 실패해도 대화에는 영향이 없다.
+ * 대화 기록에 넣지 않으려고 대화 세션과 다른 세션 id 로 부르고, CLI 연결은 부른 뒤 그 작업자를 바로 정리한다.
  */
 @Service
 public class MemoryAutoExtractService {
 
     private static final Logger log = LoggerFactory.getLogger(MemoryAutoExtractService.class);
 
-    static final int MIN_MESSAGES_FOR_EXTRACTION = 10; // 5턴 = 10메시지
-    private static final String EXTRACT_MODEL = "anthropic/claude-haiku-4-5";
-    private static final String EXTRACT_PROMPT = """
-            아래 대화에서 향후 재사용할 핵심 정보를 추출하라.
-            각 항목은 한 줄로, 아래 4가지 타입 중 하나로 분류하여 출력:
+    static final String TEMPLATE_KEY = "widget.memory-extract";
+    /** 같은 사람의 질문이 겹쳐 끝나면 같은 기억을 두 번 넣거나 개수 한도를 넘기므로, 반영 단계만 사람별로 줄 세운다. */
+    private static final int LOCK_STRIPES = 64;
 
-            - [task] 작업 관련 사실 (예: "프로젝트 X는 Spring Boot 3.4 사용")
-            - [person] 사용자 정보 (예: "사용자는 시니어 Java 개발자")
-            - [pattern] 패턴/모범사례 (예: "이 팀은 PR 전에 반드시 테스트 실행")
-            - [preference] 개인 선호 (예: "한국어 응답 선호")
-
-            최대 5개. 이미 알려진 일반 상식은 제외. 없으면 "없음" 출력.
-            """;
-
-    private final LLMAdapterRegistry adapterRegistry;
+    private final ChatWidgetSettingsService widgetSettings;
+    private final WidgetPreferenceService preferenceService;
     private final ConversationMemoryRepository memoryRepository;
-    private final MemoryService memoryService;
+    private final PromptTemplateService promptTemplateService;
+    private final ConnectionAdapterFactory connectionAdapterFactory;
+    private final LLMAdapterRegistry adapterRegistry;
+    private final UsageLogRepository usageLogRepository;
+    private final ObjectMapper objectMapper;
+    private final ReentrantLock[] locks = new ReentrantLock[LOCK_STRIPES];
 
-    // 세션별 마지막 추출 시점 (중복 추출 방지)
-    private final Map<String, Long> lastExtractionTime = new ConcurrentHashMap<>();
-    private static final long THROTTLE_MS = 60_000; // 1분 이내 재추출 방지
-
-    private final com.platform.service.PromptTemplateService promptTemplateService;
-
-    public MemoryAutoExtractService(LLMAdapterRegistry adapterRegistry,
-                                     ConversationMemoryRepository memoryRepository,
-                                     MemoryService memoryService,
-                                     com.platform.service.PromptTemplateService promptTemplateService) {
-        this.adapterRegistry = adapterRegistry;
+    public MemoryAutoExtractService(ChatWidgetSettingsService widgetSettings,
+                                    WidgetPreferenceService preferenceService,
+                                    ConversationMemoryRepository memoryRepository,
+                                    PromptTemplateService promptTemplateService,
+                                    ConnectionAdapterFactory connectionAdapterFactory,
+                                    LLMAdapterRegistry adapterRegistry,
+                                    UsageLogRepository usageLogRepository,
+                                    ObjectMapper objectMapper) {
+        this.widgetSettings = widgetSettings;
+        this.preferenceService = preferenceService;
         this.memoryRepository = memoryRepository;
-        this.memoryService = memoryService;
         this.promptTemplateService = promptTemplateService;
+        this.connectionAdapterFactory = connectionAdapterFactory;
+        this.adapterRegistry = adapterRegistry;
+        this.usageLogRepository = usageLogRepository;
+        this.objectMapper = objectMapper;
+        for (int i = 0; i < LOCK_STRIPES; i++) locks[i] = new ReentrantLock();
     }
 
     /**
-     * 대화 종료 시 메모리 자동 추출을 시도한다.
-     * 조건 미충족 시 조용히 스킵. fire-and-forget 비동기 실행.
+     * 정상으로 끝난 위젯 대화 한 번 뒤에 부른다. 기억 주인이 없거나 질문 글이 없으면 아무것도 하지 않는다(BIZ-180).
      */
-    public void extractIfEligible(String sessionId, String userId,
-                                   List<UnifiedMessage> messages) {
-        if (sessionId == null || userId == null) return;
-        if (messages == null || messages.size() < MIN_MESSAGES_FOR_EXTRACTION) return;
+    public void extractAfterTurn(ChatRequest request, String sessionId, UUID turnId) {
+        String owner = WidgetPreferenceService.memoryOwner(request);
+        String question = request.widgetTurn() != null ? request.widgetTurn().questionText() : null;
+        if (owner == null || question == null || question.isBlank()) return;
+        if (!widgetSettings.memoryEnabled()) return;
 
-        // throttle 체크
-        Long lastTime = lastExtractionTime.get(sessionId);
-        if (lastTime != null && System.currentTimeMillis() - lastTime < THROTTLE_MS) {
-            log.debug("메모리 추출 스킵 — throttle (sessionId={})", sessionId);
-            return;
-        }
-
-        lastExtractionTime.put(sessionId, System.currentTimeMillis());
-
-        // fire-and-forget 비동기
-        Thread.startVirtualThread(() -> {
+        // 실행기 고르기에 쓰는 테넌트, 토큰 user_ref, 에이전트 id 를 뽑기 스레드로 옮긴다.
+        String tenantId = TenantContext.getTenantId();
+        String userRef = RequestContext.getUserRef();
+        String agentId = RequestContext.getAgentId();
+        String connectionId = request.connectionId();
+        Thread.ofVirtual().start(() -> {
             try {
-                List<String> extracted = extractMemories(messages);
-                if (extracted.isEmpty()) {
-                    log.debug("추출된 메모리 없음 (sessionId={})", sessionId);
-                    return;
-                }
-
-                int newCount = 0;
-                int updateCount = 0;
-
-                List<ConversationMemoryEntity> existingMemories =
-                        memoryRepository.findByUserIdAndMemoryTypeOrderByCreatedAtDesc(
-                                userId, MemoryLayer.LONG_TERM.name());
-
-                for (String memory : extracted) {
-                    // 단순 content 비교로 중복 체크 (cosine 대체)
-                    boolean isDuplicate = existingMemories.stream()
-                            .anyMatch(existing -> isSimilar(existing.getContent(), memory));
-
-                    if (!isDuplicate) {
-                        memoryService.save(null, userId, MemoryLayer.LONG_TERM, memory);
-                        newCount++;
-                    } else {
-                        updateCount++;
-                    }
-                }
-
-                log.info("메모리 자동 추출 완료: sessionId={}, 추출 {}개, 신규 {}개, 중복 {}개",
-                        sessionId, extracted.size(), newCount, updateCount);
-
+                if (tenantId != null) TenantContext.setTenantId(tenantId);
+                if (userRef != null) RequestContext.setUserRef(userRef);
+                if (agentId != null) RequestContext.setAgentId(agentId);
+                extract(owner, question, sessionId, turnId, connectionId);
             } catch (Exception e) {
-                log.warn("메모리 자동 추출 실패 (무시): sessionId={}, error={}",
-                        sessionId, e.getMessage());
+                log.warn("Widget memory extraction failed (session={}, turn={}): {}", sessionId, turnId, e.getMessage());
+            } finally {
+                RequestContext.clear();
+                TenantContext.clear();
             }
         });
     }
 
-    /**
-     * Haiku로 대화에서 핵심 정보를 추출한다.
-     */
-    List<String> extractMemories(List<UnifiedMessage> messages) {
-        String conversationText = messages.stream()
-                .filter(m -> m.role() != UnifiedMessage.Role.SYSTEM)
-                .map(m -> {
-                    String role = m.role() == UnifiedMessage.Role.USER ? "사용자" : "어시스턴트";
-                    String text = m.content().stream()
-                            .filter(b -> b instanceof ContentBlock.Text)
-                            .map(b -> ((ContentBlock.Text) b).text())
-                            .collect(Collectors.joining(" "));
-                    return role + ": " + text;
-                })
-                .collect(Collectors.joining("\n"));
+    void extract(String owner, String question, String sessionId, UUID turnId, String connectionId) {
+        if (!preferenceService.autoMemoryOn(owner)) return;
 
-        if (conversationText.isBlank()) return List.of();
-
-        // 토큰 제한: 대화가 너무 길면 최근 부분만
-        if (conversationText.length() > 20_000) {
-            conversationText = conversationText.substring(conversationText.length() - 20_000);
+        List<ConversationMemoryEntity> current = preferenceService.findMemories(owner);
+        Map<String, Object> vars = new LinkedHashMap<>();
+        vars.put("question", question);
+        vars.put("memories", current.isEmpty() ? WidgetPreferenceService.EMPTY_SLOT
+                : current.stream().map(m -> m.getId() + ": " + m.getContent()).collect(Collectors.joining("\n")));
+        vars.put("max_chars", widgetSettings.memoryItemMaxChars());
+        String prompt = promptTemplateService.render(TEMPLATE_KEY, vars);
+        if (prompt == null) {
+            log.error("Prompt template {} is missing for tenant {}", TEMPLATE_KEY, TenantContext.getTenantId());
+            return;
         }
 
+        String connId = connectionId != null && !connectionId.isBlank()
+                ? connectionId : connectionAdapterFactory.findDefaultCliConnectionForCurrentTenant();
+        String model = widgetSettings.memoryModel();
+        if (model == null) {
+            model = connId != null ? connectionAdapterFactory.defaultModel(connId)
+                    : connectionAdapterFactory.platformDefaultModel();
+        }
+        String callSessionId = sessionId + ":memory:" + turnId;
+        LLMResponse response = call(connId, model, prompt, callSessionId);
+        if (response == null) return;
+        saveUsage(owner, sessionId, model, response);
+
+        Changes changes = parse(response.textContent());
+        if (changes == null) return;
+        apply(owner, changes);
+    }
+
+    private LLMResponse call(String connId, String model, String prompt, String callSessionId) {
+        LLMAdapter adapter;
         try {
-            LLMAdapter adapter = adapterRegistry.getAdapter(EXTRACT_MODEL);
-            List<UnifiedMessage> promptMessages = List.of(
-                    UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM,
-                            promptTemplateService.getTemplateOrFallback("session.memory_extract.system", EXTRACT_PROMPT)),
-                    UnifiedMessage.ofText(UnifiedMessage.Role.USER, conversationText));
+            adapter = connId != null ? connectionAdapterFactory.getAdapter(connId) : adapterRegistry.getAdapter(model);
+        } catch (RuntimeException e) {
+            log.warn("Widget memory adapter unavailable (connection={}, model={}): {}", connId, model, e.getMessage());
+            return null;
+        }
+        // 생각은 끄고 도구는 주지 않는다. 짧은 JSON 하나라 생각부터 하면 시간 한도를 넘긴다.
+        LLMRequest request = new LLMRequest(model, List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, prompt)),
+                null, ModelConfig.defaults().withThinkingOverride(false), false, callSessionId);
 
-            LLMResponse response = adapter.chat(new LLMRequest(EXTRACT_MODEL, promptMessages)).get();
+        // CLI 어댑터는 chat() 안에서 끝날 때까지 막히므로 시간 한도를 걸려면 따로 돌린다.
+        String tenantId = TenantContext.getTenantId();
+        String userRef = RequestContext.getUserRef();
+        String agentId = RequestContext.getAgentId();
+        CompletableFuture<LLMResponse> future = CompletableFuture.supplyAsync(() -> {
+            try {
+                if (tenantId != null) TenantContext.setTenantId(tenantId);
+                if (userRef != null) RequestContext.setUserRef(userRef);
+                if (agentId != null) RequestContext.setAgentId(agentId);
+                return adapter.chat(request).join();
+            } finally {
+                RequestContext.clear();
+                TenantContext.clear();
+            }
+        }, task -> Thread.ofVirtual().start(task));
+        long timeoutMs = widgetSettings.memoryTimeoutMs();
+        try {
+            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            log.warn("Widget memory call timed out after {} ms (session={})", timeoutMs, callSessionId);
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            log.warn("Widget memory call failed (session={}): {}", callSessionId, e.getMessage());
+            return null;
+        } finally {
+            try {
+                adapter.cleanupSession(callSessionId);
+            } catch (RuntimeException e) {
+                log.warn("Widget memory session cleanup failed (session={}): {}", callSessionId, e.getMessage());
+            }
+        }
+    }
 
-            String resultText = response.content().stream()
-                    .filter(b -> b instanceof ContentBlock.Text)
-                    .map(b -> ((ContentBlock.Text) b).text())
-                    .collect(Collectors.joining("\n"));
+    /** {"add": [...], "remove": [...]} 를 읽는다. JSON 이 아니면 null 이고 아무것도 바꾸지 않는다. */
+    Changes parse(String text) {
+        if (text == null) return null;
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            log.warn("Widget memory reply is not JSON: {}", abbreviate(text));
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(text.substring(start, end + 1));
+            return new Changes(texts(root.path("add")), new HashSet<>(texts(root.path("remove"))));
+        } catch (Exception e) {
+            log.warn("Widget memory reply JSON parse failed: {}", e.getMessage());
+            return null;
+        }
+    }
 
-            if (resultText.isBlank() || resultText.trim().equals("없음")) {
-                return List.of();
+    /**
+     * 뒤집은 기억을 지우고, 새 기억을 넣고, 개수 한도를 넘으면 오래된 것부터 지운다(BIZ-183).
+     * remove 는 그 사람 기억 id 만 받는다. 같은 글(공백, 대소문자 무시)은 넣지 않는다.
+     */
+    void apply(String owner, Changes changes) {
+        ReentrantLock lock = lockFor(owner);
+        lock.lock();
+        try {
+            List<ConversationMemoryEntity> kept = new ArrayList<>(preferenceService.findMemories(owner));
+            List<ConversationMemoryEntity> removed = kept.stream()
+                    .filter(m -> changes.remove().contains(m.getId().toString()))
+                    .toList();
+            if (!removed.isEmpty()) {
+                memoryRepository.deleteAll(removed);
+                kept.removeAll(removed);
             }
 
-            // 각 줄을 개별 메모리로 파싱
-            return resultText.lines()
-                    .map(String::trim)
-                    .filter(line -> !line.isBlank())
-                    .filter(line -> line.startsWith("-") || line.startsWith("["))
-                    .map(line -> line.startsWith("- ") ? line.substring(2) : line)
-                    .limit(5)
-                    .toList();
+            Set<String> seen = kept.stream().map(m -> normalize(m.getContent())).collect(Collectors.toCollection(HashSet::new));
+            int maxChars = widgetSettings.memoryItemMaxChars();
+            int added = 0;
+            for (String raw : changes.add()) {
+                String content = raw.strip();
+                if (content.length() > maxChars) content = content.substring(0, maxChars).strip();
+                if (content.isEmpty() || !seen.add(normalize(content))) continue;
+                ConversationMemoryEntity entity = new ConversationMemoryEntity();
+                entity.setUserId(owner);
+                entity.setMemoryType(MemoryLayer.USER_PROFILE.name());
+                entity.setScope(MemoryScope.PRIVATE.name());
+                entity.setContent(content);
+                kept.add(memoryRepository.save(entity));
+                added++;
+            }
 
-        } catch (Exception e) {
-            log.warn("Haiku 메모리 추출 호출 실패: {}", e.getMessage());
-            return List.of();
+            int maxItems = widgetSettings.memoryMaxItems();
+            int overflow = kept.size() - maxItems;
+            if (overflow > 0) {
+                memoryRepository.deleteAll(new ArrayList<>(kept.subList(0, overflow)));
+            }
+            if (added > 0 || !removed.isEmpty() || overflow > 0) {
+                log.info("Widget memory updated: added={}, removed={}, trimmed={}", added, removed.size(), Math.max(overflow, 0));
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
-    /**
-     * 단순 문자열 유사도 비교.
-     * 정확한 cosine similarity 대신, 포함 관계 + Jaccard 유사도로 간이 판정.
-     */
-    static boolean isSimilar(String existing, String candidate) {
-        if (existing == null || candidate == null) return false;
-        String e = existing.toLowerCase().trim();
-        String c = candidate.toLowerCase().trim();
-
-        // 한쪽이 다른 쪽을 포함하면 중복
-        if (e.contains(c) || c.contains(e)) return true;
-
-        // 단어 기반 Jaccard 유사도
-        var eWords = java.util.Set.of(e.split("\\s+"));
-        var cWords = java.util.Set.of(c.split("\\s+"));
-
-        long intersection = eWords.stream().filter(cWords::contains).count();
-        long union = eWords.size() + cWords.size() - intersection;
-
-        return union > 0 && (double) intersection / union >= 0.7;
+    private ReentrantLock lockFor(String owner) {
+        String key = TenantContext.getTenantId() + ":" + owner;
+        return locks[Math.floorMod(key.hashCode(), LOCK_STRIPES)];
     }
+
+    private void saveUsage(String owner, String sessionId, String model, LLMResponse response) {
+        try {
+            UsageLogEntity usage = new UsageLogEntity();
+            usage.setUserId(owner);
+            usage.setSessionId(sessionId);
+            usage.setModel(model);
+            if (response.usage() != null) {
+                usage.setInputTokens(response.usage().inputTokens());
+                usage.setOutputTokens(response.usage().outputTokens());
+            }
+            usage.setCostUsd(BigDecimal.valueOf(response.costUsd()));
+            usageLogRepository.save(usage);
+        } catch (Exception e) {
+            log.warn("Failed to save widget memory usage log: {}", e.getMessage());
+        }
+    }
+
+    private static List<String> texts(JsonNode node) {
+        List<String> out = new ArrayList<>();
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (item.isTextual() && !item.asText().isBlank()) out.add(item.asText());
+            }
+        }
+        return out;
+    }
+
+    static String normalize(String text) {
+        return text == null ? "" : text.strip().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+
+    private static String abbreviate(String text) {
+        return text.length() <= 200 ? text : text.substring(0, 200);
+    }
+
+    record Changes(List<String> add, Set<String> remove) {}
 }

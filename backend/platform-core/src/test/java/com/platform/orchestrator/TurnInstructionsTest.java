@@ -137,7 +137,7 @@ class TurnInstructionsTest {
     private static ChatRequest request(UUID chatProjectId) {
         ChatRequest base = new ChatRequest("claude-sonnet-5-5", List.of());
         return chatProjectId == null ? base
-                : base.withWidgetTurn(new ChatRequest.WidgetTurn("user-a", chatProjectId, null));
+                : base.withWidgetTurn(new ChatRequest.WidgetTurn("user-a", chatProjectId, null, true));
     }
 
     private static String text(UnifiedMessage m) {

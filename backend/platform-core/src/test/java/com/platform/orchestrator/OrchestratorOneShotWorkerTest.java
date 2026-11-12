@@ -35,6 +35,7 @@ import com.platform.session.MemoryAutoExtractService;
 import com.platform.session.MemoryService;
 import com.platform.session.ResponseCacheService;
 import com.platform.session.SessionStore;
+import com.platform.session.WidgetPreferenceService;
 import com.platform.tenant.quota.QuotaService;
 import com.platform.tool.ToolCallHandler;
 import com.platform.tool.ToolRegistry;
@@ -108,7 +109,14 @@ class OrchestratorOneShotWorkerTest {
                 new ChatFeatureSupport(mock(com.platform.attachment.AttachmentService.class),
                         mock(com.platform.service.PromptTemplateService.class)),
                 mock(com.platform.session.ChatWorkspaceAssigner.class),
-                new FileCreateToolGate(mock(com.platform.config.PlatformSettingsService.class)));
+                new FileCreateToolGate(mock(com.platform.config.PlatformSettingsService.class)),
+                passThroughPrefs());
+    }
+
+    private static WidgetPreferenceService passThroughPrefs() {
+        WidgetPreferenceService prefs = mock(WidgetPreferenceService.class);
+        when(prefs.attach(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        return prefs;
     }
 
     private static ChatRequest request(String sessionId) {

@@ -41,6 +41,12 @@ public class ChatWidgetSettingsService {
     static final String FOLLOW_UPS_MODEL_KEY = "widget.follow-ups-model";
     static final String FOLLOW_UPS_TIMEOUT_KEY = "widget.follow-ups-timeout-ms";
     static final String PREVIEW_HTML_SOURCES_KEY = "widget.preview-html-script-sources";
+    static final String MEMORY_ENABLED_KEY = "widget.memory-enabled";
+    static final String MEMORY_MODEL_KEY = "widget.memory-model";
+    static final String MEMORY_TIMEOUT_KEY = "widget.memory-timeout-ms";
+    static final String MEMORY_MAX_ITEMS_KEY = "widget.memory-max-items";
+    static final String MEMORY_ITEM_MAX_CHARS_KEY = "widget.memory-item-max-chars";
+    static final String PREFERENCES_MAX_CHARS_KEY = "widget.preferences-max-chars";
 
     private final PlatformSettingsService platformSettings;
     private final ConnectionAdapterFactory connectionAdapterFactory;
@@ -273,5 +279,32 @@ public class ChatWidgetSettingsService {
 
     public long followUpsTimeoutMs() {
         return platformSettings.getLong(FOLLOW_UPS_TIMEOUT_KEY, 8000L);
+    }
+
+    /** CR-179 테넌트 스위치(BIZ-184). 꺼지면 내 선호, 자동 기억, 마지막에 선택한 값을 모두 쓰지 않는다. */
+    public boolean memoryEnabled() {
+        return Boolean.parseBoolean(platformSettings.getString(MEMORY_ENABLED_KEY, "true"));
+    }
+
+    /** 비어 있으면 null. 그때는 그 대화 연결 기본 모델을 쓴다. */
+    public String memoryModel() {
+        String model = platformSettings.getString(MEMORY_MODEL_KEY, "");
+        return model == null || model.isBlank() ? null : model.trim();
+    }
+
+    public long memoryTimeoutMs() {
+        return platformSettings.getLong(MEMORY_TIMEOUT_KEY, 15000L);
+    }
+
+    public int memoryMaxItems() {
+        return platformSettings.getInt(MEMORY_MAX_ITEMS_KEY, 30);
+    }
+
+    public int memoryItemMaxChars() {
+        return platformSettings.getInt(MEMORY_ITEM_MAX_CHARS_KEY, 200);
+    }
+
+    public int preferencesMaxChars() {
+        return platformSettings.getInt(PREFERENCES_MAX_CHARS_KEY, 1500);
     }
 }

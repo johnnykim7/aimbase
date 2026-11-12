@@ -17,7 +17,7 @@ public class ConversationMemoryEntity {
     @Column(name = "session_id", length = 100)
     private String sessionId;
 
-    @Column(name = "user_id", length = 100)
+    @Column(name = "user_id", length = 200)
     private String userId;
 
     @Column(name = "memory_type", length = 30, nullable = false)

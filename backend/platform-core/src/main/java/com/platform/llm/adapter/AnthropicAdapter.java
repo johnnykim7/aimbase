@@ -117,6 +117,8 @@ public class AnthropicAdapter implements LLMAdapter {
             StringBuilder systemText = new StringBuilder();
             for (UnifiedMessage msg : request.messages()) {
                 if (msg.role() == UnifiedMessage.Role.SYSTEM) {
+                    // 시스템 메시지가 여럿이면(기억, 검색 자료, 위젯 내 선호) 붙여 쓰지 않고 문단으로 가른다.
+                    if (!systemText.isEmpty()) systemText.append("\n\n");
                     systemText.append(extractText(msg));
                 } else {
                     userMessages.add(toAnthropicMessage(msg));
@@ -254,6 +256,7 @@ public class AnthropicAdapter implements LLMAdapter {
             StringBuilder streamSystemText = new StringBuilder();
             for (UnifiedMessage msg : request.messages()) {
                 if (msg.role() == UnifiedMessage.Role.SYSTEM) {
+                    if (!streamSystemText.isEmpty()) streamSystemText.append("\n\n");
                     streamSystemText.append(extractText(msg));
                 } else {
                     userMessages.add(toAnthropicMessage(msg));

@@ -2,8 +2,10 @@ package com.platform.repository;
 
 import com.platform.domain.ConversationMemoryEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ConversationMemoryRepository extends JpaRepository<ConversationMemoryEntity, UUID> {
@@ -38,4 +40,15 @@ public interface ConversationMemoryRepository extends JpaRepository<Conversation
 
     /** scope별 전체 조회 */
     List<ConversationMemoryEntity> findByScopeOrderByCreatedAtDesc(String scope);
+
+    // ── CR-179: 위젯 사용자 자동 기억 (user_id = 위젯 토큰 user_ref) ──
+
+    List<ConversationMemoryEntity> findByUserIdAndMemoryTypeAndScopeOrderByCreatedAtAsc(
+            String userId, String memoryType, String scope);
+
+    Optional<ConversationMemoryEntity> findByIdAndUserIdAndMemoryTypeAndScope(
+            UUID id, String userId, String memoryType, String scope);
+
+    @Transactional
+    long deleteByUserIdAndMemoryTypeAndScope(String userId, String memoryType, String scope);
 }

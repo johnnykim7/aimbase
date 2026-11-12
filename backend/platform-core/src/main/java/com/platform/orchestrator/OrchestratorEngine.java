@@ -110,6 +110,8 @@ public class OrchestratorEngine {
     private final com.platform.session.ChatWorkspaceAssigner chatWorkspaceAssigner;
     /** CR-182: 대화 요청에 파일 만들기 도구를 줄지. */
     private final FileCreateToolGate fileCreateToolGate;
+    /** CR-179: 위젯 사용자 내 선호와 자동 기억을 질문 앞에 넣는 곳. */
+    private final com.platform.session.WidgetPreferenceService widgetPreferenceService;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -145,10 +147,12 @@ public class OrchestratorEngine {
             TurnInstructions turnInstructions,
             ChatFeatureSupport chatFeatures,
             com.platform.session.ChatWorkspaceAssigner chatWorkspaceAssigner,
-            FileCreateToolGate fileCreateToolGate
+            FileCreateToolGate fileCreateToolGate,
+            com.platform.session.WidgetPreferenceService widgetPreferenceService
     ) {
         this.turnInstructions = turnInstructions;
         this.chatFeatures = chatFeatures;
+        this.widgetPreferenceService = widgetPreferenceService;
         this.chatRunRecorder = chatRunRecorder;
         this.chatWorkspaceAssigner = chatWorkspaceAssigner;
         this.fileCreateToolGate = fileCreateToolGate;
@@ -316,6 +320,8 @@ public class OrchestratorEngine {
             }
         }
 
+        // CR-179 BIZ-181: 내 선호와 자동 기억은 검색 자료 다음, 이번 질문 바로 앞에 붙인다
+        trimmedMessages = widgetPreferenceService.attach(trimmedMessages, request);
         // CR-178 BIZ-172: 프로젝트 지시문은 검색 자료 다음, 이번 질문 바로 앞에 붙인다
         trimmedMessages = turnInstructions.attach(trimmedMessages, sessionId, request);
         // CR-183: 위젯이 그릴 수 있는 형식의 안내 틀을 시스템 안내 끝에 덧붙인다(BIZ-223).
@@ -534,12 +540,9 @@ public class OrchestratorEngine {
                                 "outputTokens", llmResponse.usage().outputTokens()),
                         Map.of()));
 
-        // CR-031 PRD-213: 메모리 자동 추출 (fire-and-forget 비동기)
-        try {
-            List<UnifiedMessage> sessionMessages = sessionStore.getMessages(sessionId);
-            memoryAutoExtractService.extractIfEligible(sessionId, request.userId(), sessionMessages);
-        } catch (Exception e) {
-            log.debug("메모리 자동 추출 트리거 실패 (무시): {}", e.getMessage());
+        // CR-179: 위젯 자동 기억 뽑기. 응답과 따로 돌고 실패해도 응답에 영향이 없다(BIZ-182).
+        if (llmSuccess) {
+            triggerWidgetMemory(request, sessionId, turnId);
         }
 
         return new ChatResponse(
@@ -657,6 +660,8 @@ public class OrchestratorEngine {
             streamRagCitations = null;
         }
 
+        // CR-179 BIZ-181: 내 선호와 자동 기억은 검색 자료 다음, 이번 질문 바로 앞에 붙인다
+        trimmedMessages = widgetPreferenceService.attach(trimmedMessages, request);
         // CR-178 BIZ-172: 프로젝트 지시문은 검색 자료 다음, 이번 질문 바로 앞에 붙인다
         trimmedMessages = turnInstructions.attach(trimmedMessages, sessionId, request);
         // CR-183: 위젯이 그릴 수 있는 형식의 안내 틀을 시스템 안내 끝에 덧붙인다(BIZ-223).
@@ -833,6 +838,10 @@ public class OrchestratorEngine {
                     streamRagCitations, streamRagUsed ? Boolean.TRUE : null,
                     turnId.toString(), turnSeq, resolvedModel));
             streamSuccess = true;
+            // CR-179: 중지한 답에서는 뽑지 않는다.
+            if (!wasCancelled) {
+                triggerWidgetMemory(request, sessionId, turnId);
+            }
         } finally {
             // CR-175: 저장 전에 예외로 끝났으면 쥐고 있던 Done 을 예전처럼 그대로 내보내 스트림을 닫는다.
             com.platform.orchestrator.stream.StreamEvent.Done leftover = pendingDone.getAndSet(null);
@@ -854,6 +863,15 @@ public class OrchestratorEngine {
             }
             cancellationRegistry.clear(sessionId, cancelled);
             releaseOneShotWorker(request, sessionId, adapter);
+        }
+    }
+
+    /** 위젯 대화가 정상으로 끝나면 자동 기억 뽑기를 뒤에서 시작한다(BIZ-182). 실패해도 답에는 영향이 없다. */
+    private void triggerWidgetMemory(ChatRequest request, String sessionId, UUID turnId) {
+        try {
+            memoryAutoExtractService.extractAfterTurn(request, sessionId, turnId);
+        } catch (Exception e) {
+            log.warn("Widget memory trigger failed (session={}): {}", sessionId, e.getMessage());
         }
     }
 
