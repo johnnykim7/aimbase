@@ -86,11 +86,7 @@ public class ChatController {
         if (sessionId == null || sessionId.isBlank()) return List.of();
         List<Map<String, Object>> out = new ArrayList<>();
         for (com.platform.artifact.ArtifactService.ArtifactInfo a : artifactService.listArtifacts(sessionId)) {
-            Map<String, Object> m = new HashMap<>();
-            m.put("name", a.name());
-            m.put("size", a.size());
-            m.put("download_url", ArtifactController.downloadUrl(sessionId, a.name()));
-            out.add(m);
+            out.add(ArtifactController.artifactItem(sessionId, a));
         }
         return out;
     }

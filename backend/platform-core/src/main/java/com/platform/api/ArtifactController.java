@@ -1,10 +1,12 @@
 package com.platform.api;
 
+import com.platform.artifact.ArtifactPreviewService;
 import com.platform.artifact.ArtifactService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.core.io.PathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * CR-132: CLI 산출물 다운로드 API.
@@ -35,10 +38,15 @@ import java.util.Map;
 @Tag(name = "Chat Artifacts", description = "CR-132 CLI 산출물 다운로드 (pptx/xlsx/pdf/docx)")
 public class ArtifactController {
 
-    private final ArtifactService service;
+    /** CR-180: 쪽 그림 주소에 위젯이 수정 시각을 붙여 부르므로 파일이 바뀌면 새 주소가 된다. */
+    private static final CacheControl PAGE_CACHE = CacheControl.maxAge(1, TimeUnit.DAYS).cachePrivate();
 
-    public ArtifactController(ArtifactService service) {
+    private final ArtifactService service;
+    private final ArtifactPreviewService previewService;
+
+    public ArtifactController(ArtifactService service, ArtifactPreviewService previewService) {
         this.service = service;
+        this.previewService = previewService;
     }
 
     @GetMapping
@@ -47,15 +55,44 @@ public class ArtifactController {
     public ApiResponse<Map<String, Object>> list(@RequestParam("session_id") String sessionId) {
         List<ArtifactService.ArtifactInfo> artifacts = service.listArtifacts(sessionId);
         List<Map<String, Object>> items = artifacts.stream()
-                .map(a -> {
-                    Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("name", a.name());
-                    m.put("size", a.size());
-                    m.put("download_url", downloadUrl(sessionId, a.name()));
-                    return m;
-                })
+                .map(a -> artifactItem(sessionId, a))
                 .toList();
         return ApiResponse.ok(Map.of("artifacts", items));
+    }
+
+    @GetMapping("/preview")
+    @PreAuthorize("hasAuthority('SCOPE_chat:upload') or isAuthenticated()")
+    @Operation(summary = "CR-180 산출물 미리보기 정보")
+    public ApiResponse<Map<String, Object>> preview(
+            @RequestParam("session_id") String sessionId,
+            @RequestParam("name") String name) {
+        return ApiResponse.ok(previewService.info(sessionId, name));
+    }
+
+    @GetMapping("/preview/page")
+    @PreAuthorize("hasAuthority('SCOPE_chat:upload') or isAuthenticated()")
+    @Operation(summary = "CR-180 산출물 쪽 그림(PNG)")
+    public ResponseEntity<Resource> previewPage(
+            @RequestParam("session_id") String sessionId,
+            @RequestParam("name") String name,
+            @RequestParam("page") int page) {
+        Path png = previewService.page(sessionId, name, page);
+        return ResponseEntity.ok()
+                .cacheControl(PAGE_CACHE)
+                .contentType(MediaType.IMAGE_PNG)
+                .contentLength(sizeSafe(png))
+                .body(new PathResource(png));
+    }
+
+    /** 목록 응답과 대화 끝 이벤트(done, result)의 artifacts[] 한 칸. 두 곳이 같은 모양을 쓴다. */
+    public static Map<String, Object> artifactItem(String sessionId, ArtifactService.ArtifactInfo a) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", a.name());
+        m.put("size", a.size());
+        m.put("download_url", downloadUrl(sessionId, a.name()));
+        m.put("modified_at", a.modifiedAt().toString());
+        m.put("preview_kind", a.previewKind().name());
+        return m;
     }
 
     @GetMapping("/download")
@@ -120,6 +157,10 @@ public class ArtifactController {
             case "csv" -> MediaType.parseMediaType("text/csv");
             case "json" -> MediaType.APPLICATION_JSON;
             case "png" -> MediaType.IMAGE_PNG;
+            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
+            case "gif" -> MediaType.IMAGE_GIF;
+            case "webp" -> MediaType.parseMediaType("image/webp");
+            case "svg" -> MediaType.parseMediaType("image/svg+xml");
             case "html" -> MediaType.TEXT_HTML;
             case "txt", "md" -> MediaType.TEXT_PLAIN;
             default -> MediaType.APPLICATION_OCTET_STREAM;

@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.31.0** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.32.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2562,10 +2562,12 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 7, "model": "claude-
   "thinking_default": true,
   "feedback_reasons": [{"code": "WRONG_INFO", "label": "틀린 정보"}],
   "feedback_comment_max_chars": 500,
-  "follow_ups_enabled": true
+  "follow_ups_enabled": true,
+  "preview_html_script_sources": ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"]
 }
 ```
 
+- `preview_html_script_sources` 는 옆 창 HTML 실행 틀이 스크립트, 스타일, 글꼴, 그림을 불러올 수 있는 출처입니다(§ 29, CR-180). 런타임 설정 `widget.preview-html-script-sources`.
 - `models` 는 연결 config `models` 그대로입니다. 없으면 기본 모델 하나이고, 위젯은 목록이 둘 이상일 때만 모델 선택 칸을 보입니다.
 - `connection_id` 가 없으면 런타임 설정 `llm.default-model` 하나입니다.
 - `thinking_default` 는 깊게 생각하기 단추의 처음 상태입니다. 연결 config 에 생각 설정이 있으면 그 값, 없으면 어댑터 기본(Claude CLI 는 켜짐)입니다.
@@ -2623,9 +2625,71 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 
 행은 `id`, `created_at`, `updated_at`, `rating`, `reasons`(`code`, `label`), `comment`, `model`, `session_id`, `question_excerpt`, `answer_excerpt`, `answer_deleted`(되감기로 지운 답) 입니다.
 
+## 29. 위젯 옆 창 문서 미리보기 [CR-180]
+
+답이 만든 파일(세션 작업 폴더 `out/`)을 위젯 옆 창에 보이는 데 쓰는 API 입니다. 권한과 격리는 산출물 내려받기와 같습니다. 위젯 토큰(`chat:upload`) 또는 로그인, 세션 작업 폴더는 현재 테넌트에서만 찾고, 파일 이름에 경로를 넣을 수 없습니다.
+
+### 29-1. 대화 끝 이벤트의 `artifacts[]`
+
+스트리밍 `done` 과 비스트리밍 결과의 `artifacts[]` 한 칸, 그리고 `GET /api/v1/chat/artifacts?session_id=` 목록 한 칸은 같은 모양입니다.
+
+```json
+{"name": "제안서.pptx", "size": 482113, "download_url": "/api/v1/chat/artifacts/download?session_id=...&file=...",
+ "modified_at": "2026-11-13T05:12:40Z", "preview_kind": "PAGES"}
+```
+
+| preview_kind | 확장자 | 위젯이 하는 일 |
+|---|---|---|
+| PAGES | pptx, docx, pdf | 쪽 그림(§ 29-3)을 보입니다 |
+| SHEET | xlsx, csv | 미리보기 정보의 `sheets` 를 표로 그립니다 |
+| HTML | html | `download_url` 로 원본을 받아 격리 틀에서 실행합니다 |
+| SVG, IMAGE | svg / png, jpg, jpeg, gif, webp | 원본을 그림으로 보입니다 |
+| MARKDOWN, TEXT | md / txt, json | 원본을 글로 보입니다 |
+| NONE | 그 밖 | 내려받기만 합니다 |
+
+- `modified_at` 은 UTC 입니다. 같은 이름의 파일을 다시 만들면 바뀝니다.
+
+### 29-2. 미리보기 정보 (`GET /api/v1/chat/artifacts/preview?session_id=&name=`)
+
+```json
+{"name": "제안서.pptx", "size": 482113, "modified_at": "2026-11-13T05:12:40Z",
+ "preview_kind": "PAGES", "page_count": 12, "page_width": 1600, "page_height": 900}
+```
+
+```json
+{"name": "매출.xlsx", "size": 20480, "modified_at": "2026-11-13T05:12:40Z", "preview_kind": "SHEET",
+ "sheets": [{"name": "1월", "rows": [["지점", "매출"], ["강남", "1,200,000"]], "row_count": 1200, "col_count": 8, "truncated": true}]}
+```
+
+```json
+{"name": "큰파일.pptx", "size": 41943040, "modified_at": "2026-11-13T05:12:40Z", "preview_kind": "NONE", "reason": "too_large"}
+```
+
+- pptx, docx 는 처음 부를 때 서버가 PDF 로 바꿉니다. 수십 초 걸릴 수 있고, 같은 파일은 다시 바꾸지 않습니다.
+- `page_width`, `page_height` 는 첫 쪽 그림의 픽셀 크기입니다.
+- xlsx 수식 칸은 서버가 계산한 값이고, 계산이 안 되면 수식 글입니다. csv 는 UTF-8 로 읽고, 깨지면 CP949 로 읽습니다.
+- 한도를 넘으면 오류가 아니라 `NONE` 과 `reason` 입니다. `too_large`(런타임 설정 `widget.preview-max-file-mb`), `too_many_pages`(`widget.preview-max-pages`), `unsupported`.
+- 표는 시트마다 `widget.preview-sheet-max-rows` 행, `widget.preview-sheet-max-cols` 열까지 오고, 잘렸으면 `truncated` 가 참입니다.
+
+| HTTP | 코드 | 경우 |
+|---|---|---|
+| 403 | `artifact_access_denied` | 파일 이름에 경로가 있거나 작업 폴더가 허용 폴더 밖 |
+| 404 | `artifact_not_found` | 파일이 없거나 다른 테넌트 세션 |
+| 422 | `preview_failed:convert` | 변환 실패(깨진 파일, 암호 걸린 PDF) |
+| 422 | `preview_failed:timeout` | 변환이 `widget.preview-convert-timeout-seconds` 를 넘김 |
+| 503 | `preview_busy` | 동시 변환 자리(`widget.preview-convert-concurrency`)를 시간 한도 안에 얻지 못함 |
+
+### 29-3. 쪽 그림 (`GET /api/v1/chat/artifacts/preview/page?session_id=&name=&page=`)
+
+- PNG 를 줍니다. `page` 는 1부터이고 가로 픽셀은 `widget.preview-page-width-px` 입니다.
+- 응답 머리 `Cache-Control: private, max-age=86400`. 주소에 `modified_at` 을 붙여 부르면 파일이 바뀔 때 새로 받습니다.
+- 쪽 번호가 범위 밖이거나 쪽이 없는 종류면 404 `page_not_found`. 그 밖의 오류는 § 29-2 와 같습니다.
+- 변환 결과는 세션 작업 폴더 `.preview/` 에 두고, 산출물과 같은 보관 기한(`aimbase.artifact.ttl-hours`)이 지나면 지웁니다.
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.32.0 | 2026-11-13 | **CR-180 위젯 옆 창 문서 미리보기** (§ 29). 미리보기 정보 `GET /api/v1/chat/artifacts/preview`, 쪽 그림 `GET /api/v1/chat/artifacts/preview/page`. 대화 끝 `artifacts[]` 와 산출물 목록에 `modified_at`, `preview_kind`. 산출물 확장자에 svg, jpg, jpeg, gif, webp. 위젯 설정에 `preview_html_script_sources` (§ 28-2) |
 | v3.31.0 | 2026-11-13 | **CR-177 위젯 영어 화면** (§ 28-2). 위젯 설정 조회에 `locale` 인자. `feedback_reasons` 의 `label` 을 그 언어 이름으로 준다 |
 | v3.30.1 | 2026-11-12 | **CR-175 위젯 파일 캐시** (§ 17, 문서만). 이름이 고정인 위젯 파일은 no-cache, 해시 붙은 조각만 1년 캐시. 로더가 자기 주소 쿼리를 esm 에 붙인다. 30일 캐시 시절 사본을 건너뛰는 판 표시 안내 |
 | v3.30.0 | 2026-11-11 | **CR-175 채팅 위젯 대화 기본기** (§ 28). 대화 요청에 `rewind_from_seq`, `thinking`, 허용 모델 검사. `done` 에 `turn_id`, `turn_seq`, `model`. 위젯 설정 `GET /api/v1/chat/widget-settings`, 응답 평가 `PUT`/`DELETE /api/v1/chat/feedback`, 평가 목록 `GET /api/v1/chat/feedback`, 후속 질문과 제목 `POST /api/v1/chat/sessions/{session_id}/follow-ups` |

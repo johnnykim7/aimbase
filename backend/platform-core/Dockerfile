@@ -14,6 +14,12 @@ RUN apt-get update && apt-get install -y curl poppler-utils ffmpeg && \
     apt-get install -y nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# CR-180 위젯 옆 창 미리보기: pptx, docx 를 PDF 로 바꾸는 LibreOffice 와 한글 글꼴.
+#   글꼴이 없으면 한글이 네모로 변환된다. 추천 패키지는 빼서 이미지가 덜 커지게 한다.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libreoffice-impress libreoffice-writer libreoffice-calc fonts-nanum fonts-noto-cjk && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Claude Code CLI 설치
 RUN npm install -g @anthropic-ai/claude-code
 

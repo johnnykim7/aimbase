@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.stream.Stream;
 
 /**
@@ -22,6 +23,9 @@ import java.util.stream.Stream;
  *
  * <p>스캔 범위는 workspace whitelist-roots 하위의 {@code out/} 디렉토리로 한정한다(경로 게이트 재사용).
  * 세션→workspace 매핑을 몰라도 파일 mtime 만으로 삭제 대상을 결정하므로 DB 조회가 필요 없다.
+ *
+ * <p>CR-180: 미리보기 변환 결과({@code .preview/} 아래 원본마다 한 폴더)도 같은 보관 기한으로 지운다(BIZ-192).
+ * 폴더 수정 시각은 쪽 그림이 더해질 때마다 바뀌므로 마지막으로 그린 때부터 기한을 센다.
  */
 @Component
 public class ArtifactGcScheduler {
@@ -55,14 +59,16 @@ public class ArtifactGcScheduler {
         }
     }
 
-    private int purgeUnderRoot(Path root, Instant cutoff) {
+    int purgeUnderRoot(Path root, Instant cutoff) {
         int deleted = 0;
         try (Stream<Path> dirs = Files.walk(root, MAX_DEPTH)) {
-            for (Path outDir : (Iterable<Path>) dirs
-                    .filter(Files::isDirectory)
-                    .filter(p -> ArtifactService.OUT_DIR.equals(p.getFileName().toString()))
-                    ::iterator) {
-                deleted += purgeOutDir(outDir, cutoff);
+            for (Path dir : (Iterable<Path>) dirs.filter(Files::isDirectory)::iterator) {
+                String name = dir.getFileName().toString();
+                if (ArtifactService.OUT_DIR.equals(name)) {
+                    deleted += purgeOutDir(dir, cutoff);
+                } else if (ArtifactService.PREVIEW_DIR.equals(name)) {
+                    deleted += purgePreviewDir(dir, cutoff);
+                }
             }
         } catch (IOException e) {
             log.warn("[CR132] out/ 탐색 실패 root={}: {}", root, e.getMessage());
@@ -88,5 +94,32 @@ public class ArtifactGcScheduler {
             log.warn("[CR132] out/ 목록 실패 {}: {}", outDir, e.getMessage());
         }
         return deleted;
+    }
+
+    private int purgePreviewDir(Path previewDir, Instant cutoff) {
+        int deleted = 0;
+        try (Stream<Path> entries = Files.list(previewDir)) {
+            for (Path entry : (Iterable<Path>) entries::iterator) {
+                try {
+                    if (Files.getLastModifiedTime(entry).toInstant().isBefore(cutoff)) {
+                        deleteTree(entry);
+                        deleted++;
+                    }
+                } catch (IOException e) {
+                    log.warn("[CR180] 미리보기 캐시 삭제 실패 {}: {}", entry, e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            log.warn("[CR180] .preview/ 목록 실패 {}: {}", previewDir, e.getMessage());
+        }
+        return deleted;
+    }
+
+    private static void deleteTree(Path target) throws IOException {
+        try (Stream<Path> s = Files.walk(target)) {
+            for (Path p : (Iterable<Path>) s.sorted(Comparator.reverseOrder())::iterator) {
+                Files.deleteIfExists(p);
+            }
+        }
     }
 }

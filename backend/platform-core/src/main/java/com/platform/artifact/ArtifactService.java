@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -41,9 +42,13 @@ public class ArtifactService {
     /** CLI 가 산출물을 쓰는 workspace 하위 고정 폴더명. */
     static final String OUT_DIR = "out";
 
+    /** CR-180: 미리보기 변환 결과를 두는 workspace 하위 폴더. out/ 밖이라 산출물 목록에 섞이지 않는다. */
+    static final String PREVIEW_DIR = ".preview";
+
     /** 위젯에 노출하는 산출물 확장자 화이트리스트(중간 임시파일/입력첨부 노이즈 배제). */
     private static final Set<String> ARTIFACT_EXTS = Set.of(
-            "pptx", "xlsx", "pdf", "docx", "csv", "txt", "md", "json", "png", "html");
+            "pptx", "xlsx", "pdf", "docx", "csv", "txt", "md", "json", "png", "html",
+            "svg", "jpg", "jpeg", "gif", "webp");
 
     private final SessionStore sessionStore;
     private final WorkspaceProperties workspaceProperties;
@@ -54,7 +59,11 @@ public class ArtifactService {
     }
 
     /** 산출물 메타(위젯 done 페이로드 + 목록 응답용). */
-    public record ArtifactInfo(String name, long size) {}
+    public record ArtifactInfo(String name, long size, Instant modifiedAt) {
+        public PreviewKind previewKind() {
+            return PreviewKind.of(name);
+        }
+    }
 
     /**
      * 세션의 {@code {workspace}/out/} 를 스캔해 산출물 목록을 반환. workspace 미설정/폴더 없음이면 빈 목록.
@@ -73,7 +82,8 @@ public class ArtifactService {
                     .toList();
             List<ArtifactInfo> out = new ArrayList<>(files.size());
             for (Path p : files) {
-                out.add(new ArtifactInfo(p.getFileName().toString(), sizeSafe(p)));
+                out.add(new ArtifactInfo(p.getFileName().toString(), sizeSafe(p),
+                        Instant.ofEpochMilli(lastModifiedSafe(p))));
             }
             return out;
         } catch (IOException e) {
@@ -98,6 +108,10 @@ public class ArtifactService {
         if (fileName == null || fileName.isBlank()) {
             throw new ArtifactNotFoundException("파일명 누락");
         }
+        // 산출물은 out/ 바로 아래 파일만이다. 목록에 없는 하위 폴더 파일을 이름으로 꺼내지 못하게 한다.
+        if (fileName.contains("/") || fileName.contains("\\")) {
+            throw new ArtifactAccessException("파일 이름에 경로 구분자: " + fileName);
+        }
         if (!hasArtifactExt(fileName)) {
             throw new ArtifactNotFoundException("허용되지 않은 산출물 형식: " + fileName);
         }
@@ -110,6 +124,20 @@ public class ArtifactService {
             throw new ArtifactNotFoundException("산출물 없음: " + fileName);
         }
         return target;
+    }
+
+    /**
+     * CR-180: 세션 workspace/.preview/ 절대경로. 격리 규칙은 out/ 와 같다.
+     *
+     * @throws ArtifactNotFoundException workspace 미설정
+     * @throws ArtifactAccessException   whitelist 밖
+     */
+    public Path resolvePreviewRoot(String sessionId) {
+        Path outDir = resolveOutDir(sessionId);
+        if (outDir == null) {
+            throw new ArtifactNotFoundException("세션에 연결된 산출물 폴더 없음: " + sessionId);
+        }
+        return outDir.getParent().resolve(PREVIEW_DIR);
     }
 
     /** 세션 workspace/out/ 절대경로. whitelist 밖이거나 workspace 미설정이면 null/예외. */

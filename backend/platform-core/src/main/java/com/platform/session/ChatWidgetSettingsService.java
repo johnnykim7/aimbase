@@ -32,6 +32,7 @@ public class ChatWidgetSettingsService {
     static final String FOLLOW_UPS_COUNT_KEY = "widget.follow-ups-count";
     static final String FOLLOW_UPS_MODEL_KEY = "widget.follow-ups-model";
     static final String FOLLOW_UPS_TIMEOUT_KEY = "widget.follow-ups-timeout-ms";
+    static final String PREVIEW_HTML_SOURCES_KEY = "widget.preview-html-script-sources";
 
     private final PlatformSettingsService platformSettings;
     private final ConnectionAdapterFactory connectionAdapterFactory;
@@ -78,6 +79,7 @@ public class ChatWidgetSettingsService {
         body.put("feedback_reasons", feedbackReasons(locale));
         body.put("feedback_comment_max_chars", feedbackCommentMaxChars());
         body.put("follow_ups_enabled", followUpsEnabled());
+        body.put("preview_html_script_sources", previewHtmlScriptSources());
         return body;
     }
 
@@ -170,6 +172,20 @@ public class ChatWidgetSettingsService {
         if (node == null || !node.isTextual()) return null;
         String value = node.asText();
         return value.isBlank() ? null : value;
+    }
+
+    /**
+     * CR-180: HTML 실행 틀이 스크립트, 스타일, 글꼴, 그림을 불러올 수 있는 출처(BIZ-190).
+     * 설정 값이 JSON 목록이 아니면 빈 목록이다. 그때 실행 틀은 바깥에서 아무것도 불러오지 않는다.
+     */
+    public List<String> previewHtmlScriptSources() {
+        String raw = platformSettings.getString(PREVIEW_HTML_SOURCES_KEY, "[]");
+        try {
+            return objectMapper.readValue(raw, new TypeReference<List<String>>() {});
+        } catch (Exception e) {
+            log.warn("Runtime setting {} is not a JSON list: {}", PREVIEW_HTML_SOURCES_KEY, e.getMessage());
+            return List.of();
+        }
     }
 
     public int feedbackCommentMaxChars() {

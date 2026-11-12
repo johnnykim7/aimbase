@@ -114,6 +114,16 @@ class ChatWidgetSettingsServiceTest {
         assertThat(body.get("thinking_default")).isEqualTo(false);
     }
 
+    /** CR-180: HTML 실행 틀 출처는 설정 JSON 목록, JSON 이 아니면 빈 목록. */
+    @Test
+    void preview_html_script_sources_come_from_setting() {
+        when(platformSettings.getString(eq(ChatWidgetSettingsService.PREVIEW_HTML_SOURCES_KEY), anyString()))
+                .thenReturn("[\"https://cdnjs.cloudflare.com\"]", "not json");
+
+        assertThat(service.previewHtmlScriptSources()).containsExactly("https://cdnjs.cloudflare.com");
+        assertThat(service.previewHtmlScriptSources()).isEmpty();
+    }
+
     @Test
     void connection_of_another_tenant_is_not_found() {
         when(connectionRepository.existsById("other-tenant-conn")).thenReturn(false);
