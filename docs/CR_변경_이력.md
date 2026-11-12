@@ -141,7 +141,7 @@
 | CR-182 | [위젯 파일 만들기 저장 내보내기 공유 링크](CR-182_위젯_파일_만들기_저장_내보내기_공유_링크.md) | 신규 | Medium | — | 설계중 |
 | CR-183 | [위젯 데이터 첨부 계산 그래프 수식](CR-183_위젯_데이터_첨부_계산_그래프_수식.md) | 신규 | Medium | - | 구현중 |
 | CR-184 | [위젯 이미지 생성](CR-184_위젯_이미지_생성.md) | 신규 | Medium | - | 설계중 |
-| CR-185 | [위젯 안 승인과 거절](CR-185_위젯_안_승인과_거절.md) | 신규 | High | - | 설계중 |
+| CR-185 | [위젯 안 승인과 거절](CR-185_위젯_안_승인과_거절.md) | 신규 | High | - | 구현중 |
 | CR-186 | [위젯 답 읽어주기와 실시간 음성](CR-186_위젯_답_읽어주기와_실시간_음성.md) | 신규 | Medium | - | 설계중 |
 
 ---
@@ -2929,13 +2929,14 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **대상 기능 ID**: PRD-560, PRD-561, PRD-562, PRD-563, FE-130
 - **변경 타입**: 신규
 - **원본 요구사항**: [docs/origins/원본_요구사항_CR185_위젯_안_승인과_거절_20261113.md](origins/원본_요구사항_CR185_위젯_안_승인과_거절_20261113.md) (원천은 CR-175 원본 2.1절 13번)
-- **변경 내용**: 대화 중 AI 가 승인이 필요한 도구(관리자가 정책 「도구 실행 전 승인」으로 고른 도구)를 부르면 응답을 멈추고 위젯에 승인 요청 카드를 띄운다. 승인하면 실행하고 응답을 잇고, 거절과 시간 지남은 AI 에게 알려 다른 길로 답하게 한다. API 연결(ToolCallHandler)과 Claude CLI 연결(서버 MCP 도구) 양쪽에 같은 관문을 둔다. 워크플로우 사람 확인 단계도 같은 카드로 위젯 안에서 정한다. 워크플로우 승인 API 의 권한 구멍(위젯 토큰이면 누구든 정함, 결정한 사람 기록 없음, 동시 결정 통과)을 막는다
+- **변경 내용**: 대화 중 AI 가 승인이 필요한 도구(관리자가 정책 「도구 실행 전 승인」으로 고른 도구)를 부르면 응답을 멈추고 위젯에 승인 요청 카드를 띄운다. 승인하면 실행하고 응답을 잇고, 거절과 시간 지남은 AI 에게 알려 다른 길로 답하게 한다. 서버 도구 실행 공통 지점(ToolRegistry)과 Claude CLI 가 서버 MCP 로 부르는 도구(ServerMcpToolDispatcher) 두 곳에 같은 관문을 둔다. 워크플로우 사람 확인 단계도 같은 카드로 위젯 안에서 정한다. 워크플로우 승인 API 의 권한 구멍(위젯 토큰이면 누구든 정함, 결정한 사람 기록 없음, 동시 결정 통과)을 막는다
 - **결정**: 11/13 06:29 사용자 범위 ①(대화 중 승인과 워크플로우 승인을 같은 카드로), 규모 대. 화면 컨셉은 컨셉만, 컨셉과 새 이름 4개 승인. 컨타 aimbase-56899 번호 대역 PRD-560 ~ 579, BIZ-240 ~ 249, FE-130 ~ 139, TC-CHT-110 ~ 119, 시험 영역 18, 마이그레이션 V88. CR-177 회신으로 틀 자리 `streamEvent` 의 mount, `workflowApproval` 확보(dev 37736a6). 실행기 세션 머리글은 CR-183 의 `X-Aimbase-Session-Id` 를 같이 쓴다
-- **영향 모듈**: platform-core `policy`(PolicyEngine 도구 평가), `tool`(ToolCallHandler 관문), `orchestrator`(대화 턴 등록부, 스트림 이벤트), `mcp/server`(ServerMcpToolDispatcher 관문), `api`(ChatController 결정 API, WorkflowController, AdminController, PolicyController, AgentIdRequestFilter 세션 머리글), `workflow/approval`(승인 결정, ApprovalTimeoutSweeper), cli-runner(MCP 항목 세션 머리글), 관리 FE Policies, 위젯 `packages/chat-widget-embed`(`src/features/approval.ts`), 마이그레이션 테넌트 V88, 마스터 V88
+- **영향 모듈**: platform-core `policy`(PolicyEngine 도구 평가), `tool`(ToolRegistry 관문, ToolCallHandler 승인 도구 차례 실행), `orchestrator`(대화 턴 등록부, 스트림 이벤트), `mcp/server`(ServerMcpToolDispatcher 관문), `api`(ChatController 결정 API, WorkflowController, AdminController, PolicyController, AgentIdRequestFilter 세션 머리글), `workflow/approval`(승인 결정, ApprovalTimeoutSweeper), cli-runner(MCP 항목 세션 머리글), 관리 FE Policies, 위젯 `packages/chat-widget-embed`(`src/features/approval.ts`), 마이그레이션 테넌트 V88, 마스터 V88
 - **영향도**: High (대화를 멈췄다 잇는 흐름이 API, CLI 연결 양쪽에 든다. 정책이 없는 테넌트와 대상 밖 도구는 지금 그대로)
 - **영향 범위**: 위젯을 붙인 소비앱(백오피스2 CS 문의 상세 「AI 에게 질문」). 워크플로우 승인 API 를 위젯 토큰으로 부르려면 `workflow:approve` 권한이 있어야 한다(로그인 토큰, 소비앱 키는 그대로). 레포 간 요청 없음
 - **영향 설계서**: T1-1 v7.14, T1-3 v5.16, T1-5 v1.5, T1-6 v2.3, T1-7 v3.23, T1-10 v1.6, T3-1 v4.21, T3-2 v7.19, T3-3 v3.14, T3-4 v3.13, T3-5 v4.17. API 가이드, 운용 가이드, 위젯 붙이기 가이드는 구현 때 고친다. T2-1, T2-2 는 확인 결과 영향 없음(새 라이브러리, 인프라, 구현 규약 없음)
-- **상태**: 설계중 (2026-11-13 설계 캐스케이드)
+- **설계보정**: 11/13 구현 중 관문을 ToolCallHandler 에 두면 원격 트리거 도구, 워크플로우 도구 단계, 예약 실행, 관리 화면 도구 실행이 정책과 상관없이 묻지 않고 실행되어 BIZ-241 과 어긋나는 것을 찾았다([기록/CR-185_승인문_빠진_실행길.md](기록/CR-185_승인문_빠진_실행길.md)). 컨타 승인(사용자 06:29 권장안 위임)으로 관문을 ToolRegistry 공통 지점으로 옮기고 CR-185 문서 3.2 표, T1-3 BIZ-241 문구를 고쳤다. 테넌트가 없는 실행은 정책을 보지 않는다(정책은 테넌트 DB 에만 있다)
+- **상태**: 구현중 (2026-11-13)
 
 ### CR-182 | 위젯 파일 만들기 저장 내보내기 공유 링크
 - **대상 기능 ID**: PRD-500, PRD-501, PRD-502, PRD-503, PRD-504
