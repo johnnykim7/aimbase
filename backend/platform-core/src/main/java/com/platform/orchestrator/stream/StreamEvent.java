@@ -1,5 +1,6 @@
 package com.platform.orchestrator.stream;
 
+import com.platform.llm.model.LLMStreamChunk;
 import com.platform.llm.model.TokenUsage;
 
 import java.util.List;
@@ -23,6 +24,21 @@ public sealed interface StreamEvent {
 
     /** 도구 실행 완료. output은 CR-031 축약 적용 후. */
     record ToolResultEvent(String toolUseId, String output, boolean isError) implements StreamEvent {}
+
+    /**
+     * CR-175: CLI 연결은 도구를 실행기 안에서 써서 서버 도구 루프를 타지 않는다. 실행기가 알려 온 도구 사용을
+     * API 연결과 같은 도구 이벤트로 바꿔 위젯 도구 접은 줄에 보이게 한다(PRD-374). SSE 가 null 값을 못 실어
+     * 빈 id 와 이름은 빈 글자로 둔다. 관찰 청크가 아니면 null.
+     */
+    static StreamEvent ofObservedTool(LLMStreamChunk chunk) {
+        LLMStreamChunk.ObservedTool ot = chunk.observedTool();
+        if (ot == null) return null;
+        String id = ot.toolUseId() != null ? ot.toolUseId() : "";
+        if ("tool_result".equals(chunk.type())) {
+            return new ToolResultEvent(id, ot.output(), false);
+        }
+        return new ToolUseStart(id, ot.toolName() != null ? ot.toolName() : "", ot.input());
+    }
 
     /**
      * 최종 완료 (usage 포함, null 가능).
