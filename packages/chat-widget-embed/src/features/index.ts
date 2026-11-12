@@ -3,6 +3,7 @@
  * 목록 순서는 화면 순서와 상관없다. 쓰는 법은 docs/guides/chat-widget-frame.md 다.
  */
 import type { WidgetFeature } from "../frame/context";
+import { approval } from "./approval";
 import { dataChart } from "./data-chart";
 import { documentEdit } from "./document-edit";
 import { fileCreate } from "./file-create";
@@ -21,5 +22,5 @@ import { voiceChat } from "./voice-chat";
 
 export const FEATURES: WidgetFeature[] = [
   fontSize, language, preview, imageGen, fileCreate, saveExport, shareLink, memory, documentEdit, history, readAloud, voiceChat,
-  dataChart, math, screenCapture,
+  dataChart, math, screenCapture, approval,
 ];
