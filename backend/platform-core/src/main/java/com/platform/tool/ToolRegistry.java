@@ -1,5 +1,6 @@
 package com.platform.tool;
 
+import com.platform.orchestrator.approval.ToolApprovalGate;
 import com.platform.llm.model.ToolCall;
 import com.platform.tool.model.UnifiedToolDef;
 import com.platform.monitoring.PlatformMetrics;
@@ -44,11 +45,19 @@ public class ToolRegistry {
      */
     private volatile boolean builtinsRegistered = false;
 
+    /**
+     * CR-185 BIZ-241: 도구를 실행하는 모든 길(대화, 워크플로우 단계, 예약, 관리 화면, 다른 도구의 대신 호출)이
+     * 여기를 지나므로 실행 전 승인 문을 이곳 한 군데에 둔다. 관문이 도구 설명을 읽으려 이 객체를 쓰므로 @Lazy.
+     */
+    private final ToolApprovalGate approvalGate;
+
     public ToolRegistry(@Lazy List<ToolExecutor> builtins, PlatformMetrics platformMetrics,
-                        com.platform.mcp.server.McpExposurePolicy mcpExposurePolicy) {
+                        com.platform.mcp.server.McpExposurePolicy mcpExposurePolicy,
+                        @Lazy ToolApprovalGate approvalGate) {
         this.platformMetrics = platformMetrics;
         this.builtins = builtins;
         this.mcpExposurePolicy = mcpExposurePolicy;
+        this.approvalGate = approvalGate;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -200,10 +209,22 @@ public class ToolRegistry {
      * @throws IllegalArgumentException 등록되지 않은 도구 이름인 경우
      */
     public String execute(ToolCall call) {
+        return executeInSession(call, null);
+    }
+
+    /**
+     * 대화 세션을 아는 문맥 없는 실행. 세션은 실행 전 승인을 물을 대화 턴을 찾는 데만 쓴다.
+     */
+    public String executeInSession(ToolCall call, String sessionId) {
         ToolExecutor executor = executors.get(call.name());
         if (executor == null) {
             log.error("No executor found for tool: {}", call.name());
             return "오류: 알 수 없는 도구 '" + call.name() + "'";
+        }
+        String refusal = approvalRefusal(call, sessionId);
+        if (refusal != null) {
+            platformMetrics.recordToolExecution(call.name(), false);
+            return refusal;
         }
         try {
             String result = executor.execute(call.input());
@@ -256,12 +277,23 @@ public class ToolRegistry {
                     platformMetrics.recordToolExecution(call.name(), false);
                     return ToolResult.error("입력 검증 실패: " + validation.message());
                 }
+                // 권한과 입력이 맞는 호출만 사람에게 묻는다.
+                String refusal = approvalRefusal(call, ctx != null ? ctx.sessionId() : null);
+                if (refusal != null) {
+                    platformMetrics.recordToolExecution(call.name(), false);
+                    return ToolResult.error(refusal);
+                }
                 // 확장 실행
                 ToolResult result = enhanced.execute(call.input(), ctx);
                 platformMetrics.recordToolExecution(call.name(), result.success());
                 return result.withDuration(System.currentTimeMillis() - start);
             } else {
                 // 기존 ToolExecutor bridge
+                String refusal = approvalRefusal(call, ctx != null ? ctx.sessionId() : null);
+                if (refusal != null) {
+                    platformMetrics.recordToolExecution(call.name(), false);
+                    return ToolResult.error(refusal);
+                }
                 String rawResult = executor.execute(call.input());
                 platformMetrics.recordToolExecution(call.name(), true);
                 return ToolResult.ok(rawResult, rawResult)
@@ -273,6 +305,12 @@ public class ToolRegistry {
             return ToolResult.error("도구 실행 오류: " + e.getMessage())
                     .withDuration(System.currentTimeMillis() - start);
         }
+    }
+
+    /** 실행하면 안 되면 도구 결과로 돌려줄 사유, 실행해도 되면 null. 승인을 기다리는 동안 여기서 멈춘다. */
+    private String approvalRefusal(ToolCall call, String sessionId) {
+        ToolApprovalGate.Verdict verdict = approvalGate.check(call.name(), call.input(), call.id(), sessionId);
+        return verdict.proceed() ? null : verdict.refusal();
     }
 
     /**

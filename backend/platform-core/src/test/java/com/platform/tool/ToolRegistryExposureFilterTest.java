@@ -113,7 +113,8 @@ class ToolRegistryExposureFilterTest {
     @Test
     void builtins_not_registered_flag_signals_unreliable_exposure() {
         ToolRegistry r = new ToolRegistry(List.of(builtinTool("parse_document")),
-                mock(PlatformMetrics.class), policy);
+                mock(PlatformMetrics.class), policy,
+                mock(com.platform.orchestrator.approval.ToolApprovalGate.class));
 
         // 아직 registerBuiltins 전 — 플래그로 판정 불가 상태임을 알 수 있어야 한다.
         assertThat(r.isBuiltinsRegistered()).isFalse();
@@ -126,7 +127,8 @@ class ToolRegistryExposureFilterTest {
 
     /** builtins 를 넣고 registerBuiltins 를 태워 builtinNames 를 채운 레지스트리. */
     private ToolRegistry builtinRegistry(List<ToolExecutor> builtins) {
-        ToolRegistry r = new ToolRegistry(builtins, mock(PlatformMetrics.class), policy);
+        ToolRegistry r = new ToolRegistry(builtins, mock(PlatformMetrics.class), policy,
+                mock(com.platform.orchestrator.approval.ToolApprovalGate.class));
         r.registerBuiltins();
         return r;
     }

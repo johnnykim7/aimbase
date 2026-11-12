@@ -251,14 +251,8 @@ public class ToolCallHandler {
                     continue;
                 }
 
-                ToolApprovalGate.Verdict verdict = toolApprovalGate.check(tc.name(), tc.input(), tc.id(), sessionId);
-                if (!verdict.proceed()) {
-                    results.add(new ContentBlock.ToolResult(tc.id(), verdict.refusal()));
-                    continue;
-                }
-
                 try {
-                    String result = toolRegistry.execute(tc);
+                    String result = toolRegistry.executeInSession(tc, sessionId);
                     results.add(new ContentBlock.ToolResult(tc.id(), result));
 
                     // PRD-193: PostToolUse 훅
@@ -1125,13 +1119,6 @@ public class ToolCallHandler {
         if (preHook.decision() == HookDecision.BLOCK) {
             log.info("Tool execution blocked by hook: tool={}, turn={}", tc.name(), turnNum);
             return ToolExecOutcome.text(tc.id(), "Tool execution blocked by policy hook");
-        }
-
-        // CR-185 BIZ-240: 훅 다음에 둔다. 훅이 막은 호출까지 사람에게 묻지 않게 한다.
-        ToolApprovalGate.Verdict verdict = toolApprovalGate.check(
-                tc.name(), tc.input(), tc.id(), toolContext.sessionId());
-        if (!verdict.proceed()) {
-            return ToolExecOutcome.text(tc.id(), verdict.refusal());
         }
 
         // CR-102: TOOL_USE 이벤트 — 워크플로우 run 컨텍스트일 때만 (input 전문 적재)

@@ -8,6 +8,7 @@ import com.platform.monitoring.PlatformMetrics;
 import com.platform.policy.model.PolicyResult;
 import com.platform.policy.model.TriggeredPolicy;
 import com.platform.repository.PolicyRepository;
+import com.platform.tenant.TenantContext;
 import com.platform.domain.PolicyEntity;
 import com.platform.tool.PermissionLevel;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -165,7 +166,7 @@ public class PolicyEngine {
      */
     public ToolCallDecision evaluateToolCall(String toolName, String sessionId) {
         if (toolName == null) return ToolCallDecision.allow();
-        for (PolicyEntity policy : policyRepository.findByIsActiveTrueOrderByPriorityDesc()) {
+        for (PolicyEntity policy : activeTenantPolicies()) {
             List<String> tools = toolsOf(policy);
             if (tools == null || !tools.contains(toolName)) continue;
             List<Map<String, Object>> rules = policy.getRules();
@@ -193,11 +194,20 @@ public class PolicyEngine {
     }
 
     /**
+     * 정책은 테넌트 DB 에만 있다. 테넌트 없이 도는 도구 실행(액추에이터 도구 시험 등)은 마스터 DB 로 가므로
+     * 조회하지 않는다. 걸 정책이 없으니 막을 것도 없다.
+     */
+    private List<PolicyEntity> activeTenantPolicies() {
+        if (TenantContext.getTenantId() == null) return List.of();
+        return policyRepository.findByIsActiveTrueOrderByPriorityDesc();
+    }
+
+    /**
      * CR-185: 켜진 정책 가운데 이 도구를 대상으로 둔 것이 있는가. 도구 루프가 묻게 될 도구를 병렬 실행에서 빼는 데 쓴다.
      */
     public boolean hasToolPolicy(String toolName) {
         if (toolName == null) return false;
-        for (PolicyEntity policy : policyRepository.findByIsActiveTrueOrderByPriorityDesc()) {
+        for (PolicyEntity policy : activeTenantPolicies()) {
             List<String> tools = toolsOf(policy);
             if (tools != null && tools.contains(toolName)) return true;
         }

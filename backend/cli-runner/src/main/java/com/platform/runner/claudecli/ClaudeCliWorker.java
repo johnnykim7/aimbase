@@ -1224,16 +1224,22 @@ public class ClaudeCliWorker implements AutoCloseable {
      *
      * <p>CR-147: 스킬 지정이 있으면 X-Aimbase-Skill-Set 머리글도 같은 자리에 넣는다.
      *
-     * <p>둘 다 없거나 mcpConfig 에 aimbase-server 항목이 없으면 원본을 그대로 반환(기존 동작 보존).
+     * <p>CR-185: 대화 요청이면 X-Aimbase-Session-Id 도 넣는다. 서버가 승인이 필요한 도구를 그 대화에 묻는다.
+     *
+     * <p>셋 다 없거나 mcpConfig 에 aimbase-server 항목이 없으면 원본을 그대로 반환(기존 동작 보존).
      */
     @SuppressWarnings("unchecked")
-    static String injectServerHeaders(String mcpConfig, String workingDir, List<SkillRef> skills) {
+    static String injectServerHeaders(String mcpConfig, String workingDir, List<SkillRef> skills,
+                                      String chatSessionId) {
         Map<String, String> added = new LinkedHashMap<>();
         if (workingDir != null && !workingDir.isBlank()) {
             added.put(WORKSPACE_HEADER, workingDir);
         }
         if (skills != null && !skills.isEmpty()) {
             added.put(SkillSetHeader.NAME, SkillSetHeader.encode(skills));
+        }
+        if (chatSessionId != null) {
+            added.put(SESSION_HEADER, chatSessionId);
         }
         if (added.isEmpty() || mcpConfig == null || mcpConfig.isBlank()) {
             return mcpConfig;
@@ -1438,8 +1444,8 @@ public class ClaudeCliWorker implements AutoCloseable {
             }
             mcpAllowed = names;
         }
-        // CR-117 작업장 경로, CR-147 스킬 지정 머리글을 aimbase-server 항목에 싣는다.
-        String mcpConfig = injectServerHeaders(mcpConfigJson, workingDirectory, skillSet);
+        // CR-117 작업장 경로, CR-147 스킬 지정, CR-185 대화 세션 머리글을 aimbase-server 항목에 싣는다.
+        String mcpConfig = injectServerHeaders(mcpConfigJson, workingDirectory, skillSet, dataSessionId);
         String nativeMcpConfig = null;
         if (nativeWithSkills) {
             nativeMcpConfig = skillsOnlyConfig(mcpConfig);

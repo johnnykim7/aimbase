@@ -7,6 +7,7 @@ import com.platform.hook.HookEvent;
 import com.platform.hook.HookInput;
 import com.platform.hook.HookOutput;
 import com.platform.llm.adapter.RequestContext;
+import com.platform.orchestrator.approval.ToolApprovalGate;
 import com.platform.policy.TokenBucketRateLimiter;
 import com.platform.tool.EnhancedToolExecutor;
 import com.platform.tenant.TenantContext;
@@ -56,6 +57,7 @@ public class ServerMcpToolDispatcher {
     private final TokenBucketRateLimiter rateLimiter;
     private final PdfVisionResolver pdfVisionResolver;
     private final ToolRegistry toolRegistry;
+    private final ToolApprovalGate approvalGate;
     private final int rateLimitPerMinute;
 
     // CR-121: ToolRegistry 가 McpExposurePolicy 를 주입받으므로 @Lazy 로 순환 참조를 끊는다.
@@ -63,12 +65,14 @@ public class ServerMcpToolDispatcher {
                                     TokenBucketRateLimiter rateLimiter,
                                     PdfVisionResolver pdfVisionResolver,
                                     @org.springframework.context.annotation.Lazy ToolRegistry toolRegistry,
+                                    ToolApprovalGate approvalGate,
                                     @Value("${mcp.rate-limit.requests-per-minute:60}")
                                     int rateLimitPerMinute) {
         this.hookDispatcher = hookDispatcher;
         this.rateLimiter = rateLimiter;
         this.pdfVisionResolver = pdfVisionResolver;
         this.toolRegistry = toolRegistry;
+        this.approvalGate = approvalGate;
         this.rateLimitPerMinute = rateLimitPerMinute;
     }
 
@@ -144,6 +148,14 @@ public class ServerMcpToolDispatcher {
         if (preHook != null && preHook.decision() == HookDecision.BLOCK) {
             log.info("Server MCP: tool '{}' BLOCKED by PRE_TOOL_USE hook (session={})", name, sessionId);
             return errorResult("Tool execution blocked by policy hook");
+        }
+
+        // CR-185 BIZ-241: MCP 로 온 호출은 ToolRegistry 를 거치지 않고 도구를 바로 실행하므로 여기서 따로 묻는다.
+        // 대화 세션은 실행기가 실은 X-Aimbase-Session-Id 다. 없으면(워크플로우 단계, 옛 실행기) 묻지 않고 막는다.
+        ToolApprovalGate.Verdict verdict = approvalGate.check(name, safeArgs, null, RequestContext.getChatSessionId());
+        if (!verdict.proceed()) {
+            log.info("Server MCP: tool '{}' not run by approval gate (session={})", name, sessionId);
+            return errorResult(verdict.refusal());
         }
 
         String result;

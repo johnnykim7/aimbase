@@ -41,6 +41,22 @@ class ClaudeCliWorkerDataChannelTest {
     }
 
     @Test
+    @DisplayName("CR-185: 대화 요청이면 aimbase-server 항목에도 대화 세션 머리글을 싣는다")
+    void injectServerHeaders_addsChatSessionForApproval() throws Exception {
+        String base = "{\"mcpServers\":{\"aimbase-server\":{\"type\":\"http\",\"url\":\"http://api:8280/mcp\","
+                + "\"headers\":{\"Authorization\":\"Bearer k\"}}}}";
+
+        JsonNode withSession = MAPPER.readTree(ClaudeCliWorker.injectServerHeaders(base, null, null, "sess-1"))
+                .path("mcpServers").path("aimbase-server").path("headers");
+        assertThat(withSession.path("X-Aimbase-Session-Id").asText()).isEqualTo("sess-1");
+        assertThat(withSession.path("Authorization").asText()).isEqualTo("Bearer k");
+
+        JsonNode withoutSession = MAPPER.readTree(ClaudeCliWorker.injectServerHeaders(base, null, null, null))
+                .path("mcpServers").path("aimbase-server").path("headers");
+        assertThat(withoutSession.has("X-Aimbase-Session-Id")).isFalse();
+    }
+
+    @Test
     @DisplayName("aimbase-data 항목은 /mcp-data 주소, 인증 머리글, 세션 머리글만 갖는다")
     void withDataEntry_copiesServerEntryToDataChannel() throws Exception {
         JsonNode root = MAPPER.readTree(ClaudeCliWorker.withDataEntry(SERVER_CONFIG, SERVER_CONFIG, "sess-1"));

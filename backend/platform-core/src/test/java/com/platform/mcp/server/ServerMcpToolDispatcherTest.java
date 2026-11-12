@@ -4,6 +4,8 @@ import com.platform.attachment.PdfVisionResolver;
 import com.platform.hook.HookDispatcher;
 import com.platform.hook.HookEvent;
 import com.platform.hook.HookOutput;
+import com.platform.llm.adapter.RequestContext;
+import com.platform.orchestrator.approval.ToolApprovalGate;
 import com.platform.policy.TokenBucketRateLimiter;
 import com.platform.tool.EnhancedToolExecutor;
 import com.platform.tool.PermissionLevel;
@@ -18,6 +20,7 @@ import com.platform.tool.ToolScope;
 import com.platform.mcp.MCPToolErrorException;
 import com.platform.tool.model.UnifiedToolDef;
 import io.modelcontextprotocol.spec.McpSchema;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,6 +34,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -42,6 +46,7 @@ class ServerMcpToolDispatcherTest {
     private PdfVisionResolver pdfVisionResolver;
     private ToolRegistry toolRegistry;
     private ServerMcpToolDispatcher dispatcher;
+    private ToolApprovalGate approvalGate;
 
     @BeforeEach
     void setUp() {
@@ -63,8 +68,32 @@ class ServerMcpToolDispatcherTest {
         // 기본: rate limit 통과
         when(rateLimiter.tryAcquire(anyString(), anyInt()))
                 .thenReturn(TokenBucketRateLimiter.RateLimitResult.allowed(60, 59));
+        approvalGate = mock(ToolApprovalGate.class);
+        when(approvalGate.check(any(), any(), any(), any())).thenReturn(ToolApprovalGate.Verdict.go());
         dispatcher = new ServerMcpToolDispatcher(hookDispatcher, rateLimiter, pdfVisionResolver,
-                toolRegistry, 60);
+                toolRegistry, approvalGate, 60);
+    }
+
+    @AfterEach
+    void clearRequestContext() {
+        RequestContext.clear();
+    }
+
+    @Test
+    @DisplayName("CR-185 TC-CHT-116: 승인 문이 막으면 도구를 실행하지 않고 사유를 오류 결과로 돌려준다")
+    void approval_gate_refusal_skips_tool() {
+        ToolExecutor tool = mock(ToolExecutor.class);
+        when(tool.getDefinition()).thenReturn(new UnifiedToolDef("refund_order", "환불", Map.of("type", "object")));
+        when(toolRegistry.isCliExposed(tool)).thenReturn(true);
+        when(approvalGate.check(eq("refund_order"), any(), any(), eq("sess-9")))
+                .thenReturn(ToolApprovalGate.Verdict.refuse("사용자가 실행을 거절했습니다"));
+        RequestContext.setChatSessionId("sess-9");
+
+        McpSchema.CallToolResult result = dispatcher.dispatch(tool, "refund_order", Map.of("order_id", "A-1"));
+
+        assertThat(result.isError()).isTrue();
+        assertThat(((McpSchema.TextContent) result.content().get(0)).text()).contains("사용자가 실행을 거절했습니다");
+        verify(tool, never()).execute(any());
     }
 
     @Test

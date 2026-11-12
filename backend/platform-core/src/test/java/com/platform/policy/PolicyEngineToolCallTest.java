@@ -11,6 +11,8 @@ import com.platform.hook.HookDispatcher;
 import com.platform.monitoring.PlatformMetrics;
 import com.platform.policy.model.PolicyResult.PolicyAction;
 import com.platform.repository.PolicyRepository;
+import com.platform.tenant.TenantContext;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +35,21 @@ class PolicyEngineToolCallTest {
         engine = new PolicyEngine(repo, mock(AuditLogger.class), new ObjectMapper(), mock(PIIMasker.class),
                 mock(MCPSafetyClient.class), mock(RateLimiter.class), mock(PlatformMetrics.class),
                 mock(HookDispatcher.class));
+        TenantContext.setTenantId("t1");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        TenantContext.clear();
+    }
+
+    @Test
+    void 테넌트_없는_실행은_정책을_조회하지_않고_허용() {
+        TenantContext.clear();
+        PolicyEngine.ToolCallDecision d = engine.evaluateToolCall("send_mail", "s");
+        assertThat(d.action()).isEqualTo(PolicyAction.ALLOW);
+        assertThat(engine.hasToolPolicy("send_mail")).isFalse();
+        verifyNoInteractions(repo);
     }
 
     private static PolicyEntity policy(String id, int priority, List<String> tools, String type, String message) {
