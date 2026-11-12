@@ -136,6 +136,9 @@ export const readAloud: WidgetFeature = {
     ctx.on("answerStart", stop);
     ctx.on("newConversation", stop);
     ctx.on("destroy", stop);
+    ctx.on("panelToggle", ({ open }) => {
+      if (!open) stop();
+    });
     ctx.on("localeChange", () => refresh());
   },
 };

@@ -63,6 +63,10 @@ export const voiceChat: WidgetFeature = {
     });
     ctx.on("newConversation", () => session?.close());
     ctx.on("destroy", () => session?.close());
+    // 창을 닫은 뒤에도 마이크가 켜져 있으면 사람이 모르는 채 듣게 된다.
+    ctx.on("panelToggle", ({ open }) => {
+      if (!open) session?.close();
+    });
     update();
   },
 };
