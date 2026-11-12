@@ -3525,7 +3525,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 | slides | 배열 | `[{title, bullets: [...], notes}]` pptx |
 | overwrite | 참거짓 | 같은 이름이면 바꿔 쓴다. 기본 거짓(`(2)` 를 붙인다) |
 
-결과 `{file_name, size}`. 오류 `file_invalid:format`, `file_invalid:content`, `file_invalid:file_name`, `file_too_large`, `pdf_font_missing`, `file_create_disabled`.
+결과 `{file_name, size}`. 오류 `file_invalid:format`, `file_invalid:content`, `file_invalid:file_name`, `file_too_large`, `pdf_font_missing`, `file_create_disabled`, `file_no_workspace`(세션 작업 폴더를 잡지 못함), `file_write_failed`(디스크 쓰기 실패).
 
 ### 응답 저장 [PRD-501]
 
@@ -3553,7 +3553,8 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 
 ```json
 {"share_id": "5b0c...", "url": "https://ai.banpoom.co.kr/share/bp_wes/Qm9...", "kind": "FILE",
- "file_name": "3분기 반품 현황.xlsx", "expires_at": "2026-11-20T10:00:00+09:00", "created_at": "2026-11-13T10:00:00+09:00"}
+ "file_name": "3분기 반품 현황.xlsx", "status": "ACTIVE", "view_count": 0, "expires_at": "2026-11-20T01:00:00Z",
+ "created_at": "2026-11-13T01:00:00Z", "revoked_at": null}
 ```
 
 | 오류 | 경우 |
@@ -3562,11 +3563,12 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 | 400 `share_invalid:file_name` | FILE 인데 이름이 없음 |
 | 400 `share_invalid:ttl_days` | 1 ~ `chat.share.max-ttl-days` 밖 |
 | 404 `session_not_found` | 없는 세션, 남의 세션 |
-| 404 `file_not_found` | 그 세션 `out/` 에 없는 파일 |
+| 404 `file_not_found` | 그 세션 `out/` 에 없는 파일, 이름에 경로가 섞임 |
 | 409 `export_empty` | CONVERSATION 인데 메시지가 없음 |
 | 409 `share_not_configured` | `chat.share.enabled` 꺼짐 또는 공개 주소 비움 |
+| 503 `share_write_failed` | 사본을 디스크에 쓰지 못함 |
 
-`GET /api/v1/chat/shares?session_id=` 이 세션에 내가 만든 링크 최근 20개. 행 `{share_id, url, kind, file_name, status(ACTIVE, REVOKED, EXPIRED), view_count, expires_at, created_at}`.
+`GET /api/v1/chat/shares?session_id=` 이 세션에 내가 만든 링크 최근 20개. 행 `{share_id, url, kind, file_name, status(ACTIVE, REVOKED, EXPIRED), view_count, expires_at, created_at, revoked_at}`. 만들기 응답과 같은 모양. 남의 세션이면 404 `session_not_found`.
 
 `DELETE /api/v1/chat/shares/{share_id}` 끊기. 주인이 아니거나 없으면 404 `share_not_found`. 이미 끊긴 것은 200.
 
@@ -3576,7 +3578,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 
 - 대화: 200 text/html. `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`, `Cache-Control: no-store`
 - 파일: 200 attachment
-- 없는 테넌트, 없는, 끊긴, 기한 지난 링크: 404 같은 화면. 분당 상한 넘음: 429
+- 없는 테넌트, 없는, 끊긴, 기한 지난 링크: 404 같은 화면. 분당 상한 넘음: 429 같은 화면. 상한은 `X-Real-IP`(없으면 바로 붙은 주소)마다 센다
 
 ### 위젯 설정 칸 추가 [PRD-500, PRD-503]
 
@@ -3584,7 +3586,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 
 ### 산출물 API 세션 주인 대조 [PRD-503]
 
-`GET /api/v1/chat/artifacts`, `/download`: 위젯 토큰이면 세션 주인만. 남이면 404.
+`GET /api/v1/chat/artifacts`, `/download`, `/preview`, `/preview/page`: 위젯 토큰이면 세션 주인만. 남이면 404 `artifact_not_found`.
 
 ---
 

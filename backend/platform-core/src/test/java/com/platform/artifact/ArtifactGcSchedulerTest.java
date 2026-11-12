@@ -1,6 +1,8 @@
 package com.platform.artifact;
 
 import com.platform.config.WorkspaceProperties;
+import com.platform.tool.builtin.CreateFileTool;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -41,5 +43,22 @@ class ArtifactGcSchedulerTest {
         assertThat(oldCache).doesNotExist();
         assertThat(oldArtifact).doesNotExist();
         assertThat(freshCache.resolve("doc.pdf")).exists();
+    }
+
+    @Test
+    @DisplayName("TC-CHT-082 out/.source 의 입력 JSON 도 산출물과 같은 기한으로 지운다")
+    void expired_source_json_is_removed_with_the_same_ttl() throws IOException {
+        Path source = Files.createDirectories(root.resolve("ws/out").resolve(CreateFileTool.SOURCE_DIR));
+        Path oldJson = Files.writeString(source.resolve("old.docx.json"), "{}");
+        Path freshJson = Files.writeString(source.resolve("fresh.docx.json"), "{}");
+        Files.setLastModifiedTime(oldJson, FileTime.from(Instant.now().minus(Duration.ofDays(2))));
+
+        WorkspaceProperties props = new WorkspaceProperties();
+        props.setWhitelistRoots(List.of(root.toString()));
+        int deleted = new ArtifactGcScheduler(props).purgeUnderRoot(root, Instant.now().minus(Duration.ofHours(24)));
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(oldJson).doesNotExist();
+        assertThat(freshJson).exists();
     }
 }

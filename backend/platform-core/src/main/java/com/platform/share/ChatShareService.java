@@ -51,6 +51,8 @@ public class ChatShareService {
     public static final String SHARE_NOT_FOUND = "share_not_found";
     public static final String FILE_NOT_FOUND = "file_not_found";
     static final String INVALID_KIND = "share_invalid:kind";
+    static final String INVALID_FILE_NAME = "share_invalid:file_name";
+    static final String INVALID_TTL = "share_invalid:ttl_days";
     static final String CONVERSATION_FILE = "conversation.html";
     static final String SHARES_DIR = "shares";
 
@@ -105,11 +107,15 @@ public class ChatShareService {
                                       String fileName, Integer ttlDays) {
         if (!settings.usable()) throw new ChatRejectedException(HttpStatus.CONFLICT, SHARE_NOT_CONFIGURED);
         ChatShareEntity.Kind k = kind(kind);
+        if (k == ChatShareEntity.Kind.FILE && (fileName == null || fileName.isBlank())) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, INVALID_FILE_NAME);
+        }
+        int days = ttl(ttlDays);
         ConversationSessionEntity session = ownership.require(requesterRef, sessionId);
         Path root = sharesRoot(tenantId);
 
         OffsetDateTime now = OffsetDateTime.now(clock);
-        OffsetDateTime expiresAt = now.plusDays(ttl(ttlDays));
+        OffsetDateTime expiresAt = now.plusDays(days);
         UUID id = UUID.randomUUID();
         Path dir = root.resolve(id.toString());
 
@@ -243,7 +249,10 @@ public class ChatShareService {
 
     private int ttl(Integer requested) {
         if (requested == null) return settings.ttlDays();
-        return Math.min(Math.max(1, requested), settings.maxTtlDays());
+        if (requested < 1 || requested > settings.maxTtlDays()) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, INVALID_TTL);
+        }
+        return requested;
     }
 
     private String newToken() {

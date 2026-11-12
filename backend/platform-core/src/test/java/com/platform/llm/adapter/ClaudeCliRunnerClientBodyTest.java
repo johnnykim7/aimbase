@@ -5,6 +5,7 @@ import com.platform.llm.model.ModelConfig;
 import com.platform.llm.model.LLMRequest;
 import com.platform.llm.model.UnifiedMessage;
 import com.platform.tool.SkillRef;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -60,6 +61,18 @@ class ClaudeCliRunnerClientBodyTest {
         assertThat(chunks).hasSize(1);
         assertThat(chunks.get(0).type()).isEqualTo("thinking");
         assertThat(chunks.get(0).delta()).isEqualTo("생각 글");
+    }
+
+    @Test
+    @DisplayName("TC-CHT-083 CLI 연결 exposed_tools [bash] 에 파일 만들기를 켜면 실행기 허용 도구는 [bash, create_file]")
+    void extra_allowed_tools_are_merged_into_exposed_tools() {
+        LLMRequest req = request().withExtraAllowedTools(List.of("create_file"));
+
+        Map<String, Object> body = ClaudeCliRunnerClient.buildBody(req, "NATIVE", null, null, true, List.of("bash"));
+
+        assertThat(body.get("allowed_tools")).isEqualTo(List.of("bash", "create_file"));
+        assertThat(ClaudeCliRunnerClient.buildBody(request(), "NATIVE", null, null, true, List.of("bash"))
+                .get("allowed_tools")).isEqualTo(List.of("bash"));
     }
 
     private static LLMRequest withConfig(ModelConfig config) {

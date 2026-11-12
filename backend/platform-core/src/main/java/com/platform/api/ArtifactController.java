@@ -4,6 +4,7 @@ import com.platform.artifact.ArtifactPreviewService;
 import com.platform.artifact.ArtifactService;
 import com.platform.auth.UserPrincipal;
 import com.platform.document.FileMediaTypes;
+import com.platform.session.ChatRejectedException;
 import com.platform.session.ChatSessionOwnership;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -164,7 +165,7 @@ public class ArtifactController {
     private void requireOwner(UserPrincipal principal, String sessionId) {
         if (principal != null && WIDGET_ROLE.equals(principal.getRole())
                 && !ownership.ownedOrUnclaimed(principal.getId(), sessionId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "artifact_not_found");
+            throw new ChatRejectedException(HttpStatus.NOT_FOUND, "artifact_not_found");
         }
     }
 }
