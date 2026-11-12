@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.20 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178
+> 설계 버전: 7.21 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3500,6 +3500,91 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 ### 위젯 설정 칸 추가 [PRD-463]
 
 `GET /api/v1/chat/widget-settings` 응답에 `preview_html_script_sources`(글 배열)를 더한다. 값은 런타임 설정 `widget.preview-html-script-sources`.
+
+## 채팅 위젯 파일 만들기, 저장, 내보내기, 공유 링크 [v7.13, CR-182]
+
+설계 상세: [CR-182_위젯_파일_만들기_저장_내보내기_공유_링크.md](CR-182_위젯_파일_만들기_저장_내보내기_공유_링크.md) 3절, 6절. 공개 열기 하나를 빼면 권한은 모두 `chat:stream` 위젯 토큰 또는 로그인이고, 위젯 토큰은 세션 주인만 부른다.
+
+### 대화 요청 칸 추가 [PRD-500]
+
+`POST /api/v1/chat/completions`
+
+| 칸 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| file_create | 참거짓 | 선택 | 참이고 `chat.file-create.enabled` 면 서버 도구 `create_file` 을 준다(BIZ-210). API 연결은 `actions_enabled` 가 없어도 이 도구 하나로 도구 고리를 돈다. CLI 연결은 허용 도구에 더한다 |
+
+### 서버 도구 create_file [PRD-500]
+
+| 입력 칸 | 타입 | 뜻 |
+|---|---|---|
+| file_name | 글, 필수 | 확장자 없는 이름. 경로 문자를 지우고 120자 |
+| format | 글, 필수 | `docx`, `pdf`, `xlsx`, `pptx`, `csv`, `md`, `html`, `txt` |
+| title | 글 | docx, pdf, html 맨 위 제목, pptx 표지 |
+| content | 글 | 마크다운(docx, pdf, md, html, txt, csv 대안) |
+| sheets | 배열 | `[{name, rows: [[...]]}]` xlsx, csv |
+| slides | 배열 | `[{title, bullets: [...], notes}]` pptx |
+| overwrite | 참거짓 | 같은 이름이면 바꿔 쓴다. 기본 거짓(`(2)` 를 붙인다) |
+
+결과 `{file_name, size}`. 오류 `file_invalid:format`, `file_invalid:content`, `file_invalid:file_name`, `file_too_large`, `pdf_font_missing`, `file_create_disabled`.
+
+### 응답 저장 [PRD-501]
+
+`GET /api/v1/chat/sessions/{session_id}/turns/{turn_id}/export?format=pdf|docx&tz=Asia/Seoul`
+
+- 200 파일(attachment, UTF-8 이름 `<대화 제목>_<응답 시각>.<형식>`)
+- 400 `export_invalid:format`, 404 `turn_not_found`(없는 답, 남의 세션), 503 `pdf_font_missing`
+
+### 대화 내보내기 [PRD-502]
+
+`GET /api/v1/chat/sessions/{session_id}/export?format=pdf|docx|md&tz=Asia/Seoul`
+
+- 200 파일(attachment, `<대화 제목>_<내보낸 시각>.<형식>`)
+- 400 `export_invalid:format`, 404 `session_not_found`, 409 `export_empty`, 503 `pdf_font_missing`
+
+### 공유 링크 [PRD-503]
+
+`POST /api/v1/chat/shares`
+
+```json
+{"session_id": "cs-9471-...", "kind": "FILE", "file_name": "3분기 반품 현황.xlsx", "ttl_days": 7}
+```
+
+응답:
+
+```json
+{"share_id": "5b0c...", "url": "https://ai.banpoom.co.kr/share/bp_wes/Qm9...", "kind": "FILE",
+ "file_name": "3분기 반품 현황.xlsx", "expires_at": "2026-11-20T10:00:00+09:00", "created_at": "2026-11-13T10:00:00+09:00"}
+```
+
+| 오류 | 경우 |
+|---|---|
+| 400 `share_invalid:kind` | CONVERSATION, FILE 이 아님 |
+| 400 `share_invalid:file_name` | FILE 인데 이름이 없음 |
+| 400 `share_invalid:ttl_days` | 1 ~ `chat.share.max-ttl-days` 밖 |
+| 404 `session_not_found` | 없는 세션, 남의 세션 |
+| 404 `file_not_found` | 그 세션 `out/` 에 없는 파일 |
+| 409 `export_empty` | CONVERSATION 인데 메시지가 없음 |
+| 409 `share_not_configured` | `chat.share.enabled` 꺼짐 또는 공개 주소 비움 |
+
+`GET /api/v1/chat/shares?session_id=` 이 세션에 내가 만든 링크 최근 20개. 행 `{share_id, url, kind, file_name, status(ACTIVE, REVOKED, EXPIRED), view_count, expires_at, created_at}`.
+
+`DELETE /api/v1/chat/shares/{share_id}` 끊기. 주인이 아니거나 없으면 404 `share_not_found`. 이미 끊긴 것은 200.
+
+### 공유 열기 (공개) [PRD-504]
+
+`GET /share/{tenant_id}/{token}` 로그인, 테넌트 머리글 없음.
+
+- 대화: 200 text/html. `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`, `Cache-Control: no-store`
+- 파일: 200 attachment
+- 없는 테넌트, 없는, 끊긴, 기한 지난 링크: 404 같은 화면. 분당 상한 넘음: 429
+
+### 위젯 설정 칸 추가 [PRD-500, PRD-503]
+
+`GET /api/v1/chat/widget-settings` 응답에 `file_create_enabled`, `export_formats`, `share_enabled`, `share_ttl_days`.
+
+### 산출물 API 세션 주인 대조 [PRD-503]
+
+`GET /api/v1/chat/artifacts`, `/download`: 위젯 토큰이면 세션 주인만. 남이면 404.
 
 ---
 
