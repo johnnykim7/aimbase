@@ -1,6 +1,6 @@
 package com.platform.session;
 
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.config.PlatformSettingsService;
 import com.platform.llm.ConnectionAdapterFactory;
@@ -12,8 +12,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -49,8 +51,11 @@ public class ChatWidgetSettingsService {
         this.objectMapper = objectMapper;
     }
 
-    /** GET /api/v1/chat/widget-settings 본문. 그 테넌트에 없는 연결이면 404. */
-    public Map<String, Object> settings(String connectionId) {
+    /**
+     * GET /api/v1/chat/widget-settings 본문. 그 테넌트에 없는 연결이면 404.
+     * locale 은 아쉬워요 이유 이름의 언어다(CR-177, BIZ-161). 비면 기본 이름.
+     */
+    public Map<String, Object> settings(String connectionId, String locale) {
         List<Map<String, String>> models;
         String defaultModel;
         if (connectionId != null && !connectionId.isBlank()) {
@@ -70,7 +75,7 @@ public class ChatWidgetSettingsService {
         body.put("default_model", defaultModel);
         body.put("thinking_supported", thinkingSupported(connectionId, defaultModel));
         body.put("thinking_default", thinkingDefault(connectionId, defaultModel));
-        body.put("feedback_reasons", feedbackReasons());
+        body.put("feedback_reasons", feedbackReasons(locale));
         body.put("feedback_comment_max_chars", feedbackCommentMaxChars());
         body.put("follow_ups_enabled", followUpsEnabled());
         return body;
@@ -112,15 +117,59 @@ public class ChatWidgetSettingsService {
         return adapterRegistry.hasAdapter(modelId) ? adapterRegistry.getAdapter(modelId) : null;
     }
 
-    /** 아쉬워요 이유 [{code, label}]. 설정 값이 JSON 이 아니면 빈 목록(이유 없이 평가만 받는다). */
+    /** 아쉬워요 이유 [{code, label}], label 은 기본 이름. 설정 값이 JSON 목록이 아니면 빈 목록(이유 없이 평가만 받는다). */
     public List<Map<String, String>> feedbackReasons() {
+        return feedbackReasons(null);
+    }
+
+    /**
+     * 아쉬워요 이유 [{code, label}], label 은 항목 labels 의 그 언어 이름, 없으면 기본 이름(CR-177, BIZ-161).
+     * labels 가 객체라 항목을 글 대 글 맵으로 읽으면 값 전체가 읽히지 않아, 평가 저장의 이유 검사까지 막힌다. 그래서 노드로 읽는다.
+     * code 가 없는 항목은 저장할 수 없으므로 뺀다.
+     */
+    public List<Map<String, String>> feedbackReasons(String locale) {
         String raw = platformSettings.getString(FEEDBACK_REASONS_KEY, "[]");
+        JsonNode root;
         try {
-            return objectMapper.readValue(raw, new TypeReference<List<Map<String, String>>>() {});
+            root = objectMapper.readTree(raw);
         } catch (Exception e) {
             log.warn("Runtime setting {} is not a JSON list: {}", FEEDBACK_REASONS_KEY, e.getMessage());
             return List.of();
         }
+        if (root == null || !root.isArray()) {
+            log.warn("Runtime setting {} is not a JSON list", FEEDBACK_REASONS_KEY);
+            return List.of();
+        }
+        String lang = language(locale);
+        List<Map<String, String>> reasons = new ArrayList<>();
+        for (JsonNode item : root) {
+            String code = text(item.get("code"));
+            if (code == null) continue;
+            String label = text(item.get("label"));
+            JsonNode labels = item.get("labels");
+            if (lang != null && labels != null && labels.isObject()) {
+                String localized = text(labels.get(lang));
+                if (localized != null) label = localized;
+            }
+            Map<String, String> reason = new LinkedHashMap<>();
+            reason.put("code", code);
+            reason.put("label", label != null ? label : code);
+            reasons.add(reason);
+        }
+        return reasons;
+    }
+
+    /** en-US, EN_us 처럼 지역이 붙은 값은 앞 언어만 본다(BIZ-160). 비면 null. */
+    static String language(String locale) {
+        if (locale == null || locale.isBlank()) return null;
+        String lang = locale.trim().split("[-_]", 2)[0].toLowerCase(Locale.ROOT);
+        return lang.isEmpty() ? null : lang;
+    }
+
+    private static String text(JsonNode node) {
+        if (node == null || !node.isTextual()) return null;
+        String value = node.asText();
+        return value.isBlank() ? null : value;
     }
 
     public int feedbackCommentMaxChars() {

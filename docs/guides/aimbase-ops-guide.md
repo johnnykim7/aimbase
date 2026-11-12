@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.27.0** | 2026-11-11 | Aimbase v8.18.0 기준
+> **v3.28.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -743,7 +743,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 | 키 | 처음 값 | 뜻 |
 |---|---|---|
 | `llm.default-model` | `anthropic/claude-sonnet-4-5` | 연결도 모델도 정해지지 않았을 때 쓰는 모델 |
-| `widget.feedback-reasons` | 틀린 정보, 조회를 안 함, 너무 김, 질문과 다름, 기타 | 아쉬워요 이유. `[{"code": ..., "label": ...}]`. 저장은 code 만 하므로 쓰던 code 는 지우지 말고 label 만 고칩니다 |
+| `widget.feedback-reasons` | 틀린 정보, 조회를 안 함, 너무 김, 질문과 다름, 기타 | 아쉬워요 이유. `[{"code": ..., "label": ..., "labels": {"en": ...}}]`. 저장은 code 만 하므로 쓰던 code 는 지우지 말고 이름만 고칩니다. `labels` 는 화면 언어별 이름이고(CR-177), 없는 언어는 `label` 로 보입니다 |
 | `widget.feedback-comment-max-chars` | 500 | 한 줄 의견 최대 글자 수 |
 | `widget.follow-ups-enabled` | true | 후속 질문과 대화 제목 만들기 |
 | `widget.follow-ups-count` | 3 | 후속 질문 개수 |
@@ -1968,6 +1968,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.28.0 | 2026-11-13 | **CR-177 위젯 영어 화면** (§ 2-14). 런타임 설정 `widget.feedback-reasons` 항목에 화면 언어별 이름 `labels`. 처음 값 그대로인 곳은 V80 이 영어 이름을 더한다 |
 | v3.27.0 | 2026-11-11 | **CR-175 채팅 위젯 대화 기본기** (§ 2-14). 연결 「허용 모델」, 깊게 생각하기 처음 상태, 런타임 설정 `llm.default-model` 과 `widget.feedback-*`, `widget.follow-ups-*`, 프롬프트 틀 `widget.follow-ups`, 「응답 평가」 화면, CLI 연결의 모델 바꾸기와 장애 대응 |
 | v3.26.1 | 2026-11-11 | **CR-174 수리 실행기 프로세스 상한** (§ 2-13). 운영 chaws 의 `aimbase-agent-3plgw` 에 `AIMBASE_RUNNER_MAX_PROCESSES` 4, 줄 대기 600초, `mem_limit` 3g. 수리 지시에 변환표 정규화 규칙(배송 속성 세 구분, 기존 구분 우선 매핑) |
 | v3.26.0 | 2026-11-10 | **CR-176 같은 글 다른 차례** (§ 2-12). 설정 `aimbase.tts.max-take`(기본 10). 생성기와 api 를 함께 바꿀 때는 생성기를 먼저 올린다 |

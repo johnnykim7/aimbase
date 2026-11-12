@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.30.1** | 2026-11-12 | Aimbase v8.18.0 기준
+> **v3.31.0** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2550,7 +2550,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 7, "model": "claude-
 | 409 | `session_busy` | 그 대화에 답이 도는 중 |
 | 409 | `rewind_before_compaction` | 그 순번 뒤에 대화 압축 경계가 있음 |
 
-### 28-2. 위젯 설정 (`GET /api/v1/chat/widget-settings?connection_id=`)
+### 28-2. 위젯 설정 (`GET /api/v1/chat/widget-settings?connection_id=&locale=`)
 
 위젯이 뜰 때 한 번 부릅니다.
 
@@ -2569,6 +2569,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 7, "model": "claude-
 - `models` 는 연결 config `models` 그대로입니다. 없으면 기본 모델 하나이고, 위젯은 목록이 둘 이상일 때만 모델 선택 칸을 보입니다.
 - `connection_id` 가 없으면 런타임 설정 `llm.default-model` 하나입니다.
 - `thinking_default` 는 깊게 생각하기 단추의 처음 상태입니다. 연결 config 에 생각 설정이 있으면 그 값, 없으면 어댑터 기본(Claude CLI 는 켜짐)입니다.
+- `locale` 은 위젯 화면 언어입니다(CR-177). `feedback_reasons` 의 `label` 이 그 언어 이름이고, 그 언어 이름이 없는 이유나 `locale` 이 없을 때는 기본 이름(한국어)입니다. `en-US` 처럼 지역이 붙은 값은 앞 언어(`en`)로 봅니다. 위젯은 화면 언어를 바꾸면 이 조회를 다시 부릅니다.
 - 그 테넌트에 없는 연결이면 404 `connection_not_found`.
 
 ### 28-3. 응답 평가 (`PUT`, `DELETE /api/v1/chat/feedback`)
@@ -2625,6 +2626,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
+| v3.31.0 | 2026-11-13 | **CR-177 위젯 영어 화면** (§ 28-2). 위젯 설정 조회에 `locale` 인자. `feedback_reasons` 의 `label` 을 그 언어 이름으로 준다 |
 | v3.30.1 | 2026-11-12 | **CR-175 위젯 파일 캐시** (§ 17, 문서만). 이름이 고정인 위젯 파일은 no-cache, 해시 붙은 조각만 1년 캐시. 로더가 자기 주소 쿼리를 esm 에 붙인다. 30일 캐시 시절 사본을 건너뛰는 판 표시 안내 |
 | v3.30.0 | 2026-11-11 | **CR-175 채팅 위젯 대화 기본기** (§ 28). 대화 요청에 `rewind_from_seq`, `thinking`, 허용 모델 검사. `done` 에 `turn_id`, `turn_seq`, `model`. 위젯 설정 `GET /api/v1/chat/widget-settings`, 응답 평가 `PUT`/`DELETE /api/v1/chat/feedback`, 평가 목록 `GET /api/v1/chat/feedback`, 후속 질문과 제목 `POST /api/v1/chat/sessions/{session_id}/follow-ups` |
 | v3.29.0 | 2026-11-10 | **CR-176 같은 글 다른 차례** (§ 27-2). 맡기기에 `take`(0 이상 10 이하, 빠지면 0)를 받아 같은 글을 다른 소리로 다시 만든다. 같은 글 돌려주기는 같은 차례일 때만. 응답에 `take`, 오류 `take_out_of_range`. 차례 0 은 전과 같은 소리다 |

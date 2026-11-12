@@ -47,8 +47,9 @@ public class ChatWidgetController {
     @GetMapping("/widget-settings")
     @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     public ApiResponse<Map<String, Object>> widgetSettings(
-            @RequestParam(name = "connection_id", required = false) String connectionId) {
-        return ApiResponse.ok(widgetSettings.settings(connectionId));
+            @RequestParam(name = "connection_id", required = false) String connectionId,
+            @RequestParam(name = "locale", required = false) String locale) {
+        return ApiResponse.ok(widgetSettings.settings(connectionId, locale));
     }
 
     @PutMapping("/feedback")
