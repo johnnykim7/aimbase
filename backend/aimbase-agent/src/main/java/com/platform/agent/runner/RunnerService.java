@@ -185,8 +185,11 @@ public class RunnerService {
             if (isFirst) {
                 return worker.turnFirst(messages, thinking);
             }
-            UnifiedMessage lastUser = lastUserMessage(messages);
-            return worker.turn(lastUser, thinking);
+            // CR-178: 마지막 질문만 넘기면 이번 질문 몫 시스템 지시가 빠진다. 대화째 넘기고 워커가 스트리밍과 같은 규칙으로 자른다.
+            if (messages == null || messages.isEmpty()) {
+                throw new IllegalArgumentException("messages empty");
+            }
+            return worker.turn(messages, thinking);
         } catch (RuntimeException e) {
             // CR-109: 예외(특히 turn timeout = ClaudeCliTimeoutException) 시 worker 를 닫는다.
             // 닫지 않으면 살아있는 claude CLI 프로세스가 누수된다(운영 좀비 누적). shutdownForRun 이
@@ -201,19 +204,6 @@ public class RunnerService {
         } finally {
             worker.unlease();
         }
-    }
-
-    private static UnifiedMessage lastUserMessage(List<UnifiedMessage> messages) {
-        if (messages == null || messages.isEmpty()) {
-            throw new IllegalArgumentException("messages empty");
-        }
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            UnifiedMessage m = messages.get(i);
-            if (m != null && m.role() == UnifiedMessage.Role.USER) {
-                return m;
-            }
-        }
-        return messages.get(messages.size() - 1);
     }
 
     /**
@@ -251,7 +241,9 @@ public class RunnerService {
 
         String text = (content instanceof String s) ? s
                 : (content == null ? "" : content.toString());
-        return UnifiedMessage.ofText(r, text);
+        UnifiedMessage message = UnifiedMessage.ofText(r, text);
+        // CR-178: 서버가 이번 질문 몫이라고 표시한 시스템 지시. 이 칸을 모르는 옛 서버는 보내지 않는다.
+        return Boolean.TRUE.equals(m.get("turn_scoped")) ? message.asTurnScoped() : message;
     }
 
     /**

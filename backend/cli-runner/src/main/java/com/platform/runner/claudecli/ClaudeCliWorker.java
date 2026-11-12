@@ -333,6 +333,14 @@ public class ClaudeCliWorker implements AutoCloseable {
         return turnInternal0(List.of(lastUser), false, null, null, null, thinking);
     }
 
+    /**
+     * CR-178: 이후 턴. 호출자가 넘긴 대화를 스트리밍 턴과 같은 규칙({@link #trimToCurrentTurn})으로 잘라
+     * 이번 질문과 이번 질문 몫 시스템 지시만 쓴다.
+     */
+    public LLMResponse turn(List<UnifiedMessage> messages, Boolean thinking) {
+        return turnInternal0(messages, false, null, null, null, thinking);
+    }
+
     /** 이후 턴: 마지막 user 메시지만 주입 (CLI가 이전 맥락 유지). */
     public LLMResponse turn(UnifiedMessage lastUser) {
         return turnInternal(List.of(lastUser), false);
@@ -517,6 +525,9 @@ public class ClaudeCliWorker implements AutoCloseable {
      *
      * <p>TOOL_RESULT 는 도구 루프가 진행 중인 이번 턴의 입력이므로 보존한다. 마지막 USER 메시지보다
      * 뒤에 오는 TOOL_RESULT 만 남기고, 그 앞의 과거 이력은 버린다.
+     *
+     * <p>CR-178: 이번 질문 몫 표시가 달린 시스템 메시지(화면 맥락, 검색 자료, 기억, 프로젝트 지시문)는 CLI 세션에
+     * 없는 이번 질문의 입력이라 남긴다. 표시 없는 지난 시스템 메시지는 지난 질문과 함께 이미 갔으므로 버린다.
      */
     // visible for testing
     static List<UnifiedMessage> trimToCurrentTurn(List<UnifiedMessage> messages) {
@@ -533,6 +544,12 @@ public class ClaudeCliWorker implements AutoCloseable {
         if (lastUserIdx < 0) return messages;
 
         List<UnifiedMessage> trimmed = new ArrayList<>();
+        for (int i = 0; i < lastUserIdx; i++) {
+            UnifiedMessage m = messages.get(i);
+            if (m != null && m.role() == UnifiedMessage.Role.SYSTEM && m.turnScoped()) {
+                trimmed.add(m);
+            }
+        }
         for (int i = lastUserIdx; i < messages.size(); i++) {
             UnifiedMessage m = messages.get(i);
             if (m == null) continue;
@@ -551,22 +568,25 @@ public class ClaudeCliWorker implements AutoCloseable {
     private void writeUserMessages(List<UnifiedMessage> messages) throws IOException {
         // CR-068 후속: systemPromptOverride 가 설정됐으면 SYSTEM 메시지는 이미 --system-prompt flag 로
         // CLI 에 주입됨 → user prepend 생략 (이중 노출 방지). 미설정 시 기존 prepend 폴백 유지.
-        StringBuilder systemPrefix = new StringBuilder();
-        if (systemPromptOverride == null) {
-            // CR-050: SYSTEM 메시지는 첫 user 메시지 앞에 prepend (CLI stream-json 은 system role 재주입 미지원).
-            for (UnifiedMessage msg : messages) {
-                if (msg.role() == UnifiedMessage.Role.SYSTEM) {
-                    if (systemPrefix.length() > 0) systemPrefix.append("\n\n");
-                    systemPrefix.append(flattenText(msg));
-                }
-            }
-        }
-
         int lastUserIdx = -1;
         for (int i = messages.size() - 1; i >= 0; i--) {
             if (messages.get(i).role() == UnifiedMessage.Role.USER) {
                 lastUserIdx = i;
                 break;
+            }
+        }
+
+        // CR-178: 대체값이 있어도 이번 질문 몫 표시가 달린 시스템 메시지는 대체값에 없는 이번 질문의 지시라 붙인다.
+        // 질문이 없는 도구 루프 재주입에는 붙이지 않는다(질문과 함께 이미 갔다).
+        StringBuilder systemPrefix = new StringBuilder();
+        for (UnifiedMessage msg : messages) {
+            if (msg.role() != UnifiedMessage.Role.SYSTEM) continue;
+            boolean include = systemPromptOverride == null
+                    // CR-050: SYSTEM 메시지는 첫 user 메시지 앞에 prepend (CLI stream-json 은 system role 재주입 미지원).
+                    || (msg.turnScoped() && lastUserIdx >= 0);
+            if (include) {
+                if (systemPrefix.length() > 0) systemPrefix.append("\n\n");
+                systemPrefix.append(flattenText(msg));
             }
         }
 

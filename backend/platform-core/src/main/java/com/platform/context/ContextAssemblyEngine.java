@@ -275,9 +275,7 @@ public class ContextAssemblyEngine {
         allMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, assembleSystemPrompt(sessionId)));
         allMessages.addAll(memoryContext);
         allMessages.addAll(history);
-        if (request.messages() != null) {
-            allMessages.addAll(request.messages());
-        }
+        allMessages.addAll(currentTurnInput(request));
 
         // 트리밍 (C2: sessionId 전달 → 압축 요약 저장)
         List<UnifiedMessage> trimmed = contextWindowManager.trim(allMessages,
@@ -374,6 +372,15 @@ public class ContextAssemblyEngine {
     }
 
     /**
+     * CR-178: 이번 요청 메시지. 붙이는 앱이 질문 앞에 보낸 시스템 메시지(화면 맥락)에는 이번 질문 몫 표시를 단다.
+     * 대화 기록에서 읽은 지난 시스템 메시지에는 달지 않는다(지난 질문과 함께 이미 갔다).
+     */
+    public static List<UnifiedMessage> currentTurnInput(ChatRequest request) {
+        if (request.messages() == null) return List.of();
+        return request.messages().stream().map(UnifiedMessage::asTurnScoped).toList();
+    }
+
+    /**
      * Source Provider: source 이름에 따라 적절한 메시지를 수집.
      */
     private List<UnifiedMessage> provideSource(String source, String sessionId, ChatRequest request) {
@@ -394,7 +401,7 @@ public class ContextAssemblyEngine {
                 yield List.of();
             }
             case "recent_conversation" -> sessionStore.getMessages(sessionId);
-            case "user_input" -> request.messages() != null ? request.messages() : List.of();
+            case "user_input" -> currentTurnInput(request);
             // 나머지 source는 향후 Provider 추가 시 구현
             default -> {
                 log.debug("Unknown context source: {}, skipping", source);

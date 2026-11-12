@@ -296,7 +296,7 @@ public class OrchestratorEngine {
                         (List<Map<String, Object>>) ragResult.getOrDefault("citations", List.of());
                 if (!ragContext.isBlank()) {
                     trimmedMessages.add(0,
-                            UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, ragContext));
+                            UnifiedMessage.turnScopedSystem(ragContext));
                     ragUsed = true;
                     if (!citations.isEmpty()) {
                         ragCitations = citations;
@@ -579,7 +579,8 @@ public class OrchestratorEngine {
 
         List<UnifiedMessage> history = sessionStore.getMessages(sessionId);
         List<UnifiedMessage> allMessages = new ArrayList<>(history);
-        allMessages.addAll(request.messages());
+        // CR-178: 이번 요청의 시스템 메시지(화면 맥락)는 질문마다 붙는 지시다(BIZ-172)
+        allMessages.addAll(com.platform.context.ContextAssemblyEngine.currentTurnInput(request));
         List<UnifiedMessage> trimmedMessages = contextWindowManager.trim(allMessages);
 
         // CR-058: RAG 주입 — 비스트림 경로와 동일 정책. citations 는 Done 이벤트에 실어 전달.
@@ -604,7 +605,7 @@ public class OrchestratorEngine {
                 if (!ragContext.isBlank()) {
                     trimmedMessages = new ArrayList<>(trimmedMessages);
                     trimmedMessages.add(0,
-                            UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, ragContext));
+                            UnifiedMessage.turnScopedSystem(ragContext));
                     streamRagUsed = true;
                     streamRagCitations = citations.isEmpty() ? null : citations;
                 } else {

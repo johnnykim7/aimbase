@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -148,14 +149,14 @@ class RunnerServiceTest {
     void freshWorkerForKnownRunGetsWholeConversation() {
         when(worker.claimFirstTurn()).thenReturn(true, false, true);
         when(worker.turnFirst(any(), any())).thenReturn(okResponse());
-        when(worker.turn(any(), any())).thenReturn(okResponse());
+        when(worker.turn(anyList(), any())).thenReturn(okResponse());
 
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
         service.chat(request("run-1"), ClaudeCliCommandBuilder.ToolMode.AIMBASE, null, null);
 
         verify(worker, times(2)).turnFirst(any(), any());
-        verify(worker, times(1)).turn(any(), any());
+        verify(worker, times(1)).turn(anyList(), any());
     }
 
     @Test

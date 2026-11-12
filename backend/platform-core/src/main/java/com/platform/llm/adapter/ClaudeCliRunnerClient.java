@@ -469,6 +469,8 @@ public class ClaudeCliRunnerClient {
                 Map<String, Object> msg = new LinkedHashMap<>();
                 msg.put("role", role);
                 msg.put("content", text);
+                // CR-178: 이번 질문 몫 시스템 지시. 실행기 CLI 작업자가 이어 쓰는 질문에도 붙인다
+                if (m.turnScoped()) msg.put("turn_scoped", true);
                 out.add(msg);
             }
         }

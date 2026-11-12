@@ -169,6 +169,28 @@ class ClaudeCliWorkerTest {
         assertThat(trimmed.get(1).role()).isEqualTo(UnifiedMessage.Role.TOOL_RESULT);
     }
 
+    /**
+     * TC-CHT-048 (CR-178 BIZ-172): 이어 쓰는 질문에도 이번 질문 몫 시스템 메시지(검색 자료, 화면 맥락, 프로젝트 지시문)는
+     * 순서대로 남기고, 표시 없는 지난 시스템 메시지는 버린다.
+     */
+    @Test
+    void trim_keeps_turn_scoped_system_messages_in_order() {
+        List<UnifiedMessage> input = List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, "old-screen"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "old-question"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, "old-answer"),
+                UnifiedMessage.turnScopedSystem("rag"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, "screen").asTurnScoped(),
+                UnifiedMessage.turnScopedSystem("project"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "current-question"));
+
+        List<UnifiedMessage> trimmed = ClaudeCliWorker.trimToCurrentTurn(input);
+
+        assertThat(trimmed).extracting(ClaudeCliWorkerTest::flatten)
+                .containsExactly("rag", "screen", "project", "current-question");
+        assertThat(trimmed.subList(0, 3)).allMatch(UnifiedMessage::turnScoped);
+    }
+
     /** USER 없이 TOOL_RESULT 만 재주입되는 도구 루프 중간 턴은 전량 보존한다. */
     @Test
     void trim_preserves_all_when_no_user_message() {
