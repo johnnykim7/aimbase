@@ -96,17 +96,21 @@ dependencyManagement {
 }
 
 // CR-058 Sprint 53: 위젯 번들을 정적 리소스(/widget/v1/*)로 포함해 공개 서빙.
-// packages/chat-widget-embed/dist/ 가 존재하면 그 산출물을,
-// 없으면 static/widget/v1/ 에 체크인된 기존 사본을 그대로 사용한다.
-val copyWidgetBundle by tasks.registering(Copy::class) {
+// packages/chat-widget-embed/dist/ 가 있으면 그 산출물로 폴더를 맞추고, 없으면 체크인된 사본을 그대로 쓴다.
+// CR-177: 위젯이 조각 파일을 그때그때 불러오므로 진입 파일만 옮기면 화면이 뜨지 않는다. 조각 전부를 옮기고,
+// 지난 빌드의 조각은 남지 않게 지운다. 지우는 것은 빌드가 만드는 맨 위 js 와 d.ts 뿐이고 안내 html, 예제 폴더는 남긴다.
+val copyWidgetBundle by tasks.registering(Sync::class) {
     val widgetDist = rootProject.projectDir.resolve("../packages/chat-widget-embed/dist")
-    if (widgetDist.exists()) {
-        from(widgetDist)
-        include("aimbase-chat.umd.global.js", "aimbase-chat.esm.js", "index.d.ts")
-        into(layout.projectDirectory.dir("src/main/resources/static/widget/v1"))
+    onlyIf { widgetDist.exists() }
+    from(widgetDist) {
+        include("*.js", "index.d.ts")
+        rename("^index\\.d\\.ts$", "aimbase-chat.d.ts")
     }
-    // rename .d.ts → aimbase-chat.d.ts for clearer public URL
-    rename("^index\\.d\\.ts$", "aimbase-chat.d.ts")
+    into(layout.projectDirectory.dir("src/main/resources/static/widget/v1"))
+    preserve {
+        include("**/*")
+        exclude("*.js", "aimbase-chat.d.ts")
+    }
 }
 
 tasks.named("processResources") {

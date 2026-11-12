@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.9 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-178, CR-185, CR-186
+> 문서 버전: 1.10 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-178, CR-185, CR-186
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -332,5 +332,6 @@ interface ConversationView {
 ## 5. 빌드와 합치기
 
 - 확인은 `npm run typecheck` 와 `npm run build`(위젯 폴더)다. 문구표의 ko, en 짝은 타입 검사가 본다.
-- 빌드 산출물(`backend/platform-core/src/main/resources/static/widget/v1/`)은 dev 를 받은 뒤 다시 빌드해 통째로 덮는다. 산출물 충돌을 손으로 고치지 않는다.
+- 빌드 산출물(`backend/platform-core/src/main/resources/static/widget/v1/`)은 서버 빌드가 위젯 `dist/` 의 조각 전부로 맞춘다. 지난 빌드의 조각은 지우고 안내 html 과 `sample-bff/` 는 남긴다. `dist/` 가 없으면 체크인된 사본을 그대로 쓴다.
+- 각 건은 산출물을 커밋하지 않는다. 산출물 커밋은 59 배포 직전 대표 창이 dev 에서 위젯을 빌드해 한 번만 한다. 산출물 충돌을 손으로 고치지 않는다.
 - 각 건의 위젯 코드는 CR-177 이 dev 에 들어간 뒤 그 dev 에서 시작한다. 컨타가 알린다.
