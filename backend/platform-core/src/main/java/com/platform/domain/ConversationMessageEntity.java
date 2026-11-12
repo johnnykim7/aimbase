@@ -75,6 +75,11 @@ public class ConversationMessageEntity {
     @Column(name = "delete_reason", length = 20)
     private String deleteReason;
 
+    // CR-178: 질문 줄에만 둔다. 이어보기 화면에 사용자가 쓴 글과 첨부 이름을 보여주는 값이며 모델에는 보내지 않는다.
+    @Type(JsonBinaryType.class)
+    @Column(name = "display", columnDefinition = "jsonb")
+    private Map<String, Object> display;
+
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
     public String getSessionId() { return sessionId; }
@@ -102,4 +107,6 @@ public class ConversationMessageEntity {
     public void setTurnId(UUID turnId) { this.turnId = turnId; }
     public String getDeleteReason() { return deleteReason; }
     public void setDeleteReason(String deleteReason) { this.deleteReason = deleteReason; }
+    public Map<String, Object> getDisplay() { return display; }
+    public void setDisplay(Map<String, Object> display) { this.display = display; }
 }

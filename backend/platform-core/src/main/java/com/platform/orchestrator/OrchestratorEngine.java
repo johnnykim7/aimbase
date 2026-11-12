@@ -105,6 +105,8 @@ public class OrchestratorEngine {
     private final ChatRunRecorder chatRunRecorder;
     /** CR-132 후속: 채팅 세션 workspace 자동 할당(산출물 out/ 의 부모)의 base 경로 산정용. */
     private final WorkspaceProperties workspaceProperties;
+    /** CR-178: 질문마다 붙는 시스템 지시(프로젝트 지시문)를 넣는 곳. */
+    private final TurnInstructions turnInstructions;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -137,8 +139,10 @@ public class OrchestratorEngine {
             MemoryAutoExtractService memoryAutoExtractService,
             CancellationRegistry cancellationRegistry,
             ChatRunRecorder chatRunRecorder,
-            WorkspaceProperties workspaceProperties
+            WorkspaceProperties workspaceProperties,
+            TurnInstructions turnInstructions
     ) {
+        this.turnInstructions = turnInstructions;
         this.chatRunRecorder = chatRunRecorder;
         this.workspaceProperties = workspaceProperties;
         this.modelRouter = modelRouter;
@@ -304,6 +308,9 @@ public class OrchestratorEngine {
                 }
             }
         }
+
+        // CR-178 BIZ-172: 프로젝트 지시문은 검색 자료 다음, 이번 질문 바로 앞에 붙인다
+        trimmedMessages = turnInstructions.attach(trimmedMessages, sessionId, request);
 
         // 4. LLM 어댑터 선택 (connectionId > modelRouter). 그룹은 chat() 입구에서 멤버 connectionId 로 바뀌어 온다(CR-161)
         //    CR-029: runtimeRegistry 로깅 (향후 selectBest 연결 지점)
@@ -477,7 +484,7 @@ public class OrchestratorEngine {
         List<UnifiedMessage> turnMessages = new ArrayList<>(request.messages());
         turnMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, llmResponse.textContent()));
         Integer turnSeq = sessionStore.appendTurn(sessionId, turnMessages, turnId, resolvedModel,
-                com.platform.llm.adapter.RequestContext.getUserRef());
+                sessionOwner(request), turnExtras(request, usedToolNames(actionsExecuted, llmResponse)));
 
         // 7.5 PRD-128: 응답 캐시 저장 (세션 없는 단발 요청만, 유효한 응답만)
         if (request.sessionId() == null && lastUserMsg != null && !lastUserMsg.isBlank()
@@ -559,7 +566,16 @@ public class OrchestratorEngine {
     }
 
     private void chatStreamSingle(ChatRequest request,
-                                  Consumer<com.platform.orchestrator.stream.StreamEvent> streamSink) {
+                                  Consumer<com.platform.orchestrator.stream.StreamEvent> rawSink) {
+        // CR-178: 이번 답에서 쓴 도구 이름. 채팅 대화 기록에 도구 호출 줄을 남기지 않아 답 줄에 이름만 둔다
+        final List<String> usedTools = new java.util.concurrent.CopyOnWriteArrayList<>();
+        final Consumer<com.platform.orchestrator.stream.StreamEvent> streamSink = ev -> {
+            if (ev instanceof com.platform.orchestrator.stream.StreamEvent.ToolUseStart t
+                    && t.name() != null && !t.name().isBlank()) {
+                usedTools.add(t.name());
+            }
+            rawSink.accept(ev);
+        };
         String sessionId = request.sessionId() != null
                 ? request.sessionId()
                 : UUID.randomUUID().toString();
@@ -620,6 +636,9 @@ public class OrchestratorEngine {
             streamRagUsed = false;
             streamRagCitations = null;
         }
+
+        // CR-178 BIZ-172: 프로젝트 지시문은 검색 자료 다음, 이번 질문 바로 앞에 붙인다
+        trimmedMessages = turnInstructions.attach(trimmedMessages, sessionId, request);
 
         // CR-058: Done 이벤트에 citations 를 합쳐 내보내는 decorator.
         // CR-175: Done 은 바로 내보내지 않고 쥐고 있다가, 대화 기록을 저장한 뒤 답 번호와 순번을 채워 내보낸다.
@@ -744,7 +763,7 @@ public class OrchestratorEngine {
                 }
                 String finalText = textBuf.toString();
                 if (cancelled.get()) {
-                    finalText = "[중단됨] " + finalText;
+                    finalText = com.platform.session.ChatStopMarker.PREFIX + finalText;
                 }
                 finalResponse = new LLMResponse(idHolder[0], resolvedModel,
                         List.of(new ContentBlock.Text(finalText)),
@@ -764,15 +783,15 @@ public class OrchestratorEngine {
             boolean wasCancelled = cancelled.get();
             String assistantText = finalResponse.textContent() != null ? finalResponse.textContent() : "";
             // 도구 루프 경로의 partial은 Handler가 텍스트만 반환 → 여기서 prefix 부착
-            if (wasCancelled && !assistantText.startsWith("[중단됨]")) {
-                assistantText = "[중단됨] " + assistantText;
+            if (wasCancelled && !com.platform.session.ChatStopMarker.isStopped(assistantText)) {
+                assistantText = com.platform.session.ChatStopMarker.PREFIX + assistantText;
             }
             // CR-175: 한 요청의 메시지를 한 번에 저장한다(PRD-369).
             UUID turnId = UUID.randomUUID();
             List<UnifiedMessage> turnMessages = new ArrayList<>(request.messages());
             turnMessages.add(UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, assistantText));
             Integer turnSeq = sessionStore.appendTurn(sessionId, turnMessages, turnId, resolvedModel,
-                    com.platform.llm.adapter.RequestContext.getUserRef());
+                    sessionOwner(request), turnExtras(request, List.copyOf(new java.util.LinkedHashSet<>(usedTools))));
             if (finalResponse.usage() != null) {
                 saveUsageLog(request.userId(), sessionId, resolvedModel, finalResponse);
             }
@@ -1063,4 +1082,36 @@ public class OrchestratorEngine {
         }
     }
 
+
+    /** CR-178 BIZ-170: 세션 주인. 위젯 요청은 받은 스레드에서 정해 실어 오고, 그 밖은 지금처럼 토큰 user_ref 다. */
+    private static String sessionOwner(ChatRequest request) {
+        if (request.widgetTurn() != null && request.widgetTurn().ownerRef() != null) {
+            return request.widgetTurn().ownerRef();
+        }
+        return com.platform.llm.adapter.RequestContext.getUserRef();
+    }
+
+    private static com.platform.session.TurnExtras turnExtras(ChatRequest request, List<String> toolNames) {
+        ChatRequest.WidgetTurn w = request.widgetTurn();
+        return new com.platform.session.TurnExtras(
+                w != null ? w.chatProjectId() : null,
+                w != null ? w.questionDisplay() : null,
+                toolNames);
+    }
+
+    /** CR-178: API 도구 루프가 부른 도구와 CLI 실행기가 알려 온 도구의 이름(중복 제외, 부른 순서). */
+    private static List<String> usedToolNames(List<Map<String, Object>> actionsExecuted, LLMResponse response) {
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+        if (actionsExecuted != null) {
+            for (Map<String, Object> action : actionsExecuted) {
+                if (action.get("name") instanceof String name && !name.isBlank()) names.add(name);
+            }
+        }
+        if (response != null && response.hasObservedToolEvents()) {
+            for (com.platform.llm.model.ObservedToolEvent ev : response.observedToolEvents()) {
+                if (ev.toolName() != null && !ev.toolName().isBlank()) names.add(ev.toolName());
+            }
+        }
+        return List.copyOf(names);
+    }
 }

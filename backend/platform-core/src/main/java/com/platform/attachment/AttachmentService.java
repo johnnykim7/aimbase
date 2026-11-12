@@ -59,26 +59,36 @@ public class AttachmentService {
             throw new AttachmentException(HttpStatus.BAD_REQUEST,
                     AttachmentException.CODE_MIME_UNSUPPORTED, "session_id is required");
         }
+        byte[] bytes = readUpload(file);
+        String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "upload";
+        String mediaType = validate(bytes, file.getContentType());
+        return saveForSession(sessionId, originalName, mediaType, bytes);
+    }
+
+    /** CR-178: 올린 파일을 메모리로 읽는다. 50MB 이내 설계. checksum 과 저장에 다시 쓴다. */
+    public byte[] readUpload(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new AttachmentException(HttpStatus.BAD_REQUEST,
                     AttachmentException.CODE_MIME_UNSUPPORTED, "file is empty");
         }
-
-        // 1) 원본 바이트 전부 메모리로 — 50MB 이내 설계. checksum/StorageService 저장을 위해 재사용.
-        byte[] bytes;
         try {
-            bytes = file.getBytes();
+            return file.getBytes();
         } catch (IOException e) {
             throw new AttachmentException(HttpStatus.INTERNAL_SERVER_ERROR,
                     AttachmentException.CODE_MIME_UNSUPPORTED,
                     "failed to read uploaded file: " + e.getMessage());
         }
+    }
 
-        // 2) Magic number 기반 MIME 판정 + Content-Type 이중 검증
+    /**
+     * 종류와 크기 검사. 판정한 미디어 종류를 돌려준다. CR-178 프로젝트 자료도 같은 검사를 쓴다(BIZ-173).
+     */
+    public String validate(byte[] bytes, String declaredContentType) {
+        // Magic number 기반 MIME 판정 + Content-Type 이중 검증
         byte[] head = new byte[Math.min(16, bytes.length)];
         System.arraycopy(bytes, 0, head, 0, head.length);
         String mediaType = mimeValidator.detect(head);
-        mimeValidator.assertMatchesContentType(mediaType, file.getContentType());
+        mimeValidator.assertMatchesContentType(mediaType, declaredContentType);
 
         // CR-137: MimeValidator 가 영상 4종(MP4/MOV/WEBM/AVI)도 인식하게 확장됐지만,
         // 채팅 첨부 경로는 이미지·PDF 전용을 유지한다. 영상은 프레임 추출·job 이 필요하므로
@@ -90,7 +100,7 @@ public class AttachmentService {
                     "video is not supported on chat attachments — use POST /api/v1/vision-jobs");
         }
 
-        // 3) 크기 제한 BIZ-099
+        // 크기 제한 BIZ-099
         long maxBytes = MimeValidator.isPdf(mediaType)
                 ? getLong("widget.attachment.max-pdf-bytes", DEFAULT_MAX_PDF_BYTES)
                 : getLong("widget.attachment.max-image-bytes", DEFAULT_MAX_IMAGE_BYTES);
@@ -99,8 +109,14 @@ public class AttachmentService {
                     AttachmentException.CODE_SIZE_EXCEEDED,
                     "size " + bytes.length + " exceeds limit " + maxBytes + " for " + mediaType);
         }
+        return mediaType;
+    }
 
-        // 4) 세션당 활성 개수 BIZ-100
+    /**
+     * 검사를 마친 파일을 세션 첨부로 저장한다. CR-178 프로젝트 자료 붙이기도 이 길로 새 첨부를 만든다.
+     */
+    public ChatAttachmentEntity saveForSession(String sessionId, String originalName, String mediaType, byte[] bytes) {
+        // 세션당 활성 개수 BIZ-100
         int maxPerSession = settings.getInt("widget.attachment.max-per-session", DEFAULT_MAX_PER_SESSION);
         long activeCount = repo.countBySessionIdAndExpiresAtAfter(sessionId, OffsetDateTime.now());
         if (activeCount >= maxPerSession) {
@@ -109,9 +125,7 @@ public class AttachmentService {
                     "session has " + activeCount + " active attachments (limit " + maxPerSession + ")");
         }
 
-        // 5) 저장
         String tenantId = TenantContext.getTenantId();
-        String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "upload";
         String category = "widget-attachments/" + sessionId;
         String storagePath;
         try (InputStream in = new ByteArrayInputStream(bytes)) {
@@ -122,10 +136,9 @@ public class AttachmentService {
                     "storage write failed: " + e.getMessage());
         }
 
-        // 6) checksum (SHA-256)
         String checksum = sha256Hex(bytes);
 
-        // 7) PDF 페이지 수는 Phase 3 PdfTextExtractor 에서 필요 시 채움. 여기선 null.
+        // PDF 페이지 수는 Phase 3 PdfTextExtractor 에서 필요 시 채움. 여기선 null.
         long ttlSeconds = getLong("widget.attachment.ttl-seconds", DEFAULT_TTL_SECONDS);
 
         ChatAttachmentEntity e = new ChatAttachmentEntity();
@@ -209,7 +222,7 @@ public class AttachmentService {
         return v;
     }
 
-    private static String sha256Hex(byte[] data) {
+    public static String sha256Hex(byte[] data) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] digest = md.digest(data);

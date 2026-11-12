@@ -44,8 +44,35 @@ public record ChatRequest(
         String toolModeOverride,
         String systemPromptOverride,
         List<SkillRef> skillSet,
-        Boolean thinkingOverride
+        Boolean thinkingOverride,
+        WidgetTurn widgetTurn
 ) {
+    /**
+     * CR-178: 위젯 대화 요청이 같이 싣는 값. 요청을 받은 스레드에서 정해 둔다(응답을 흘리는 스레드에는 로그인 정보가 없다).
+     *
+     * @param ownerRef        세션 주인(BIZ-170). 위젯 토큰 user_ref, 로그인 사용자 id
+     * @param chatProjectId   세션을 처음 만들 때 넣을 위젯 프로젝트. 이미 있는 세션이면 null
+     * @param questionDisplay 이어보기 화면에 보일 질문 글과 첨부({@code text}, {@code attachments})
+     */
+    public record WidgetTurn(String ownerRef, java.util.UUID chatProjectId,
+                             java.util.Map<String, Object> questionDisplay) {}
+
+    /** CR-178 이전 20-arg 호환 (위젯 값 없음) */
+    public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
+                       boolean stream, boolean actionsEnabled, String userId,
+                       String ragSourceId, String connectionId,
+                       ToolFilterContext toolFilter, String toolChoice,
+                       ResponseFormat responseFormat, String connectionGroupId,
+                       String workingDirectory,
+                       String workflowRunId, String workflowStepId, String subagentRunId,
+                       String toolModeOverride, String systemPromptOverride,
+                       List<SkillRef> skillSet, Boolean thinkingOverride) {
+        this(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride,
+                skillSet, thinkingOverride, null);
+    }
+
     /** CR-175 이전 19-arg 호환 (깊게 생각하기 지정 없음) */
     public ChatRequest(String model, String sessionId, List<UnifiedMessage> messages,
                        boolean stream, boolean actionsEnabled, String userId,
@@ -146,14 +173,23 @@ public record ChatRequest(
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
-                thinkingOverride);
+                thinkingOverride, widgetTurn);
     }
 
     /** CR-175: 깊게 생각하기를 지정한 사본. */
     public ChatRequest withThinkingOverride(Boolean on) {
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
                 toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
-                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet, on);
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet, on,
+                widgetTurn);
+    }
+
+    /** CR-178: 위젯 값을 실은 사본. */
+    public ChatRequest withWidgetTurn(WidgetTurn turn) {
+        return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, connectionId,
+                toolFilter, toolChoice, responseFormat, connectionGroupId, workingDirectory,
+                workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
+                thinkingOverride, turn);
     }
 
     /** CR-161: 그룹이 고른 멤버로 단일 커넥션 요청을 만든다. 그룹은 지워 안에서 다시 고르지 않게 한다. */
@@ -161,7 +197,7 @@ public record ChatRequest(
         return new ChatRequest(model, sessionId, messages, stream, actionsEnabled, userId, ragSourceId, memberConnectionId,
                 toolFilter, toolChoice, responseFormat, null, workingDirectory,
                 workflowRunId, workflowStepId, subagentRunId, toolModeOverride, systemPromptOverride, skillSet,
-                thinkingOverride);
+                thinkingOverride, widgetTurn);
     }
 
     public boolean hasConnectionGroup() {

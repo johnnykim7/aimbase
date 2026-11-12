@@ -57,6 +57,8 @@ public class ChatController {
     private final com.platform.session.ChatWidgetSettingsService widgetSettings;
     private final com.platform.image.ImageGenerationService imageGeneration;
     private final com.platform.image.ImageGenerationSettings imageSettings;
+    private final com.platform.session.ChatProjectService chatProjectService;
+    private final com.platform.repository.ConversationSessionRepository sessionRepository;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -70,7 +72,11 @@ public class ChatController {
                           com.platform.session.ConversationRewindService rewindService,
                           com.platform.session.ChatWidgetSettingsService widgetSettings,
                           com.platform.image.ImageGenerationService imageGeneration,
-                          com.platform.image.ImageGenerationSettings imageSettings) {
+                          com.platform.image.ImageGenerationSettings imageSettings,
+                          com.platform.session.ChatProjectService chatProjectService,
+                          com.platform.repository.ConversationSessionRepository sessionRepository) {
+        this.chatProjectService = chatProjectService;
+        this.sessionRepository = sessionRepository;
         this.orchestrator = orchestrator;
         this.workspaceProperties = workspaceProperties;
         this.cancellationRegistry = cancellationRegistry;
@@ -128,6 +134,9 @@ public class ChatController {
         // CR-175: 모델, 깊게 생각하기 검사 뒤 되감기. 되감기는 스트림을 열기 전에 해야 오류를 HTTP 코드로 줄 수 있다.
         validateModel(request);
         Boolean thinkingOverride = parseThinking(request);
+        // CR-178: 프로젝트는 응답을 시작하기 전에 거른다(PRD-424). 주인은 이 스레드에서 정해 실어 보낸다
+        String owner = com.platform.session.ChatOwner.current();
+        UUID chatProjectId = resolveChatProject(request, owner);
         rewindIfRequested(request);
 
         AdapterResolution resolved = resolveAdapter(request.model(), request.connectionId());
@@ -172,7 +181,8 @@ public class ChatController {
                 // CR-128(갭B): 요청 단위 CLI override 전달
                 request.toolMode(),
                 request.systemPromptOverride()
-        ).withThinkingOverride(thinkingOverride);
+        ).withThinkingOverride(thinkingOverride)
+                .withWidgetTurn(new ChatRequest.WidgetTurn(owner, chatProjectId, questionDisplay(request)));
 
         if (request.stream()) {
             return streamResponse(chatRequest);
@@ -374,7 +384,9 @@ public class ChatController {
             // CR-175: on, off. 비우면 연결 설정 그대로(BIZ-150)
             String thinking,
             // CR-184: 있으면 그림 연결로 그림 한 장을 만든다(PRD-540, PRD-541)
-            ImageDto image
+            ImageDto image,
+            // CR-178: 세션을 처음 만들 때 넣을 위젯 프로젝트. 이미 있는 세션이면 쓰지 않는다(PRD-424)
+            @JsonProperty("chat_project_id") String chatProjectId
     ) {
         /** CR-184 이전 15칸 호환(그림 없음) */
         public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
@@ -384,7 +396,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, null);
+                    thinking, null, null);
         }
     }
 
@@ -429,6 +441,55 @@ public class ChatController {
     public record ImageUrlDto(
             String url
     ) {}
+
+    // ─── CR-178: 위젯 프로젝트와 이어보기 화면용 질문 ───
+
+    /** 이미 있는 세션이면 null(옮기기는 PATCH). 없거나 요청자의 프로젝트가 아니면 404 project_not_found. */
+    private UUID resolveChatProject(ChatCompletionRequest request, String owner) {
+        if (request.chatProjectId() == null || request.chatProjectId().isBlank()) return null;
+        if (request.sessionId() == null || request.sessionId().isBlank()) return null;
+        if (sessionRepository.findBySessionIdIncludingDeleted(request.sessionId()).isPresent()) return null;
+        return chatProjectService.requireOwned(owner, request.chatProjectId()).getId();
+    }
+
+    /**
+     * 이어보기 화면에 보일 질문 글과 첨부. 저장된 질문 블록에는 첨부 번호가 없고 서버가 덧붙인 안내 글이 섞여 있어
+     * 사용자가 보낸 그대로를 따로 남긴다(BIZ-174).
+     */
+    private Map<String, Object> questionDisplay(ChatCompletionRequest request) {
+        if (request.sessionId() == null || request.sessionId().isBlank()) return null;
+        MessageDto question = null;
+        for (MessageDto dto : request.messages()) {
+            if ("user".equalsIgnoreCase(dto.role())) question = dto;
+        }
+        if (question == null) return null;
+        StringBuilder text = new StringBuilder();
+        List<Map<String, Object>> attachments = new ArrayList<>();
+        if (question.content() instanceof String str) {
+            text.append(str);
+        } else if (question.content() instanceof List<?> parts) {
+            for (Object part : parts) {
+                if (!(part instanceof Map<?, ?> map)) continue;
+                Object type = map.get("type");
+                if ("text".equals(type) && map.get("text") instanceof String t) {
+                    if (!text.isEmpty()) text.append('\n');
+                    text.append(t);
+                } else if (("image".equals(type) || "document".equals(type))
+                        && map.get("attachment_id") instanceof String id && !id.isBlank()) {
+                    ChatAttachmentEntity att = attachmentService.loadOwned(UUID.fromString(id), request.sessionId());
+                    Map<String, Object> a = new java.util.LinkedHashMap<>();
+                    a.put("attachment_id", att.getId().toString());
+                    a.put("filename", att.getFilename());
+                    a.put("media_type", att.getMediaType());
+                    attachments.add(a);
+                }
+            }
+        }
+        Map<String, Object> display = new java.util.LinkedHashMap<>();
+        display.put("text", text.toString());
+        display.put("attachments", attachments);
+        return display;
+    }
 
     // ─── CR-045 L0: 화이트리스트 조기 차단 ───
 

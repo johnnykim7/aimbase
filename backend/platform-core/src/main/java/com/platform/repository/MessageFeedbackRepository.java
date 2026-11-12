@@ -43,6 +43,9 @@ public interface MessageFeedbackRepository extends JpaRepository<MessageFeedback
 
     Optional<MessageFeedbackEntity> findByTurnIdAndUserRef(UUID turnId, String userRef);
 
+    /** CR-178: 이어보기 화면에 싣는 요청자의 평가. */
+    java.util.List<MessageFeedbackEntity> findByTurnIdInAndUserRef(java.util.Collection<UUID> turnIds, String userRef);
+
     @Modifying
     @Transactional
     @Query("DELETE FROM MessageFeedbackEntity f WHERE f.turnId = :turnId AND f.userRef = :userRef")

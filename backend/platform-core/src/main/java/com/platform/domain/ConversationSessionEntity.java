@@ -89,6 +89,10 @@ public class ConversationSessionEntity {
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
 
+    // CR-178: 위젯 프로젝트. project_id(관리 프로젝트)와 다른 칸이다(BIZ-171).
+    @Column(name = "chat_project_id", columnDefinition = "uuid")
+    private UUID chatProjectId;
+
     @PreUpdate
     protected void onUpdate() {
         updatedAt = OffsetDateTime.now();
@@ -141,4 +145,6 @@ public class ConversationSessionEntity {
     public void setParentSessionId(String parentSessionId) { this.parentSessionId = parentSessionId; }
     public OffsetDateTime getDeletedAt() { return deletedAt; }
     public void setDeletedAt(OffsetDateTime deletedAt) { this.deletedAt = deletedAt; }
+    public UUID getChatProjectId() { return chatProjectId; }
+    public void setChatProjectId(UUID chatProjectId) { this.chatProjectId = chatProjectId; }
 }

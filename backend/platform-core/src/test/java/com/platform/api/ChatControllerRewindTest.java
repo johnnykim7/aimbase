@@ -83,6 +83,6 @@ class ChatControllerRewindTest {
                 "claude-sonnet-4-5", "s-1",
                 List.of(new ChatController.MessageDto("user", "고친 질문")),
                 true, false, null, null, null, null, null, null, null, null,
-                2, null);
+                2, null, null, null);
     }
 }

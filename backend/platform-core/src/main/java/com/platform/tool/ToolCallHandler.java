@@ -540,7 +540,7 @@ public class ToolCallHandler {
             StreamingAccumulator acc = new StreamingAccumulator(streamSink, cancelled);
             adapter.chatStream(request, acc::accept);
             acc.await();
-            String text = cancelled.get() ? "[중단됨] " + acc.text() : acc.text();
+            String text = cancelled.get() ? com.platform.session.ChatStopMarker.PREFIX + acc.text() : acc.text();
             streamSink.accept(new StreamEvent.Done(acc.usage()));
             return new LLMResponse(acc.id(), resolvedModel,
                     List.of(new ContentBlock.Text(text)),
@@ -659,12 +659,12 @@ public class ToolCallHandler {
                         .map(b -> ((ContentBlock.Text) b).text())
                         .reduce("", String::concat);
                 response = new LLMResponse(response.id(), resolvedModel,
-                        List.of(new ContentBlock.Text("[중단됨] " + partialText)),
+                        List.of(new ContentBlock.Text(com.platform.session.ChatStopMarker.PREFIX + partialText)),
                         List.of(), response.usage() != null ? response.usage() : new TokenUsage(0, 0),
                         LLMResponse.FinishReason.END, 0, 0);
             } else {
                 response = new LLMResponse("", resolvedModel,
-                        List.of(new ContentBlock.Text("[중단됨] ")),
+                        List.of(new ContentBlock.Text(com.platform.session.ChatStopMarker.PREFIX)),
                         List.of(), new TokenUsage(0, 0),
                         LLMResponse.FinishReason.END, 0, 0);
             }
@@ -842,7 +842,7 @@ public class ToolCallHandler {
             int seqNum = seq.getAndIncrement();
             CompletableFuture<ToolExecOutcome> f = CompletableFuture.supplyAsync(() -> {
                 if (cancelled != null && cancelled.get()) {
-                    return ToolExecOutcome.text(tc.id(), "[중단됨] tool execution cancelled");
+                    return ToolExecOutcome.text(tc.id(), com.platform.session.ChatStopMarker.PREFIX + "tool execution cancelled");
                 }
                 try {
                     semaphore.acquire();
@@ -883,7 +883,7 @@ public class ToolCallHandler {
         // 2) unsafeCalls 순차 실행
         for (ToolCall tc : unsafeCalls) {
             if (cancelled != null && cancelled.get()) {
-                byId.put(tc.id(), ToolExecOutcome.text(tc.id(), "[중단됨] tool execution cancelled"));
+                byId.put(tc.id(), ToolExecOutcome.text(tc.id(), com.platform.session.ChatStopMarker.PREFIX + "tool execution cancelled"));
                 continue;
             }
             try {

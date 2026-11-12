@@ -143,7 +143,14 @@ public class SessionStore {
      */
     public Integer appendTurn(String sessionId, List<UnifiedMessage> newMessages,
                               UUID turnId, String model, String ownerRef) {
+        return appendTurn(sessionId, newMessages, turnId, model, ownerRef, TurnExtras.NONE);
+    }
+
+    /** CR-178: 위젯 프로젝트와 이어보기 화면용 값을 같이 남긴다. */
+    public Integer appendTurn(String sessionId, List<UnifiedMessage> newMessages,
+                              UUID turnId, String model, String ownerRef, TurnExtras extras) {
         if (newMessages == null || newMessages.isEmpty()) return null;
+        TurnExtras turnExtras = extras != null ? extras : TurnExtras.NONE;
         Semaphore lock = lockFor(sessionId);
         lock.acquireUninterruptibly();
         try {
@@ -152,7 +159,10 @@ public class SessionStore {
             saveToRedisLocked(sessionId, messages);
             try {
                 upsertSessionWithRetry(sessionId, messages, ownerRef);
-                return insertTurnMessages(sessionId, newMessages, turnId, model);
+                if (turnExtras.chatProjectId() != null) {
+                    sessionRepository.assignChatProjectIfAbsent(sessionId, turnExtras.chatProjectId());
+                }
+                return insertTurnMessages(sessionId, newMessages, turnId, model, turnExtras);
             } catch (Exception e) {
                 log.warn("Failed to persist session {} to DB: {}", sessionId, e.getMessage());
                 return null;
@@ -344,12 +354,18 @@ public class SessionStore {
      * 잠금 밖에서 넣는 압축 경계가 같은 순번을 먼저 차지하면 최댓값을 다시 읽어 다음 순번으로 넣는다.
      */
     private Integer insertTurnMessages(String sessionId, List<UnifiedMessage> newMessages,
-                                       UUID turnId, String model) {
+                                       UUID turnId, String model, TurnExtras extras) {
         String turnIdText = turnId != null ? turnId.toString() : null;
+        int questionIdx = lastIndexOf(newMessages, UnifiedMessage.Role.USER);
+        int answerIdx = lastIndexOf(newMessages, UnifiedMessage.Role.ASSISTANT);
+        String questionDisplay = extras.questionDisplay() != null ? toJson(extras.questionDisplay()) : null;
+        String answerDisplay = extras.toolNames().isEmpty() ? null : toJson(Map.of("tool_uses",
+                extras.toolNames().stream().map(name -> Map.of("name", name)).toList()));
         return transactionTemplate.execute(status -> {
             Integer firstSeq = null;
             int seq = messageRepository.findMaxSeqBySessionId(sessionId) + 1;
-            for (UnifiedMessage msg : newMessages) {
+            for (int idx = 0; idx < newMessages.size(); idx++) {
+                UnifiedMessage msg = newMessages.get(idx);
                 String contentJson;
                 try {
                     // CR-083: List<ContentBlock> 명시 타입으로 직렬화 → "type":"tool_use" 등 polymorphic info 보존
@@ -369,11 +385,32 @@ public class SessionStore {
                     }
                     seq = messageRepository.findMaxSeqBySessionId(sessionId) + 1;
                 }
+                if (idx == questionIdx && questionDisplay != null) {
+                    messageRepository.updateDisplay(sessionId, seq, questionDisplay);
+                } else if (idx == answerIdx && answerDisplay != null) {
+                    messageRepository.updateDisplay(sessionId, seq, answerDisplay);
+                }
                 if (firstSeq == null) firstSeq = seq;
                 seq++;
             }
             return firstSeq;
         });
+    }
+
+    private static int lastIndexOf(List<UnifiedMessage> messages, UnifiedMessage.Role role) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i).role() == role) return i;
+        }
+        return -1;
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            log.warn("Failed to serialize message display: {}", e.getMessage());
+            return null;
+        }
     }
 
     private int insertMessage(String sessionId, int seq, UnifiedMessage msg, String contentJson,

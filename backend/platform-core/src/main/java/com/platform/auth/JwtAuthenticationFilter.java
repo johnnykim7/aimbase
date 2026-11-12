@@ -202,8 +202,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             com.platform.llm.adapter.RequestContext.setUserRef(userRef);
         }
 
+        // CR-178: 대화 목록과 위젯 프로젝트의 주인은 user_ref 다. 없으면 주인이 없는 토큰으로 본다(BIZ-170).
+        Map<String, Object> widgetInfo = userRef != null && !userRef.isBlank()
+                ? Map.of(com.platform.session.ChatOwner.USER_REF_KEY, userRef) : Map.of();
         UserPrincipal principal = new UserPrincipal(
-                principalId, principalId, tenantId, "WIDGET", Map.of());
+                principalId, principalId, tenantId, com.platform.session.ChatOwner.WIDGET_ROLE, widgetInfo);
 
         var authentication = new UsernamePasswordAuthenticationToken(
                 principal, null, authorities);

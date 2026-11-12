@@ -94,6 +94,8 @@ class OrchestratorOneShotWorkerTest {
                 "r1", "claude-cli/sonnet", List.of(new ContentBlock.Text("답")), List.of(),
                 new TokenUsage(10, 5), LLMResponse.FinishReason.END, 0, 0)));
 
+        TurnInstructions turnInstructions = mock(TurnInstructions.class);
+        when(turnInstructions.attach(any(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         engine = new OrchestratorEngine(
                 mock(ModelRouter.class), mock(FallbackChainExecutor.class), factory,
                 mock(ConnectionGroupSelector.class), mock(SessionStore.class), contextWindow,
@@ -103,7 +105,7 @@ class OrchestratorOneShotWorkerTest {
                 mock(TraceService.class), mock(SchemaRegistry.class), mock(SchemaValidator.class),
                 new ObjectMapper(), responseCache, mock(MemoryService.class), mock(QuotaService.class),
                 contextAssembly, mock(RuntimeRegistry.class), hooks, mock(MemoryAutoExtractService.class),
-                cancellation, mock(ChatRunRecorder.class), mock(WorkspaceProperties.class));
+                cancellation, mock(ChatRunRecorder.class), mock(WorkspaceProperties.class), turnInstructions);
     }
 
     private static ChatRequest request(String sessionId) {

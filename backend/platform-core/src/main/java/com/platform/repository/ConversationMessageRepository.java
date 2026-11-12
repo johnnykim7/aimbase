@@ -60,6 +60,13 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
                          @Param("createdAt") OffsetDateTime createdAt,
                          @Param("turnId") String turnId);
 
+    /** CR-178: 질문 줄과 답 줄에 이어보기 화면용 값을 단다. 같은 트랜잭션에서 넣은 직후 부른다. */
+    @Modifying
+    @Transactional
+    @Query(value = "UPDATE conversation_messages SET display = CAST(:display AS JSONB) "
+            + "WHERE session_id = :sessionId AND seq = :seq AND deleted_at IS NULL", nativeQuery = true)
+    int updateDisplay(@Param("sessionId") String sessionId, @Param("seq") int seq, @Param("display") String display);
+
     @Modifying
     @Transactional
     void deleteBySessionId(String sessionId);

@@ -90,6 +90,12 @@ public class ChatWidgetSettingsService {
         body.put("follow_ups_enabled", followUpsEnabled());
         body.put("preview_html_script_sources", previewHtmlScriptSources());
         body.put("image_generation", imageGeneration(connectionId));
+        // CR-178: user_ref 없는 위젯 토큰은 주인이 하나로 모여 남의 대화가 보이므로 목록과 프로젝트를 쓰지 못한다(BIZ-170)
+        body.put("history_enabled", ChatOwner.current() != null);
+        body.put("project_instructions_max_chars", platformSettings.getInt(
+                "widget.project-instructions-max-chars", ChatProjectService.DEFAULT_INSTRUCTIONS_MAX));
+        body.put("project_files_max_count", platformSettings.getInt(
+                "widget.project-files-max-count", ChatProjectService.DEFAULT_FILES_MAX));
         return body;
     }
 

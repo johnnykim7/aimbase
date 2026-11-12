@@ -222,4 +222,36 @@ class ChatWidgetSettingsServiceTest {
         stubReasons("not json");
         assertThat(service.feedbackReasons()).isEmpty();
     }
+
+    @Test
+    void history_is_offered_only_when_the_widget_token_names_a_user() {
+        when(connectionRepository.existsById("api-1")).thenReturn(true);
+        when(connectionAdapterFactory.selectableModels("api-1")).thenReturn(List.of(
+                Map.of("id", "claude-sonnet-5-5", "label", "Sonnet 5.5")));
+        when(connectionAdapterFactory.defaultModel("api-1")).thenReturn("claude-sonnet-5-5");
+        when(connectionAdapterFactory.getAdapter("api-1")).thenReturn(apiAdapter);
+        when(connectionAdapterFactory.resolveModelConfig("api-1")).thenReturn(ModelConfig.defaults());
+        when(platformSettings.getInt(eq("widget.project-instructions-max-chars"), anyInt())).thenReturn(3000);
+        when(platformSettings.getInt(eq("widget.project-files-max-count"), anyInt())).thenReturn(15);
+        try {
+            signInWidget(Map.of());
+            assertThat(service.settings("api-1", null).get("history_enabled")).isEqualTo(false);
+
+            signInWidget(Map.of(ChatOwner.USER_REF_KEY, "u-77"));
+            Map<String, Object> body = service.settings("api-1", null);
+            assertThat(body.get("history_enabled")).isEqualTo(true);
+            assertThat(body.get("project_instructions_max_chars")).isEqualTo(3000);
+            assertThat(body.get("project_files_max_count")).isEqualTo(15);
+        } finally {
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        }
+    }
+
+    private static void signInWidget(Map<String, Object> permissions) {
+        com.platform.auth.UserPrincipal principal = new com.platform.auth.UserPrincipal(
+                "widget-sub", null, "tenant-a", ChatOwner.WIDGET_ROLE, permissions);
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
+    }
 }

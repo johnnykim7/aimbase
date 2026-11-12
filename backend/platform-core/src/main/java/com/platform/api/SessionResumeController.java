@@ -53,8 +53,8 @@ public class SessionResumeController {
         }
 
         // 본인 소유 검증 — session.userId 가 세팅된 경우만 엄격 검증 (레거시 null 허용)
-        String principal = auth != null ? auth.getName() : null;
-        if (session.getUserId() != null && principal != null && !session.getUserId().equals(principal)) {
+        // CR-178: 로그인 세션 주인은 사용자 id 로 적힌다. 예전 행은 이메일이라 ChatOwner 가 둘 다 본다.
+        if (session.getUserId() != null && auth != null && !com.platform.session.ChatOwner.owns(session.getUserId(), auth)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(ApiResponse.error("세션 소유자가 아닙니다."));
         }

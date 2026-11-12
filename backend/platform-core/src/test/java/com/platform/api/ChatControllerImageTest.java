@@ -185,6 +185,6 @@ class ChatControllerImageTest {
                 model, "s-1",
                 List.of(new ChatController.MessageDto("user", "고양이")),
                 stream, false, "chat-1", null, null, null, null, null, null, null,
-                rewindFromSeq, thinking, new ChatController.ImageDto("create", null));
+                rewindFromSeq, thinking, new ChatController.ImageDto("create", null), null);
     }
 }

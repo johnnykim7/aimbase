@@ -2,11 +2,11 @@ package com.platform.api;
 
 import com.platform.domain.ConversationMessageEntity;
 import com.platform.domain.ConversationSessionEntity;
-import com.platform.repository.ChatGeneratedImageRepository;
 import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
-import com.platform.session.CancellationRegistry;
-import com.platform.session.SessionStore;
+import com.platform.session.ChatHistoryService;
+import com.platform.session.ChatOwner;
+import com.platform.session.ChatRejectedException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.PageRequest;
@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -28,20 +27,25 @@ public class ConversationController {
 
     private final ConversationSessionRepository sessionRepository;
     private final ConversationMessageRepository messageRepository;
-    private final SessionStore sessionStore;
-    private final CancellationRegistry cancellationRegistry;
-    private final ChatGeneratedImageRepository imageRepository;
+    private final ChatHistoryService historyService;
 
     public ConversationController(ConversationSessionRepository sessionRepository,
                                    ConversationMessageRepository messageRepository,
-                                   SessionStore sessionStore,
-                                   CancellationRegistry cancellationRegistry,
-                                   ChatGeneratedImageRepository imageRepository) {
+                                   ChatHistoryService historyService) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
-        this.sessionStore = sessionStore;
-        this.cancellationRegistry = cancellationRegistry;
-        this.imageRepository = imageRepository;
+        this.historyService = historyService;
+    }
+
+    /**
+     * CR-178 BIZ-170: 관리 화면이 로그인으로 부르는 경로다. 위젯 토큰은 남의 대화까지 보이므로 막고,
+     * 위젯은 /api/v1/chat/sessions 로 자기 대화만 본다.
+     */
+    @ModelAttribute
+    void rejectWidgetToken() {
+        if (ChatOwner.isWidget(ChatOwner.currentPrincipal())) {
+            throw new ChatRejectedException(HttpStatus.FORBIDDEN, "widget_forbidden");
+        }
     }
 
     @GetMapping
@@ -86,31 +90,16 @@ public class ConversationController {
                         "Conversation session not found: " + sessionId));
 
         // 본인 권한 체크: 세션 user_id가 비어있으면(레거시) 통과, 있으면 일치 필요.
-        String currentUser = currentUserId();
+        // CR-178: 로그인 세션 주인은 사용자 id 로 적힌다. 예전 행은 이메일이라 ChatOwner 가 둘 다 본다.
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (session.getUserId() != null && !session.getUserId().isBlank()
-                && currentUser != null && !session.getUserId().equals(currentUser)) {
+                && auth != null && auth.isAuthenticated() && !ChatOwner.owns(session.getUserId(), auth)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "본인 세션만 삭제 가능: " + sessionId);
         }
 
-        // 활성 스트림 abort
-        cancellationRegistry.cancel(sessionId);
-
-        OffsetDateTime now = OffsetDateTime.now();
-        session.setDeletedAt(now);
-        sessionRepository.save(session);
-        messageRepository.softDeleteBySessionId(sessionId, now);
-        // CR-184 BIZ-231: 그 대화에서 만든 그림도 지운 표시. 파일은 남긴다
-        imageRepository.softDeleteBySessionId(sessionId, now);
-        sessionStore.clearSession(sessionId);
-    }
-
-    private String currentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated()) return null;
-        Object principal = auth.getPrincipal();
-        if (principal instanceof com.platform.auth.UserPrincipal up) return up.getUsername();
-        return auth.getName();
+        // CR-178: 위젯 대화 삭제와 같은 서비스를 쓴다(답 멈춤, 지운 표시, Redis 기록 비우기)
+        historyService.deleteSession(session);
     }
 
     /** CR-029: 세션 메타 조회 */
