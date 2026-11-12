@@ -156,6 +156,25 @@ class RunnerControllerTest {
     }
 
     @Test
+    @DisplayName("CR-175: /v1/interrupt — 답하는 CLI 만 멈추고 워커를 끄지 않는다")
+    void interruptStopsAnswerWithoutClosingWorkers() {
+        when(service.interrupt("run-1")).thenReturn(true);
+        com.platform.agent.runner.dto.RunnerInterruptRequest req = new com.platform.agent.runner.dto.RunnerInterruptRequest();
+        req.setRunId("run-1");
+
+        assertThat(controller.interrupt("secret-test-key", req)).containsEntry("interrupted", true);
+        verify(service).interrupt("run-1");
+        verify(service, org.mockito.Mockito.never()).cancel(org.mockito.ArgumentMatchers.anyString());
+
+        assertThatThrownBy(() -> controller.interrupt("secret-test-key",
+                new com.platform.agent.runner.dto.RunnerInterruptRequest()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("run_id required");
+        assertThatThrownBy(() -> controller.interrupt("wrong-key", req))
+                .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
     @DisplayName("/v1/cancel — run_id 누락이면 400")
     void cancelMissingRunId() {
         RunnerCancelRequest req = new RunnerCancelRequest();

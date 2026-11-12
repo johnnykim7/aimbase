@@ -64,4 +64,10 @@ public interface LLMAdapter {
      * <p>기본은 no-op. worker pool 을 두는 어댑터(예: {@code ClaudeCliAdapter})만 오버라이드한다. best-effort.
      */
     default void cleanupSessionsByPrefix(String runIdPrefix) { }
+
+    /**
+     * CR-175: 사용자가 그 세션의 스트리밍 답을 멈췄다. 답을 끝까지 받아야 스트림이 끝나는 어댑터
+     * (예: {@code ClaudeCliAdapter})만 오버라이드해 생성 쪽을 멈추게 한다. 세션 자원은 남긴다. best-effort.
+     */
+    default void interrupt(String sessionId) { }
 }

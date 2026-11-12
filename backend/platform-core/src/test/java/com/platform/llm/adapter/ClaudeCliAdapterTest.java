@@ -165,6 +165,26 @@ class ClaudeCliAdapterTest {
                 any(), eq("runner-key-xyz"), any(), anyBoolean(), any());
     }
 
+    @Test
+    @DisplayName("CR-175 TC-CHT-021: 답을 받는 중에만 그 실행기에 멈춤을 보낸다")
+    void interruptGoesToTheRunnerOfTheActiveStream() {
+        RequestContext.setAgentId("agent-1");
+        AgentEndpoint endpoint = new AgentEndpoint("agent-1", "http://host:8290", null);
+        when(agentRegistry.resolveActiveRunner("agent-1")).thenReturn(Optional.of(endpoint));
+        org.mockito.Mockito.doAnswer(inv -> {
+            RequestContext.clear();   // 중지는 다른 요청에서 온다
+            adapter.interrupt("run-1");
+            adapter.interrupt("run-other");
+            return null;
+        }).when(client).chatStream(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+        adapter.chatStream(sampleRequest(), chunk -> {});
+        adapter.interrupt("run-1");
+
+        verify(client, times(1)).interrupt(endpoint, "run-1", "runner-key-xyz");
+        verify(client, times(1)).interrupt(any(), any(), any());
+    }
+
     // ─── CR-075: user_ref 자동 라우팅 폴백 ───
 
     @Test

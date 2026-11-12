@@ -119,6 +119,16 @@ public class RunnerService {
     }
 
     /**
+     * CR-175: 사용자의 응답 중지. 답하고 있는 워커의 CLI 만 멈추고 워커는 남겨 대화를 잇는다.
+     *
+     * @return 멈춤을 보냈으면 true, 답하는 워커가 없으면 false
+     */
+    public boolean interrupt(String runId) {
+        if (runId == null || runId.isBlank()) return false;
+        return workerPool.interruptRun(runId) > 0;
+    }
+
+    /**
      * CR-121: 접두사로 시작하는 모든 run 의 워커를 일괄 종료한다. LARGE_INPUT 은 청크/재시도마다
      * runId(={parentRunId}-li-...)가 달라 pool 에 제각각 등록되므로, 부모 runId 접두사 하나로 모두 회수한다.
      *

@@ -126,6 +126,12 @@ public class ClaudeCliWorker implements AutoCloseable {
     static final String ENV_MCP_CONNECT_TIMEOUT_MS = "MCP_CONNECT_TIMEOUT_MS";
 
     private final ReentrantLock turnLock = new ReentrantLock();
+    // CR-175: 응답 중지 신호는 턴을 쥔 스레드 밖에서 온다. 질문 줄과 섞이지 않고, 다음 질문보다 먼저 CLI 에
+    // 닿도록 stdin 쓰기를 이 잠금 하나로 묶는다. 가상 스레드라 synchronized 대신 ReentrantLock 이다.
+    private final ReentrantLock stdinLock = new ReentrantLock();
+    private volatile boolean turnActive;
+    private volatile boolean interruptRequested;
+    static final String INTERRUPT_REQUEST_PREFIX = "interrupt-";
 
     private Process process;
     private BufferedWriter stdin;
@@ -462,11 +468,24 @@ public class ClaudeCliWorker implements AutoCloseable {
             }
 
             eventQueue.clear();
-            writeThinkingControlIfChanged(thinking);
-            writeUserMessages(first ? messages : trimToCurrentTurn(messages));
+            stdinLock.lock();
+            try {
+                interruptRequested = false;
+                writeThinkingControlIfChanged(thinking);
+                writeUserMessages(first ? messages : trimToCurrentTurn(messages));
+                turnActive = true;
+            } finally {
+                stdinLock.unlock();
+            }
             if (first) firstTurnSent = true;
 
-            return awaitResult(start, deltaConsumer, observeConsumer, thinkingConsumer);
+            try {
+                return awaitResult(start, deltaConsumer, observeConsumer, thinkingConsumer);
+            } finally {
+                // 끝난 뒤 늦게 온 멈춤은 CLI 가 쉬는 중에 받아 응답만 하고 넘긴다. 다음 질문보다 먼저 쓰이므로
+                // 다음 턴을 멈추지 않는다.
+                turnActive = false;
+            }
         } catch (IOException e) {
             throw new ClaudeCliException("stdin write failed: " + e.getMessage(), e);
         } finally {
@@ -602,6 +621,36 @@ public class ClaudeCliWorker implements AutoCloseable {
             sb.append('<').append(tag).append(">\n").append(text).append("\n</").append(tag).append(">\n");
         }
         return sb.length() == 0 ? "" : "<previous_conversation>\n" + sb + "</previous_conversation>";
+    }
+
+    /**
+     * CR-175: 사용자가 응답을 멈추면 답하고 있는 CLI 에 멈춤 신호를 쓴다. CLI 는 그 자리에서 답을 끝내고
+     * 오류 끝(result is_error)을 내며, 이 턴은 그때까지 받은 글로 정상 끝난다. 작업자를 끄지 않아 CLI 가
+     * 기억하는 대화가 남고 다음 질문에 그대로 답한다.
+     *
+     * @return 이 턴에 멈춤을 보냈으면 true. 답하는 중이 아니면 쓰지 않고 false
+     */
+    public boolean interrupt() {
+        stdinLock.lock();
+        try {
+            if (!turnActive || stdin == null || process == null || !process.isAlive()) return false;
+            if (interruptRequested) return true;
+            interruptRequested = true;
+            Map<String, Object> event = new LinkedHashMap<>();
+            event.put("type", "control_request");
+            event.put("request_id", INTERRUPT_REQUEST_PREFIX + UUID.randomUUID());
+            event.put("request", Map.of("subtype", "interrupt"));
+            stdin.write(MAPPER.writeValueAsString(event));
+            stdin.newLine();
+            stdin.flush();
+            log.info("[CLI-STDIN] interrupt (session={})", sessionId);
+            return true;
+        } catch (IOException e) {
+            log.warn("[CLI-STDIN] interrupt write failed: {}", e.getMessage());
+            return false;
+        } finally {
+            stdinLock.unlock();
+        }
     }
 
     /**
@@ -884,7 +933,13 @@ public class ClaudeCliWorker implements AutoCloseable {
                     // is_error 가 단일 진실 소스(success/error 모든 subtype 공통) → 예외로 승격해
                     // RunnerService→RunnerController error 이벤트→어댑터→AgentCallStepExecutor→
                     // WorkflowEngine.executeWithRetry(retry/--resume 이어하기) 정책에 태운다.
-                    if (Boolean.TRUE.equals(json.get("is_error"))) {
+                    if (Boolean.TRUE.equals(json.get("is_error")) && interruptRequested) {
+                        // CR-175: 사용자가 멈춘 턴이다. 오류로 올리지 않고 받은 데까지를 답으로 끝낸다.
+                        // result 칸의 글은 CLI 의 오류 안내라 답에 쓰지 않는다.
+                        finalText = assistantBuffer.toString();
+                        log.info("[CLI-RESULT] stopped by user (subtype={}, latency={}ms, chars={})",
+                                json.get("subtype"), latency, finalText.length());
+                    } else if (Boolean.TRUE.equals(json.get("is_error"))) {
                         String subtype = json.get("subtype") != null ? json.get("subtype").toString() : "unknown";
                         String errText = (finalText != null && !finalText.isBlank())
                                 ? finalText : "(no result text)";
@@ -922,7 +977,9 @@ public class ClaudeCliWorker implements AutoCloseable {
                 }
                 case "control_response" -> {
                     // CR-175: 깊게 생각하기 신호가 거절되면 바라는 설정으로 답할 수 없으므로 턴을 끊는다.
-                    if (json.get("response") instanceof Map<?, ?> r && "error".equals(r.get("subtype"))) {
+                    // 멈춤 신호의 응답은 성공이든 거절이든 이 턴의 결과를 바꾸지 않는다.
+                    if (json.get("response") instanceof Map<?, ?> r && "error".equals(r.get("subtype"))
+                            && !String.valueOf(r.get("request_id")).startsWith(INTERRUPT_REQUEST_PREFIX)) {
                         appliedThinking = null;
                         throw new ClaudeCliException("thinking control rejected: " + r.get("error"));
                     }

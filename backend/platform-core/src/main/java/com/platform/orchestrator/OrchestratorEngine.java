@@ -658,6 +658,10 @@ public class OrchestratorEngine {
                 : ModelConfig.defaults())
                 .withThinkingOverride(request.thinkingOverride());   // CR-175: 요청 단위 깊게 생각하기
 
+        // CR-175: 중지 표시만으로는 답을 끝까지 받아야 끝나는 어댑터(CLI 실행기)가 있어 생성 쪽도 멈춘다.
+        final LLMAdapter interruptTarget = adapter;
+        cancellationRegistry.onCancel(cancelled, () -> interruptTarget.interrupt(sessionId));
+
         // CR-045 Phase 2-B: 도구 루프 통합 스트리밍
         LLMResponse finalResponse;
         try {
@@ -773,7 +777,7 @@ public class OrchestratorEngine {
                     chatRunRecorder.complete(chatRunId);
                 }
             }
-            cancellationRegistry.clear(sessionId);
+            cancellationRegistry.clear(sessionId, cancelled);
             releaseOneShotWorker(request, sessionId, adapter != null ? Set.of(adapter) : Set.of());
         }
     }

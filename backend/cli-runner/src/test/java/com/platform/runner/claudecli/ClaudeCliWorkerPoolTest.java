@@ -48,6 +48,18 @@ class ClaudeCliWorkerPoolTest {
                 """);
     }
 
+    /** CR-175 TC-CHT-020: 답하는 워커가 없으면 멈춤을 보내지 않고 워커도 끄지 않는다. */
+    @Test
+    void interruptRun_sends_nothing_when_no_worker_is_answering() {
+        ClaudeCliWorkerPool pool = newPool(5);
+        assertThat(pool.interruptRun("run-none")).isZero();
+        ClaudeCliWorker main = pool.getOrCreateMain("run-I", null, null);
+        assertThat(pool.interruptRun("run-I")).isZero();
+        assertThat(pool.getOrCreateMain("run-I", null, null)).isSameAs(main);
+
+        pool.shutdownForRun("run-I");
+    }
+
     @Test
     void getOrCreateMain_is_idempotent_per_run() {
         ClaudeCliWorkerPool pool = newPool(5);

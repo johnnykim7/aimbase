@@ -790,6 +790,64 @@ class ClaudeCliWorkerTest {
         assertThat(resp.textContent()).isEqualTo("abcdef");
     }
 
+    /**
+     * CR-175 TC-CHT-020: 답하는 중에 멈추면 CLI 에 멈춤 신호 한 줄을 쓰고, CLI 의 오류 끝을 오류로 올리지 않고
+     * 받은 데까지로 끝낸다. 멈춤의 control_response 거절은 생각 거절로 보지 않는다. 작업자는 남아 다음 질문에 답한다.
+     */
+    @Test
+    void interrupt_ends_the_turn_with_received_text_and_keeps_the_worker() throws IOException {
+        Path stdinDump = tempDir.resolve("stdin-interrupt-" + System.nanoTime() + ".txt");
+        Path stub = writeStub("""
+                #!/bin/bash
+                echo '{"type":"system","subtype":"init","session_id":"sess-int"}'
+                N=0
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo "$line" >> '%s'
+                  case "$line" in
+                    *'"subtype":"interrupt"'*)
+                      RID=$(echo "$line" | sed -E 's/.*"request_id":"([^"]+)".*/\\1/')
+                      echo '{"type":"control_response","response":{"subtype":"error","request_id":"'"$RID"'","error":"x"}}'
+                      echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Request interrupted","session_id":"sess-int","usage":{"input_tokens":1,"output_tokens":1}}' ;;
+                    *)
+                      N=$((N+1))
+                      if [ "$N" = "1" ]; then
+                        echo '{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","content":[]}},"parent_tool_use_id":null}'
+                        echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"part"}},"parent_tool_use_id":null}'
+                      else
+                        echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"next"}]}}'
+                        echo '{"type":"result","subtype":"success","result":"next","session_id":"sess-int","usage":{"input_tokens":1,"output_tokens":1}}'
+                      fi ;;
+                  esac
+                done
+                """.formatted(stdinDump.toString()));
+        worker = new ClaudeCliWorker(stub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.start();
+
+        assertThat(worker.interrupt()).isFalse();
+
+        List<String> deltas = new java.util.ArrayList<>();
+        LLMResponse stopped = worker.turnStream(question("q1"), true, d -> {
+            deltas.add(d);
+            assertThat(worker.interrupt()).isTrue();
+        }, null, null, null);
+
+        assertThat(deltas).containsExactly("part");
+        assertThat(stopped.finishReason()).isEqualTo(LLMResponse.FinishReason.END);
+        assertThat(stopped.textContent()).isEqualTo("part");
+        assertThat(worker.interrupt()).isFalse();
+
+        LLMResponse next = worker.turn(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "q2"));
+        assertThat(next.textContent()).isEqualTo("next");
+
+        List<String> lines = Files.readAllLines(stdinDump);
+        assertThat(lines).hasSize(3);
+        assertThat(lines.get(0)).contains("\"type\":\"user\"").contains("q1");
+        assertThat(lines.get(1)).contains("\"type\":\"control_request\"")
+                .contains("\"request_id\":\"interrupt-").contains("\"subtype\":\"interrupt\"");
+        assertThat(lines.get(2)).contains("\"type\":\"user\"").contains("q2");
+    }
+
     private static List<UnifiedMessage> question(String text) {
         return List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, text));
     }

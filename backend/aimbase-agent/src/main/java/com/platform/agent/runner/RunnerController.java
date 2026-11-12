@@ -3,6 +3,7 @@ package com.platform.agent.runner;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.agent.runner.dto.RunnerCancelRequest;
+import com.platform.agent.runner.dto.RunnerInterruptRequest;
 import com.platform.agent.runner.dto.RunnerChatRequest;
 import com.platform.agent.runner.dto.RunnerChatResponse;
 import com.platform.llm.model.LLMRequest;
@@ -39,6 +40,7 @@ import java.util.Map;
  *   <li>POST /v1/chat            — 단발 응답</li>
  *   <li>POST /v1/chat/stream     — NDJSON 스트림 (Transfer-Encoding: chunked)</li>
  *   <li>POST /v1/cancel          — 진행 중 실행 취소</li>
+ *   <li>POST /v1/interrupt       — 답하는 CLI 만 멈춤, 워커는 유지 (CR-175)</li>
  *   <li>GET  /v1/health          — Runner 상태</li>
  * </ul>
  *
@@ -161,6 +163,18 @@ public class RunnerController {
         result.put("closed", n);
         if (n == 0) result.put("reason", "not_found_or_failed");
         return result;
+    }
+
+    /** CR-175: 사용자의 응답 중지. 워커를 끄는 /cancel 과 달리 대화를 남긴다. */
+    @PostMapping(value = "/interrupt", consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> interrupt(@RequestHeader(value = RUNNER_API_KEY_HEADER, required = false) String apiKey,
+                                         @RequestBody RunnerInterruptRequest req) {
+        verifyApiKey(apiKey);
+        if (req == null || req.getRunId() == null || req.getRunId().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "run_id required");
+        }
+        return Map.of("interrupted", service.interrupt(req.getRunId()));
     }
 
     @org.springframework.web.bind.annotation.GetMapping(value = "/health",

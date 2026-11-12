@@ -220,6 +220,33 @@ public class ClaudeCliRunnerClient {
         }
     }
 
+    /** CR-175: 멈춤은 사용자가 기다리는 신호라 cancel 보다 짧게 끊는다. */
+    private static final Duration INTERRUPT_TIMEOUT = Duration.ofSeconds(5);
+
+    /**
+     * CR-175: 실행기에 그 세션의 답만 멈추라고 알린다. 워커는 남아 대화가 이어진다.
+     * 이 주소를 모르는 이전 실행기(404)나 호출 실패는 경고만 남긴다. 그때는 답이 끝날 때까지 기다린다.
+     *
+     * @return 실행기가 답하는 워커를 멈췄으면 true
+     */
+    public boolean interrupt(AgentEndpoint endpoint, String runId, String runnerApiKey) {
+        HttpRequest httpReq = newJsonRequest(endpoint, "/v1/interrupt", Map.of("run_id", runId),
+                runnerApiKey, INTERRUPT_TIMEOUT);
+        try {
+            HttpResponse<String> resp = clientFor(endpoint).send(httpReq, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() / 100 != 2) {
+                log.warn("Runner /v1/interrupt 응답 {}: {}", resp.statusCode(), resp.body());
+                return false;
+            }
+            Map<String, Object> body = MAPPER.readValue(resp.body(), new TypeReference<Map<String, Object>>() {});
+            return Boolean.TRUE.equals(body.get("interrupted"));
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            log.warn("Runner /v1/interrupt 호출 실패: {}", e.getMessage());
+            return false;
+        }
+    }
+
     // ─── 내부 ─────────────────────────────────────────────────────────────
 
     private HttpRequest newJsonRequest(AgentEndpoint endpoint, String path,
