@@ -23,6 +23,7 @@ export const T = {
   edit: "수정",
   copy: "복사",
   copied: "복사했습니다",
+  copyFailed: "복사하지 못했습니다",
   regenerate: "다시 생성",
   prevVersion: "이전",
   nextVersion: "다음",

@@ -16,6 +16,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import { copyText } from "./clipboard";
 import { tableToXlsxBlob } from "./xlsx-writer";
 
 let markedConfigured = false;
@@ -169,12 +170,7 @@ function enhanceTables(container: HTMLElement): void {
     const copyBtn = mkBtn("복사", "표를 클립보드에 복사 (탭 구분)");
     copyBtn.addEventListener("click", async () => {
       const tsv = rows.map((r) => r.join("\t")).join("\n");
-      try {
-        await navigator.clipboard.writeText(tsv);
-        flashCopied(copyBtn, "복사");
-      } catch {
-        /* clipboard 미허용 환경 — 무시 */
-      }
+      if (await copyText(tsv)) flashCopied(copyBtn, "복사");
     });
 
     toolbar.appendChild(csvBtn);
@@ -213,12 +209,7 @@ async function enhanceCodeBlocks(container: HTMLElement, theme: "light" | "dark"
     copyBtn.textContent = "복사";
     copyBtn.title = "코드 복사";
     copyBtn.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(code.textContent ?? "");
-        flashCopied(copyBtn, "복사");
-      } catch {
-        /* ignore */
-      }
+      if (await copyText(code.textContent ?? "")) flashCopied(copyBtn, "복사");
     });
     pre.appendChild(copyBtn);
   }
