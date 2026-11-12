@@ -79,17 +79,19 @@ dict(id='IT-09-002', flow='다시 생성과 질문 수정', kind='정상', title
      pre=WES_CS,
      steps='1. 질문을 보내고 답이 끝나면 답 아래 「다시 생성」을 누른다\n'
            '2. 버전 번호 옆 「이전」, 「다음」을 누른다\n'
-           '3. 관리 화면 「세션」에서 그 대화의 세션 상세를 연다\n'
+           '3. 서버 대화 조회 GET /api/v1/conversations/{session_id} 로 그 세션의 메시지를 본다\n'
            '4. 테넌트 DB conversation_messages 에서 그 세션의 행을 본다',
      expect='1. 같은 질문의 새 답이 오고 답 아래 버전 번호 "2/2" 가 보인다\n'
             '2. "1/2" 에서는 앞 답 글이, "2/2" 에서는 새 답 글이 보인다\n'
-            '3. 그 질문 아래 새 답 하나만 이어져 있다\n'
+            '3. 메시지 목록의 답은 새 답 하나뿐이고 그 turnId 가 다시 보낸 질문의 turn_id 와 같다\n'
             '4. 앞 답 행에 deleted_at 이 찍히고 delete_reason 이 REWIND 다\n'
             '5. 다시 보낸 질문과 새 답 행은 deleted_at 이 비어 있고 turn_id 가 서로 같다',
-     judge=['합동', '합동', '합동', '서버', '서버'],
-     probe={n: dict(steps=[ask(Q1), ask(Q1, session=S0, rewind='{val:0:data.turn_seq}'), rows(0)], wait=180, check=c)
-            for n, c in ((4, f"len({answers_of(2, 0)}) > 0 and all(x['del'] == 't' and x['delete_reason'] == 'REWIND' for x in {answers_of(2, 0)})"),
-                         (5, "len([x for x in r[2] if x['del'] == 'f' and x['role'] == 'user']) == 1 "
+     judge=['합동', '합동', '서버', '서버', '서버'],
+     probe={n: dict(steps=[ask(Q1), ask(Q1, session=S0, rewind='{val:0:data.turn_seq}'), s2], wait=180, check=c)
+            for n, s2, c in ((3, ('api', WES, 'GET', '/api/v1/conversations/{val:0:data.session_id}'),
+                              "[m['turnId'] for m in r[2]['body']['data']['messages'] if m['role'] == 'assistant'] == [r[1]['body']['data']['turn_id']]"),
+                             (4, rows(0), f"len({answers_of(2, 0)}) > 0 and all(x['del'] == 't' and x['delete_reason'] == 'REWIND' for x in {answers_of(2, 0)})"),
+                             (5, rows(0), "len([x for x in r[2] if x['del'] == 'f' and x['role'] == 'user']) == 1 "
                              "and len([x for x in r[2] if x['del'] == 'f' and x['role'] == 'assistant']) > 0 "
                              "and all(x['turn_id'] == [u for u in r[2] if u['del'] == 'f' and u['role'] == 'user'][0]['turn_id'] "
                              "for x in r[2] if x['del'] == 'f')"))},
@@ -219,7 +221,8 @@ dict(id='IT-09-008', flow='모델 선택', kind='정상', title='연결에 넣�
      req=['PRD-371'], src=['CR-175'], pri='High'),
 
 dict(id='IT-09-009', flow='모델 선택', kind='정상', title='관리 화면 연결 편집의 허용 모델 칸에서 넣고 순서를 바꾸고 비운 값이 연결 설정과 위젯에 그대로 반영된다',
-     pre='관리 화면 「연결 관리」. 공용 WES 연결이 아닌 시험용 연결 하나. 관리 화면은 CR-175 판이 올라간 뒤',
+     pre='관리 화면 「연결 관리」. 공용 WES 연결이 아닌 시험용 연결 하나이고, 그 연결의 기본 모델은 claude-sonnet-4-5 다'
+         '(기본 모델이 허용 모델 목록에 없으면 저장이 막힌다). 관리 화면은 CR-175 판이 올라간 뒤',
      steps='1. 시험용 연결 편집의 「허용 모델」에 claude-sonnet-4-5(Sonnet 4.5), claude-haiku-5-5(Haiku 5.5) 를 넣고 저장한 뒤 편집을 다시 연다\n'
            '2. 둘째 줄을 「위로」 올려 저장하고 테넌트 DB connections 의 config 를 본다\n'
            '3. 그 연결로 위젯을 열고 모델 단추를 누른다\n'
@@ -374,7 +377,7 @@ dict(id='IT-09-019', flow='읽기 편의', kind='정상', title='새 대화를 �
      steps='1. 머리줄 「새 대화」를 누른다\n'
            '2. 질문을 보내고 테넌트 DB conversation_messages 에서 그 질문 행의 session_id 를 본다\n'
            '3. 관리 화면 「세션」 목록을 본다',
-     expect='1. 앞 질문과 답이 화면에서 사라지고 "무엇을 도와드릴까요?" 안내 제목이 보인다\n'
+     expect='1. 앞 질문과 답이 화면에서 사라지고 백오피스2 가 준 "AI 에게 질문" 안내 제목이 보인다\n'
             '2. session_id 가 앞 대화와 다르다\n'
             '3. 앞 대화 세션이 목록에 남아 있다',
      judge=['합동', '서버', '합동'],
