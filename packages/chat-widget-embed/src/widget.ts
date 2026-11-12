@@ -2192,6 +2192,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
           runId: ev.run_id,
           status: ev.status === "completed" || ev.status === "cancelled" ? ev.status : "failed",
           reason: failureReason(ev.error),
+          code: typeof ev.error?.reason === "string" ? ev.error.reason : undefined,
         });
       },
       onError: (e) => {

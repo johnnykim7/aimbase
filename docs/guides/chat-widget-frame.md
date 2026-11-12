@@ -1,6 +1,6 @@
 # 채팅 위젯 틀 사용법
 
-> 문서 버전: 1.7 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-185, CR-186
+> 문서 버전: 1.8 | 최종 수정: 2026-11-13 | 관련 CR: CR-177, CR-185, CR-186
 
 채팅 위젯(`packages/chat-widget-embed`)에 기능을 붙이는 건이 지켜야 할 약속이다. CR-178 ~ CR-186 이 같은 위젯을 동시에 고치므로, 각 건은 아래 자리에 자기 기능을 등록만 하고 위젯 본체(`src/widget.ts`)와 틀(`src/frame/`)은 고치지 않는다.
 
@@ -244,7 +244,7 @@ ctx.on("answerDelta", ({ answer, text }) => ...);  // 응답 글 조각이 옴. 
 ctx.on("answerDone", (a: AnswerView) => ...);      // 응답 하나가 끝남(중지, 오류 포함)
 ctx.on("streamEvent", ({ name, data, answer, mount }) => ...); // 대화 스트림에서 위젯 본체가 모르는 이벤트. mount 는 아래
 ctx.on("workflowApproval", ({ runId, stepId, policyId, reason, approvers, timeoutAt, mount }) => ...); // 워크플로우 진행 칸에 승인 대기가 옴
-ctx.on("workflowDone", ({ runId, status, reason }) => ...); // 워크플로우 진행 칸의 런이 끝남. status 는 completed, failed, cancelled. reason 은 실패나 거절 이유
+ctx.on("workflowDone", ({ runId, status, reason, code }) => ...); // 워크플로우 진행 칸의 런이 끝남. status 는 completed, failed, cancelled. reason 은 실패나 거절 이유, code 는 서버 실패 코드
 ctx.on("modelChange", ({ model, thinking }) => ...); // 사람이 모델이나 깊게 생각하기를 바꿈. selectModel, setThinking 으로 바꾼 것은 오지 않는다
 ctx.on("titleChange", ({ sessionId, title }) => ...); // 서버가 대화 제목을 만들어 머리줄 제목이 바뀜. setTitle 로 바꾼 것은 오지 않는다
 ctx.on("settingsLoaded", (settings) => ...);      // 위젯 설정을 받았거나 다시 받음(화면 언어를 바꿀 때 포함)
@@ -297,7 +297,7 @@ interface ConversationView {
 - `streamEvent` 의 `mount(el)` 은 도는 중인 응답의 지금 위치(그때까지 받은 글 바로 아래)에 요소를 끼운다. 그 뒤에 오는 글은 요소 아래에 이어 그린다. 응답이 끝나도 남는다. 응답이 이미 끝났으면 끼우지 않고 거짓을 돌려준다.
 - 끼운 요소는 응답 글(`AnswerView.text`)에 들어가지 않는다. 복사는 글만 복사하고, 다시 생성한 새 버전과 지난 대화 열기에는 없다. 손질(decorate)은 요소로 나뉜 글 조각마다 불린다.
 - `workflowApproval` 의 `mount(el)` 은 그 워크플로우 진행 칸의 승인 대기 줄 바로 아래에 요소를 끼운다. 붙이는 앱의 `onApprovalRequired` 는 그대로 불린다.
-- `workflowDone` 의 `reason` 은 서버가 그 런에 저장한 실패 이유에서 사람이 쓴 글(`error`, 없으면 거절의 `detail`, 없으면 `reason`)을 고른 것이다. 서버 글 그대로라 번역되지 않는다. 고를 글이 없으면 비운다.
+- `workflowDone` 의 `reason` 은 서버가 그 런에 저장한 실패 이유에서 사람이 쓴 글(`error`, 없으면 거절의 `detail`, 없으면 `reason`)을 고른 것이다. 서버 글 그대로라 번역되지 않는다. 고를 글이 없으면 비운다. 승인 시한 초과는 `detail` 이 시각이라 `reason` 에 시각이 오므로, 문구는 `code`(서버 `error.reason` 원문, 예: `approval_timeout`, `Human approval rejected`)로 고른다.
 - 끼운 요소의 글은 기능이 `localeChange` 를 받아 다시 그린다.
 
 스트림 중간 오류: 서버가 응답 도중 `event: error`(`data: {"code": "...", "message": "..."}`)를 보내면 위젯 본체가 그 응답을 오류로 끝낸다. 받은 글은 남기고 「답을 받지 못했습니다: (오류 문구)」를 붙이며 다시 시도 단추는 두지 않는다(CR-175 T3-4 전송 7단계와 같다). 오류 문구는 3.6 의 규칙으로 고른다.
