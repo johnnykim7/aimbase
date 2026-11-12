@@ -110,7 +110,8 @@ class OrchestratorOneShotWorkerTest {
                         mock(com.platform.service.PromptTemplateService.class)),
                 mock(com.platform.session.ChatWorkspaceAssigner.class),
                 new FileCreateToolGate(mock(com.platform.config.PlatformSettingsService.class)),
-                passThroughPrefs());
+                passThroughPrefs(),
+                new com.platform.orchestrator.approval.ChatTurnRegistry());
     }
 
     private static WidgetPreferenceService passThroughPrefs() {

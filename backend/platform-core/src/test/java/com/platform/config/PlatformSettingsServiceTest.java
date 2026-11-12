@@ -99,6 +99,22 @@ class PlatformSettingsServiceTest {
                 .containsExactly("skills.read-max-bytes");
     }
 
+    /** CR-185 TC-CHT-115: 대화 승인 대기는 10 ~ 240 초만 받는다. */
+    @Test
+    void chatApprovalTimeout_acceptsOnlyTenTo240() {
+        String key = "chat.approval-timeout-seconds";
+        when(configRepository.findByConfigKey(key)).thenReturn(Optional.of(entity(key, "120")));
+
+        for (String bad : List.of("9", "241", "abc")) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.updateSettings(
+                    List.of(new PlatformSettingsService.SettingUpdateRequest(key, bad)), "admin"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThat(service.updateSettings(List.of(
+                new PlatformSettingsService.SettingUpdateRequest(key, "10"),
+                new PlatformSettingsService.SettingUpdateRequest(key, "240")), "admin")).isEqualTo(2);
+    }
+
     private GlobalConfigEntity entity(String key, String value) {
         GlobalConfigEntity e = new GlobalConfigEntity();
         e.setConfigKey(key);

@@ -48,7 +48,8 @@ class WorkflowControllerDeleteTest {
                 mock(WorkflowRunSubscriberRegistry.class),
                 mock(WorkflowRunEventRepository.class),
                 mock(com.platform.repository.ProjectRepository.class),
-                mock(com.platform.auth.ResourceOwner.class));
+                mock(com.platform.auth.ResourceOwner.class),
+                org.mockito.Mockito.mock(com.platform.orchestrator.approval.ApprovalDecisionService.class));
     }
 
     private static WorkflowEntity workflow(String id) {

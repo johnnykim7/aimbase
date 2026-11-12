@@ -56,6 +56,16 @@ public class CancellationRegistry {
         return true;
     }
 
+    /**
+     * CR-185: 세션이 아니라 그 요청의 토큰을 끊는다. 승인을 기다리다 스트림이 끊긴 요청만 멈추고,
+     * 그사이 같은 세션에 들어온 새 요청은 건드리지 않는다.
+     */
+    public void cancel(AtomicBoolean token) {
+        if (token == null) return;
+        token.set(true);
+        fire(token);
+    }
+
     public boolean isCancelled(String sessionId) {
         AtomicBoolean token = tokens.get(sessionId);
         return token != null && token.get();

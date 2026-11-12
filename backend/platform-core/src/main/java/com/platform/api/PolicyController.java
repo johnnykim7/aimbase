@@ -5,6 +5,7 @@ import com.platform.action.model.ActionTarget;
 import com.platform.domain.PolicyEntity;
 import com.platform.policy.PolicyEngine;
 import com.platform.repository.PolicyRepository;
+import com.platform.session.ChatRejectedException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -49,6 +50,7 @@ public class PolicyController {
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "정책 생성")
     public ApiResponse<PolicyEntity> create(@Valid @RequestBody PolicyRequest request) {
+        rejectEmptyTools(request.matchRules());
         PolicyEntity entity = new PolicyEntity();
         entity.setId(request.id() != null && !request.id().isBlank()
                 ? request.id()
@@ -74,6 +76,7 @@ public class PolicyController {
     @Operation(summary = "정책 수정")
     public ApiResponse<PolicyEntity> update(@PathVariable String id,
                                              @Valid @RequestBody PolicyRequest request) {
+        rejectEmptyTools(request.matchRules());
         PolicyEntity entity = policyRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Policy not found: " + id));
         entity.setName(request.name());
@@ -134,4 +137,16 @@ public class PolicyController {
             String adapter,
             String sessionId
     ) {}
+
+    /**
+     * CR-185 BIZ-240: 빈 tools 는 저장하지 않는다. 빈 목록 정책이 도구 대상이 아닌 정책처럼 보이면
+     * 그 규칙(승인, 거부)이 모든 작업에 걸린다.
+     */
+    private static void rejectEmptyTools(Map<String, Object> matchRules) {
+        if (matchRules == null || !matchRules.containsKey(PolicyEngine.MATCH_TOOLS)) return;
+        Object tools = matchRules.get(PolicyEngine.MATCH_TOOLS);
+        if (!(tools instanceof List<?> list) || list.stream().noneMatch(t -> t != null && !t.toString().isBlank())) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "policy_tools_empty");
+        }
+    }
 }

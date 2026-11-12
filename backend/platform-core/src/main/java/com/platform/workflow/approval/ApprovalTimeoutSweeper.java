@@ -2,6 +2,8 @@ package com.platform.workflow.approval;
 
 import com.platform.domain.PendingApprovalEntity;
 import com.platform.domain.WorkflowRunEntity;
+import com.platform.orchestrator.approval.ChatTurnRegistry;
+import com.platform.orchestrator.approval.ToolApprovalGate;
 import com.platform.repository.PendingApprovalRepository;
 import com.platform.repository.WorkflowRunRepository;
 import com.platform.tenant.TenantContext;
@@ -39,17 +41,27 @@ public class ApprovalTimeoutSweeper {
     private final WorkflowEventPublisher eventPublisher;
     private final TenantDataSourceManager tenantDataSourceManager;
     private final Clock clock;
+    private final ChatTurnRegistry chatTurns;
 
     @Autowired
     public ApprovalTimeoutSweeper(PendingApprovalRepository approvals, WorkflowRunRepository runs,
                                   WorkflowEventPublisher eventPublisher,
-                                  TenantDataSourceManager tenantDataSourceManager) {
-        this(approvals, runs, eventPublisher, tenantDataSourceManager, Clock.systemUTC());
+                                  TenantDataSourceManager tenantDataSourceManager,
+                                  ChatTurnRegistry chatTurns) {
+        this(approvals, runs, eventPublisher, tenantDataSourceManager, Clock.systemUTC(), chatTurns);
     }
 
     ApprovalTimeoutSweeper(PendingApprovalRepository approvals, WorkflowRunRepository runs,
                            WorkflowEventPublisher eventPublisher,
                            TenantDataSourceManager tenantDataSourceManager, Clock clock) {
+        this(approvals, runs, eventPublisher, tenantDataSourceManager, clock, null);
+    }
+
+    ApprovalTimeoutSweeper(PendingApprovalRepository approvals, WorkflowRunRepository runs,
+                           WorkflowEventPublisher eventPublisher,
+                           TenantDataSourceManager tenantDataSourceManager, Clock clock,
+                           ChatTurnRegistry chatTurns) {
+        this.chatTurns = chatTurns;
         this.approvals = approvals;
         this.runs = runs;
         this.eventPublisher = eventPublisher;
@@ -93,6 +105,22 @@ public class ApprovalTimeoutSweeper {
             runs.findById(approval.getActionLogId())
                     .filter(run -> "pending_approval".equals(run.getStatus()))
                     .ifPresent(run -> failRun(run, approval, now));
+        }
+        return closed + sweepChat(now);
+    }
+
+    /**
+     * CR-185: 대화 승인은 기다리는 도구 관문이 마감에 스스로 닫는다. 서버가 다시 떠서 관문이 사라진 줄만 여기서 닫는다.
+     * 관문이 살아 있으면 깨워 같은 결과를 스트림에 알리게 한다.
+     */
+    private int sweepChat(OffsetDateTime now) {
+        int closed = 0;
+        for (PendingApprovalEntity approval : approvals.findByStatusAndApprovalChannelAndTimeoutAtBefore(
+                "pending", ToolApprovalGate.CHANNEL_CHAT, now)) {
+            if (approvals.closeIfPending(approval.getId(), STATUS_TIMEOUT, null, null, now) > 0) {
+                closed++;
+                if (chatTurns != null) chatTurns.resolve(approval.getId(), STATUS_TIMEOUT);
+            }
         }
         return closed;
     }

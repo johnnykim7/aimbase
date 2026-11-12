@@ -148,11 +148,79 @@ public class PolicyEngine {
                 transforms.isEmpty() ? null : transforms, null);
     }
 
+    /** CR-185 BIZ-240: 이 키가 있는 정책은 도구 호출 평가에만 쓴다. */
+    public static final String MATCH_TOOLS = "tools";
+
+    /** 도구 호출 평가 결과. policyId, message 는 ALLOW 면 null. */
+    public record ToolCallDecision(PolicyResult.PolicyAction action, String policyId, String message) {
+        public static ToolCallDecision allow() {
+            return new ToolCallDecision(PolicyResult.PolicyAction.ALLOW, null, null);
+        }
+    }
+
+    /**
+     * CR-185 BIZ-240: 도구 호출 평가. 켜진 정책을 우선순위 높은 순으로 보고, {@code match_rules.tools} 에 그 도구가 든
+     * 정책의 규칙 가운데 처음 나온 DENY 또는 REQUIRE_APPROVAL 에서 멈춘다(BIZ-005 와 같은 순서).
+     * 도구 계약의 승인 필요 표시는 보지 않는다. 그 표시가 있는 도구는 워크플로우와 에이전트가 사람 없이 부른다.
+     */
+    public ToolCallDecision evaluateToolCall(String toolName, String sessionId) {
+        if (toolName == null) return ToolCallDecision.allow();
+        for (PolicyEntity policy : policyRepository.findByIsActiveTrueOrderByPriorityDesc()) {
+            List<String> tools = toolsOf(policy);
+            if (tools == null || !tools.contains(toolName)) continue;
+            List<Map<String, Object>> rules = policy.getRules();
+            if (rules == null) continue;
+            for (Map<String, Object> rule : rules) {
+                String type = rule.get("type") instanceof String t ? t.toUpperCase() : null;
+                PolicyResult.PolicyAction action;
+                if ("DENY".equals(type)) {
+                    action = PolicyResult.PolicyAction.DENY;
+                } else if ("REQUIRE_APPROVAL".equals(type)) {
+                    action = PolicyResult.PolicyAction.REQUIRE_APPROVAL;
+                } else {
+                    continue;
+                }
+                String message = rule.get("message") instanceof String m && !m.isBlank() ? m : null;
+                HookEvent hook = action == PolicyResult.PolicyAction.DENY
+                        ? HookEvent.PERMISSION_DENIED : HookEvent.PERMISSION_REQUEST;
+                hookDispatcher.dispatch(hook, HookInput.of(hook, sessionId,
+                        Map.of("policyId", policy.getId(), "tool", toolName), Map.of()));
+                log.info("Policy {} for tool '{}': policy={}", action, toolName, policy.getId());
+                return new ToolCallDecision(action, policy.getId(), message);
+            }
+        }
+        return ToolCallDecision.allow();
+    }
+
+    /**
+     * CR-185: 켜진 정책 가운데 이 도구를 대상으로 둔 것이 있는가. 도구 루프가 묻게 될 도구를 병렬 실행에서 빼는 데 쓴다.
+     */
+    public boolean hasToolPolicy(String toolName) {
+        if (toolName == null) return false;
+        for (PolicyEntity policy : policyRepository.findByIsActiveTrueOrderByPriorityDesc()) {
+            List<String> tools = toolsOf(policy);
+            if (tools != null && tools.contains(toolName)) return true;
+        }
+        return false;
+    }
+
+    /** match_rules.tools 목록. 키가 없으면 null, 목록이 아니면 빈 목록. */
+    public static List<String> toolsOf(PolicyEntity policy) {
+        Map<String, Object> matchRules = policy.getMatchRules();
+        if (matchRules == null || !matchRules.containsKey(MATCH_TOOLS)) return null;
+        if (matchRules.get(MATCH_TOOLS) instanceof List<?> list) {
+            return list.stream().filter(java.util.Objects::nonNull).map(Object::toString).toList();
+        }
+        return List.of();
+    }
+
     // ─── 매칭 ─────────────────────────────────────────────────────────────
 
     private boolean matches(PolicyEntity policy, ActionRequest request) {
         Map<String, Object> matchRules = policy.getMatchRules();
         if (matchRules == null || matchRules.isEmpty()) return true;
+        // CR-185 BIZ-240: 도구 대상 정책은 작업 평가에 걸지 않는다
+        if (matchRules.containsKey(MATCH_TOOLS)) return false;
 
         if (matchRules.containsKey("intents")) {
             @SuppressWarnings("unchecked")

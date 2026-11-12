@@ -44,6 +44,7 @@ public class WorkflowController {
     private final WorkflowRunEventRepository eventRepository;
     private final ProjectRepository projectRepository;
     private final ResourceOwner resourceOwner;
+    private final com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService;
 
     public WorkflowController(WorkflowRepository workflowRepository,
                                WorkflowRunRepository workflowRunRepository,
@@ -52,7 +53,9 @@ public class WorkflowController {
                                WorkflowRunSubscriberRegistry subscriberRegistry,
                                WorkflowRunEventRepository eventRepository,
                                ProjectRepository projectRepository,
-                               ResourceOwner resourceOwner) {
+                               ResourceOwner resourceOwner,
+                               com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService) {
+        this.approvalDecisionService = approvalDecisionService;
         this.workflowRepository = workflowRepository;
         this.workflowRunRepository = workflowRunRepository;
         this.workflowEngine = workflowEngine;
@@ -181,8 +184,10 @@ public class WorkflowController {
     @Operation(summary = "HUMAN_INPUT 스텝 승인/거부")
     public ApiResponse<WorkflowRunEntity> approve(@PathVariable UUID runId,
                                                    @RequestBody ApproveRequest request) {
+        approvalDecisionService.authorizeWorkflowDecision(runId);
         try {
-            WorkflowRunEntity run = workflowEngine.resume(runId, request.approved(), request.reason());
+            WorkflowRunEntity run = workflowEngine.resume(runId, request.approved(), request.reason(),
+                    com.platform.orchestrator.approval.ChatTurnRegistry.currentActor());
             return ApiResponse.ok(run);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());

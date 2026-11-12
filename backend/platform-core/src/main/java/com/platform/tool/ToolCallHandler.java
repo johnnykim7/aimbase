@@ -1,5 +1,6 @@
 package com.platform.tool;
 
+import com.platform.orchestrator.approval.ToolApprovalGate;
 import com.platform.tool.builtin.DataQueryTool;
 import com.platform.tool.model.UnifiedToolDef;
 import com.platform.domain.ToolExecutionLogEntity;
@@ -59,6 +60,8 @@ public class ToolCallHandler {
     private final com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder;
     /** CR-048 PRD-301: 대형 tool result 외부 저장 */
     private final com.platform.tool.storage.ToolResultStorageService toolResultStorage;
+    /** CR-185: 정책이 묻거나 막는 도구를 실행 직전에 멈춘다. */
+    private final ToolApprovalGate toolApprovalGate;
 
     /** CR-047 PRD-298: safeCalls 병렬 실행용 Virtual Thread executor */
     private final ExecutorService parallelToolExecutor =
@@ -106,7 +109,9 @@ public class ToolCallHandler {
                            com.platform.config.PlatformSettingsService platformSettings,
                            com.platform.tool.registry.SessionToolRegistry sessionToolRegistry,
                            com.platform.tool.storage.ToolResultStorageService toolResultStorage,
-                           com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder) {
+                           com.platform.workflow.event.WorkflowRunEventRecorder eventRecorder,
+                           ToolApprovalGate toolApprovalGate) {
+        this.toolApprovalGate = toolApprovalGate;
         this.executionLogRepository = executionLogRepository;
         this.hookDispatcher = hookDispatcher;
         this.permissionClassifier = permissionClassifier;
@@ -243,6 +248,12 @@ public class ToolCallHandler {
                     log.info("Tool execution blocked by hook: tool={}", tc.name());
                     results.add(new ContentBlock.ToolResult(tc.id(),
                             "Tool execution blocked by policy hook"));
+                    continue;
+                }
+
+                ToolApprovalGate.Verdict verdict = toolApprovalGate.check(tc.name(), tc.input(), tc.id(), sessionId);
+                if (!verdict.proceed()) {
+                    results.add(new ContentBlock.ToolResult(tc.id(), verdict.refusal()));
                     continue;
                 }
 
@@ -430,7 +441,7 @@ public class ToolCallHandler {
             List<ToolCall> unsafeCalls = new ArrayList<>();
             for (ToolCall tc : toolCalls) {
                 ToolContractMeta meta = toolRegistry.getContractMeta(tc.name());
-                if (meta != null && meta.concurrencySafe()) {
+                if (meta != null && meta.concurrencySafe() && !toolApprovalGate.mayAsk(tc.name())) {
                     safeCalls.add(tc);
                 } else {
                     unsafeCalls.add(tc);
@@ -603,7 +614,8 @@ public class ToolCallHandler {
             List<ToolCall> unsafeCalls = new ArrayList<>();
             for (ToolCall tc : toolCalls) {
                 ToolContractMeta meta = toolRegistry.getContractMeta(tc.name());
-                if (meta != null && meta.concurrencySafe()) safeCalls.add(tc);
+                // CR-185: 승인을 물을 수 있는 도구는 부른 순서대로 하나씩 묻도록 차례 실행에 둔다.
+                if (meta != null && meta.concurrencySafe() && !toolApprovalGate.mayAsk(tc.name())) safeCalls.add(tc);
                 else unsafeCalls.add(tc);
             }
 
@@ -1113,6 +1125,13 @@ public class ToolCallHandler {
         if (preHook.decision() == HookDecision.BLOCK) {
             log.info("Tool execution blocked by hook: tool={}, turn={}", tc.name(), turnNum);
             return ToolExecOutcome.text(tc.id(), "Tool execution blocked by policy hook");
+        }
+
+        // CR-185 BIZ-240: 훅 다음에 둔다. 훅이 막은 호출까지 사람에게 묻지 않게 한다.
+        ToolApprovalGate.Verdict verdict = toolApprovalGate.check(
+                tc.name(), tc.input(), tc.id(), toolContext.sessionId());
+        if (!verdict.proceed()) {
+            return ToolExecOutcome.text(tc.id(), verdict.refusal());
         }
 
         // CR-102: TOOL_USE 이벤트 — 워크플로우 run 컨텍스트일 때만 (input 전문 적재)

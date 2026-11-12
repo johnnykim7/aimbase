@@ -53,7 +53,8 @@ class WorkflowControllerSaveTest {
         controller = new WorkflowController(repository, mock(WorkflowRunRepository.class),
                 mock(WorkflowEngine.class), new WorkflowValidator(),
                 mock(WorkflowRunSubscriberRegistry.class), mock(WorkflowRunEventRepository.class),
-                projects, new ResourceOwner(users));
+                projects, new ResourceOwner(users),
+                org.mockito.Mockito.mock(com.platform.orchestrator.approval.ApprovalDecisionService.class));
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new UserPrincipal("user-a", "a@test.local", "t1", "ADMIN", Map.of()), null, List.of()));
     }

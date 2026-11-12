@@ -1,5 +1,9 @@
 package com.platform.api;
 
+import com.platform.orchestrator.approval.ApprovalDecisionException;
+import com.platform.orchestrator.approval.ApprovalDecisionService;
+import com.platform.orchestrator.approval.ChatTurnRegistry;
+import com.platform.orchestrator.approval.ToolApprovalGate;
 import com.platform.domain.ModelPricingEntity;
 import com.platform.domain.PendingApprovalEntity;
 import com.platform.monitoring.TraceService;
@@ -36,6 +40,7 @@ public class AdminController {
     private final ModelPricingRepository modelPricingRepository;
     private final WorkflowEngine workflowEngine;
     private final TraceService traceService;
+    private final ApprovalDecisionService approvalDecisionService;
 
     public AdminController(ActionLogRepository actionLogRepository,
                             AuditLogRepository auditLogRepository,
@@ -44,7 +49,9 @@ public class AdminController {
                             ConnectionRepository connectionRepository,
                             ModelPricingRepository modelPricingRepository,
                             WorkflowEngine workflowEngine,
-                            TraceService traceService) {
+                            TraceService traceService,
+                            ApprovalDecisionService approvalDecisionService) {
+        this.approvalDecisionService = approvalDecisionService;
         this.actionLogRepository = actionLogRepository;
         this.auditLogRepository = auditLogRepository;
         this.usageLogRepository = usageLogRepository;
@@ -133,43 +140,43 @@ public class AdminController {
     }
 
     @PostMapping("/approvals/{id}/approve")
-    @Operation(summary = "승인 — approvalChannel=workflow 이면 WorkflowEngine.resume() 호출")
+    @Operation(summary = "승인. 워크플로우 대기면 run 을 이어 가고, 대화 승인이면 같은 결정 처리를 탄다")
     public ApiResponse<PendingApprovalEntity> approve(@PathVariable UUID id,
                                                         @RequestBody(required = false) Map<String, String> body) {
-        PendingApprovalEntity approval = pendingApprovalRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-
-        String reason = body != null ? body.get("reason") : null;
-        approval.setStatus("approved");
-        approval.setApprovedBy(body != null ? body.get("approved_by") : null);
-        approval.setReason(reason);
-        approval.setResolvedAt(OffsetDateTime.now());
-        pendingApprovalRepository.save(approval);
-
-        // 워크플로우 HUMAN_INPUT 승인 콜백
-        resumeWorkflowIfNeeded(approval, true, reason);
-
-        return ApiResponse.ok(approval);
+        return decide(id, true, body);
     }
 
     @PostMapping("/approvals/{id}/reject")
-    @Operation(summary = "거부 — approvalChannel=workflow 이면 WorkflowEngine.resume() 호출")
+    @Operation(summary = "거부. 워크플로우 대기면 run 을 실패로 끝내고, 대화 승인이면 같은 결정 처리를 탄다")
     public ApiResponse<PendingApprovalEntity> reject(@PathVariable UUID id,
                                                        @RequestBody(required = false) Map<String, String> body) {
+        return decide(id, false, body);
+    }
+
+    /**
+     * CR-185 BIZ-245: 정한 사람은 요청 본문이 아니라 로그인 주체로 남긴다. pending 일 때만 바뀌는 한 번의 갱신으로 닫아
+     * 위젯과 관리 화면이 함께 정해도 하나만 지난다.
+     */
+    private ApiResponse<PendingApprovalEntity> decide(UUID id, boolean approved, Map<String, String> body) {
         PendingApprovalEntity approval = pendingApprovalRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-
         String reason = body != null ? body.get("reason") : null;
-        approval.setStatus("rejected");
-        approval.setApprovedBy(body != null ? body.get("rejected_by") : null);
-        approval.setReason(reason);
-        approval.setResolvedAt(OffsetDateTime.now());
-        pendingApprovalRepository.save(approval);
+        String decidedBy = ChatTurnRegistry.currentActor();
 
-        // 워크플로우 HUMAN_INPUT 거부 콜백
-        resumeWorkflowIfNeeded(approval, false, reason);
+        if (ToolApprovalGate.CHANNEL_CHAT.equals(approval.getApprovalChannel())) {
+            approvalDecisionService.decideChatAsAdmin(approval, approved, reason);
+        } else if (!resumeWorkflowIfNeeded(approval, approved, reason, decidedBy)) {
+            closeOrConflict(id, approved ? "approved" : "rejected", decidedBy, reason);
+        }
+        return ApiResponse.ok(pendingApprovalRepository.findById(id).orElse(approval));
+    }
 
-        return ApiResponse.ok(approval);
+    private void closeOrConflict(UUID id, String status, String decidedBy, String reason) {
+        int closed = pendingApprovalRepository.closeIfPending(id, status, decidedBy, reason, OffsetDateTime.now());
+        if (closed == 0) {
+            String current = pendingApprovalRepository.findById(id).map(PendingApprovalEntity::getStatus).orElse(null);
+            throw new ApprovalDecisionException(HttpStatus.CONFLICT, "approval_closed", current);
+        }
     }
 
     @GetMapping("/cost-breakdown")
@@ -265,16 +272,20 @@ public class AdminController {
      * approvalChannel = "workflow" 이면 WorkflowEngine.resume() 호출.
      * actionLogId 필드에 workflowRunId가 저장됨 (WorkflowEngine.handleHumanInput() 패턴).
      */
-    private void resumeWorkflowIfNeeded(PendingApprovalEntity approval, boolean approved, String reason) {
-        if (!"workflow".equals(approval.getApprovalChannel())) return;
-        if (approval.getActionLogId() == null) return;
+    /** 워크플로우 대기면 run 을 이어 가며 줄을 닫는다. run 이 없거나 이미 끝났으면 false 를 돌려 줄만 닫게 한다. */
+    private boolean resumeWorkflowIfNeeded(PendingApprovalEntity approval, boolean approved, String reason,
+                                           String decidedBy) {
+        if (!"workflow".equals(approval.getApprovalChannel())) return false;
+        if (approval.getActionLogId() == null) return false;
 
         try {
-            workflowEngine.resume(approval.getActionLogId(), approved, reason);
+            workflowEngine.resume(approval.getActionLogId(), approved, reason, decidedBy);
             log.info("WorkflowEngine.resume({}, approved={}) triggered", approval.getActionLogId(), approved);
+            return true;
         } catch (IllegalArgumentException | IllegalStateException e) {
             // 이미 완료/취소된 run이면 무시 (멱등성)
             log.warn("WorkflowEngine.resume({}) ignored: {}", approval.getActionLogId(), e.getMessage());
+            return false;
         }
     }
 }

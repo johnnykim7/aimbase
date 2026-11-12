@@ -82,7 +82,15 @@ class ToolCallHandlerCr102Test {
                 settings,
                 mock(SessionToolRegistry.class),
                 mock(ToolResultStorageService.class),
-                recorder);
+                recorder,
+                passGate());
+    }
+
+    private static com.platform.orchestrator.approval.ToolApprovalGate passGate() {
+        com.platform.orchestrator.approval.ToolApprovalGate gate = mock(com.platform.orchestrator.approval.ToolApprovalGate.class);
+        when(gate.check(any(), any(), any(), any()))
+                .thenReturn(com.platform.orchestrator.approval.ToolApprovalGate.Verdict.go());
+        return gate;
     }
 
     private ToolContext workflowContext() {

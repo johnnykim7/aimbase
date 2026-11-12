@@ -44,7 +44,8 @@ class WorkflowControllerSubscribeTest {
                 workflowEngine, workflowValidator, subscriberRegistry,
                 org.mockito.Mockito.mock(com.platform.repository.WorkflowRunEventRepository.class),
                 org.mockito.Mockito.mock(com.platform.repository.ProjectRepository.class),
-                org.mockito.Mockito.mock(com.platform.auth.ResourceOwner.class));
+                org.mockito.Mockito.mock(com.platform.auth.ResourceOwner.class),
+                org.mockito.Mockito.mock(com.platform.orchestrator.approval.ApprovalDecisionService.class));
     }
 
     @Test

@@ -15,6 +15,7 @@ import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.model.*;
 import com.platform.llm.router.FallbackChainExecutor;
 import com.platform.llm.router.ModelRouter;
+import com.platform.orchestrator.approval.ChatTurnRegistry;
 import com.platform.policy.AuditLogger;
 import com.platform.policy.MCPSafetyClient;
 import com.platform.policy.PolicyEngine;
@@ -112,6 +113,8 @@ public class OrchestratorEngine {
     private final FileCreateToolGate fileCreateToolGate;
     /** CR-179: 위젯 사용자 내 선호와 자동 기억을 질문 앞에 넣는 곳. */
     private final com.platform.session.WidgetPreferenceService widgetPreferenceService;
+    /** CR-185: 도구 관문이 승인을 물을 스트림을 세션 번호로 찾는다. */
+    private final ChatTurnRegistry chatTurnRegistry;
 
     private static final int STRUCTURED_OUTPUT_MAX_RETRIES = 2;
 
@@ -148,8 +151,10 @@ public class OrchestratorEngine {
             ChatFeatureSupport chatFeatures,
             com.platform.session.ChatWorkspaceAssigner chatWorkspaceAssigner,
             FileCreateToolGate fileCreateToolGate,
-            com.platform.session.WidgetPreferenceService widgetPreferenceService
+            com.platform.session.WidgetPreferenceService widgetPreferenceService,
+            ChatTurnRegistry chatTurnRegistry
     ) {
+        this.chatTurnRegistry = chatTurnRegistry;
         this.turnInstructions = turnInstructions;
         this.chatFeatures = chatFeatures;
         this.widgetPreferenceService = widgetPreferenceService;
@@ -728,6 +733,9 @@ public class OrchestratorEngine {
         final LLMAdapter interruptTarget = adapter;
         cancellationRegistry.onCancel(cancelled, () -> interruptTarget.interrupt(sessionId));
 
+        ChatTurnRegistry.ChatTurn chatTurn = chatTurnRegistry.open(
+                sessionId, ChatTurnRegistry.currentActor(), streamSink, cancelled);
+
         // CR-045 Phase 2-B: 도구 루프 통합 스트리밍
         LLMResponse finalResponse;
         boolean streamSuccess = false;
@@ -863,6 +871,7 @@ public class OrchestratorEngine {
                     chatRunRecorder.fail(chatRunId, "LLM call failed");
                 }
             }
+            chatTurnRegistry.close(sessionId, chatTurn);
             cancellationRegistry.clear(sessionId, cancelled);
             releaseOneShotWorker(request, sessionId, adapter);
         }

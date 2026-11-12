@@ -123,4 +123,22 @@ class ApprovalTimeoutSweeperTest {
         verify(approvals, never()).save(any());
         assertThat(TenantContext.getTenantId()).isNull();
     }
+
+    /** CR-185 TC-CHT-118: 턴이 사라진 대화 승인도 마감이 지나면 timeout 으로 닫고, 기다리는 관문이 있으면 깨운다. */
+    @Test
+    void 마감이_지난_대화_승인을_닫는다() {
+        com.platform.orchestrator.approval.ChatTurnRegistry chatTurns =
+                mock(com.platform.orchestrator.approval.ChatTurnRegistry.class);
+        ApprovalTimeoutSweeper withChat = new ApprovalTimeoutSweeper(approvals, runs, publisher, tenants,
+                Clock.fixed(NOW, ZoneOffset.UTC), chatTurns);
+        PendingApprovalEntity chat = new PendingApprovalEntity();
+        org.springframework.test.util.ReflectionTestUtils.setField(chat, "id", UUID.randomUUID());
+        chat.setApprovalChannel("chat");
+        when(approvals.findByStatusAndApprovalChannelAndTimeoutAtBefore(eq("pending"), eq("chat"), any()))
+                .thenReturn(List.of(chat));
+        when(approvals.closeIfPending(eq(chat.getId()), eq("timeout"), any(), any(), any())).thenReturn(1);
+
+        assertThat(withChat.sweepCurrentTenant()).isEqualTo(1);
+        verify(chatTurns).resolve(chat.getId(), "timeout");
+    }
 }

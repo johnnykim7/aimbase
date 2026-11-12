@@ -77,4 +77,21 @@ public sealed interface StreamEvent {
      * @param durationMs  실행 시간
      */
     record SubagentDone(String runId, String status, String summary, long durationMs) implements StreamEvent {}
+
+    /**
+     * CR-185 PRD-560: 도구 실행 전 승인을 묻기 시작. 위젯 본체는 이름을 모르고 틀의 streamEvent 로 승인 기능에 넘긴다.
+     * message 는 정책 안내 문구이고 없으면 null 이다. expiresAt 은 시간대를 포함한 ISO-8601.
+     */
+    record ApprovalRequired(String approvalId, String toolUseId, String toolName, String description,
+                            Map<String, Object> input, String message, String expiresAt,
+                            int timeoutSeconds) implements StreamEvent {}
+
+    /** CR-185 PRD-560: 승인 요청이 정해짐. status 는 approved, rejected, timeout, cancelled. */
+    record ApprovalResolved(String approvalId, String status, String decidedAt) implements StreamEvent {}
+
+    /**
+     * CR-185: 승인을 기다리는 동안 스트림이 살아 있게 하는 주석 줄. 보내지 못하면 받는 쪽이 lost 를 세운다.
+     * 승인 관문은 그것으로 연결이 끊긴 것을 안다.
+     */
+    record KeepAlive(java.util.concurrent.atomic.AtomicBoolean lost) implements StreamEvent {}
 }

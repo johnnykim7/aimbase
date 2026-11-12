@@ -181,7 +181,26 @@ public class PlatformSettingsService {
         cache.clear();
     }
 
+    /**
+     * 키별 정수 범위. CR-185 BIZ-242: 대화 승인 대기는 대화 스트림, 실행기 턴, 서버와 실행기 사이 호출 한도(300초)보다
+     * 짧아야 승인 뒤 실행할 시간이 남는다.
+     */
+    private static final Map<String, int[]> INT_RANGES = Map.of(
+            "chat.approval-timeout-seconds", new int[]{10, 240});
+
     private void validateValue(String key, String value) {
+        int[] range = INT_RANGES.get(key);
+        if (range != null) {
+            int num;
+            try {
+                num = Integer.parseInt(value.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Value must be an integer: " + key + "=" + value);
+            }
+            if (num < range[0] || num > range[1]) {
+                throw new IllegalArgumentException("Value must be " + range[0] + "~" + range[1] + ": " + key + "=" + value);
+            }
+        }
         if (key.endsWith("-percent")) {
             double pct = Double.parseDouble(value);
             if (pct < 0 || pct > 100) {

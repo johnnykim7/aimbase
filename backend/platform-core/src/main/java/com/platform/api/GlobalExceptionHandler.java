@@ -14,10 +14,20 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.util.Map;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /** CR-185: 이미 정해진 승인은 지금 상태를 data.status 로 같이 돌려준다. */
+    @ExceptionHandler(com.platform.orchestrator.approval.ApprovalDecisionException.class)
+    public ResponseEntity<ApiResponse<Map<String, String>>> handleApprovalDecision(
+            com.platform.orchestrator.approval.ApprovalDecisionException ex) {
+        Map<String, String> data = ex.getCurrentStatus() != null ? Map.of("status", ex.getCurrentStatus()) : null;
+        return ResponseEntity.status(ex.getStatus()).body(new ApiResponse<>(false, data, ex.getMessage(), null));
+    }
 
     @ExceptionHandler(ChatRejectedException.class)
     public ResponseEntity<ApiResponse<Void>> handleChatRejected(ChatRejectedException ex) {

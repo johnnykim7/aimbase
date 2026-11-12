@@ -65,6 +65,7 @@ public class ChatController {
     /** CR-183 BIZ-223: render_features 값 모양과 개수 상한. */
     private static final java.util.regex.Pattern RENDER_FEATURE = java.util.regex.Pattern.compile("[a-z0-9-]{1,40}");
     private static final int MAX_RENDER_FEATURES = 10;
+    private final com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -82,7 +83,9 @@ public class ChatController {
                           com.platform.session.ChatProjectService chatProjectService,
                           com.platform.repository.ConversationSessionRepository sessionRepository,
                           com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder,
-                          com.platform.chatdoc.DocumentEditService documentEditService) {
+                          com.platform.chatdoc.DocumentEditService documentEditService,
+                          com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService) {
+        this.approvalDecisionService = approvalDecisionService;
         this.chatProjectService = chatProjectService;
         this.sessionRepository = sessionRepository;
         this.attachmentPromptBuilder = attachmentPromptBuilder;
@@ -119,6 +122,18 @@ public class ChatController {
      * CR-046: 진행 중 스트림 중지.
      * 활성 토큰이 있으면 cancel 플래그를 set → OrchestratorEngine/ToolCallHandler가 다음 체크포인트에서 break.
      */
+    /** CR-185 PRD-560: 위젯 승인 요청 카드의 승인, 거절 단추. */
+    public record ApprovalDecisionRequest(String decision) {}
+
+    @PostMapping("/approvals/{approvalId}")
+    @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
+    @Operation(summary = "대화 승인 결정", description = "도구 실행 전 승인 요청을 승인하거나 거절한다. 요청한 사람이나 관리자만 정한다.")
+    public ApiResponse<Map<String, Object>> decideApproval(@PathVariable String approvalId,
+                                                           @RequestBody(required = false) ApprovalDecisionRequest body) {
+        return ApiResponse.ok(approvalDecisionService
+                .decideChat(approvalId, body != null ? body.decision() : null).toResponse());
+    }
+
     @PostMapping("/{sessionId}/abort")
     @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     @Operation(summary = "스트림 중지", description = "진행 중인 SSE 스트림을 즉시 중지한다.")
@@ -332,6 +347,31 @@ public class ChatController {
                                     .name("done")
                                     .data(donePayload));
                             emitter.complete();
+                        }
+                        case com.platform.orchestrator.stream.StreamEvent.ApprovalRequired a -> {
+                            Map<String, Object> payload = new HashMap<>();
+                            payload.put("approval_id", a.approvalId());
+                            payload.put("tool_use_id", a.toolUseId());
+                            payload.put("tool_name", a.toolName());
+                            if (a.description() != null) payload.put("description", a.description());
+                            payload.put("input", a.input() != null ? a.input() : Map.of());
+                            if (a.message() != null) payload.put("message", a.message());
+                            payload.put("expires_at", a.expiresAt());
+                            payload.put("timeout_seconds", a.timeoutSeconds());
+                            emitter.send(SseEmitter.event().name("approval_required").data(payload));
+                        }
+                        case com.platform.orchestrator.stream.StreamEvent.ApprovalResolved r ->
+                            emitter.send(SseEmitter.event()
+                                    .name("approval_resolved")
+                                    .data(Map.of("approval_id", r.approvalId(), "status", r.status(),
+                                            "decided_at", r.decidedAt())));
+                        case com.platform.orchestrator.stream.StreamEvent.KeepAlive k -> {
+                            // 승인을 기다리는 동안 끊긴 스트림을 알아채는 길은 보내 보는 것뿐이다.
+                            try {
+                                emitter.send(SseEmitter.event().comment("keep-alive"));
+                            } catch (IOException | IllegalStateException e) {
+                                k.lost().set(true);
+                            }
                         }
                         case com.platform.orchestrator.stream.StreamEvent.SubagentStart s ->
                             emitter.send(SseEmitter.event()

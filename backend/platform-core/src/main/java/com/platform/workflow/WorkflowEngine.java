@@ -407,6 +407,14 @@ public class WorkflowEngine {
      * HUMAN_INPUT 스텝에서 일시 중단된 실행을 승인/거부 후 재개.
      */
     public WorkflowRunEntity resume(UUID runId, boolean approved, String reason) {
+        return resume(runId, approved, reason, null);
+    }
+
+    /**
+     * CR-185 BIZ-245: 정한 사람(decidedBy)을 남긴다. 대기 줄은 pending 일 때만 바뀌는 한 번의 갱신으로 닫아,
+     * 둘이 함께 정하면 하나만 지나고 늦은 쪽은 approval_closed 를 받는다.
+     */
+    public WorkflowRunEntity resume(UUID runId, boolean approved, String reason, String decidedBy) {
         WorkflowRunEntity run = workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Workflow run not found: " + runId));
 
@@ -414,15 +422,20 @@ public class WorkflowEngine {
             throw new IllegalStateException("Workflow run is not pending approval: " + runId);
         }
 
-        // 대기 중인 승인 엔티티 업데이트
-        pendingApprovalRepository.findByActionLogId(runId).stream()
-                .filter(a -> "pending".equals(a.getStatus()))
-                .forEach(a -> {
-                    a.setStatus(approved ? "approved" : "rejected");
-                    a.setReason(reason);
-                    a.setResolvedAt(OffsetDateTime.now());
-                    pendingApprovalRepository.save(a);
-                });
+        List<PendingApprovalEntity> waiting = pendingApprovalRepository.findByActionLogId(runId).stream()
+                .filter(a -> "workflow".equals(a.getApprovalChannel()))
+                .toList();
+        if (!waiting.isEmpty()) {
+            int closed = pendingApprovalRepository.closeWorkflowIfPending(
+                    runId, approved ? "approved" : "rejected", decidedBy, reason, OffsetDateTime.now());
+            if (closed == 0) {
+                String current = pendingApprovalRepository.findByActionLogId(runId).stream()
+                        .filter(a -> "workflow".equals(a.getApprovalChannel()))
+                        .map(PendingApprovalEntity::getStatus).findFirst().orElse(null);
+                throw new com.platform.orchestrator.approval.ApprovalDecisionException(
+                        org.springframework.http.HttpStatus.CONFLICT, "approval_closed", current);
+            }
+        }
 
         if (!approved) {
             run.setStatus("failed");
