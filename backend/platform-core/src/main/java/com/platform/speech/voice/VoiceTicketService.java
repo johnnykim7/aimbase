@@ -9,6 +9,7 @@ import com.platform.tenant.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +17,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -41,6 +43,16 @@ public class VoiceTicketService {
     public static final String STREAM_PATH = "/api/v1/chat/voice/stream";
     static final String TICKET_PREFIX = "vt_";
     private static final String REDIS_PREFIX = "voice:ticket:";
+
+    /**
+     * 꺼내기와 지우기를 한 번에 해서 같은 입장권으로 두 번 열지 못하게 한다.
+     * GETDEL 은 Redis 6.2 부터라 개발기 59 의 5.0.7 에서 오류가 났다. 스크립트는 판을 가리지 않는다.
+     */
+    private static final DefaultRedisScript<String> TAKE_SCRIPT = new DefaultRedisScript<>(
+            "local v = redis.call('GET', KEYS[1])\n" +
+            "if v then redis.call('DEL', KEYS[1]) end\n" +
+            "return v",
+            String.class);
 
     private final RedisTemplate<String, String> redis;
     private final ObjectMapper objectMapper;
@@ -111,7 +123,7 @@ public class VoiceTicketService {
     public Optional<VoiceTicket> consume(String ticket) {
         if (ticket == null || !ticket.startsWith(TICKET_PREFIX)) return Optional.empty();
         try {
-            String raw = redis.opsForValue().getAndDelete(REDIS_PREFIX + ticket);
+            String raw = redis.execute(TAKE_SCRIPT, List.of(REDIS_PREFIX + ticket));
             if (raw == null) return Optional.empty();
             return Optional.of(objectMapper.readValue(raw, VoiceTicket.class));
         } catch (Exception e) {

@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.http.server.ServletServerHttpResponse;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -49,6 +50,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -102,7 +104,7 @@ class VoiceRelayTest {
             redisTtl.put(inv.getArgument(0), inv.getArgument(2));
             return null;
         }).when(ops).set(anyString(), anyString(), any(Duration.class));
-        when(ops.getAndDelete(anyString())).thenAnswer(inv -> redisStore.remove(inv.<String>getArgument(0)));
+        when(redis.execute(any(RedisScript.class), anyList())).thenAnswer(inv -> redisStore.remove(inv.<List<String>>getArgument(1).get(0)));
 
         sttConnection = new ConnectionEntity();
         sttConnection.setId("stt-1");
