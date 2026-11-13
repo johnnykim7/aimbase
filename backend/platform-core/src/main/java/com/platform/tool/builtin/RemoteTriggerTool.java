@@ -102,6 +102,8 @@ public class RemoteTriggerTool implements EnhancedToolExecutor {
 
         long startTime = System.currentTimeMillis();
         String resultSummary;
+        // 같은 요청 스레드의 뒤 도구와 훅이 테넌트를 잃지 않게 들어올 때 값으로 되돌린다(CR-189).
+        String callerTenantId = TenantContext.getTenantId();
 
         try {
             TenantContext.setTenantId(tenantId);
@@ -139,7 +141,11 @@ public class RemoteTriggerTool implements EnhancedToolExecutor {
             log.error("RemoteTrigger failed: {} {} — {}", targetType, targetId, e.getMessage());
             return ToolResult.error("트리거 실행 실패: " + e.getMessage());
         } finally {
-            TenantContext.clear();
+            if (callerTenantId == null) {
+                TenantContext.clear();
+            } else {
+                TenantContext.setTenantId(callerTenantId);
+            }
         }
     }
 

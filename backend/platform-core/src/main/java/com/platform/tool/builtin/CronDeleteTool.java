@@ -55,8 +55,13 @@ public class CronDeleteTool implements EnhancedToolExecutor {
             return ToolResult.error("job_id는 필수입니다");
         }
 
+        String tenantId = ctx.tenantId();
+        if (tenantId == null) {
+            return ToolResult.error("테넌트 컨텍스트가 필요합니다");
+        }
+
         try {
-            cronScheduleManager.deleteJob(jobId);
+            cronScheduleManager.deleteJob(jobId, tenantId);
             return ToolResult.ok(
                     Map.of("deleted", jobId),
                     "스케줄 '" + jobId + "' 삭제 완료"

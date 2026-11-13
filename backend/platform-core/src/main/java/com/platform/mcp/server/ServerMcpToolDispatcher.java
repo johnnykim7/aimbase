@@ -107,7 +107,7 @@ public class ServerMcpToolDispatcher {
             log.warn("Server MCP: blocked non-CLI-exposed tool '{}'", name);
             return errorResult("Tool not exposed via MCP CLI channel");
         }
-        return execute(tool, name, args, null);
+        return execute(tool, name, args, RequestContext.getChatSessionId());
     }
 
     /**
@@ -281,32 +281,24 @@ public class ServerMcpToolDispatcher {
     }
 
     /**
-     * CR-117: 서버 MCP 도구 실행용 ToolContext.
-     * {@link ToolContext#minimal} 과 동일하되 workspacePath 만 CLI 워커가 보낸 run 격리 cwd
-     * (X-Aimbase-Workspace-Path 헤더 → {@link RequestContext#getWorkspacePath()}) 로 채운다.
-     * 헤더 누락 시 null → WorkspaceResolver 가 default/general 폴백 (기존 동작 보존).
-     * tenantId/sessionId 는 기존 minimal 과 동일하게 null — 행동 동일성 유지.
+     * 서버 MCP 도구 실행 맥락. API 연결 대화(OrchestratorEngine)와 같이 테넌트와 대화 세션을 싣는다(CR-189).
+     * 비워 두면 테넌트로 찾는 도구(cron_list, schedule_cron, remote_trigger)와 세션으로 찾는 도구(task_*, todo_write,
+     * read_tool_result 등)가 CLI 연결에서만 실패한다.
+     * <ul>
+     *   <li>테넌트: 키 인증이 요청 스레드에 채운 값. 도구는 요청 스레드에서 돈다(ServerMcpConfig immediateExecution)</li>
+     *   <li>세션: 실행기가 실은 X-Aimbase-Session-Id. 워크플로우 단계는 싣지 않아 비운다</li>
+     *   <li>작업장: X-Aimbase-Workspace-Path(CR-117). 없으면 WorkspaceResolver 가 테넌트 폴더로 정한다</li>
+     *   <li>스킬 지정: X-Aimbase-Skill-Set(CR-147, BIZ-123). 없으면 스킬 도구가 이름으로 최신 판을 찾는다</li>
+     * </ul>
      */
     private ToolContext buildToolContext(String chatSessionId) {
+        String sessionId = (chatSessionId == null || chatSessionId.isBlank()) ? null : chatSessionId;
         String workspacePath = RequestContext.getWorkspacePath();
-        if (chatSessionId != null && !chatSessionId.isBlank()) {
-            // CR-183: data 통로만 세션을 싣는다. 다른 통로는 아래 기존 모양 그대로다.
-            return new ToolContext(
-                    TenantContext.getTenantId(), null, null, chatSessionId, null, null, null, null, null,
-                    PermissionLevel.READ_ONLY, ApprovalState.NOT_REQUIRED,
-                    workspacePath, false, 0
-            );
-        }
-        ToolContext context = (workspacePath == null || workspacePath.isBlank())
-                ? ToolContext.minimal(null, null)
-                // minimal 과 동일 (tenantId/sessionId=null, READ_ONLY/NOT_REQUIRED) + workspacePath 주입.
-                : new ToolContext(
-                        null, null, null, null, null, null, null, null,
-                        PermissionLevel.READ_ONLY, ApprovalState.NOT_REQUIRED,
-                        workspacePath, false, 0
-                );
-        // CR-147: X-Aimbase-Skill-Set 으로 온 단계 고정 판(BIZ-123). 없으면 스킬 도구가 이름으로 최신 판을 찾는다.
-        return context.withSkillSet(RequestContext.getSkillSet());
+        return new ToolContext(
+                TenantContext.getTenantId(), null, null, sessionId, null, null, null, null, null,
+                PermissionLevel.READ_ONLY, ApprovalState.NOT_REQUIRED,
+                (workspacePath == null || workspacePath.isBlank()) ? null : workspacePath, false, 0
+        ).withSkillSet(RequestContext.getSkillSet());
     }
 
     private String resolveSessionId() {

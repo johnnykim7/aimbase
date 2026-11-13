@@ -7,6 +7,7 @@ import com.platform.hook.HookOutput;
 import com.platform.llm.adapter.RequestContext;
 import com.platform.orchestrator.approval.ToolApprovalGate;
 import com.platform.policy.TokenBucketRateLimiter;
+import com.platform.tenant.TenantContext;
 import com.platform.tool.EnhancedToolExecutor;
 import com.platform.tool.PermissionLevel;
 import com.platform.tool.RetryPolicy;
@@ -77,6 +78,39 @@ class ServerMcpToolDispatcherTest {
     @AfterEach
     void clearRequestContext() {
         RequestContext.clear();
+        TenantContext.clear();
+    }
+
+    @Test
+    @DisplayName("CR-189: CLI 통로 도구도 API 연결처럼 키의 테넌트와 대화 세션을 받는다")
+    void cr189_tenant_and_chat_session_propagated_into_toolcontext() {
+        java.util.concurrent.atomic.AtomicReference<ToolContext> captured =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        ToolExecutor tool = capturingEnhancedTool("cron_list", captured);
+        TenantContext.setTenantId("workmap");
+        RequestContext.setChatSessionId("sess-189");
+
+        McpSchema.CallToolResult result = dispatcher.dispatch(tool, "cron_list", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(captured.get().tenantId()).isEqualTo("workmap");
+        assertThat(captured.get().sessionId()).isEqualTo("sess-189");
+        assertThat(captured.get().permissionLevel()).isEqualTo(PermissionLevel.READ_ONLY);
+    }
+
+    @Test
+    @DisplayName("CR-189: 세션 머리글이 없는 워크플로우 단계는 테넌트만 받고 세션은 비운다")
+    void cr189_without_session_header_keeps_tenant_and_null_session() {
+        java.util.concurrent.atomic.AtomicReference<ToolContext> captured =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        ToolExecutor tool = capturingEnhancedTool("schedule_cron", captured);
+        TenantContext.setTenantId("workmap");
+
+        McpSchema.CallToolResult result = dispatcher.dispatch(tool, "schedule_cron", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(captured.get().tenantId()).isEqualTo("workmap");
+        assertThat(captured.get().sessionId()).isNull();
     }
 
     @Test
@@ -360,7 +394,7 @@ class ServerMcpToolDispatcherTest {
                 new java.util.concurrent.atomic.AtomicReference<>();
         ToolExecutor tool = capturingEnhancedTool("file_write", captured);
 
-        // RequestContext 미설정 → 기존 minimal(null,null) 동작 = workspacePath null
+        // 작업장 머리글이 없으면 workspacePath 는 비우고 WorkspaceResolver 가 테넌트 폴더로 정한다
         com.platform.llm.adapter.RequestContext.clear();
         McpSchema.CallToolResult result = dispatcher.dispatch(tool, "file_write", Map.of());
 

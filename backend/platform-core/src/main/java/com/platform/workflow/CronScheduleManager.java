@@ -113,10 +113,9 @@ public class CronScheduleManager {
         return job;
     }
 
-    /** 스케줄 작업 삭제 */
-    public void deleteJob(String jobId) {
-        var job = jobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 스케줄: " + jobId));
+    /** 스케줄 작업 삭제. 예약 표는 마스터에 모든 테넌트 것이 함께 있어 그 테넌트 것만 지운다(CR-189). */
+    public void deleteJob(String jobId, String tenantId) {
+        var job = findOwnedJob(jobId, tenantId);
 
         cancelJob(jobId);
         jobRepository.delete(job);
@@ -131,10 +130,9 @@ public class CronScheduleManager {
         return jobRepository.findByTenantIdOrderByCreatedAtDesc(tenantId);
     }
 
-    /** 활성/비활성 토글 */
-    public ScheduledJobEntity toggleActive(String jobId, boolean active) {
-        var job = jobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 스케줄: " + jobId));
+    /** 활성/비활성 토글. 그 테넌트 것만 바꾼다(CR-189). */
+    public ScheduledJobEntity toggleActive(String jobId, boolean active, String tenantId) {
+        var job = findOwnedJob(jobId, tenantId);
 
         job.setActive(active);
         if (active) {
@@ -147,6 +145,16 @@ public class CronScheduleManager {
     }
 
     // --- Private ---
+
+    /** 다른 테넌트 예약은 없는 것과 같은 답을 준다. 남의 예약 번호가 있는지 알리지 않는다. */
+    private ScheduledJobEntity findOwnedJob(String jobId, String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new IllegalArgumentException("테넌트 컨텍스트가 필요합니다");
+        }
+        return jobRepository.findById(jobId)
+                .filter(job -> tenantId.equals(job.getTenantId()))
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 스케줄: " + jobId));
+    }
 
     private void scheduleJob(ScheduledJobEntity job) {
         cancelJob(job.getId()); // 기존 future가 있으면 제거

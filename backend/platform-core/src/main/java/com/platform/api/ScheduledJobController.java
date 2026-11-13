@@ -51,7 +51,7 @@ public class ScheduledJobController {
     @DeleteMapping("/{jobId}")
     public ApiResponse<Map<String, Object>> delete(@PathVariable String jobId) {
         try {
-            cronScheduleManager.deleteJob(jobId);
+            cronScheduleManager.deleteJob(jobId, TenantContext.getTenantId());
             return ApiResponse.ok(Map.of("deleted", jobId));
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(e.getMessage());
@@ -63,7 +63,7 @@ public class ScheduledJobController {
                                                     @RequestBody Map<String, Object> body) {
         boolean active = Boolean.TRUE.equals(body.get("is_active"));
         try {
-            ScheduledJobEntity job = cronScheduleManager.toggleActive(jobId, active);
+            ScheduledJobEntity job = cronScheduleManager.toggleActive(jobId, active, TenantContext.getTenantId());
             return ApiResponse.ok(job.toMap());
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(e.getMessage());
