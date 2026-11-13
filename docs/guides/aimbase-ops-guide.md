@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.37.0** | 2026-11-14 | Aimbase v8.18.0 기준
+> **v3.37.1** | 2026-11-14 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -531,7 +531,7 @@ bp-wes 의 CS 초안과 CS 상세 AI 대화(위젯)는 실행기 `aimbase-agent-
 7. 계정 로그인 `work01`, `work02`(위와 같은 방법, 서비스 이름만 `aimbase-agent-wes-cs`)
 8. `bootstrap connections wes-cs`: 계정마다 `cli-runner-bp-wes-cs-<계정>`, 묶음 `cli-runner-bp-wes-cs-rr`, 위젯 연결 `cli-runner-bp-wes-cs-001`(계정 `WIDGET_ACCOUNT`, 기본 `work01`). 설정은 59 와 같게 `tool_mode=NATIVE`, 도구 `bash`, `get_current_time`
 
-**작업 폴더 경로 [CR-187]**: api 와 CS 실행기가 `workspace-wes-cs` 를 같은 컨테이너 경로 `/data/workspace-wes-cs` 로 붙이고, api 환경설정 `AIMBASE_WORKSPACE_RUNNER_BASES=cli-runner-bp-wes-cs=/data/workspace-wes-cs` 로 연결 설정 `agent_name` 이 `cli-runner-bp-wes-cs` 인 대화의 작업 폴더를 그 아래 `chat/{세션}` 에 잡습니다. 경로가 다르면 실행기 기록에 `workingDirectory ... is not a directory, using default cwd` 가 남고, 실행기가 만든 파일이 대화 파일 카드로 올라오지 않습니다. 실행기를 더 나눌 때도 같게 하고 `실행기 이름=폴더` 를 쉼표로 더합니다. 그 폴더는 허용 폴더에 저절로 들어갑니다. 59 와 chaws 의 compose 에 들어 있습니다.
+**작업 폴더 경로 [CR-187]**: api 와 CS 실행기가 `workspace-wes-cs` 를 같은 컨테이너 경로 `/data/workspace-wes-cs` 로 붙이고, api 환경설정 `AIMBASE_WORKSPACE_RUNNER_BASES=cli-runner-bp-wes-cs=/data/workspace-wes-cs` 로 연결 설정 `agent_name` 이 `cli-runner-bp-wes-cs` 인 대화의 작업 폴더를 그 아래 `chat/{세션}` 에 잡습니다. 경로가 다르면 실행기 기록에 `workingDirectory ... is not a directory, using default cwd` 가 남고, 실행기가 만든 파일이 대화 파일 카드로 올라오지 않습니다. 실행기를 더 나눌 때도 같게 하고 `실행기 이름=폴더` 를 쉼표로 더합니다. 그 폴더는 허용 폴더에 저절로 들어갑니다. 59 와 chaws 의 compose 에 들어 있습니다. 실행기 연결 대화에는 서버가 질문마다 프롬프트 틀 `widget.artifact-out`(파일은 `./out/` 에)을 붙이므로, 연결 시스템 프롬프트에 같은 규약을 따로 적지 않아도 됩니다(§ 2-21 프롬프트 틀).
 9. `bootstrap smoke wes-cs`: 실행기의 DB 계정이 `wes_cs_ai` 인지 보고, bp-wes 가 부르는 길(망 `aimbase-apps`, 소비앱 키, 묶음, `stream=false`)로 CLI 에게 `select current_user` 를 시켜 응답을 찍는다
 
 ```bash
@@ -987,6 +987,7 @@ location = /api/v1/chat/voice/stream {
 | `widget.data.guide` | 데이터 파일 요약 끝에 붙는 계산 안내. 합계, 평균, 순위 같은 값은 반드시 `data_query` 로 계산하라는 지시와 SQL 쓰는 법 |
 | `widget.render.chart` | 숫자를 비교하거나 추이를 보일 때 그래프 블록을 쓰라는 안내와 블록 형식 |
 | `widget.render.math` | 수식 표기 안내. 돈 표시 `$` 는 `\$` 로 쓰게 한다 |
+| `widget.artifact-out` | 실행기 연결 대화에서 사용자에게 줄 파일을 작업 폴더 `./out/` 에 두라는 안내(CR-187). 이 폴더의 파일만 대화 파일 카드가 된다. 비활성이면 실행기가 직접 만든 파일이 `/tmp` 나 작업 폴더 바로 아래에 떨어져 카드가 붙지 않는다 |
 
 **CLI 연결.** Claude CLI 연결(NATIVE, AIMBASE, HYBRID)은 대화마다 실행기가 MCP 통로 `aimbase-data` 를 붙이고 세션 번호를 머리글 `X-Aimbase-Session-Id` 로 싣습니다. 이 머리글은 CR-183 이 들어간 실행기 판부터 실리므로 실행기를 함께 바꿔야 CLI 연결에서 계산이 됩니다.
 
@@ -2238,6 +2239,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.37.1 | 2026-11-14 | **CR-187 파일 위치 안내** (§ 2-10, § 2-21). 테넌트 프롬프트 틀 `widget.artifact-out`(테넌트 V90). 실행기 연결 대화에 질문마다 붙는다 |
 | v3.37.0 | 2026-11-14 | **CR-187 따로 붙인 실행기의 대화 작업 폴더** (§ 2-10, CR-107 run별 격리 절). 환경설정 `AIMBASE_WORKSPACE_RUNNER_BASES`(`실행기 이름=폴더`), CS 실행기와 api 가 `workspace-wes-cs` 를 `/data/workspace-wes-cs` 로 붙임 |
 | v3.36.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 2-17). 실행기 연결은 계산 도구 통로(`/mcp-data`)로 `create_file` 을 부르므로 api 와 실행기를 함께 올린다. 파일 만들기가 바뀌면 그 대화의 CLI 를 다시 기동한다 |
 | v3.36.1 | 2026-11-13 | **CR-186** (§ 2-20) 설정 `widget.voice.connect-timeout-seconds`, 맥 서버를 다시 켰을 때 안내. API 가이드 절 번호 § 35 로 바로잡음 |

@@ -5,6 +5,8 @@ import com.platform.llm.model.UnifiedMessage;
 import com.platform.service.PromptTemplateService;
 import com.platform.tool.ToolFilterContext;
 import com.platform.tool.builtin.DataQueryTool;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -23,7 +25,10 @@ import java.util.List;
 @Component
 public class ChatFeatureSupport {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatFeatureSupport.class);
+
     static final String RENDER_TEMPLATE_PREFIX = "widget.render.";
+    static final String ARTIFACT_OUT_TEMPLATE = "widget.artifact-out";
 
     private final AttachmentService attachments;
     private final PromptTemplateService templates;
@@ -75,6 +80,33 @@ public class ChatFeatureSupport {
         }
         String text = (lastSystem >= 0 ? "\n\n" : "") + String.join("\n\n", guides);
         out.add(lastSystem + 1, UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, text));
+        return out;
+    }
+
+    /**
+     * CR-187: 실행기 연결 대화는 작업 폴더의 out/ 에 있는 파일만 대화 파일 카드가 된다(ArtifactService). 실행기가
+     * 직접 만든 파일을 거기 두라는 안내를 이번 질문 바로 앞에 붙인다. 이번 질문 몫으로 붙여야 연결 시스템 프롬프트를
+     * 따로 둔 실행기에도 가고, 이어지는 CLI 세션에서도 질문마다 간다(ClaudeCliWorker.writeUserMessages).
+     *
+     * @param applies 실행기 연결의 대화이고 세션 작업 폴더가 있을 때 true
+     */
+    public List<UnifiedMessage> withArtifactGuide(List<UnifiedMessage> messages, boolean applies) {
+        if (!applies) return messages;
+        int lastUser = -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i).role() == UnifiedMessage.Role.USER) {
+                lastUser = i;
+                break;
+            }
+        }
+        if (lastUser < 0) return messages;
+        String guide = templates.getTemplate(ARTIFACT_OUT_TEMPLATE);
+        if (guide == null || guide.isBlank()) {
+            log.warn("Prompt template {} is missing; runner-made files will not reach the chat", ARTIFACT_OUT_TEMPLATE);
+            return messages;
+        }
+        List<UnifiedMessage> out = new ArrayList<>(messages);
+        out.add(lastUser, UnifiedMessage.turnScopedSystem(guide.strip()));
         return out;
     }
 }

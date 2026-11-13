@@ -332,6 +332,7 @@ public class OrchestratorEngine {
         // CR-183: 위젯이 그릴 수 있는 형식의 안내 틀을 시스템 안내 끝에 덧붙인다(BIZ-223).
         trimmedMessages = chatFeatures.withRenderGuides(trimmedMessages, request.renderFeatures());
         trimmedMessages = withTurnInstruction(trimmedMessages, request.turnInstruction());   // CR-181
+        trimmedMessages = chatFeatures.withArtifactGuide(trimmedMessages, artifactGuideApplies(request, workspacePath));
 
         // 4. LLM 어댑터 선택 (connectionId > modelRouter). 그룹은 chat() 입구에서 멤버 connectionId 로 바뀌어 온다(CR-161)
         //    CR-029: runtimeRegistry 로깅 (향후 selectBest 연결 지점)
@@ -690,6 +691,7 @@ public class OrchestratorEngine {
         // CR-045: workspacePath 결정 (비스트리밍 경로와 동일)
         String tenantId = TenantContext.getTenantId();
         String workspacePath = resolveWorkspace(request, sessionId);
+        trimmedMessages = chatFeatures.withArtifactGuide(trimmedMessages, artifactGuideApplies(request, workspacePath));
         // CR-130: 스트리밍 채팅도 비스트리밍과 동일하게 run 을 만들어 "실행 내역"에 남긴다.
         // 위젯·FE 채팅이 이 경로를 타므로 여기가 빠지면 실사용 대부분이 기록되지 않는다.
         String effectiveRunId = request.workflowRunId();
@@ -1151,6 +1153,17 @@ public class OrchestratorEngine {
         if (!connectionAdapterFactory.isCliConnection(request.connectionId())) return null;
         return chatWorkspaceAssigner.assign(sessionId,
                 connectionAdapterFactory.routingAgentName(request.connectionId()));
+    }
+
+    /**
+     * CR-187: 파일 위치 안내를 붙일 대화. 대화 파일 카드는 세션 작업 폴더의 out/ 을 훑어 만들므로(ArtifactService)
+     * 그 폴더가 있는 실행기 연결의 대화에만 붙인다. 워크플로우 단계와 서브에이전트는 자기 프롬프트가 산출 위치를 정하고
+     * 대화 파일 카드를 쓰지 않아 붙이지 않는다. 파일 만들기 도구(CR-182)는 스스로 out/ 에 쓰므로 그 설정과는 무관하다.
+     */
+    private boolean artifactGuideApplies(ChatRequest request, String workspacePath) {
+        if (workspacePath == null || workspacePath.isBlank()) return false;
+        if (request.workflowRunId() != null || request.subagentRunId() != null) return false;
+        return connectionAdapterFactory.isCliConnection(request.connectionId());
     }
 
     /**

@@ -116,4 +116,37 @@ class ChatFeatureSupportTest {
 
         assertThat(support.withRenderGuides(messages, List.of("unknown"))).isSameAs(messages);
     }
+
+    @Test
+    @DisplayName("CR-187 실행기 대화면 파일 위치 안내가 이번 질문 몫으로 마지막 질문 바로 앞에")
+    void artifactGuide_insertedBeforeLastUserAsTurnScoped() {
+        when(templates.getTemplate("widget.artifact-out")).thenReturn("  OUT  ");
+        List<UnifiedMessage> messages = List.of(
+                UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, "base"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "q1"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.ASSISTANT, "a1"),
+                UnifiedMessage.ofText(UnifiedMessage.Role.USER, "q2"));
+
+        List<UnifiedMessage> out = support.withArtifactGuide(messages, true);
+
+        assertThat(out).hasSize(5);
+        assertThat(out.get(3).role()).isEqualTo(UnifiedMessage.Role.SYSTEM);
+        assertThat(out.get(3).turnScoped()).isTrue();
+        assertThat(text(out.get(3))).isEqualTo("OUT");
+        assertThat(text(out.get(4))).isEqualTo("q2");
+    }
+
+    @Test
+    @DisplayName("CR-187 대상이 아니거나 질문이 없거나 틀이 없으면 받은 목록 그대로")
+    void artifactGuide_skipped() {
+        List<UnifiedMessage> messages = List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "q"));
+        assertThat(support.withArtifactGuide(messages, false)).isSameAs(messages);
+        verify(templates, never()).getTemplate(anyString());
+
+        assertThat(support.withArtifactGuide(messages, true)).isSameAs(messages);
+
+        when(templates.getTemplate("widget.artifact-out")).thenReturn("OUT");
+        List<UnifiedMessage> toolLoop = List.of(UnifiedMessage.ofText(UnifiedMessage.Role.SYSTEM, "base"));
+        assertThat(support.withArtifactGuide(toolLoop, true)).isSameAs(toolLoop);
+    }
 }
