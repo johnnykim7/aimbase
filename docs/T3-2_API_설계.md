@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.23 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179
+> 설계 버전: 7.24 | 최종 수정: 2026-11-13 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3675,7 +3675,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 | 연결 | 붙는 조건 | 길 |
 |------|----------|-----|
 | API | 세션에 보관 중인 데이터 파일이 있음. `tool_filter.exclude_tools` 에 있으면 빼고, `allowed_tools` 와 세션 활성 목록에 없어도 더한다 | 도구 정의 |
-| 실행기(NATIVE, AIMBASE, HYBRID) | 대화 API 요청 | `/mcp-data` 통로 `aimbase-data`. 허용 도구 목록이 있으면 `mcp__aimbase-data__data_query` 를 더한다 |
+| 실행기(NATIVE, AIMBASE, HYBRID) | 대화 API 요청이고 세션에 보관 중인 데이터 파일이 있음(API 와 같음). 통로 도구가 바뀌면 실행기가 CLI 를 다시 기동한다(CR-182 `channel_tools`) | `/mcp-data` 통로 `aimbase-data`. 허용 도구 목록이 있으면 `mcp__aimbase-data__data_query` 를 더한다 |
 
 - `actions_enabled=false` 인 대화도 데이터 파일이 있으면 `data_query` 하나만 실은 도구 반복으로 답한다.
 - 실행기 세 방식이 같은 통로를 쓴다. `/mcp` 는 실행기가 세션 번호를 싣지 않고, 노출 등급이 없는 도구를 걸러 내므로 쓰지 않는다.
