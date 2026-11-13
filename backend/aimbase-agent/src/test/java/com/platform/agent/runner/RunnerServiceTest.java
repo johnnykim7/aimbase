@@ -41,12 +41,12 @@ class RunnerServiceTest {
         pool = mock(ClaudeCliWorkerPool.class);
         worker = mock(ClaudeCliWorker.class);
         service = new RunnerService(pool, "claude-sonnet-4-5");
-        // RunnerService 가 부르는 10-인자 오버로드(CR-183 dataSessionId 까지)를 정확히 타겟. doReturn 으로 오버로드 모호성 회피.
+        // RunnerService 가 부르는 11-인자 오버로드(CR-182 channelTools 까지)를 정확히 타겟. doReturn 으로 오버로드 모호성 회피.
         org.mockito.Mockito.doReturn(worker).when(pool).getOrCreateMain(
                 anyString(), nullable(String.class), nullable(String.class),
                 nullable(String.class), nullable(ClaudeCliCommandBuilder.ToolMode.class),
                 ArgumentMatchers.<List<String>>any(), nullable(String.class), anyBoolean(),
-                ArgumentMatchers.<List<SkillRef>>any(), nullable(String.class));
+                ArgumentMatchers.<List<SkillRef>>any(), nullable(String.class), ArgumentMatchers.<List<String>>any());
         // 풀이 돌려주는 워커는 새로 띄운 것으로 본다(첫 턴).
         when(worker.claimFirstTurn()).thenReturn(true);
     }
@@ -129,7 +129,21 @@ class RunnerServiceTest {
         verify(pool).getOrCreateMain(eq("run-1"), nullable(String.class), nullable(String.class),
                 nullable(String.class), eq(ClaudeCliCommandBuilder.ToolMode.NATIVE),
                 ArgumentMatchers.<List<String>>any(), nullable(String.class), anyBoolean(), eq(pins),
-                nullable(String.class));
+                nullable(String.class), ArgumentMatchers.<List<String>>any());
+    }
+
+    @Test
+    @DisplayName("CR-182 TC-CHT-083: 대화 세션과 통로 도구를 풀에 넘겨 워커가 aimbase-data 통로에 싣게 한다")
+    void passesDataChannelToPool() {
+        when(worker.turnFirst(any(), any())).thenReturn(okResponse());
+
+        service.chat(request("run-1").withDataChannel("cs-1", List.of("create_file")),
+                ClaudeCliCommandBuilder.ToolMode.NATIVE, null, null);
+
+        verify(pool).getOrCreateMain(eq("run-1"), nullable(String.class), nullable(String.class),
+                nullable(String.class), eq(ClaudeCliCommandBuilder.ToolMode.NATIVE),
+                ArgumentMatchers.<List<String>>any(), nullable(String.class), anyBoolean(),
+                ArgumentMatchers.<List<SkillRef>>any(), eq("cs-1"), eq(List.of("create_file")));
     }
 
     @Test

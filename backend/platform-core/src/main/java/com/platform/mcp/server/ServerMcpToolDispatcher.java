@@ -14,7 +14,7 @@ import com.platform.tenant.TenantContext;
 import com.platform.tool.ApprovalState;
 import com.platform.tool.PermissionLevel;
 import com.platform.tool.ToolContext;
-import com.platform.tool.builtin.DataQueryTool;
+import com.platform.tool.DataChannelTools;
 import com.platform.tool.ToolExecutor;
 import com.platform.tool.ToolMessageBlock;
 import com.platform.tool.ToolRegistry;
@@ -113,9 +113,11 @@ public class ServerMcpToolDispatcher {
     /**
      * CR-183: aimbase-data 통로(/mcp-data). data_query 는 노출 목록에 없어 위 판정을 타지 않고 이 통로에서만
      * 부른다. 대화 세션은 워커가 실은 X-Aimbase-Session-Id 로 채워 첨부 소유를 확인하게 한다(BIZ-222).
+     * CR-182: create_file 도 이 통로에 함께 싣는다. 통로에는 두 도구가 늘 등록돼 있으므로, 이번 CLI 에 연 도구는
+     * 워커가 실은 X-Aimbase-Channel-Tools 로 가린다(BIZ-210).
      */
     public McpSchema.CallToolResult dispatchData(String name, Map<String, Object> args) {
-        if (!DataQueryTool.NAME.equals(name)) {
+        if (!DataChannelTools.decode(RequestContext.getChannelTools()).contains(name)) {
             log.warn("Server MCP data channel: blocked tool '{}'", name);
             return errorResult("Tool not available on data channel: " + name);
         }

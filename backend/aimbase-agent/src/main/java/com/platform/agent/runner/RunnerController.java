@@ -7,6 +7,7 @@ import com.platform.agent.runner.dto.RunnerInterruptRequest;
 import com.platform.agent.runner.dto.RunnerChatRequest;
 import com.platform.agent.runner.dto.RunnerChatResponse;
 import com.platform.llm.model.LLMRequest;
+import com.platform.tool.DataChannelTools;
 import com.platform.llm.model.LLMResponse;
 import com.platform.llm.model.ModelConfig;
 import com.platform.llm.model.UnifiedMessage;
@@ -227,7 +228,7 @@ public class RunnerController {
         return new LLMRequest(model, messages, null, config, true, req.getRunId())
                 .withWorkingDirectory(req.getWorkingDirectory())
                 .withSkillSet(toSkillSet(req.getSkillSet()))
-                .withDataSessionId(req.getDataSessionId());
+                .withDataChannel(req.getDataSessionId(), DataChannelTools.open(req.getChannelTools()));
     }
 
     /** CR-147: skill_set 항목을 판까지 받는다. 깨진 항목은 최신 판으로 넘어가지 않게 400 이다(BIZ-123). */

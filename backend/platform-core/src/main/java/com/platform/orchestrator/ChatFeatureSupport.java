@@ -35,13 +35,13 @@ public class ChatFeatureSupport {
 
     /**
      * 계산 도구를 붙인 도구 고르기 맥락. 붙이지 않으면 요청의 것을 그대로 돌려준다.
-     *
-     * @param cli 실제로 답할 어댑터가 CLI 인지
+     * CLI 연결도 데이터 파일이 있을 때만 붙인다. 대화 중에 처음 붙인 파일은 실행기가 통로 도구가 바뀐 것을 보고
+     * CLI 를 다시 기동해 연다(CR-182 3.2.2).
      */
-    public ToolFilterContext attachDataTools(ChatRequest request, String sessionId, boolean cli) {
+    public ToolFilterContext attachDataTools(ChatRequest request, String sessionId) {
         ToolFilterContext base = request.toolFilter();
         if (!request.dataTools() || sessionId == null || sessionId.isBlank()) return base;
-        if (!cli && !attachments.hasActiveDataFile(sessionId)) return base;
+        if (!attachments.hasActiveDataFile(sessionId)) return base;
         ToolFilterContext attached = ToolFilterContext.withAttached(base, List.of(DataQueryTool.NAME));
         return attached.attaches(DataQueryTool.NAME) ? attached : base;
     }

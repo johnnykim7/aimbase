@@ -1,6 +1,7 @@
 package com.platform.orchestrator;
 
 import com.platform.config.PlatformSettingsService;
+import com.platform.tool.DataChannelTools;
 import com.platform.tool.ToolFilterContext;
 import com.platform.tool.builtin.CreateFileTool;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,7 +41,6 @@ class FileCreateToolGateTest {
         assertThat(filter.isToolAllowed(CreateFileTool.NAME)).isTrue();
         assertThat(filter.isToolAllowed("bash")).isFalse();
         assertThat(filter.attaches(CreateFileTool.NAME)).isTrue();
-        assertThat(gate.extraAllowed(req, false)).isNull();
     }
 
     @Test
@@ -63,7 +63,7 @@ class FileCreateToolGateTest {
         assertThat(gate.on(req)).isFalse();
         assertThat(gate.loop(req, false)).isFalse();
         assertThat(gate.loop(req, true)).isFalse();
-        assertThat(gate.extraAllowed(req, true)).isNull();
+        assertThat(DataChannelTools.of(gate.filter(req, null))).isEmpty();
     }
 
     @Test
@@ -75,16 +75,16 @@ class FileCreateToolGateTest {
         assertThat(gate.enabled()).isFalse();
         assertThat(gate.on(req)).isFalse();
         assertThat(gate.loop(req, false)).isFalse();
-        assertThat(gate.extraAllowed(req, true)).isNull();
+        assertThat(DataChannelTools.of(gate.filter(req, null))).isEmpty();
     }
 
     @Test
-    @DisplayName("TC-CHT-083 CLI 연결에 file_create 참이면 고리 없이 허용 도구에 create_file 을 더한다")
-    void cli_file_create_adds_create_file_to_allowed_tools() {
+    @DisplayName("TC-CHT-083 CLI 연결에 file_create 참이면 고리 없이 실행기 통로 도구에 create_file 을 싣는다")
+    void cli_file_create_goes_to_data_channel() {
         ChatRequest req = request(false, null, true);
 
         assertThat(gate.loop(req, true)).isFalse();
-        assertThat(gate.extraAllowed(req, true)).containsExactly(CreateFileTool.NAME);
+        assertThat(DataChannelTools.of(gate.filter(req, null))).containsExactly(CreateFileTool.NAME);
     }
 
     @Test
@@ -101,7 +101,7 @@ class FileCreateToolGateTest {
 
         ToolFilterContext none = gate.filter(request(true, null, false), null);
         assertThat(none.isToolAllowed(CreateFileTool.NAME)).isFalse();
-        assertThat(gate.extraAllowed(request(true, null, true), true)).isNull();
+        assertThat(DataChannelTools.of(gate.filter(request(true, null, true), null))).containsExactly(CreateFileTool.NAME);
     }
 
     @Test
@@ -113,6 +113,7 @@ class FileCreateToolGateTest {
         ToolFilterContext with = gate.filter(request(false, null, true), dataOnly);
         assertThat(with.allowedTools()).containsExactly("data_query", CreateFileTool.NAME);
         assertThat(with.attachedTools()).containsExactly("data_query", CreateFileTool.NAME);
+        assertThat(DataChannelTools.of(with)).containsExactly("data_query", CreateFileTool.NAME);
         assertThat(with.isToolAllowed("bash")).isFalse();
 
         assertThat(gate.filter(request(false, null, false), dataOnly)).isSameAs(dataOnly);

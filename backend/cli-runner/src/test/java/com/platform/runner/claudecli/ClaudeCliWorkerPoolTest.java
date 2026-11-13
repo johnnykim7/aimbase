@@ -178,6 +178,25 @@ class ClaudeCliWorkerPoolTest {
     }
 
     @Test
+    void cr182_channel_tools_change_respawns_main_worker() {
+        // 대화 중에 파일 만들기를 켜거나 데이터 파일을 처음 붙이면 통로 도구가 바뀐다. 기동 인자라 다시 기동해야 한다.
+        ClaudeCliWorkerPool pool = newPool(5);
+        ClaudeCliWorker dataOnly = pool.getOrCreateMain("run-ch", null, null, null,
+                ClaudeCliCommandBuilder.ToolMode.NATIVE, null, null, false, null, "cs-1", List.of("data_query"));
+        ClaudeCliWorker sameAgain = pool.getOrCreateMain("run-ch", null, null, null,
+                ClaudeCliCommandBuilder.ToolMode.NATIVE, null, null, false, null, "cs-1", null);
+        ClaudeCliWorker withFile = pool.getOrCreateMain("run-ch", null, null, null,
+                ClaudeCliCommandBuilder.ToolMode.NATIVE, null, null, false, null, "cs-1",
+                List.of("data_query", "create_file"));
+
+        assertThat(sameAgain).isSameAs(dataOnly);
+        assertThat(withFile).isNotSameAs(dataOnly);
+        assertThat(withFile.channelKey()).containsExactly("data_query", "create_file");
+        assertThat(dataOnly.isAlive()).isFalse();
+        pool.shutdownForRun("run-ch");
+    }
+
+    @Test
     void invalidateMain_allows_respawn() {
         ClaudeCliWorkerPool pool = newPool(5);
         ClaudeCliWorker first = pool.getOrCreateMain("run-I", null, null);

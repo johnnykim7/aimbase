@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.config.PlatformSettingsService;
 import com.platform.mcp.agent.McpToolConversion;
 import com.platform.tool.builtin.SkillOpenTool;
-import com.platform.tool.builtin.DataQueryTool;
+import com.platform.tool.DataChannelTools;
 import com.platform.tool.builtin.SkillReadTool;
 import com.platform.tool.builtin.SkillRunTool;
 import com.platform.tool.ToolExecutor;
@@ -269,10 +269,13 @@ public class ServerMcpConfig {
         skills.keySet().retainAll(SKILL_TOOLS);
         sync("skillMcpServer", skills, publishedSkillTools, meta, resized);
 
-        // CR-183: /mcp-data 는 노출 목록이 아니라 등록된 data_query 를 그대로 싣는다.
+        // CR-183: /mcp-data 는 노출 목록이 아니라 등록된 통로 도구를 그대로 싣는다.
+        // CR-182: create_file 도 함께다. 이번 CLI 에 연 도구는 호출 때 머리글로 가린다(dispatchData).
         Map<String, ToolExecutor> data = new HashMap<>();
-        ToolExecutor dataQuery = toolRegistry.getExecutor(DataQueryTool.NAME);
-        if (dataQuery != null) data.put(DataQueryTool.NAME, dataQuery);
+        for (String name : DataChannelTools.NAMES) {
+            ToolExecutor tool = toolRegistry.getExecutor(name);
+            if (tool != null) data.put(name, tool);
+        }
         sync("dataMcpServer", data, publishedDataTools, meta, resized);
         publishedResultMaxChars = resultMaxChars;
         return publishedTools.size();

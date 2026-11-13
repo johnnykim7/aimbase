@@ -64,15 +64,17 @@ class ClaudeCliRunnerClientBodyTest {
     }
 
     @Test
-    @DisplayName("TC-CHT-083 CLI 연결 exposed_tools [bash] 에 파일 만들기를 켜면 실행기 허용 도구는 [bash, create_file]")
-    void extra_allowed_tools_are_merged_into_exposed_tools() {
-        LLMRequest req = request().withExtraAllowedTools(List.of("create_file"));
+    @DisplayName("TC-CHT-083 CLI 연결 exposed_tools [bash] 에 파일 만들기를 켜면 허용 도구는 [bash], 통로 도구는 [create_file]")
+    void channel_tools_are_sent_with_data_session_not_as_allowed_tools() {
+        LLMRequest req = request().withDataChannel("cs-1", List.of("create_file"));
 
         Map<String, Object> body = ClaudeCliRunnerClient.buildBody(req, "NATIVE", null, null, true, List.of("bash"));
 
-        assertThat(body.get("allowed_tools")).isEqualTo(List.of("bash", "create_file"));
-        assertThat(ClaudeCliRunnerClient.buildBody(request(), "NATIVE", null, null, true, List.of("bash"))
-                .get("allowed_tools")).isEqualTo(List.of("bash"));
+        assertThat(body.get("allowed_tools")).isEqualTo(List.of("bash"));
+        assertThat(body.get("data_session_id")).isEqualTo("cs-1");
+        assertThat(body.get("channel_tools")).isEqualTo(List.of("create_file"));
+        assertThat(ClaudeCliRunnerClient.buildBody(request().withDataChannel("cs-1", List.of()), "NATIVE", null, null,
+                true, List.of("bash"))).doesNotContainKeys("data_session_id", "channel_tools");
     }
 
     private static LLMRequest withConfig(ModelConfig config) {

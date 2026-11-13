@@ -362,7 +362,7 @@ public class ClaudeCliWorkerPool {
     }
 
     /**
-     * CR-183: 대화 요청의 세션 번호 추가. 있으면 워커가 계산 도구 통로를 붙인다(BIZ-222). 메인 워커가 이미 살아있으면 무시한다.
+     * CR-183: 대화 요청의 세션 번호 추가. 있으면 워커가 계산 도구 통로를 붙인다(BIZ-222). 통로 도구는 data_query 하나다.
      */
     public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
                                             String systemPrompt,
@@ -372,6 +372,24 @@ public class ClaudeCliWorkerPool {
                                             boolean disallowSubagent,
                                             List<SkillRef> skillSet,
                                             String dataSessionId) {
+        return getOrCreateMain(runId, model, configDir, systemPrompt, toolMode, allowedTools, workingDirectory,
+                disallowSubagent, skillSet, dataSessionId, null);
+    }
+
+    /**
+     * CR-182: 통로에 열 도구 추가(BIZ-210). 살아 있는 메인 워커의 통로 도구가 요청과 다르면 닫고 다시 기동한다.
+     * MCP 설정과 머리글은 기동 때 정해져 이어 쓰는 동안 바꿀 수 없기 때문이다.
+     */
+    public ClaudeCliWorker getOrCreateMain(String runId, String model, String configDir,
+                                            String systemPrompt,
+                                            ClaudeCliCommandBuilder.ToolMode toolMode,
+                                            List<String> allowedTools,
+                                            String workingDirectory,
+                                            boolean disallowSubagent,
+                                            List<SkillRef> skillSet,
+                                            String dataSessionId,
+                                            List<String> channelTools) {
+        List<String> channel = ClaudeCliWorker.channelKey(dataSessionId, channelTools);
         // CR-173: 돌려주는 워커는 lease 된 상태다. 호출자는 턴을 마치면 unlease 한다(그동안 자리 내기 대상이 아니다).
         // 실행기 전체 자리는 run 잠금 밖에서 기다린다. 잠금을 쥔 채 기다리면 자리 내기가 다른 run 잠금을 잡다 서로 막힌다.
         boolean slotHeld = false;
@@ -381,7 +399,7 @@ public class ClaudeCliWorkerPool {
                 synchronized (rw) {
                     // reaper 가 빈 항목을 치웠으면 지금 항목으로 다시 한다.
                     if (runs.get(runId) != rw) continue;
-                    ClaudeCliWorker live = liveMain(rw, runId, configDir, model);
+                    ClaudeCliWorker live = liveMain(rw, runId, configDir, model, channel);
                     if (live != null) {
                         live.lease();
                         return live;
@@ -389,7 +407,7 @@ public class ClaudeCliWorkerPool {
                     if (!slotHeld && tryTakeProcessSlot()) slotHeld = true;
                     if (slotHeld) {
                         ClaudeCliWorker worker = spawnMain(rw, runId, model, configDir, systemPrompt, toolMode,
-                                allowedTools, workingDirectory, disallowSubagent, skillSet, dataSessionId);
+                                allowedTools, workingDirectory, disallowSubagent, skillSet, dataSessionId, channelTools);
                         handProcessSlotTo(worker);
                         slotHeld = false;
                         worker.lease();
@@ -408,12 +426,14 @@ public class ClaudeCliWorkerPool {
      * 이어 쓸 수 있는 메인 워커. 프로세스가 죽었거나 계정 폴더나 모델이 바뀌었으면 닫고 null 이다. rw 잠금 안에서 부른다.
      * 죽은 메인을 남겨 두면 run 자리와 실행기 전체 자리를 계속 쥐고 있게 된다.
      */
-    private ClaudeCliWorker liveMain(RunWorkers rw, String runId, String configDir, String model) {
+    private ClaudeCliWorker liveMain(RunWorkers rw, String runId, String configDir, String model,
+                                     List<String> channel) {
         ClaudeCliWorker current = rw.main;
         if (current == null) return null;
         boolean alive = current.isAlive();
         boolean sameAccount = sameConfigDir(current.getConfigDir(), configDir);
-        if (alive && sameAccount && sameModel(current.getModel(), model)) return current;
+        boolean sameModel = sameModel(current.getModel(), model);
+        if (alive && sameAccount && sameModel && current.channelKey().equals(channel)) return current;
         rw.main = null;
         rw.forks.remove(current);
         rw.slots.release();
@@ -422,8 +442,9 @@ public class ClaudeCliWorkerPool {
             // CR-161: 연결 묶음이 같은 run 을 다른 계정 커넥션으로 보냈다. 이전 계정 프로세스를 계속 쓰면
             // api 기록의 커넥션과 실제로 쓴 계정이 어긋나고, 한도에 걸린 계정으로 다시 부른다.
             // CR-175: 위젯에서 모델을 바꿨다. CLI 는 실행 중에 모델을 못 바꾸므로 같은 이유로 새로 띄운다.
+            // CR-182: 통로 도구(계산 도구, 파일 만들기)가 바뀌었다. 대화 중에 데이터 파일을 처음 붙인 경우 등이다.
             log.info("Run '{}': main worker closed because the {} changed", runId,
-                    sameAccount ? "model" : "account folder");
+                    !sameAccount ? "account folder" : !sameModel ? "model" : "data channel tools");
         } else {
             log.info("Run '{}': dead main worker closed before respawn (pid={})", runId, current.pid());
         }
@@ -438,7 +459,8 @@ public class ClaudeCliWorkerPool {
                                       String workingDirectory,
                                       boolean disallowSubagent,
                                       List<SkillRef> skillSet,
-                                      String dataSessionId) {
+                                      String dataSessionId,
+                                      List<String> channelTools) {
         acquireSlot(rw, runId);
         try {
             ClaudeCliWorker worker = workerFactory.create(model, null, false, configDir);
@@ -465,6 +487,7 @@ public class ClaudeCliWorkerPool {
             }
             if (dataSessionId != null && !dataSessionId.isBlank()) {
                 worker.setDataSessionId(dataSessionId);
+                worker.setChannelTools(channelTools);
             }
             worker.start();
             rw.main = worker;

@@ -10,7 +10,7 @@ import com.platform.llm.model.ToolCall;
 import com.platform.llm.model.UnifiedMessage;
 import com.platform.skill.SkillSetHeader;
 import com.platform.tool.SkillRef;
-import com.platform.tool.builtin.DataQueryTool;
+import com.platform.tool.DataChannelTools;
 import com.platform.tool.builtin.SkillOpenTool;
 import com.platform.tool.builtin.SkillReadTool;
 import com.platform.tool.builtin.SkillRunTool;
@@ -127,9 +127,14 @@ public class ClaudeCliWorker implements AutoCloseable {
      * dataSessionId 와 따로 둔다. start() 호출 전에만 setRunId 로 변경 가능.
      */
     private volatile String runId;
+    /**
+     * CR-182: 통로에 열 도구(DataChannelTools.NAMES 중). null 이면 data_query 하나다. 머리글
+     * X-Aimbase-Channel-Tools 로 서버에 돌려줘 서버가 그 도구만 부른다(BIZ-210). start() 전에만 바꾼다.
+     */
+    private volatile List<String> channelTools;
     static final String DATA_SERVER_KEY = "aimbase-data";
     private static final String DATA_PATH = "/mcp-data";
-    private static final String DATA_TOOL = "mcp__" + DATA_SERVER_KEY + "__" + DataQueryTool.NAME;
+    private static final String DATA_PREFIX = "mcp__" + DATA_SERVER_KEY + "__";
     /**
      * CR-068 후속: --system-prompt flag 로 CLI 의 기본 system prompt 를 우리 prompt 로 교체.
      * null 이면 CLI 기본(Claude Code 학습 패턴) 사용. 비어있으면 SYSTEM 메시지 prepend 폴백.
@@ -301,6 +306,25 @@ public class ClaudeCliWorker implements AutoCloseable {
             throw new IllegalStateException("Worker already started; cannot set runId after start()");
         }
         this.runId = (runId == null || runId.isBlank()) ? null : runId.trim();
+    }
+
+    /** CR-182: 통로에 열 도구. 비어 있으면 data_query 하나다. */
+    public void setChannelTools(List<String> tools) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set channelTools after start()");
+        }
+        this.channelTools = (tools == null || tools.isEmpty()) ? null : List.copyOf(tools);
+    }
+
+    /** 이 CLI 가 통로에 연 도구. 통로가 없으면 빈 목록이다. 실행기가 이어 쓸지 정할 때 요청과 견준다. */
+    public List<String> channelKey() {
+        return channelKey(dataSessionId, channelTools);
+    }
+
+    /** 요청이 열 통로 도구. 세션이 없으면(워크플로우 단계) 통로가 없다. */
+    public static List<String> channelKey(String sessionId, List<String> tools) {
+        if (sessionId == null || sessionId.isBlank()) return List.of();
+        return DataChannelTools.open(tools);
     }
 
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
@@ -1227,6 +1251,7 @@ public class ClaudeCliWorker implements AutoCloseable {
     /** CR-117: 서버 MCP 도구가 run 격리 작업장을 보도록 X-Aimbase-Workspace-Path 헤더 키. */
     private static final String WORKSPACE_HEADER = AgentIdRequestFilter.WORKSPACE_HEADER;
     private static final String SESSION_HEADER = AgentIdRequestFilter.SESSION_HEADER;
+    static final String CHANNEL_TOOLS_HEADER = AgentIdRequestFilter.CHANNEL_TOOLS_HEADER;
 
     /**
      * CR-117: MCP config 의 aimbase-server.headers 에 {@code X-Aimbase-Workspace-Path} 헤더를 주입한다.
@@ -1406,9 +1431,10 @@ public class ClaudeCliWorker implements AutoCloseable {
      * CR-183: MCP 설정에 aimbase-data 항목을 더한다. aimbase-server 항목을 본떠 주소를 /mcp-data 로 바꾸고
      * 머리글에 대화 세션 번호를 싣는다. 바탕 설정이 비었으면(NATIVE) 이 항목 하나가 된다.
      * aimbase-server 항목이 없으면 계산 도구에 닿을 길이 없어 바탕 설정을 그대로 돌려준다.
+     * CR-182: 통로에는 도구가 늘 함께 등록돼 있으므로 이번에 연 도구를 머리글로 함께 싣는다.
      */
     @SuppressWarnings("unchecked")
-    static String withDataEntry(String baseConfig, String serverConfig, String chatSessionId) {
+    static String withDataEntry(String baseConfig, String serverConfig, String chatSessionId, List<String> tools) {
         Map<String, Object> server;
         try {
             server = serverEntry(serverConfig);
@@ -1425,6 +1451,7 @@ public class ClaudeCliWorker implements AutoCloseable {
         headers.remove(WORKSPACE_HEADER);
         headers.remove(SkillSetHeader.NAME);
         headers.put(SESSION_HEADER, chatSessionId);
+        headers.put(CHANNEL_TOOLS_HEADER, DataChannelTools.encode(tools));
         data.put("headers", headers);
         try {
             Map<String, Object> root = (baseConfig == null || baseConfig.isBlank())
@@ -1450,8 +1477,8 @@ public class ClaudeCliWorker implements AutoCloseable {
         List<String> mcpAllowed = null;
         if (allowedToolNames != null && !allowedToolNames.isEmpty()) {
             List<String> names = new ArrayList<>();
-            // CR-183: data_query 는 aimbase-server 에 없고 아래에서 aimbase-data 이름으로 더한다.
-            allowedToolNames.stream().filter(n -> !DataQueryTool.NAME.equals(n))
+            // CR-183, CR-182: 통로 도구는 aimbase-server 에 없고 아래에서 aimbase-data 이름으로 더한다.
+            allowedToolNames.stream().filter(n -> !DataChannelTools.NAMES.contains(n))
                     .forEach(n -> names.add(MCP_SERVER_PREFIX + n));
             // CR-147: NATIVE 의 스킬 도구는 aimbase-skills 항목에서 오므로 그 이름으로도 허용한다.
             if (nativeWithSkills) {
@@ -1467,28 +1494,33 @@ public class ClaudeCliWorker implements AutoCloseable {
         } else if (skillSet != null) {
             serverEntry(mcpConfig);   // AIMBASE, HYBRID 도 스킬 도구가 실릴 aimbase-server 항목이 있어야 한다
         }
+        // CR-117: subagent OFF 면 CLI 본체 Agent 도구를 --disallowedTools 로 차단(자율 서브에이전트 spawn 방지).
+        List<String> disallowed = new ArrayList<>();
+        if (disallowSubagent) disallowed.add("Agent");
         // CR-183: 대화 요청이면 모든 모드에 계산 도구 통로를 더한다. data_query 는 /mcp 노출 목록에 없다.
+        // CR-182: create_file 도 이 통로로 싣는다. 열지 않은 통로 도구는 허용 목록이 없는 방식에서도 모델에 보이지 않게 막는다.
         if (dataSessionId != null) {
+            List<String> open = channelKey();
             if (toolMode == ClaudeCliCommandBuilder.ToolMode.NATIVE) {
-                nativeMcpConfig = withDataEntry(nativeMcpConfig, mcpConfig, dataSessionId);
+                nativeMcpConfig = withDataEntry(nativeMcpConfig, mcpConfig, dataSessionId, open);
             } else {
-                mcpConfig = withDataEntry(mcpConfig, mcpConfig, dataSessionId);
+                mcpConfig = withDataEntry(mcpConfig, mcpConfig, dataSessionId, open);
             }
-            if (mcpAllowed != null) mcpAllowed.add(DATA_TOOL);
+            if (mcpAllowed != null) {
+                for (String t : open) mcpAllowed.add(DATA_PREFIX + t);
+            }
+            DataChannelTools.NAMES.stream().filter(t -> !open.contains(t)).forEach(t -> disallowed.add(DATA_PREFIX + t));
         }
         // CR-152: CLI 가 실제로 받는 설정은 NATIVE 면 nativeMcpConfig, 그 밖은 mcpConfig 다(빌더 resolveMcpJson 과 같은 기준).
         requiredMcpServers = mcpServerNames(
                 toolMode == ClaudeCliCommandBuilder.ToolMode.NATIVE ? nativeMcpConfig : mcpConfig);
-        // CR-117: subagent OFF 면 CLI 본체 Agent 도구를 --disallowedTools 로 차단(자율 서브에이전트 spawn 방지).
-        // 기본(disallowSubagent=false)이면 null → 빌더 미적용 = 현행 동작(subagent 허용).
-        List<String> disallowed = disallowSubagent ? List.of("Agent") : null;
         return ClaudeCliCommandBuilder.builder(binaryPath)
                 .toolMode(toolMode)               // null 이면 빌더 default(AIMBASE)
                 .sealedNativeTools(sealedNativeTools)  // CR-126: null 이면 빌더 기본 상수
                 .mcpConfigJson(mcpConfig)
                 .nativeMcpConfigJson(nativeMcpConfig)  // CR-147: NATIVE 에서만 쓰인다. null 이면 빈 설정
                 .allowedTools(mcpAllowed)         // CR-104: null 이면 빌더가 무시
-                .disallowedTools(disallowed)      // CR-117: null 이면 빌더가 무시
+                .disallowedTools(disallowed)      // CR-117, CR-182: 비어 있으면 빌더가 더하지 않는다
                 .streamJson(true)
                 .verbose(true)
                 .includePartialMessages(true)

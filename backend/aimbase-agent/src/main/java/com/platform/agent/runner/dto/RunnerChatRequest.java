@@ -79,6 +79,13 @@ public class RunnerChatRequest {
     @JsonProperty("data_session_id")
     private String dataSessionId;
 
+    /**
+     * CR-182: 통로 aimbase-data 에 열 도구(data_query, create_file 중). 없으면 data_query 하나로 본다(CR-183 서버).
+     * Worker 가 X-Aimbase-Channel-Tools 머리글로 서버에 돌려줘 서버가 그 도구만 부른다(BIZ-210).
+     */
+    @JsonProperty("channel_tools")
+    private List<String> channelTools;
+
     /** CR-175: 깊게 생각하기. null 이면 CLI 생각 설정에 손대지 않는다. */
     @JsonProperty("thinking")
     private Boolean thinking;
@@ -109,6 +116,8 @@ public class RunnerChatRequest {
     public void setSkillSet(List<Map<String, Object>> skillSet) { this.skillSet = skillSet; }
     public String getDataSessionId() { return dataSessionId; }
     public void setDataSessionId(String dataSessionId) { this.dataSessionId = dataSessionId; }
+    public List<String> getChannelTools() { return channelTools; }
+    public void setChannelTools(List<String> channelTools) { this.channelTools = channelTools; }
     public Boolean getThinking() { return thinking; }
     public void setThinking(Boolean thinking) { this.thinking = thinking; }
 }

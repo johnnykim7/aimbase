@@ -45,14 +45,14 @@ class ChatFeatureSupportTest {
     }
 
     @Test
-    @DisplayName("API: 세션에 데이터 파일이 있으면 붙이고, 없으면 붙이지 않는다")
+    @DisplayName("API, CLI 모두 세션에 데이터 파일이 있으면 붙이고, 없으면 붙이지 않는다(CR-182 3.2.2)")
     void api_dependsOnDataFile() {
         when(attachments.hasActiveDataFile("s1")).thenReturn(true);
         when(attachments.hasActiveDataFile("s2")).thenReturn(false);
 
-        assertThat(ChatFeatureSupport.attachesDataQuery(support.attachDataTools(request(true, null), "s1", false)))
+        assertThat(ChatFeatureSupport.attachesDataQuery(support.attachDataTools(request(true, null), "s1")))
                 .isTrue();
-        assertThat(ChatFeatureSupport.attachesDataQuery(support.attachDataTools(request(true, null), "s2", false)))
+        assertThat(ChatFeatureSupport.attachesDataQuery(support.attachDataTools(request(true, null), "s2")))
                 .isFalse();
     }
 
@@ -62,26 +62,24 @@ class ChatFeatureSupportTest {
         when(attachments.hasActiveDataFile("s1")).thenReturn(true);
         ToolFilterContext filter = new ToolFilterContext(null, List.of(DataQueryTool.NAME), null, null, null, null);
 
-        ToolFilterContext out = support.attachDataTools(request(true, filter), "s1", false);
+        ToolFilterContext out = support.attachDataTools(request(true, filter), "s1");
 
         assertThat(out).isSameAs(filter);
     }
 
     @Test
-    @DisplayName("CLI 대화 요청은 파일을 보지 않고 붙이고, 워크플로우 단계 요청은 붙이지 않는다")
-    void cli_attachedWithoutFileCheck_workflowNot() {
-        ToolFilterContext out = support.attachDataTools(request(true, null), "s1", true);
-        assertThat(ChatFeatureSupport.attachesDataQuery(out)).isTrue();
-        verify(attachments, never()).hasActiveDataFile(anyString());
-
-        assertThat(ChatFeatureSupport.attachesDataQuery(support.attachDataTools(request(false, null), "s1", true)))
+    @DisplayName("워크플로우 단계 요청은 파일을 보지 않고 붙이지 않는다")
+    void workflowStep_notAttached() {
+        assertThat(ChatFeatureSupport.attachesDataQuery(support.attachDataTools(request(false, null), "s1")))
                 .isFalse();
+        verify(attachments, never()).hasActiveDataFile(anyString());
     }
 
     @Test
     @DisplayName("도구를 끈 대화의 계산 전용 목록은 data_query 하나만 허용한다")
     void dataQueryOnly() {
-        ToolFilterContext attached = support.attachDataTools(request(true, null), "s1", true);
+        when(attachments.hasActiveDataFile("s1")).thenReturn(true);
+        ToolFilterContext attached = support.attachDataTools(request(true, null), "s1");
 
         ToolFilterContext only = ChatFeatureSupport.dataQueryOnly(attached);
 

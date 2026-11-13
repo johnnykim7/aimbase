@@ -1,7 +1,6 @@
 package com.platform.tool;
 
 import com.platform.orchestrator.approval.ToolApprovalGate;
-import com.platform.tool.builtin.DataQueryTool;
 import com.platform.tool.model.UnifiedToolDef;
 import com.platform.domain.ToolExecutionLogEntity;
 import com.platform.hook.HookDecision;
@@ -539,13 +538,13 @@ public class ToolCallHandler {
         List<UnifiedToolDef> filteredTools = withAttached(toolRegistry, toolFilter,
                 sessionToolRegistry.filterActive(sessionId, toolRegistry.getToolDefs(toolFilter)));
 
-        // CR-183: CLI 어댑터만 읽는다. 러너가 계산 도구 통로를 붙인다(BIZ-222).
-        String dataSessionId = toolFilter != null && toolFilter.attaches(DataQueryTool.NAME) ? sessionId : null;
+        // CR-183, CR-182: CLI 어댑터만 읽는다. 러너가 거르기가 붙인 계산 도구와 파일 만들기를 통로에 싣는다.
+        List<String> channelTools = DataChannelTools.of(toolFilter);
         // 도구 없음 → 단순 스트리밍 한 번
         if (filteredTools.isEmpty()) {
             LLMRequest request = new LLMRequest(
                     resolvedModel, mutableMessages, null, config, true, sessionId, null)
-                    .withDataSessionId(dataSessionId);
+                    .withDataChannel(sessionId, channelTools);
             StreamingAccumulator acc = new StreamingAccumulator(streamSink, cancelled);
             adapter.chatStream(request, acc::accept);
             acc.await();
@@ -564,7 +563,7 @@ public class ToolCallHandler {
             LLMRequest request = new LLMRequest(
                     resolvedModel, mutableMessages, filteredTools,
                     config, true, sessionId, toolChoice)
-                    .withDataSessionId(dataSessionId);
+                    .withDataChannel(sessionId, channelTools);
 
             StreamingAccumulator acc = new StreamingAccumulator(streamSink, cancelled);
             adapter.chatStream(request, acc::accept);
@@ -991,9 +990,8 @@ public class ToolCallHandler {
                 .withCliOverrides(toolModeOverride, systemPromptOverride)
                 // CR-147: 러너가 MCP 머리글로 돌려줘 서버 쪽 스킬 도구가 단계가 고정한 판을 쓴다(BIZ-123)
                 .withSkillSet(ctx != null ? ctx.skillSet() : null)
-                // CR-183: 대화 요청이면 러너가 계산 도구 통로(aimbase-data)를 붙인다(BIZ-222)
-                .withDataSessionId(toolFilter != null && toolFilter.attaches(DataQueryTool.NAME) && ctx != null
-                        ? ctx.sessionId() : null);
+                // CR-183, CR-182: 대화 요청이면 러너가 통로(aimbase-data)를 붙인다(BIZ-222, BIZ-210)
+                .withDataChannel(ctx != null ? ctx.sessionId() : null, DataChannelTools.of(toolFilter));
 
         final java.util.UUID runId = (ctx != null && ctx.workflowRunId() != null)
                 ? parseUuidSafe(ctx.workflowRunId()) : null;

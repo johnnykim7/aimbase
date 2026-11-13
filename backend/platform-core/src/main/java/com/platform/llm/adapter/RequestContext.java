@@ -34,6 +34,8 @@ public final class RequestContext {
      * data_query 가 첨부 소유를 이 세션으로 확인한다.
      */
     private static final ThreadLocal<String> CHAT_SESSION_ID = new ThreadLocal<>();
+    /** CR-182: CLI 워커가 aimbase-data 통로에 X-Aimbase-Channel-Tools 머리글로 싣는 연 도구 목록(쉼표). */
+    private static final ThreadLocal<String> CHANNEL_TOOLS = new ThreadLocal<>();
 
     private RequestContext() {}
 
@@ -54,6 +56,10 @@ public final class RequestContext {
     public static void setChatSessionId(String sessionId) { CHAT_SESSION_ID.set(sessionId); }
 
     public static String getChatSessionId() { return CHAT_SESSION_ID.get(); }
+
+    public static void setChannelTools(String header) { CHANNEL_TOOLS.set(header); }
+
+    public static String getChannelTools() { return CHANNEL_TOOLS.get(); }
 
     /** CR-075: JwtAuthenticationFilter 가 widget 토큰 인증 시 set. */
     public static void setUserRef(String ref) { USER_REF.set(ref); }
@@ -80,5 +86,6 @@ public final class RequestContext {
         WORKSPACE_PATH.remove();
         SKILL_SET.remove();
         CHAT_SESSION_ID.remove();
+        CHANNEL_TOOLS.remove();
     }
 }

@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * CR-183 TC-CHT-098: CLI 작업자가 대화 세션의 계산 도구 통로(aimbase-data)를 MCP 설정에 붙이는지.
+ * CR-182 TC-CHT-083: 같은 통로에 파일 만들기를 함께 싣고, 열지 않은 통로 도구는 막는지(3.2.2).
  */
 class ClaudeCliWorkerDataChannelTest {
 
@@ -57,9 +58,10 @@ class ClaudeCliWorkerDataChannelTest {
     }
 
     @Test
-    @DisplayName("aimbase-data 항목은 /mcp-data 주소, 인증 머리글, 세션 머리글만 갖는다")
+    @DisplayName("aimbase-data 항목은 /mcp-data 주소, 인증 머리글, 세션 머리글, 통로 도구 머리글만 갖는다")
     void withDataEntry_copiesServerEntryToDataChannel() throws Exception {
-        JsonNode root = MAPPER.readTree(ClaudeCliWorker.withDataEntry(SERVER_CONFIG, SERVER_CONFIG, "sess-1"));
+        JsonNode root = MAPPER.readTree(ClaudeCliWorker.withDataEntry(SERVER_CONFIG, SERVER_CONFIG, "sess-1",
+                List.of("data_query", "create_file")));
 
         JsonNode data = root.path("mcpServers").path("aimbase-data");
         assertThat(data.path("url").asText()).isEqualTo("http://api:8280/mcp-data");
@@ -67,6 +69,7 @@ class ClaudeCliWorkerDataChannelTest {
         JsonNode headers = data.path("headers");
         assertThat(headers.path("Authorization").asText()).isEqualTo("Bearer k");
         assertThat(headers.path("X-Aimbase-Session-Id").asText()).isEqualTo("sess-1");
+        assertThat(headers.path(ClaudeCliWorker.CHANNEL_TOOLS_HEADER).asText()).isEqualTo("data_query,create_file");
         assertThat(headers.has("X-Aimbase-Workspace-Path")).isFalse();
         assertThat(headers.has(SkillSetHeader.NAME)).isFalse();
         assertThat(root.path("mcpServers").path("aimbase-server").path("url").asText())
@@ -76,7 +79,7 @@ class ClaudeCliWorkerDataChannelTest {
     @Test
     @DisplayName("NATIVE 처럼 기본 설정이 없으면 aimbase-data 항목 하나만 담는다")
     void withDataEntry_withoutBaseConfig() throws Exception {
-        JsonNode root = MAPPER.readTree(ClaudeCliWorker.withDataEntry(null, SERVER_CONFIG, "sess-1"));
+        JsonNode root = MAPPER.readTree(ClaudeCliWorker.withDataEntry(null, SERVER_CONFIG, "sess-1", List.of("data_query")));
 
         assertThat(root.path("mcpServers").size()).isEqualTo(1);
         assertThat(root.path("mcpServers").has("aimbase-data")).isTrue();
@@ -85,7 +88,7 @@ class ClaudeCliWorkerDataChannelTest {
     @Test
     @DisplayName("aimbase-server 항목이 없으면 통로를 붙이지 않고 원래 설정을 쓴다")
     void withDataEntry_withoutServerEntry_keepsBase() {
-        assertThat(ClaudeCliWorker.withDataEntry(null, "{\"mcpServers\":{}}", "sess-1")).isNull();
+        assertThat(ClaudeCliWorker.withDataEntry(null, "{\"mcpServers\":{}}", "sess-1", List.of("data_query"))).isNull();
     }
 
     @Test
@@ -97,6 +100,39 @@ class ClaudeCliWorkerDataChannelTest {
         assertThat(args).contains("--allowedTools mcp__aimbase-server__file_write");
         assertThat(args).doesNotContain("mcp__aimbase-server__data_query");
         assertThat(args).contains("/mcp-data").contains("sess-1");
+        assertThat(args).contains("--disallowedTools mcp__aimbase-data__create_file");
+    }
+
+    @Test
+    @DisplayName("통로 도구로 create_file 만 열면 aimbase-data 이름으로 허용하고 data_query 는 막는다")
+    void channelTools_createFileOnly() throws IOException {
+        String args = runAndDumpArgs(ClaudeCliCommandBuilder.ToolMode.AIMBASE, List.of("file_write", "create_file"), "sess-1",
+                null, List.of("create_file"));
+
+        assertThat(args).contains("--allowedTools mcp__aimbase-data__create_file");
+        assertThat(args).doesNotContain("mcp__aimbase-server__create_file");
+        assertThat(args).doesNotContain("--allowedTools mcp__aimbase-data__data_query");
+        assertThat(args).contains("--disallowedTools mcp__aimbase-data__data_query");
+        assertThat(args).contains("create_file");
+    }
+
+    @Test
+    @DisplayName("NATIVE 방식에도 통로를 붙이고 통로 도구 머리글에 연 도구를 싣는다")
+    void channelTools_native() throws IOException {
+        String args = runAndDumpArgs(ClaudeCliCommandBuilder.ToolMode.NATIVE, null, "sess-1", null,
+                List.of("data_query", "create_file"));
+
+        assertThat(args).contains("/mcp-data").contains("data_query,create_file");
+        assertThat(args).doesNotContain("--disallowedTools mcp__aimbase-data__");
+    }
+
+    @Test
+    @DisplayName("작업자의 통로 열쇠는 세션이 없으면 빈 목록, 목록이 없으면 계산 도구 하나다")
+    void channelKey() {
+        assertThat(ClaudeCliWorker.channelKey(null, List.of("create_file"))).isEmpty();
+        assertThat(ClaudeCliWorker.channelKey("sess-1", null)).containsExactly("data_query");
+        assertThat(ClaudeCliWorker.channelKey("sess-1", List.of("create_file", "data_query")))
+                .containsExactly("data_query", "create_file");
     }
 
     @Test
@@ -125,6 +161,11 @@ class ClaudeCliWorkerDataChannelTest {
     }
 
     private String runAndDumpArgs(List<String> allowed, String dataSessionId, String runId) throws IOException {
+        return runAndDumpArgs(ClaudeCliCommandBuilder.ToolMode.AIMBASE, allowed, dataSessionId, runId, null);
+    }
+
+    private String runAndDumpArgs(ClaudeCliCommandBuilder.ToolMode mode, List<String> allowed, String dataSessionId,
+                                  String runId, List<String> channelTools) throws IOException {
         Path argsDump = tempDir.resolve("args-" + System.nanoTime() + ".txt");
         Path stub = writeStub("""
                 #!/bin/bash
@@ -137,10 +178,11 @@ class ClaudeCliWorkerDataChannelTest {
                 """.formatted(argsDump));
         worker = new ClaudeCliWorker(stub.toString(), null, null, false, null, Duration.ofSeconds(10),
                 SERVER_CONFIG.strip());
-        worker.setToolMode(ClaudeCliCommandBuilder.ToolMode.AIMBASE);
+        worker.setToolMode(mode);
         worker.setAllowedTools(allowed);
         if (dataSessionId != null) worker.setDataSessionId(dataSessionId);
         if (runId != null) worker.setRunId(runId);
+        if (channelTools != null) worker.setChannelTools(channelTools);
         worker.start();
         worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
         return Files.readString(argsDump);

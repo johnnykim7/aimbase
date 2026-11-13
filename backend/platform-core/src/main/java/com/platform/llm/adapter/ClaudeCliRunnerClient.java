@@ -343,8 +343,12 @@ public class ClaudeCliRunnerClient {
                     .toList());
         }
         // CR-183: 대화 요청이면 러너가 계산 도구 통로를 붙이도록 대화 세션 번호를 싣는다(BIZ-222).
+        // CR-182: 통로에 열 도구도 싣는다. 없으면 러너가 data_query 하나로 본다.
         if (request.dataSessionId() != null && !request.dataSessionId().isBlank()) {
             body.put("data_session_id", request.dataSessionId());
+            if (request.channelTools() != null && !request.channelTools().isEmpty()) {
+                body.put("channel_tools", request.channelTools());
+            }
         }
         // CR-107 디버그: BE 가 agent 로 보내는 working_directory 추적.
         org.slf4j.LoggerFactory.getLogger(ClaudeCliRunnerClient.class)
@@ -369,14 +373,6 @@ public class ClaudeCliRunnerClient {
         }
         if (allowedTools == null && exposedTools != null && !exposedTools.isEmpty()) {
             allowedTools = exposedTools;
-        }
-        // CR-182: 파일 만들기처럼 이 요청에만 더 여는 서버 도구. 목록이 없어 전체를 여는 요청은 이미 들어 있다.
-        if (allowedTools != null && request.extraAllowedTools() != null && !request.extraAllowedTools().isEmpty()) {
-            List<String> merged = new java.util.ArrayList<>(allowedTools);
-            for (String extra : request.extraAllowedTools()) {
-                if (extra != null && !extra.isBlank() && !merged.contains(extra)) merged.add(extra);
-            }
-            allowedTools = merged;
         }
         if (allowedTools != null) {
             body.put("allowed_tools", allowedTools);

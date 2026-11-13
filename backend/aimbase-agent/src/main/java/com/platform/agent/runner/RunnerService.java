@@ -169,7 +169,8 @@ public class RunnerService {
         // CR-147: 단계가 고정한 스킬과 판은 Worker 가 MCP 머리글로 서버에 돌려준다(BIZ-123).
         ClaudeCliWorker worker = workerPool.getOrCreateMain(
                 runId, model, configDir, systemPromptOverride, toolMode, allowedTools,
-                request.workingDirectory(), disallowSubagent, request.skillSet(), request.dataSessionId());
+                request.workingDirectory(), disallowSubagent, request.skillSet(), request.dataSessionId(),
+                request.channelTools());
 
         // CR-173: 첫 턴 여부는 워커에 묶는다. 유휴 회수나 실행기 전체 상한의 자리 내기로 워커가 새로 뜨면
         // 그 워커는 앞 대화를 모르므로 api 가 보낸 대화 전체를 다시 넣어야 한다.

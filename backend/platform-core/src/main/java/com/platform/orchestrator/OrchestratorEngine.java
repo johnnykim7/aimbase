@@ -390,12 +390,11 @@ public class OrchestratorEngine {
         List<Map<String, Object>> actionsExecuted = List.of();
         // CR-183: 대화 요청이면 계산 도구를 붙인다. API 는 도구를 끈 대화여도 데이터 파일이 있으면
         // 계산 도구 하나만 실은 도구 루프를 탄다. CLI 는 러너가 계산 도구 통로를 붙인다(BIZ-222).
-        // CR-182: 파일 만들기도 같은 식이다. CLI 는 고리 없이 허용 도구 목록에 더하고, 그 밖은 고리로 준다.
+        // CR-182: 파일 만들기도 같은 식이다. CLI 는 고리 없이 계산 도구와 같은 실행기 통로에 싣고, 그 밖은 고리로 준다.
         boolean cliAdapter = com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider());
-        com.platform.tool.ToolFilterContext toolFilter = chatFeatures.attachDataTools(request, sessionId, cliAdapter);
+        com.platform.tool.ToolFilterContext toolFilter = chatFeatures.attachDataTools(request, sessionId);
         boolean dataQueryOnly = !request.actionsEnabled() && !cliAdapter
                 && ChatFeatureSupport.attachesDataQuery(toolFilter);
-        String dataSessionId = ChatFeatureSupport.attachesDataQuery(toolFilter) ? sessionId : null;
         try {
             if ((fileCreateToolGate.loop(request, cliAdapter) && toolRegistry.hasTools()) || dataQueryOnly) {
                 // Tool use 루프 — 최대 5회 반복 (CR-006 + CR-029: ToolContext + lineage)
@@ -422,8 +421,9 @@ public class OrchestratorEngine {
                         modelConfig, false, sessionId, null, resolvedSchema, workspacePath)
                         // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (CLI 어댑터만 사용, 그 외 무시)
                         .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride())
-                        .withDataSessionId(dataSessionId)   // CR-183: CLI 어댑터만 읽는다
-                        .withExtraAllowedTools(fileCreateToolGate.extraAllowed(request, cliAdapter));
+                        // CR-183, CR-182: CLI 어댑터만 읽는다. 러너가 계산 도구와 파일 만들기를 통로에 싣는다
+                        .withDataChannel(sessionId, com.platform.tool.DataChannelTools.of(
+                                fileCreateToolGate.filter(request, toolFilter)));
                 try {
                     if (request.connectionId() == null || request.connectionId().isBlank()) {
                         // CR-082: CLI adapter 는 fallback chain 우회 — 다른 provider 로 떨어지면
@@ -742,7 +742,7 @@ public class OrchestratorEngine {
         // CR-183, CR-182: 계산 도구와 파일 만들기 붙이기. 판단은 비스트리밍 경로와 같다(BIZ-222, BIZ-210).
         boolean streamCliAdapter = com.platform.llm.adapter.ClaudeCliAdapter.PROVIDER.equals(adapter.getProvider());
         com.platform.tool.ToolFilterContext streamToolFilter =
-                chatFeatures.attachDataTools(request, sessionId, streamCliAdapter);
+                chatFeatures.attachDataTools(request, sessionId);
         boolean streamDataQueryOnly = !request.actionsEnabled() && !streamCliAdapter
                 && ChatFeatureSupport.attachesDataQuery(streamToolFilter);
         try {
@@ -761,9 +761,9 @@ public class OrchestratorEngine {
                         streamModelConfig, true, sessionId, null, null, workspacePath)
                         // CR-128(갭B): 요청 단위 CLI tool_mode/system_prompt override 전파 (스트리밍 경로)
                         .withCliOverrides(request.toolModeOverride(), request.systemPromptOverride())
-                        // CR-183: CLI 어댑터만 읽는다. 러너가 계산 도구 통로를 붙인다(BIZ-222)
-                        .withDataSessionId(ChatFeatureSupport.attachesDataQuery(streamToolFilter) ? sessionId : null)
-                        .withExtraAllowedTools(fileCreateToolGate.extraAllowed(request, streamCliAdapter));
+                        // CR-183, CR-182: CLI 어댑터만 읽는다. 러너가 계산 도구와 파일 만들기를 통로에 싣는다
+                        .withDataChannel(sessionId, com.platform.tool.DataChannelTools.of(
+                                fileCreateToolGate.filter(request, streamToolFilter)));
                 StringBuilder textBuf = new StringBuilder();
                 final TokenUsage[] usageHolder = new TokenUsage[]{null};
                 final String[] idHolder = new String[]{""};

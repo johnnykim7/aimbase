@@ -400,6 +400,39 @@ class ServerMcpToolDispatcherTest {
         assertThat(captured.get().skillSet()).isNullOrEmpty();
     }
 
+    @Test
+    @DisplayName("CR-182 TC-CHT-083: 통로 도구 머리글이 없으면 aimbase-data 통로는 data_query 만 부른다")
+    void dataChannel_withoutHeader_blocksCreateFile() {
+        when(toolRegistry.getExecutor("create_file")).thenReturn(stubTool("create_file", "made"));
+        when(toolRegistry.getExecutor("data_query")).thenReturn(stubTool("data_query", "rows"));
+        com.platform.llm.adapter.RequestContext.clear();
+        try {
+            assertThat(dispatcher.dispatchData("create_file", Map.of()).isError()).isTrue();
+            assertThat(dispatcher.dispatchData("data_query", Map.of()).isError()).isFalse();
+        } finally {
+            com.platform.llm.adapter.RequestContext.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("CR-182 TC-CHT-083: 머리글로 연 create_file 은 대화 세션으로 부르고 작업 폴더는 비운다")
+    void dataChannel_createFile_getsChatSession() {
+        java.util.concurrent.atomic.AtomicReference<ToolContext> captured =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        when(toolRegistry.getExecutor("create_file")).thenReturn(capturingEnhancedTool("create_file", captured));
+        com.platform.llm.adapter.RequestContext.setChannelTools("create_file");
+        com.platform.llm.adapter.RequestContext.setChatSessionId("cs-1");
+        try {
+            assertThat(dispatcher.dispatchData("create_file", Map.of()).isError()).isFalse();
+            assertThat(dispatcher.dispatchData("data_query", Map.of()).isError()).isTrue();
+        } finally {
+            com.platform.llm.adapter.RequestContext.clear();
+        }
+
+        assertThat(captured.get().sessionId()).isEqualTo("cs-1");
+        assertThat(captured.get().workspacePath()).isNull();
+    }
+
     private static ToolExecutor capturingEnhancedTool(
             String name, java.util.concurrent.atomic.AtomicReference<ToolContext> sink) {
         UnifiedToolDef def = new UnifiedToolDef(name, "test", Map.of("type", "object"));

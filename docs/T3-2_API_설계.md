@@ -3691,7 +3691,7 @@ BLOCK 은 `turn_id`, `index`, `lang` 이 차고 `name` 이 비어 있다. 판의
 | data_session_id | 글 | 대화 세션 번호(CR-183). 있으면 실행기가 `aimbase-data` 통로를 붙인다 |
 | channel_tools | 글 목록 | 통로에 열 도구(CR-182). `data_query`, `create_file` 중. 없으면 `data_query` 하나 |
 
-- 실행기는 대화 세션마다 CLI 를 이어 쓴다. `channel_tools` 가 살아 있는 CLI 와 다르면 닫고 새로 띄운다.
+- 실행기는 대화 세션마다 CLI 를 이어 쓴다. `channel_tools` 가 살아 있는 CLI 와 다르면 닫고 다시 기동한다.
 
 ## 위젯 이미지 생성 [v7.17, CR-184]
 

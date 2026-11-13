@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.40.1** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.40.2** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2793,7 +2793,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
  "file_create": true}
 ```
 
-- `file_create: true` 이고 런타임 설정 `chat.file-create.enabled` 가 켜져 있으면 그 요청에 서버 도구 `create_file` 을 줍니다. API 연결은 `actions_enabled` 가 없어도 이 도구 하나로 도구 고리를 돌리고, CLI 연결은 실행기 허용 도구 목록에 더합니다.
+- `file_create: true` 이고 런타임 설정 `chat.file-create.enabled` 가 켜져 있으면 그 요청에 서버 도구 `create_file` 을 줍니다. API 연결은 `actions_enabled` 가 없어도 이 도구 하나로 도구 고리를 돌리고, CLI 연결은 실행기가 붙이는 계산 도구 통로(`/mcp-data`)에 함께 실어 부릅니다. 내장 도구만 쓰는 방식(NATIVE)도 같습니다.
 - 칸이 없거나 거짓이면 지금과 같습니다. 붙이는 앱의 서버 호출은 바뀌지 않습니다.
 - 만든 파일은 세션 작업 폴더 `out/` 에 남고 끝 이벤트 `done.artifacts[]` 로 옵니다(§ 29 와 같은 모양). 받기는 `GET /api/v1/chat/artifacts/download` 입니다.
 
@@ -3366,6 +3366,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.40.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 31-1). CLI 연결의 `create_file` 은 허용 도구 목록이 아니라 실행기가 붙이는 계산 도구 통로(`/mcp-data`)로 부른다. 내장 도구만 쓰는 방식(NATIVE)도 같다 |
 | v3.40.1 | 2026-11-13 | **CR-186** (§ 35-4) ready 가 받아쓰기 서버 준비를 기다리는 것과 1011 경우 보정, 운용 가이드 절 번호 § 2-20 으로 바로잡음 |
 | v3.40.0 | 2026-11-13 | **CR-185 위젯 안 승인과 거절** (§ 37). 정책 `match_rules.tools` 와 `REQUIRE_APPROVAL` 로 도구 실행 전 승인, 대화 스트림 `approval_required`, `approval_resolved`, 결정 API `POST /api/v1/chat/approvals/{approvalId}`. 워크플로우 승인에 권한 `workflow:approve`, 승인자 확인, 정한 사람 기록, 409 |
 | v3.39.0 | 2026-11-13 | **CR-183 위젯 데이터 첨부, 계산, 그래프, 수식** (§ 36). 첨부가 xlsx, xls, csv, tsv, docx, txt, md 를 받고 오류 코드 `FG-ATT-4003` ~ `FG-ATT-4006`, 오류 본문 `code`, `limit`. 대화 요청 `render_features`, `document` 블록이 데이터, 텍스트 첨부도 받음. 계산 도구 `data_query`. 위젯 설정 `attachments` |

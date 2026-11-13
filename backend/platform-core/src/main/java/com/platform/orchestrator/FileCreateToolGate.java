@@ -36,7 +36,7 @@ public class FileCreateToolGate {
         return request.fileCreate() && enabled();
     }
 
-    /** 도구 고리를 돌린다. CLI 연결은 고리 없이 허용 도구 목록에 더한다. */
+    /** 도구 고리를 돌린다. CLI 연결은 고리 없이 실행기 통로에 싣는다(3.2.2). */
     public boolean loop(ChatRequest request, boolean cli) {
         return request.actionsEnabled() || (on(request) && !cli);
     }
@@ -75,10 +75,5 @@ public class FileCreateToolGate {
     private static ToolFilterContext copy(ToolFilterContext base, List<String> allowed, List<String> exclude) {
         return new ToolFilterContext(allowed, exclude, base.tags(), base.requiredCapabilities(),
                 base.maxPermission(), base.readOnlyMode(), base.attachedTools());
-    }
-
-    /** 도구 고리를 돌지 않는 CLI 요청에서 허용 도구 목록에 더할 것. */
-    public List<String> extraAllowed(ChatRequest request, boolean cli) {
-        return cli && !request.actionsEnabled() && on(request) ? List.of(TOOL) : null;
     }
 }

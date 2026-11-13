@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.36.1** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.36.2** | 2026-11-13 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -821,7 +821,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 
 위젯 사용자가 AI 에게 워드, PDF, 엑셀, PPT, CSV 파일을 만들게 하고, 응답 하나를 「저장」(PDF, 워드), 대화 전체를 더 보기 「대화 내보내기」(PDF, 워드, 마크다운)로 받고, 대화나 만든 파일을 「공유 링크 만들기」 로 나누는 기능입니다. API 는 API 가이드 § 31.
 
-**파일 만들기.** 연결 종류(API, CLI)와 관계없이 서버 도구 `create_file` 이 파일을 그려 세션 작업 폴더 `out/` 에 씁니다. 위젯이 대화 요청마다 `file_create: true` 를 실을 때만 도구가 열리므로 붙이는 앱의 서버 호출은 바뀌지 않습니다. 모델에게 보이는 도구 설명은 테넌트 프롬프트 틀 `tool.create-file.description` 에서 고칩니다.
+**파일 만들기.** 연결 종류(API, CLI)와 관계없이 서버 도구 `create_file` 이 파일을 그려 세션 작업 폴더 `out/` 에 씁니다. 위젯이 대화 요청마다 `file_create: true` 를 실을 때만 도구가 열리므로 붙이는 앱의 서버 호출은 바뀌지 않습니다. 모델에게 보이는 도구 설명은 테넌트 프롬프트 틀 `tool.create-file.description` 에서 고칩니다. 실행기(Claude CLI) 연결은 실행기가 붙이는 계산 도구 통로(`/mcp-data`)로 이 도구를 부르므로 api 와 실행기를 함께 올립니다. 대화 중에 파일 만들기가 켜지거나 꺼지면 실행기가 그 대화의 CLI 를 다시 기동하고 대화 전체를 다시 넘깁니다.
 
 **PDF 한글 글꼴.** api 이미지에 `fonts-nanum` 을 깝니다. 글꼴 폴더는 환경변수 `AIMBASE_DOCUMENT_PDF_FONT_DIR`(기본 `/usr/share/fonts/truetype/nanum`)입니다. 폴더에 글꼴이 없으면 PDF 만 503 `pdf_font_missing` 이고 위젯 형식 목록에서 PDF 가 빠집니다. 워드, 마크다운은 그대로 됩니다.
 
@@ -2235,6 +2235,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.36.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 2-17). 실행기 연결은 계산 도구 통로(`/mcp-data`)로 `create_file` 을 부르므로 api 와 실행기를 함께 올린다. 파일 만들기가 바뀌면 그 대화의 CLI 를 다시 기동한다 |
 | v3.36.1 | 2026-11-13 | **CR-186** (§ 2-20) 설정 `widget.voice.connect-timeout-seconds`, 맥 서버를 다시 켰을 때 안내. API 가이드 절 번호 § 35 로 바로잡음 |
 | v3.36.0 | 2026-11-13 | **CR-185 도구 실행 전 승인** (§ 3-2, § 4 시나리오 Q, § 5). 정책 규칙 타입 「도구 실행 전 승인」(대상 도구, 안내 문구), 플랫폼 설정 `chat.approval-timeout-seconds`, 대상 도구는 위젯 대화 밖에서 실행되지 않음, CLI 연결은 실행기 재배포 필요 |
 | v3.35.0 | 2026-11-13 | **CR-183 위젯 데이터 첨부, 계산, 그래프, 수식** (§ 2-21). 첨부 종류 확대, 런타임 설정 `widget.attachment.max-data-bytes`, `max-text-bytes`, `max-text-chars`, `widget.data.*` 7개(마스터 V86), 프롬프트 틀 `widget.data.guide`, `widget.render.chart`, `widget.render.math`(테넌트 V86), CLI 실행기 판, 증상과 조치 |
