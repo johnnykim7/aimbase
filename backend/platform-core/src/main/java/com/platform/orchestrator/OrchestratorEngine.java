@@ -1137,7 +1137,8 @@ public class OrchestratorEngine {
      *
      * <p>여기서 세션 전용 폴더를 잡아주면 소비앱·위젯 코드 변경 없이 모든 채팅 세션이 산출물 전달 통로를 갖는다.
      * 경로는 {@code {base}/chat/{sessionId}} — base 는 BE·러너가 동일 볼륨으로 공유하는 마운트
-     * (운영: {@code /data/workspace})라 러너가 쓴 파일을 BE 가 그대로 읽는다.
+     * (운영: {@code /data/workspace})라 러너가 쓴 파일을 BE 가 그대로 읽는다. 작업 폴더를 따로 붙인 러너
+     * (CS 실행기 등)로 가는 연결은 그 러너 폴더 아래에 잡는다(CR-187, {@code aimbase.workspace.runner-bases}).
      *
      * <p>CLI 커넥션에만 적용한다. 일반 LLM 채팅은 파일을 만들 수단이 없어 빈 폴더만 양산되기 때문이다.
      * 폴더 생성은 실제 사용 시점(러너가 cwd 로 진입)에 맡기지 않고 여기서 미리 만든다 — CLI 프로세스의
@@ -1148,7 +1149,8 @@ public class OrchestratorEngine {
     private String autoAssignChatWorkspace(ChatRequest request, String sessionId) {
         if (sessionId == null || sessionId.isBlank()) return null;
         if (!connectionAdapterFactory.isCliConnection(request.connectionId())) return null;
-        return chatWorkspaceAssigner.assign(sessionId);
+        return chatWorkspaceAssigner.assign(sessionId,
+                connectionAdapterFactory.routingAgentName(request.connectionId()));
     }
 
     /**

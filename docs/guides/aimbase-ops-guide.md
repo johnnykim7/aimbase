@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.36.2** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.37.0** | 2026-11-14 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -530,6 +530,8 @@ bp-wes 의 CS 초안과 CS 상세 AI 대화(위젯)는 실행기 `aimbase-agent-
 6. `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-wes-cs`: 실행기 기록에 `Agent registered successfully: name=cli-runner-bp-wes-cs` 가 나오면 된 것
 7. 계정 로그인 `work01`, `work02`(위와 같은 방법, 서비스 이름만 `aimbase-agent-wes-cs`)
 8. `bootstrap connections wes-cs`: 계정마다 `cli-runner-bp-wes-cs-<계정>`, 묶음 `cli-runner-bp-wes-cs-rr`, 위젯 연결 `cli-runner-bp-wes-cs-001`(계정 `WIDGET_ACCOUNT`, 기본 `work01`). 설정은 59 와 같게 `tool_mode=NATIVE`, 도구 `bash`, `get_current_time`
+
+**작업 폴더 경로 [CR-187]**: api 와 CS 실행기가 `workspace-wes-cs` 를 같은 컨테이너 경로 `/data/workspace-wes-cs` 로 붙이고, api 환경설정 `AIMBASE_WORKSPACE_RUNNER_BASES=cli-runner-bp-wes-cs=/data/workspace-wes-cs` 로 연결 설정 `agent_name` 이 `cli-runner-bp-wes-cs` 인 대화의 작업 폴더를 그 아래 `chat/{세션}` 에 잡습니다. 경로가 다르면 실행기 기록에 `workingDirectory ... is not a directory, using default cwd` 가 남고, 실행기가 만든 파일이 대화 파일 카드로 올라오지 않습니다. 실행기를 더 나눌 때도 같게 하고 `실행기 이름=폴더` 를 쉼표로 더합니다. 그 폴더는 허용 폴더에 저절로 들어갑니다. 59 와 chaws 의 compose 에 들어 있습니다.
 9. `bootstrap smoke wes-cs`: 실행기의 DB 계정이 `wes_cs_ai` 인지 보고, bp-wes 가 부르는 길(망 `aimbase-apps`, 소비앱 키, 묶음, `stream=false`)로 CLI 에게 `select current_user` 를 시켜 응답을 찍는다
 
 ```bash
@@ -1253,6 +1255,7 @@ DAG 기반 워크플로우를 설계하고 실행합니다. Workflow Studio(비�
 
 - **사전 조건**: agent 컨테이너에 BE/사이드카와 **동일 workspace 볼륨 마운트** 필수 — `docker-compose.prod.yml`에 `./workspace:/data/workspace` 3곳(be/rag/agent) 정렬됨. 누락 시 CLI 내장 Read가 작업장 파일을 못 찾아 헤매다 turn timeout
 - 세션에 명시 `workspaceRef`가 있으면(소비앱 채팅 연동 지정) 그걸 사용(기존 동작 보존), 없으면 run별 격리 경로 생성
+- 작업 폴더를 api 공용 폴더와 따로 붙인 실행기(CS 실행기 등)의 대화는 `AIMBASE_WORKSPACE_RUNNER_BASES` 로 그 실행기 폴더 아래에 잡는다(CR-187, § 2-10). 워크플로우 run 폴더는 아직 공용 base 아래다
 
 **CLI worker 좀비 누수 점검 [CR-109 / CR-114]**
 
@@ -2235,6 +2238,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.37.0 | 2026-11-14 | **CR-187 따로 붙인 실행기의 대화 작업 폴더** (§ 2-10, CR-107 run별 격리 절). 환경설정 `AIMBASE_WORKSPACE_RUNNER_BASES`(`실행기 이름=폴더`), CS 실행기와 api 가 `workspace-wes-cs` 를 `/data/workspace-wes-cs` 로 붙임 |
 | v3.36.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 2-17). 실행기 연결은 계산 도구 통로(`/mcp-data`)로 `create_file` 을 부르므로 api 와 실행기를 함께 올린다. 파일 만들기가 바뀌면 그 대화의 CLI 를 다시 기동한다 |
 | v3.36.1 | 2026-11-13 | **CR-186** (§ 2-20) 설정 `widget.voice.connect-timeout-seconds`, 맥 서버를 다시 켰을 때 안내. API 가이드 절 번호 § 35 로 바로잡음 |
 | v3.36.0 | 2026-11-13 | **CR-185 도구 실행 전 승인** (§ 3-2, § 4 시나리오 Q, § 5). 정책 규칙 타입 「도구 실행 전 승인」(대상 도구, 안내 문구), 플랫폼 설정 `chat.approval-timeout-seconds`, 대상 도구는 위젯 대화 밖에서 실행되지 않음, CLI 연결은 실행기 재배포 필요 |

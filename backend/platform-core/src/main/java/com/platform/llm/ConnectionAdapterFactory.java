@@ -244,6 +244,25 @@ public class ConnectionAdapterFactory {
     }
 
     /**
+     * CR-187: 연결 설정 {@code agent_name}(이 연결을 받는 실행기 이름). 대화 작업 폴더를 그 실행기가 볼 수 있는
+     * 곳에 잡을 때 쓴다. 없으면 null 이고, 실행기는 요청 머리글이나 user_ref 로 정해진다(CR-075).
+     */
+    public String routingAgentName(String connectionId) {
+        if (connectionId == null || connectionId.isBlank()) return null;
+        try {
+            return connectionRepository.findById(connectionId)
+                    .map(conn -> conn.getConfig() != null ? conn.getConfig().get("agent_name") : null)
+                    .filter(String.class::isInstance)
+                    .map(String.class::cast)
+                    .filter(name -> !name.isBlank())
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("[CR187] 연결 실행기 이름 조회 실패 connection={}: {}", connectionId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * CR-075: connection_id 미지정 호출에 대해 현재 테넌트의 기본 anthropic-cli connection 을 반환.
      * 조건:
      *   1) {@link #isCliEnabledForCurrentTenant()} — 피처 플래그 통과

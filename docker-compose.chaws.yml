@@ -54,6 +54,7 @@ services:
       CLAUDE_CODE_WORKING_DIRECTORY: /data/workspace
       AIMBASE_WORKSPACE_BASE: /data/workspace
       AIMBASE_WORKSPACE_WHITELIST: /data/workspace
+      AIMBASE_WORKSPACE_RUNNER_BASES: "cli-runner-bp-wes-cs=/data/workspace-wes-cs"
     mem_limit: 2g
     # 관리 API 는 맥에서 SSH 터널로만 부른다. bp-wms 는 aimbase-apps 망으로 부른다.
     ports: ["127.0.0.1:8280:8080"]
@@ -61,6 +62,8 @@ services:
       - ./claude-accounts:/home/appuser/.claude-accounts
       - ./aimbase-storage:/data/aimbase
       - ./workspace:/data/workspace
+      # CR-187: CS 실행기 작업 폴더. 실행기와 같은 경로로 붙여 대화 폴더를 그 안에 잡는다.
+      - ./workspace-wes-cs:/data/workspace-wes-cs
     networks:
       default: {}
       aimbase-apps:
@@ -172,7 +175,8 @@ services:
     # 계정 폴더 work01, work02 를 붙인다. 연결마다 config.config_dir 로 폴더를 고른다.
     volumes:
       - ./claude-accounts-wes-cs:/home/appuser/.claude-accounts
-      - ./workspace-wes-cs:/data/workspace
+      # api 가 같은 폴더를 같은 경로로 붙인다(CR-187).
+      - ./workspace-wes-cs:/data/workspace-wes-cs
     depends_on:
       api:
         condition: service_healthy

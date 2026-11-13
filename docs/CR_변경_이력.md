@@ -143,6 +143,7 @@
 | CR-184 | [위젯 이미지 생성](CR-184_위젯_이미지_생성.md) | 신규 | Medium | - | 개발기 반영(운영 반영 전) |
 | CR-185 | [위젯 안 승인과 거절](CR-185_위젯_안_승인과_거절.md) | 신규 | High | - | 구현중 |
 | CR-186 | [위젯 답 읽어주기와 실시간 음성](CR-186_위젯_답_읽어주기와_실시간_음성.md) | 신규 | Medium | - | 설계중 |
+| CR-187 | [59 CS 실행기 작업 폴더를 api 와 맞추기](CR-187_59_CS_실행기_작업_폴더를_api_와_맞추기.md) | 변경 | Low | - | 구현중 |
 | CR-188 | [위젯 설정 전에 보낸 질문의 파일 만들기와 모델 누락](CR-188_위젯_설정_전에_보낸_질문의_파일_만들기와_모델_누락.md) | 변경 | Low | - | 개발기 반영(운영 반영 전) |
 
 ---
@@ -2964,6 +2965,18 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 | 5 | 시험 설정이 docker info 를 시간 제한 없이 기다려, Docker 가 멈추면 bootRun, bootJar 를 포함한 모든 gradle 호출이 멈춘다 | CR-150 (2026-10-14) | backend/platform-core/build.gradle.kts:110-111 | 실제로 20분 넘게 멈춘 것을 확인. 배포 때는 멈춘 docker info 를 끊어 진행했다 |
 | 6 | 화면 시험 도구가 없다. 이 저장소 CLAUDE.md 는 FE 훅 시험(use*.test.ts)을 필수로 두지만 frontend/package.json 에 시험 명령과 도구가 없고 훅 시험 파일도 없다 | CR-149 (2026-10-13) | frontend/package.json scripts, frontend/src/hooks | 확인 |
 | 10 | 옛 서버(59.8.160.12) 공용 Postgres(bp-postgres, 주인 bp-infra)의 관리자 계정 platform 비밀번호가 계정 이름과 같다. 이 계정은 superuser 이고 Aimbase api, rag, bp-wms, bp-wes, bp-oms, bp-3plgw, WorkMap, FlowGuard 가 함께 쓴다. 5432 는 0.0.0.0 에 열려 있고 pg_hba 가 모든 주소를 비밀번호로 받는다. 이 맥에서는 접속되고 AWS(54.116.150.247)에서는 닫혀 있어 방화벽이 일부 주소만 받는 것으로 보인다. 개발자 로컬 프로필(bp-wms application-local.yml)은 이 주소로 읽기 전용 계정 claude_ro 를 쓴다 | CR-155 (2026-10-25), 2026-10-26 다시 확인 | 컨테이너 환경 해시 대조, pg_hba, pg_roles, AWS 에서 5432 접속 시험 | 해시와 접속 시험으로 확인. 방화벽 규칙은 root 권한이 없어 못 봤다. CR-155 때 적은 "backend/.env.example 의 값과 같다" 는 틀렸다(그 파일 값은 다르다) |
+
+
+### CR-187 | 59 CS 실행기 작업 폴더를 api 와 맞추기
+- **대상 기능 ID**: 없음(CR-132 대화 작업 폴더, CR-173 CS 실행기의 배치 보정)
+- **변경 타입**: 변경
+- **변경 내용**: 대화 작업 폴더를 그 연결이 가는 실행기가 볼 수 있는 곳에 잡는다. api 설정 `aimbase.workspace.runner-bases`(`실행기 이름=폴더`)에 있는 실행기로 가는 연결은 그 폴더 아래 `chat/{세션}` 에 잡고, 그 폴더는 허용 폴더에 저절로 든다. 59 와 chaws 의 api, CS 실행기가 `workspace-wes-cs` 를 같은 경로 `/data/workspace-wes-cs` 로 붙인다
+- **변경 사유**: CS 실행기가 `/data/workspace` 에 다른 호스트 폴더를 붙여 api 가 잡은 대화 폴더가 실행기 안에 없었다. 실행기가 직접 만든 파일이 대화 파일 카드로 올라오지 않았다(CR-181 15절 표 5). 운영 chaws 도 같았다
+- **결정**: 11/13 19:41 사용자 /전승 후속 CR 발번. 11/14 01:11 컨타 승인 ①(실행기별 작업 폴더 표, CS 격리 유지)
+- **영향 모듈**: platform-core `config`(WorkspaceProperties), `session`(ChatWorkspaceAssigner), `llm`(ConnectionAdapterFactory), `orchestrator`(OrchestratorEngine), compose 2벌
+- **영향도**: Low (표에 없는 실행기와 API 연결은 그대로. 품고 수리 실행기의 워크플로우 run 폴더는 범위 밖)
+- **영향 설계서**: 운용 가이드 v3.37.0. T 문서는 대화 작업 폴더 규칙을 적은 곳이 없어 바꾸지 않았다
+- **상태**: 구현중 (2026-11-14)
 
 ---
 

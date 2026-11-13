@@ -25,6 +25,8 @@ services:
       - "8280:8080"
     volumes:
       - ./workspace:/data/workspace
+      # CR-187: CS 실행기 작업 폴더. 실행기와 같은 경로로 붙여 대화 폴더를 그 안에 잡는다(AIMBASE_WORKSPACE_RUNNER_BASES).
+      - ./workspace-wes-cs:/data/workspace-wes-cs
       - ./claude-accounts:/home/appuser/.claude-accounts
       # CR-137 Phase 0: 업로드 스토리지 영속화.
       # LocalStorageService 가 /data/aimbase 아래에 첨부 파일을 쓰는데(application.yml
@@ -50,6 +52,7 @@ services:
       # turn 이 먼저 끊고 BE 가 그 신호를 받게 함(CR-109 동시발동 회피). 넘으면 retry 이어하기(CR-106).
       ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS: "660"
       CLAUDE_CODE_WORKING_DIRECTORY: /data/workspace
+      AIMBASE_WORKSPACE_RUNNER_BASES: "cli-runner-bp-wes-cs=/data/workspace-wes-cs"
       SKILL_SANDBOX_URL: http://skill-sandbox:8300
       AIMBASE_TTS_SIDECAR_URL: http://tts-sidecar:8310
     # skill-sandbox 는 skill-sandbox-net 에만 있으므로 api 가 그 망에 더 붙는다.
@@ -301,7 +304,8 @@ services:
       - api
     volumes:
       - ./claude-accounts-wes-cs:/home/appuser/.claude-accounts
-      - ./workspace-wes-cs:/data/workspace
+      # api 가 같은 폴더를 같은 경로로 붙인다(CR-187). /data/workspace 에 붙이면 api 가 잡은 대화 폴더가 이 안에 없다.
+      - ./workspace-wes-cs:/data/workspace-wes-cs
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
       AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"

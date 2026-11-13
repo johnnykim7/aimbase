@@ -43,6 +43,39 @@ class WorkspacePropertiesTest {
     }
 
     @Test
+    void runnerBase_mapsRunnerNameToFolder() {
+        WorkspaceProperties p = new WorkspaceProperties();
+        p.setRunnerBases(List.of("cli-runner-bp-wes-cs=/data/workspace-wes-cs", " ", "cli-runner-x = /data/x "));
+        assertEquals("/data/workspace-wes-cs", p.runnerBase("cli-runner-bp-wes-cs"));
+        assertEquals("/data/x", p.runnerBase("cli-runner-x"));
+        assertNull(p.runnerBase("cli-runner-bp-wes"));
+        assertNull(p.runnerBase(null));
+    }
+
+    @Test
+    void runnerBase_folderJoinsWhitelist() {
+        WorkspaceProperties p = props(List.of(root.toString()));
+        p.setRunnerBases(List.of("cli-runner-bp-wes-cs=" + other));
+        assertTrue(p.isInsideWhitelist(other.resolve("chat/s1")));
+        assertTrue(p.isInsideWhitelist(root.resolve("chat/s1")));
+    }
+
+    @Test
+    void runnerBase_emptyWhitelistStaysOff() {
+        WorkspaceProperties p = props(List.of());
+        p.setRunnerBases(List.of("cli-runner-bp-wes-cs=" + other));
+        assertTrue(p.whitelistPaths().isEmpty());
+    }
+
+    @Test
+    void runnerBase_malformedEntryStopsStartup() {
+        WorkspaceProperties p = new WorkspaceProperties();
+        assertThrows(IllegalArgumentException.class, () -> p.setRunnerBases(List.of("/data/workspace-wes-cs")));
+        assertThrows(IllegalArgumentException.class, () -> p.setRunnerBases(List.of("cli-runner-bp-wes-cs=")));
+        assertThrows(IllegalArgumentException.class, () -> p.setRunnerBases(List.of("cli-runner-bp-wes-cs=data/x")));
+    }
+
+    @Test
     void homeExpansion_works() {
         WorkspaceProperties p = props(List.of("~/"));
         Path inside = Path.of(System.getProperty("user.home"), "anything");

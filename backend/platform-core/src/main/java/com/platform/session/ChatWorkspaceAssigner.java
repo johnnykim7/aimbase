@@ -29,11 +29,22 @@ public class ChatWorkspaceAssigner {
 
     /** @return 작업 폴더 절대경로. 잡지 못하면 null(대화는 계속된다). */
     public String assign(String sessionId) {
+        return assign(sessionId, null);
+    }
+
+    /**
+     * CR-187: 대화를 받을 실행기가 작업 폴더를 따로 붙였으면 그 폴더 아래 {@code chat/{session_id}} 에 잡는다.
+     * 공용 base 에 잡으면 그 실행기 안에는 그 경로가 없어 실행기가 만든 파일이 대화에 올라오지 않는다.
+     *
+     * @param runnerName 연결 설정 {@code agent_name}. 없거나 따로 붙인 실행기가 아니면 base 아래에 잡는다.
+     */
+    public String assign(String sessionId, String runnerName) {
         if (sessionId == null || sessionId.isBlank()) return null;
         String existing = sessionStore.getWorkspaceRef(sessionId);
         if (existing != null && !existing.isBlank()) return existing;
 
-        String base = workspaceProperties.getBase();
+        String runnerBase = workspaceProperties.runnerBase(runnerName);
+        String base = runnerBase != null ? runnerBase : workspaceProperties.getBase();
         if (base == null || base.isBlank()) return null;
         try {
             Path chatRoot = Path.of(base, "chat").toAbsolutePath().normalize();
@@ -50,7 +61,8 @@ public class ChatWorkspaceAssigner {
             Files.createDirectories(dir);
             String assigned = dir.toString();
             sessionStore.setWorkspaceRefIfAbsent(sessionId, assigned);
-            log.info("[CR132] 채팅 작업 폴더 잡음: session={}, path={}", sessionId, assigned);
+            log.info("[CR132] 채팅 작업 폴더 잡음: session={}, path={}, runner={}", sessionId, assigned,
+                    runnerBase != null ? runnerName : "-");
             return sessionStore.getWorkspaceRef(sessionId);
         } catch (Exception e) {
             log.warn("[CR132] 채팅 작업 폴더 잡기 실패 session={}: {}", sessionId, e.getMessage());

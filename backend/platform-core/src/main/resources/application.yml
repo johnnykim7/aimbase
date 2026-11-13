@@ -215,6 +215,9 @@ aimbase:
     base: ${AIMBASE_WORKSPACE_BASE:/data/workspaces}
     whitelist-roots:
       - ${AIMBASE_WORKSPACE_WHITELIST:${user.home}/Documents/GitHub/bp-fulfillment-infra}
+    # CR-187: 작업 폴더를 따로 붙인 실행기. 「실행기 이름=폴더」 를 쉼표로 잇는다. 폴더 경로는 compose 에서
+    # api 와 그 실행기가 같은 호스트 폴더를 붙인 컨테이너 경로와 같아야 한다. 배치마다 달라 여기 둔다.
+    runner-bases: ${AIMBASE_WORKSPACE_RUNNER_BASES:}
   # CR-182: PDF 에 넣을 한글 글꼴 폴더. 이미지마다 깔린 자리가 달라 global_config 가 아니라 여기 둔다.
   document:
     pdf-font-dir: ${AIMBASE_DOCUMENT_PDF_FONT_DIR:/usr/share/fonts/truetype/nanum}
