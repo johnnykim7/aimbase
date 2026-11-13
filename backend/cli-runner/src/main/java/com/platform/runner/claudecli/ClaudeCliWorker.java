@@ -146,10 +146,16 @@ public class ClaudeCliWorker implements AutoCloseable {
      * 서버가 아직 붙지 않은 채 모델이 도구 없이 답을 끝낸다. null 이면 CLI 기본 상한(5초)을 쓴다.
      */
     private volatile Duration mcpConnectTimeout;
+    /**
+     * CR-185: CLI 가 MCP 도구 호출 하나를 기다릴 상한. CLI 기본값(60초)은 서버가 실행 전 승인을 기다리는 시간보다
+     * 짧아, 사용자가 정하기 전에 호출이 끊기고 모델이 시간 초과로 답을 끝낸다. null 이면 CLI 기본값을 쓴다.
+     */
+    private volatile Duration mcpToolTimeout;
     /** CR-152: 이 워커가 CLI 에 넘긴 MCP 서버 이름. 턴을 시작할 때 모두 connected 여야 한다. */
     private volatile Set<String> requiredMcpServers = Set.of();
     static final String ENV_MCP_NONBLOCKING = "MCP_CONNECTION_NONBLOCKING";
     static final String ENV_MCP_CONNECT_TIMEOUT_MS = "MCP_CONNECT_TIMEOUT_MS";
+    static final String ENV_MCP_TOOL_TIMEOUT_MS = "MCP_TOOL_TIMEOUT";
 
     private final ReentrantLock turnLock = new ReentrantLock();
     // CR-175: 응답 중지 신호는 턴을 쥔 스레드 밖에서 온다. 질문 줄과 섞이지 않고, 다음 질문보다 먼저 CLI 에
@@ -284,6 +290,14 @@ public class ClaudeCliWorker implements AutoCloseable {
         this.mcpConnectTimeout = timeout;
     }
 
+    /** CR-185: start() 호출 전, CLI 가 MCP 도구 호출 하나를 기다릴 상한 설정. */
+    public void setMcpToolTimeout(Duration timeout) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set mcpToolTimeout after start()");
+        }
+        this.mcpToolTimeout = timeout;
+    }
+
     /** CR-147: 단계가 고정한 스킬과 판. 비어 있으면 지정 없음(기존 동작). */
     public void setSkillSet(List<SkillRef> skills) {
         if (process != null) {
@@ -344,6 +358,9 @@ public class ClaudeCliWorker implements AutoCloseable {
             pb.environment().put(ENV_MCP_NONBLOCKING, "false");
             if (mcpConnectTimeout != null && mcpConnectTimeout.toMillis() > 0) {
                 pb.environment().put(ENV_MCP_CONNECT_TIMEOUT_MS, String.valueOf(mcpConnectTimeout.toMillis()));
+            }
+            if (mcpToolTimeout != null && mcpToolTimeout.toMillis() > 0) {
+                pb.environment().put(ENV_MCP_TOOL_TIMEOUT_MS, String.valueOf(mcpToolTimeout.toMillis()));
             }
         }
 

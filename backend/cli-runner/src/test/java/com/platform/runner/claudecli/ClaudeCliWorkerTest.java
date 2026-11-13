@@ -601,7 +601,7 @@ class ClaudeCliWorkerTest {
     private Path initStub(String mcpServers, Path envDump) throws IOException {
         return writeStub("""
                 #!/bin/bash
-                echo "${MCP_CONNECTION_NONBLOCKING:-unset} ${MCP_CONNECT_TIMEOUT_MS:-unset}" > '%s'
+                echo "${MCP_CONNECTION_NONBLOCKING:-unset} ${MCP_CONNECT_TIMEOUT_MS:-unset} ${MCP_TOOL_TIMEOUT:-unset}" > '%s'
                 while IFS= read -r line; do
                   if [ -z "$line" ]; then continue; fi
                   echo '{"type":"system","subtype":"init","session_id":"sess-mcp","mcp_servers":%s}'
@@ -615,6 +615,7 @@ class ClaudeCliWorkerTest {
         worker = new ClaudeCliWorker(initStub(mcpServers, envDump).toString(), null, null, false, null,
                 Duration.ofSeconds(10), mcpConfig);
         worker.setMcpConnectTimeout(Duration.ofSeconds(15));
+        worker.setMcpToolTimeout(Duration.ofSeconds(300));
         worker.start();
         return worker;
     }
@@ -650,7 +651,8 @@ class ClaudeCliWorkerTest {
         LLMResponse resp = worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
 
         assertThat(resp.textContent()).isEqualTo("done");
-        assertThat(Files.readString(env).trim()).isEqualTo("false 15000");
+        // CR-185: 도구 호출 상한도 같이 넘겨 승인 대기 중에 CLI 가 호출을 먼저 끊지 않게 한다.
+        assertThat(Files.readString(env).trim()).isEqualTo("false 15000 300000");
     }
 
     @Test
@@ -664,7 +666,8 @@ class ClaudeCliWorkerTest {
         assertThat(resp.textContent()).isEqualTo("done");
         // 워커는 손대지 않으므로 시험을 돌리는 프로세스의 값이 그대로 넘어간다.
         assertThat(Files.readString(env).trim()).isEqualTo(
-                inherited(ClaudeCliWorker.ENV_MCP_NONBLOCKING) + " " + inherited(ClaudeCliWorker.ENV_MCP_CONNECT_TIMEOUT_MS));
+                inherited(ClaudeCliWorker.ENV_MCP_NONBLOCKING) + " " + inherited(ClaudeCliWorker.ENV_MCP_CONNECT_TIMEOUT_MS)
+                        + " " + inherited(ClaudeCliWorker.ENV_MCP_TOOL_TIMEOUT_MS));
     }
 
     private static String inherited(String name) {

@@ -41,6 +41,12 @@ public class RunnerProperties {
     /** CR-152: CLI 가 첫 턴 전에 MCP 서버 연결을 기다릴 상한(초). 그 안에 붙지 않으면 그 턴은 실패한다. */
     private int mcpConnectTimeoutSeconds = 30;
 
+    /**
+     * CR-185: CLI 가 서버 도구 호출 하나를 기다릴 상한(초). CLI 기본값은 60초라, 서버가 실행 전 승인을 기다리는
+     * 동안(chat.approval-timeout-seconds, 최대 240초) 호출이 먼저 끊긴다. 승인 최대 대기보다 길게 둔다.
+     */
+    private int mcpToolTimeoutSeconds = 300;
+
     /** Aimbase MCP 서버 jar 경로 (AIMBASE/HYBRID tool-mode 일 때). */
     private String aimbaseMcpJar;
 
@@ -93,6 +99,8 @@ public class RunnerProperties {
     public void setTurnTimeoutSeconds(int turnTimeoutSeconds) { this.turnTimeoutSeconds = turnTimeoutSeconds; }
     public int getMcpConnectTimeoutSeconds() { return mcpConnectTimeoutSeconds; }
     public void setMcpConnectTimeoutSeconds(int mcpConnectTimeoutSeconds) { this.mcpConnectTimeoutSeconds = mcpConnectTimeoutSeconds; }
+    public int getMcpToolTimeoutSeconds() { return mcpToolTimeoutSeconds; }
+    public void setMcpToolTimeoutSeconds(int mcpToolTimeoutSeconds) { this.mcpToolTimeoutSeconds = mcpToolTimeoutSeconds; }
     public String getAimbaseMcpJar() { return aimbaseMcpJar; }
     public void setAimbaseMcpJar(String aimbaseMcpJar) { this.aimbaseMcpJar = aimbaseMcpJar; }
 

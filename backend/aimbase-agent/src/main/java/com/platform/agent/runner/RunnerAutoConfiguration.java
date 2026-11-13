@@ -55,6 +55,7 @@ public class RunnerAutoConfiguration {
                     Duration.ofSeconds(props.getTurnTimeoutSeconds()),  // CR-106: 설정화 (기본 300s)
                     mcpConfig);
             worker.setMcpConnectTimeout(Duration.ofSeconds(props.getMcpConnectTimeoutSeconds()));  // CR-152
+            worker.setMcpToolTimeout(Duration.ofSeconds(props.getMcpToolTimeoutSeconds()));  // CR-185
             return worker;
         };
         // CR-121: reaper 설정 주입 — idle 좀비 워커 자동 회수.
