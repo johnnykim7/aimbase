@@ -172,7 +172,8 @@ class Memory {
       if (!this.availabilityAsked) {
         this.availabilityAsked = true;
         // 주인이 없는 토큰은 서버가 403 으로 거절하므로 묻지 않고 메뉴를 숨긴 채 둔다(BIZ-180)
-        if (ctx.api.hasUserRef()) void this.loadAvailability();
+        // 지난 모델을 고르기 전에 보낸 질문이 기본 모델로 가지 않게 첫 질문이 이 조회를 기다린다(CR-188)
+        if (ctx.api.hasUserRef()) ctx.chat.waitBeforeSend(this.loadAvailability());
       }
       this.applyLast();
     });

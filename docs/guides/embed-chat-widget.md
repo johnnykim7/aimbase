@@ -269,6 +269,7 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - `contextProvider`: 현재 화면 컨텍스트(예: `{orderId}`)를 매 대화 자동 주입
 - `on.onMessage` / `on.onWorkflowStep` / `on.onApprovalRequired` / `on.onError` / `on.onTokenExpiring`
 - `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`, `locale`, `allowApproval`: 위 속성과 같다. 언어별 값은 `{ ko: ..., en: ... }` 객체로 준다 (CR-175, CR-177)
+- `sendMessage(text)`: 위젯을 만든 직후 불러도 된다. 위젯이 서버의 위젯 설정과 사용자 선호를 받을 때까지 기다렸다가 파일 만들기와 고른 모델을 실어 보낸다. 길어도 10초 기다리고, 그때까지 받지 못하면 서버 기본값으로 보낸다. 입력칸에서 보낸 질문도 같다 (CR-188)
 - `on.onNewConversation({previousSessionId, sessionId})`: 사용자가 새 대화를 시작했을 때. 엘리먼트로 붙였으면 `new-conversation` 이벤트(`detail` 에 같은 값). 앞 대화는 서버에 남는다 (CR-175)
 
 ### 3-5. 위젯이 스스로 하는 것 (CR-175, CR-179, CR-180, CR-184, CR-182, CR-181, CR-178, CR-186, CR-183)

@@ -278,6 +278,11 @@ export interface WidgetContext {
     /** + 메뉴 「파일 올리기」와 같은 기준으로 본다. 받으면 null, 아니면 지금 언어 거절 문구 */
     checkAttachment(file: { name: string; type: string; size: number }): string | null;
     addRequestFields(fn: () => Record<string, unknown>): void;
+    /**
+     * 위젯이 뜰 때 받아야 대화 요청에 실을 수 있는 것(내 선호의 지난 모델 등)을 건다. 첫 질문은 이것이 끝나거나
+     * 시한이 지날 때까지 기다렸다 보낸다(CR-188). 위젯 설정을 처음 받을 때(settingsLoaded)까지 건 것만 기다린다
+     */
+    waitBeforeSend(task: Promise<unknown>): void;
   };
   api: {
     /** body 가 FormData 면 multipart 로 그대로, 그 밖에는 JSON 으로 싣는다 */

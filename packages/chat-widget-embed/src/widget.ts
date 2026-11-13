@@ -30,6 +30,7 @@ import {
 } from "./frame/i18n";
 import { Menu } from "./frame/menu";
 import { Panes } from "./frame/panes";
+import { FIRST_SEND_WAIT_MS, StartupGate } from "./frame/startup-gate";
 import { icon } from "./icons";
 import { createMarked, renderRichInto } from "./rich-render";
 import { CORE } from "./strings";
@@ -306,6 +307,10 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   let workflowRuns = new Map<string, { stepEl: HTMLDivElement; steps: Map<string, HTMLElement> }>();
   /** 언어가 바뀌면 다시 쓸 대화 칸 글(워크플로우 진행 칸). 새 대화에서 비운다. */
   let relabelers: Array<() => void> = [];
+  /** 위젯이 뜰 때 받는 것. 질문은 이것이 열린 뒤에 요청 칸을 모아 보낸다(CR-188) */
+  const startup = new StartupGate();
+  /** 위젯이 뜰 때 받는 것을 기다리는 질문을 멈춘다. 아직 보내지 않아 서버에 멈출 것이 없다 */
+  let stopWaiting: (() => void) | null = null;
 
   // ── 틀에 등록된 것 ─────────────────────────
   const events = new Emitter<WidgetEvents>();
@@ -668,16 +673,22 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     for (const t of composerTools) toolsEl.appendChild(t.node);
   }
 
-  /** 기능이 더한 칸, 입력 모드 칸, 이번에 보내며 준 칸 순으로 합친다. 뒤가 앞을 덮는다. */
-  function collectRequestFields(body?: Record<string, unknown>): Record<string, unknown> {
+  /**
+   * 기능이 더한 칸, 입력 모드 칸, 이번에 보내며 준 칸 순으로 합친다. 뒤가 앞을 덮는다.
+   * 입력 모드 칸은 보내기를 누른 때 것을 받는다. 위젯이 뜰 때 받는 것을 기다리는 동안 모드가 바뀔 수 있다.
+   */
+  function collectRequestFields(modeFields: Record<string, unknown>, body?: Record<string, unknown>): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const fn of requestFieldFns) Object.assign(out, guarded("request fields", fn) ?? {});
-    if (composerMode) {
-      const mode = composerMode;
-      Object.assign(out, guarded(`mode ${mode.id} requestFields`, () => mode.requestFields()) ?? {});
-    }
+    Object.assign(out, modeFields);
     if (body) Object.assign(out, body);
     return out;
+  }
+
+  function collectModeFields(): Record<string, unknown> {
+    const mode = composerMode;
+    if (!mode) return {};
+    return guarded(`mode ${mode.id} requestFields`, () => mode.requestFields()) ?? {};
   }
 
   function collectRenderFeatures(): string[] {
@@ -1351,14 +1362,18 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
 
     emptyEl.remove();
     const previousLast = turns[turns.length - 1];
-    const turn = buildTurn(trimmed, names, payload, collectRequestFields(body));
+    const modeFields = collectModeFields();
+    const turn = buildTurn(trimmed, names, payload, {});
     turns.push(turn);
     thread.appendChild(turn.el);
     renderUser(turn, turns.length - 1);
     if (previousLast) renderAnswer(previousLast);
     if (turns.length === 1 && !titleFromServer && trimmed) setTitle(trimmed.slice(0, TITLE_MAX_CHARS));
     scrollToBottom(true);
-    await runTurn(turn);
+    // 기능이 더하는 칸(파일 만들기 등)은 위젯 설정을 받은 뒤에 모아야 실린다(CR-188)
+    await runTurn(turn, undefined, () => {
+      turn.requestBody = collectRequestFields(modeFields, body);
+    });
   }
 
   async function regenerate(turn: Turn): Promise<void> {
@@ -1387,7 +1402,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   }
 
   /** 한 번의 대화 요청. rewindFromSeq 가 있으면 그 순번부터 지우고 다시 답하게 한다. */
-  async function runTurn(turn: Turn, rewindFromSeq?: number): Promise<AnswerVersion> {
+  async function runTurn(turn: Turn, rewindFromSeq?: number, prepare?: () => void): Promise<AnswerVersion> {
     const version = newVersion();
     turn.versions.push(version);
     turn.shown = turn.versions.length - 1;
@@ -1395,6 +1410,23 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     setBusy(true);
     renderAnswer(turn);
     scrollToBottom();
+    if (!startup.isOpen()) {
+      await new Promise<void>((resolve) => {
+        stopWaiting = resolve;
+        void startup.wait(FIRST_SEND_WAIT_MS).then(resolve);
+      });
+      stopWaiting = null;
+      // 기다리는 동안 새 대화나 지난 대화로 옮겼으면 이 질문이 있던 대화는 이미 지워졌다
+      if (live?.version !== version) return version;
+      if (version.stopped) {
+        version.live = false;
+        live = null;
+        setBusy(false);
+        renderAnswer(turn);
+        return version;
+      }
+    }
+    prepare?.();
     events.emit("answerStart", answerView(turn, version));
 
     try {
@@ -1551,6 +1583,10 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   async function stop(): Promise<void> {
     if (!busy || !live) return;
     live.version.stopped = true;
+    if (stopWaiting) {
+      stopWaiting();
+      return;
+    }
     await chat.stop(options.baseUrl, sessionId);
   }
 
@@ -2309,6 +2345,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       attachUploaded: (meta) => attachUploaded(meta),
       checkAttachment: (file) => validateFile(file),
       addRequestFields: (fn) => void requestFieldFns.push(fn),
+      waitBeforeSend: (task) => startup.hold(task),
     },
     api: {
       request: (method, path, body) => api.request(method, path, body),
@@ -2328,15 +2365,18 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   }
   refreshMenus();
   events.on("settingsLoaded", () => refreshMenus());
-  (async () => {
-    try {
-      await tokens.ensureLoaded();
-      if (sttSupported() && tokens.hasScope("chat:stt")) micBtn.hidden = false;
-    } catch {
-      // 토큰을 못 읽으면 첫 요청에서 오류로 보인다.
-    }
-    await loadSettings();
-  })();
+  startup.hold(
+    (async () => {
+      try {
+        await tokens.ensureLoaded();
+        if (sttSupported() && tokens.hasScope("chat:stt")) micBtn.hidden = false;
+      } catch {
+        // 토큰을 못 읽으면 첫 요청에서 오류로 보인다.
+      }
+      await loadSettings();
+    })(),
+  );
+  void startup.finish();
 
   return {
     open: () => setOpen(true),

@@ -23,7 +23,7 @@ function setup(opts: { userRef: boolean; preferences?: () => Promise<unknown> })
       return () => {};
     },
     api: { request, hasUserRef: () => opts.userRef },
-    chat: { selectModel: vi.fn(() => true), setThinking: vi.fn(() => true) },
+    chat: { selectModel: vi.fn(() => true), setThinking: vi.fn(() => true), waitBeforeSend: vi.fn() },
   } as unknown as WidgetContext;
   memory.install(ctx);
   const emit = (event: string) => handlers.get(event)?.forEach((fn) => fn({}));
