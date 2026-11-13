@@ -5,7 +5,7 @@
 - 원천: 2026-11-13 19:41 사용자 /전승 「후속 CR 발번」. CR-181 완료 보고 「59 CS 실행기의 작업 폴더가 api 와 달라(workspace-wes-cs) 실행기가 직접 만든 파일이 대화에 올라오지 않음」
 - 실행맵: [기록/실행맵_채팅_위젯_고도화.md](기록/실행맵_채팅_위젯_고도화.md) 12번 행(추가 갈래)
 - 번호 대역: PRD-600 ~ 609, BIZ-260 ~ 264, FE-150 ~ 154, TC 130 ~ 134, 시험 영역 20, 마이그레이션 V90(쓰지 않음)
-- 상태: 59 반영 끝. 실행기 파일이 대화 폴더에 들어오는 것까지 확인. 파일 카드는 5.2 승인 대기
+- 상태: 개발기 59 반영과 확인 끝(7절). 운영 chaws 반영 전
 
 ## 1. 범위
 
@@ -125,3 +125,16 @@
 - 단위시험: `ChatFeatureSupportTest` 8건(새 2건), `OrchestratorOneShotWorkerTest` 6건, `OrchestratorWidgetMemoryTest` 6건, `OrchestratorTurnInstructionTest` 3건, 앞 절 12건 통과.
 - 로컬(18187, 테넌트 cr160_local, 로컬 실행기 `cr187-runner` 를 따로 붙인 실행기로 표에 둠): V90 을 migrate API 로 적용(성공 1). 도구를 말하지 않고 docx 를 달라고 하면 실행기가 `runner-cs/chat/{세션}/out/주간회의.docx` 에 만들고 답에 파일 카드(`artifacts`)가 실렸다. 같은 요청을 틀을 끄고(캐시도 비우고) 보내면 실행기가 CLI 자기 임시 폴더에 만들고 카드가 없었다. 틀을 다시 켰다.
 - 위젯이 쓰는 스트리밍 경로도 같다. xlsx 를 달라고 하면 `out/분기매출.xlsx` 에 만들고 done 이벤트에 파일 카드가 실렸다.
+
+## 7. 개발기 59 2차 반영과 확인 (2026-11-14 01:46)
+
+| 순번 | 항목 | 값 |
+|---|---|---|
+| 1 | 반영 | dev 3a8c2094 을 `./deploy.sh be`. 실행기는 바뀐 것이 없어 다시 반영하지 않았다 |
+| 2 | 기동 | api 01:46 Started, 기동 뒤 ERROR 0줄. 테넌트 V90 이 기동 때 적용됐고 bp_wes 에 `widget.artifact-out` 이 활성으로 있다 |
+| 3 | 파일 카드 | CS 연결로 도구를 말하지 않고 docx 를 달라고 하자 실행기가 `workspace-wes-cs/chat/{세션}/out/주간회의.docx` 에 만들었고 답에 「주간회의.docx (36KB)」 칩이 붙었다 |
+| 4 | 원본 없는 이진 파일 고치기(CR-181 15절에 남은 미확인) | 칩을 눌러 옆 창에 「제목을 '월간 회의' 로 바꿔 주세요」 를 보내자 판 2 / 2, 옆 창 제목 「월간 회의」, 답에 「주간회의.docx · 버전 2」 카드. 요청에 `document_edit`(파일)이 실렸고 판 저장소에 FILE 판 2개 |
+| 5 | 실행기 기록 | 반영 뒤 「is not a directory」 0줄 |
+
+- 그림 `/tmp/claude-e2e/9ba9b044/21-runner-file-answer.png`, `22-runner-file-pane.png`, `23-runner-file-edited.png`.
+- 운영 chaws 는 반영하지 않았다. compose(1차)와 api(1, 2차)를 함께 반영해야 하며 따로 승인받는다.

@@ -143,7 +143,7 @@
 | CR-184 | [위젯 이미지 생성](CR-184_위젯_이미지_생성.md) | 신규 | Medium | - | 개발기 반영(운영 반영 전) |
 | CR-185 | [위젯 안 승인과 거절](CR-185_위젯_안_승인과_거절.md) | 신규 | High | - | 구현중 |
 | CR-186 | [위젯 답 읽어주기와 실시간 음성](CR-186_위젯_답_읽어주기와_실시간_음성.md) | 신규 | Medium | - | 설계중 |
-| CR-187 | [59 CS 실행기 작업 폴더를 api 와 맞추기](CR-187_59_CS_실행기_작업_폴더를_api_와_맞추기.md) | 변경 | Low | - | 구현중 |
+| CR-187 | [59 CS 실행기 작업 폴더를 api 와 맞추기](CR-187_59_CS_실행기_작업_폴더를_api_와_맞추기.md) | 변경 | Low | - | 개발기 반영(운영 반영 전) |
 | CR-188 | [위젯 설정 전에 보낸 질문의 파일 만들기와 모델 누락](CR-188_위젯_설정_전에_보낸_질문의_파일_만들기와_모델_누락.md) | 변경 | Low | - | 개발기 반영(운영 반영 전) |
 | CR-189 | [서버 도구 통로 테넌트 누락으로 cron_list 실패](CR-189_서버_도구_통로_테넌트_누락으로_cron_list_실패.md) | 결함 수정 | Medium | - | 개발기 반영(운영 반영 전) |
 
@@ -2973,11 +2973,11 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **변경 타입**: 변경
 - **변경 내용**: 대화 작업 폴더를 그 연결이 가는 실행기가 볼 수 있는 곳에 잡는다. api 설정 `aimbase.workspace.runner-bases`(`실행기 이름=폴더`)에 있는 실행기로 가는 연결은 그 폴더 아래 `chat/{세션}` 에 잡고, 그 폴더는 허용 폴더에 저절로 든다. 59 와 chaws 의 api, CS 실행기가 `workspace-wes-cs` 를 같은 경로 `/data/workspace-wes-cs` 로 붙인다
 - **변경 사유**: CS 실행기가 `/data/workspace` 에 다른 호스트 폴더를 붙여 api 가 잡은 대화 폴더가 실행기 안에 없었다. 실행기가 직접 만든 파일이 대화 파일 카드로 올라오지 않았다(CR-181 15절 표 5). 운영 chaws 도 같았다
-- **결정**: 11/13 19:41 사용자 /전승 후속 CR 발번. 11/14 01:11 컨타 승인 ①(실행기별 작업 폴더 표, CS 격리 유지)
-- **영향 모듈**: platform-core `config`(WorkspaceProperties), `session`(ChatWorkspaceAssigner), `llm`(ConnectionAdapterFactory), `orchestrator`(OrchestratorEngine), compose 2벌
+- **결정**: 11/13 19:41 사용자 /전승 후속 CR 발번. 11/14 01:11 컨타 승인 ①(실행기별 작업 폴더 표, CS 격리 유지). 11/14 01:35 컨타 승인 ①(실행기 대화에 파일 위치 안내 틀, 테넌트 V90)
+- **영향 모듈**: platform-core `config`(WorkspaceProperties), `session`(ChatWorkspaceAssigner), `llm`(ConnectionAdapterFactory), `orchestrator`(OrchestratorEngine), compose 2벌, 테넌트 마이그레이션 V90(프롬프트 틀 `widget.artifact-out`), `ChatFeatureSupport`
 - **영향도**: Low (표에 없는 실행기와 API 연결은 그대로. 품고 수리 실행기의 워크플로우 run 폴더는 범위 밖)
-- **영향 설계서**: 운용 가이드 v3.37.0. T 문서는 대화 작업 폴더 규칙을 적은 곳이 없어 바꾸지 않았다
-- **상태**: 구현중 (2026-11-14)
+- **영향 설계서**: 운용 가이드 v3.37.0, v3.37.1. T 문서는 대화 작업 폴더 규칙을 적은 곳이 없어 바꾸지 않았다
+- **상태**: 개발기 반영(운영 반영 전) (2026-11-14). 59 api dev 3a8c2094, CS 실행기 dev bd73fb30
 
 ---
 
