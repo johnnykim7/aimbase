@@ -404,6 +404,8 @@ public final class RequestContext {
 
 CR-152: CLI 는 기본값으로 MCP 서버 연결을 기다리지 않고 첫 턴을 시작한다. 러너는 MCP 서버를 넘길 때 CLI 에 `MCP_CONNECTION_NONBLOCKING=false` 와 `MCP_CONNECT_TIMEOUT_MS`(러너 설정 `aimbase.runner.mcp-connect-timeout-seconds`, 기본 30초)를 주고, 턴 시작 신호(system/init)에서 넘긴 서버가 하나라도 connected 가 아니면 그 턴을 실패로 끝낸다(도구 없이 정상 완료로 나가지 않게).
 
+CR-185: CLI 는 MCP 도구 호출 하나를 기본 60초에서 끊는다. 서버가 실행 전 승인을 기다리는 동안(`chat.approval-timeout-seconds`, 최대 240초) 호출이 먼저 끊기면 모델이 시간 초과로 답을 끝내므로, 러너는 MCP 서버를 넘길 때 CLI 에 `MCP_TOOL_TIMEOUT`(러너 설정 `aimbase.runner.mcp-tool-timeout-seconds`, 기본 300초)을 함께 준다. 승인 최대 대기보다 길게 둔다.
+
 → `tool_use` 이벤트가 NDJSON으로 흘러들어오면 Adapter가 `LLMResponse.toolCalls`에 누적해서 호출자에게 반환 (CR-050 동작 유지).
 
 ---
