@@ -19,7 +19,7 @@ import { ToolApprovalFields, type ToolApprovalValue } from "../components/policy
 
 /** CR-185: 도구 대상 정책. 서버는 matchRules.tools 로 대상을 보고 규칙 REQUIRE_APPROVAL 로 묻는다. */
 const TOOL_APPROVAL = "tool_approval";
-const TOOLS_REQUIRED = "도구를 하나 이상 고르세요";
+const TOOLS_REQUIRED = "도구를 하나 이상 선택하세요";
 const EMPTY_TOOL_APPROVAL: ToolApprovalValue = { tools: [], message: "" };
 
 function targetTools(policy: Policy): string[] {
@@ -34,7 +34,7 @@ const RULE_TYPE_OPTIONS = [
   { value: "rate_limit", label: "호출 제한", description: "시간당 최대 호출 횟수", fields: ["max_requests", "window_seconds"] },
   { value: "model_filter", label: "모델 필터", description: "허용/차단 모델 목록", fields: ["allowed_models", "blocked_models"] },
   { value: "time_restriction", label: "시간 제한", description: "허용 시간대 설정", fields: ["allowed_hours_start", "allowed_hours_end"] },
-  { value: TOOL_APPROVAL, label: "도구 실행 전 승인", description: "고른 도구를 실행하기 전에 대화 중인 사용자에게 묻는다", fields: ["tools", "message"] },
+  { value: TOOL_APPROVAL, label: "도구 실행 전 승인", description: "선택한 도구를 실행하기 전에 대화 중인 사용자에게 묻는다", fields: ["tools", "message"] },
 ];
 
 function generateRuleTemplate(ruleType: string): object[] {
