@@ -171,6 +171,11 @@ interface WidgetSettings {
     }>;
     feedback_comment_max_chars: number;
     follow_ups_enabled: boolean;
+    /** CR-183: 받는 확장자와 묶음(image, pdf, data, text)별 크기 상한(바이트). 없는 서버면 검사는 서버가 한다 */
+    attachments?: {
+        accept: string[];
+        max_bytes: Partial<Record<"image" | "pdf" | "data" | "text", number>>;
+    };
 }
 interface WidgetHandle {
     open(): void;
