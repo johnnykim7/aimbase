@@ -37,7 +37,7 @@ dict(id='IT-15-002', flow='파일 만들기', kind='정상', title='API 연결�
      req=['PRD-500'], src=['CR-182'], pri='High'),
 
 dict(id='IT-15-003', flow='파일 만들기', kind='정상', title='CS 실행기(CLI) 연결에서 NATIVE, AIMBASE 두 방식 모두 파일을 만들어 받을 수 있고 파일 만들기를 싣지 않은 대화에는 도구가 보이지 않는다',
-     pre=WES_CS + '. ' + SETTINGS_ON + '. 실행기와 api 는 서로 다른 볼륨을 쓴다',
+     pre=WES_CS + '. ' + SETTINGS_ON + '. 실행기와 api 가 대화 작업 폴더(workspace-wes-cs)를 같은 경로로 함께 본다(CR-187)',
      steps='1. 위젯에서 "이 문의 반품 요약을 워드로 만들어 주세요" 를 보낸다(연결 기본 NATIVE)\n'
            '2. 답 아래 파일 칩을 눌러 받는다\n'
            '3. 같은 연결에 대화 요청 tool_mode 를 AIMBASE 로 실어 1 ~ 2 를 되풀이한다\n'
