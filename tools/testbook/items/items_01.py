@@ -2,6 +2,7 @@
 # CR-152, CR-153 의 대상 기능(PRD-306, PRD-281)은 T1-1 에 행이 없어 req·fc 를 비워 두고 src 에 CR 번호를 적는다. CR-154 도 같은 영역이라 같게 둔다.
 # CR-169 항목(IT-01-017 ~ 025)의 근거는 T1-3 BIZ-142, T3-2 구독 수정 요청 스키마, T3-4 구독 관리, T3-5 TC-SUB-001 ~ 009 다.
 # CR-173 항목(IT-01-026 ~ 028)의 근거는 CR-173 문서 12절(키 없는 서버의 임베딩)과 13절(세션 없는 요청 뒤 실행기 프로세스)이다.
+# CR-191 항목(IT-01-031 ~ 039)의 근거는 T1-3 BIZ-153, T1-1 PRD-080, PRD-087, PRD-376, T3-2 테넌트 생성과 구독 수정과 플랜 목록 응답, T3-4 플랜, T3-5 TC-PLAN-001 ~ 012 다.
 # 대상 기능이 T1-1 에 행이 없어 req 를 비워 두고 src 에 CR 번호를 적는다.
 
 ITEMS = [
@@ -352,6 +353,7 @@ dict(id='IT-01-028', flow='키 없는 서버의 임베딩', kind='예외', title
      pair={1: [1], 2: [2], 3: [3]},
      src=['CR-173'], pri='Medium'),
 
+
 # IT-01-029, 030 의 근거는 CR-173 문서 14절(실행기 전체 Claude 프로세스 상한과 줄서기)이다.
 dict(id='IT-01-029', flow='CLI 프로세스 정리', kind='정상', title='실행기 전체 Claude 프로세스 상한을 넘는 요청은 줄을 서고, 쉬는 프로세스를 닫아 자리를 낸다',
      pre='cli-runner, aimbase-agent 단위시험(가짜 CLI). 상한 1 또는 2',
@@ -386,5 +388,127 @@ dict(id='IT-01-030', flow='CLI 프로세스 정리', kind='정상', title='CS �
      judge=['서버', '서버', '서버', '서버'],
      pair={1: [1], 2: [2], 3: [3], 4: [4]},
      src=['CR-173'], pri='High'),
+
+dict(id='IT-01-031', flow='플랜 분당 요청 한도', kind='정상', title='플랜 없이 만든 테넌트와 플랜을 고른 테넌트가 그 플랜의 분당 요청 한도로 시작한다',
+     pre='로컬 api, 플랫폼 관리자 토큰, 시험용 테넌트 두 개를 만들 수 있는 상태(끝나면 지운다)',
+     steps='1. 플랜 목록(GET /api/v1/platform/plans)을 읽는다\n'
+           '2. 플랜 없이 테넌트를 만든다(POST /api/v1/platform/tenants)\n'
+           '3. 플랜 pro 로 테넌트를 만든다\n'
+           '4. 구독 목록(GET /api/v1/platform/subscriptions)에서 두 테넌트를 본다\n'
+           '5. 두 시험 테넌트를 지운다',
+     expect='1. 200 이고 defaultPlan 이 free, plans 가 free, starter, pro, enterprise 순이며 한도가 60, 300, 1000, 0 이다\n'
+            '2. 생성이 성공한다\n'
+            '3. 생성이 성공한다\n'
+            '4. 첫 테넌트는 free 와 60, 둘째는 pro 와 1000 이다\n'
+            '5. 두 테넌트가 목록에서 없어진다',
+     judge=['서버', '서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5]},
+     req=['PRD-080', 'PRD-376', 'BIZ-153'], src=['CR-191'], pri='High'),
+
+dict(id='IT-01-032', flow='플랜 분당 요청 한도', kind='예외', title='목록에 없는 플랜으로 테넌트를 만들면 400 이고 테넌트와 DB 가 생기지 않는다',
+     pre='로컬 api, 플랫폼 관리자 토큰',
+     steps='1. 플랜 standard 로 테넌트를 만든다\n'
+           '2. 테넌트 목록과 DB 목록에서 그 테넌트 ID 를 찾는다',
+     expect='1. 400 이고 본문 error 가 plan must be one of: free, starter, pro, enterprise 다\n'
+            '2. 테넌트 행도 aimbase_<ID> DB 도 없다',
+     judge=['서버', '서버'],
+     pair={1: [1], 2: [2]},
+     req=['PRD-080', 'BIZ-153'], src=['CR-191'], pri='High'),
+
+dict(id='IT-01-033', flow='플랜 분당 요청 한도', kind='정상', title='구독 변경으로 다른 플랜으로 바꾸면 한도도 그 플랜의 값이 되고, 같은 플랜이면 그대로, 한도를 같이 보내면 보낸 값이다',
+     pre='개발기 시험 테넌트, 플랫폼 관리자 토큰, 그 테넌트의 지금 플랜과 분당 요청 한도를 적어 둔 상태(끝나면 되돌린다)',
+     steps='1. 지금과 다른 플랜 starter 로 구독을 변경한다(본문 {"plan":"starter"})\n'
+           '2. 그 테넌트 키로 업무 요청(GET /api/v1/workflows)을 한 번 보내고 응답 머리글을 본다\n'
+           '3. 한도만 77 로 바꾼 뒤(본문 {"apiRpmLimit":77}) 같은 플랜으로 다시 변경한다(본문 {"plan":"starter"})\n'
+           '4. 플랜과 한도를 같이 보낸다(본문 {"plan":"pro","apiRpmLimit":250})\n'
+           '5. 적어 둔 플랜과 한도로 되돌린다(본문 {"plan":적어 둔 플랜,"apiRpmLimit":적어 둔 한도})',
+     expect='1. 200 이고 plan 이 starter, apiRpmLimit 이 300 이다\n'
+            '2. X-RateLimit-Limit 이 300 이다. api 를 재기동하지 않았다\n'
+            '3. 두 번 다 200 이고 apiRpmLimit 이 77 그대로다\n'
+            '4. 200 이고 plan 이 pro, apiRpmLimit 이 250 이다\n'
+            '5. 200 이고 적어 둔 값이다',
+     judge=['서버', '서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5]},
+     req=['PRD-087', 'BIZ-153'], src=['CR-191'], pri='High'),
+
+dict(id='IT-01-034', flow='플랜 분당 요청 한도', kind='예외', title='구독 변경에서 목록에 없는 플랜은 400 이고 같이 보낸 값도 저장되지 않는다',
+     pre='개발기 시험 테넌트, 플랫폼 관리자 토큰, 그 테넌트의 지금 플랜, 분당 요청 한도, 최대 연결 수를 적어 둔 상태',
+     steps='1. 구독을 변경한다(본문 {"plan":"standard","maxConnections":적어 둔 값 + 1})\n'
+           '2. 구독 목록에서 그 테넌트를 본다',
+     expect='1. 400 이고 본문 error 가 plan must be one of: free, starter, pro, enterprise 다\n'
+            '2. 플랜, 분당 요청 한도, 최대 연결 수가 적어 둔 값 그대로다',
+     judge=['서버', '서버'],
+     pair={1: [1], 2: [2]},
+     req=['PRD-087', 'BIZ-153'], src=['CR-191'], pri='Medium'),
+
+dict(id='IT-01-035', flow='플랜 분당 요청 한도', kind='정상', title='운영 설정에서 플랜 한도를 바꾸면 새로 만드는 테넌트부터 적용되고 이미 있는 테넌트는 그대로다',
+     pre='로컬 api, 플랫폼 관리자 토큰, free 플랜 테넌트 하나의 한도를 적어 둔 상태(끝나면 설정을 60 으로 되돌리고 시험 테넌트를 지운다)',
+     steps='1. 운영 설정을 저장한다(PUT /api/v1/platform/settings, plan.free.api-rpm-limit 45)\n'
+           '2. 플랜 목록을 읽는다\n'
+           '3. 플랜 없이 테넌트를 만들고 구독 목록에서 본다\n'
+           '4. 적어 둔 free 테넌트를 구독 목록에서 본다\n'
+           '5. plan.free.api-rpm-limit 를 60 으로 되돌리고 시험 테넌트를 지운다',
+     expect='1. 200 이다\n'
+            '2. free 의 apiRpmLimit 이 45 다\n'
+            '3. 새 테넌트가 free 와 45 다\n'
+            '4. 한도가 적어 둔 값 그대로다\n'
+            '5. 플랜 목록의 free 가 60 이고 시험 테넌트가 없다',
+     judge=['서버', '서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5]},
+     req=['BIZ-153'], src=['CR-191'], pri='Medium'),
+
+dict(id='IT-01-036', flow='플랜 분당 요청 한도', kind='예외', title='운영 설정의 틀린 플랜 값은 400 이고 같은 요청의 다른 값도 저장되지 않는다',
+     pre='로컬 api, 플랫폼 관리자 토큰, 플랜 설정의 지금 값을 적어 둔 상태',
+     steps='1. plan.pro.api-rpm-limit 를 -1 로 저장한다\n'
+           '2. plan.pro.api-rpm-limit 를 1.5 로 저장한다\n'
+           '3. plan.default 를 standard 로 저장한다\n'
+           '4. plan.codes 를 free,gold 로 저장한다\n'
+           '5. 한 요청에 plan.starter.api-rpm-limit 301 과 plan.pro.api-rpm-limit -1 을 같이 저장한다\n'
+           '6. 플랜 목록을 읽는다',
+     expect='1. 400 이다\n'
+            '2. 400 이다\n'
+            '3. 400 이다\n'
+            '4. 400 이다\n'
+            '5. 400 이다\n'
+            '6. 플랜 목록과 한도가 적어 둔 값 그대로다. starter 도 301 이 아니다',
+     judge=['서버', '서버', '서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5], 6: [6]},
+     req=['BIZ-153'], src=['CR-191'], pri='Medium'),
+
+dict(id='IT-01-037', flow='플랜 화면', kind='정상', title='테넌트 생성 창의 플랜 선택지가 플랜 목록 순서이고 처음 선택이 기본 플랜이며, 표의 플랜 배지가 이름 그대로다',
+     pre='로컬 또는 개발기 화면, 플랫폼 관리자 로그인',
+     steps='1. 테넌트 관리에서 「새 테넌트」를 누르고 플랜 칸을 연다\n'
+           '2. 테넌트 관리 표와 구독 관리 표의 플랜 칸을 본다\n'
+           '3. 플랜 목록 응답을 실패로 바꾸고 「새 테넌트」를 누른다',
+     expect='1. 선택지가 free, starter, pro, enterprise 순이고 처음 선택이 free 다. standard 가 없다\n'
+            '2. 플랜 이름이 그대로 보이고 모든 플랜 배지가 같은 색이다\n'
+            '3. 플랜 칸 아래 「플랜 목록을 읽지 못했습니다.」가 보이고 생성 단추가 막혀 있다',
+     judge=['화면', '화면', '화면'],
+     pair={1: [1], 2: [2], 3: [3]},
+     req=['PRD-080', 'PRD-376'], src=['CR-191'], pri='Medium'),
+
+dict(id='IT-01-038', flow='플랜 화면', kind='정상', title='운영 설정에 「플랜」 카드가 보이고, 틀린 값은 저장 실패 문구와 함께 저장되지 않는다',
+     pre='로컬 화면, 플랫폼 관리자 로그인(끝나면 바꾼 값을 되돌린다)',
+     steps='1. 운영 설정을 연다\n'
+           '2. 플랜 카드에서 plan.free.api-rpm-limit 를 -1 로 바꿔 저장한다\n'
+           '3. 같은 칸을 61 로 바꿔 저장하고, 다시 60 으로 저장한다',
+     expect='1. 「플랜」 카드에 plan.codes, plan.default, 플랜별 api-rpm-limit 넷이 보이고 카드 설명이 보인다\n'
+            '2. 「저장하지 못했습니다: (서버 문구)」가 보이고 고친 값이 칸에 남는다. 플랜 목록의 free 는 그대로다\n'
+            '3. 저장 실패 문구가 없어지고 저장됨이 잠깐 보인다. 플랜 목록의 free 가 61, 다음에 60 이다',
+     judge=['화면', '화면', '화면'],
+     pair={1: [1], 2: [2], 3: [3]},
+     req=['BIZ-153'], src=['CR-191'], pri='Medium'),
+
+dict(id='IT-01-039', flow='플랜 분당 요청 한도', kind='정상', title='반영 뒤 플랜 설정 6행이 생기고 standard 행이 starter 로 바뀌며 기존 테넌트의 한도는 그대로다',
+     pre='개발기(59) 또는 운영 chaws 에 CR-191 api 반영, master DB 읽기 전용 접속, 반영 전 구독 표를 적어 둔 상태. 값은 바꾸지 않는다',
+     steps='1. master DB 를 읽기 전용 트랜잭션으로 global_config 의 plan. 으로 시작하는 행을 읽는다\n'
+           '2. subscriptions 의 tenant_id, plan, api_rpm_limit 을 읽어 반영 전과 비교한다\n'
+           '3. 서버 안에서 관리자로 로그인해 플랜 목록(GET /api/v1/platform/plans)을 읽는다',
+     expect='1. plan.codes, plan.default, plan.free/starter/pro/enterprise.api-rpm-limit 6행이 있다\n'
+            '2. plan 이 standard 인 행이 없고, 한도는 모든 행이 반영 전과 같다(59 lexflow 300, chaws bp_wms 600 포함)\n'
+            '3. 200 이고 1 의 값과 같다',
+     judge=['서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3]},
+     req=['BIZ-153'], src=['CR-191'], pri='High'),
 
 ]
