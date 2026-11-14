@@ -2967,7 +2967,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   5. 구독 행이 없는 테넌트는 코드의 60 대신 처음 플랜의 한도로 센다
   6. 운영 설정 화면에 「플랜」 카드와 저장 실패 표시를 더한다
 - **결정**: 11/14 11:54 사용자 결정 1, 2 모두 ①(CR 문서 4절, 컨타 전달). 기존 테넌트 값 수정과 배포는 따로 승인받는다
-- **영향 모듈**: platform-core `TenantOnboardingService`, `PlatformController`, `RateLimitFilter`, `PlatformSettingsService`, 새 `SubscriptionPlanService`, master V75. frontend `Tenants`, `Subscriptions`, `PlatformSettings`, `types/tenant`
+- **영향 모듈**: platform-core `TenantOnboardingService`, `PlatformController`, `RateLimitFilter`, `PlatformSettingsService`, `PlatformSettingsController`, 새 `SubscriptionPlanService`, master V94. frontend `Tenants`, `Subscriptions`, `PlatformSettings`, `types/tenant`
 - **영향도**: Medium (새로 만들거나 플랜을 바꾸는 테넌트의 한도가 바뀐다. 기존 테넌트의 한도는 그대로이고, 59 `flowguard_dev` 의 플랜 이름 하나가 starter 로 바뀐다)
 - **영향 범위**: CR-013(테넌트 분당 요청 한도), CR-167(운영 chaws 한도 직접 수정), CR-168(연결 신호 전용 칸), CR-169(구독 변경 API 의 한도)
 - **영향 설계서**: T1-1 v7.18(PRD-080, PRD-087, PRD-376), T1-3 v5.20(BIZ-153), T1-7 v3.27(CR-191 묶음), T3-1 v4.24(subscriptions, global_config `plan.*`), T3-2 v7.25(테넌트 생성, 구독 수정, 플랜 목록 응답, 설정 저장 검사), T3-3 v3.18(Tenants, Subscriptions, PlatformSettings), T3-4 v3.16(플랜), T3-5 v4.21(TC-PLAN-001 ~ 012), 운용 가이드 v3.38.0 § 2-2, 시험항목 IT-01-031 ~ 039

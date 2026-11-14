@@ -70,9 +70,7 @@ export default function Subscriptions() {
     {
       header: "플랜",
       render: (s) => (
-        <Badge color={s.plan === "enterprise" ? "purple" : s.plan === "standard" ? "accent" : "muted"}>
-          {s.plan ?? "standard"}
-        </Badge>
+        <Badge color="muted">{s.plan ?? "-"}</Badge>
       ),
       width: "100px",
     },

@@ -5,6 +5,7 @@ import com.platform.config.PlatformSettingsService;
 import com.platform.domain.master.SubscriptionEntity;
 import com.platform.repository.master.SubscriptionRepository;
 import com.platform.tenant.TenantContext;
+import com.platform.tenant.plan.SubscriptionPlanService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -43,19 +44,24 @@ public class RateLimitFilter extends OncePerRequestFilter {
     static final String AGENT_SIGNAL_LIMIT_KEY = "ratelimit.agent-signal-max-per-minute";
     // 설정 행이 아직 없는 서버(마이그레이션 전)에서 쓰는 값. V73 시드와 같다.
     private static final int DEFAULT_AGENT_SIGNAL_LIMIT = 60;
+    // CR-191: 설정 행이 아직 없는 서버(마이그레이션 전)와 구독 조회가 실패했을 때만 쓰는 값. V94 의 free 시드와 같다.
+    private static final int DEFAULT_RPM_LIMIT = 60;
 
     private final TokenBucketRateLimiter rateLimiter;
     private final SubscriptionRepository subscriptionRepository;
     private final PlatformSettingsService platformSettings;
+    private final SubscriptionPlanService planService;
     private final ObjectMapper objectMapper;
 
     public RateLimitFilter(TokenBucketRateLimiter rateLimiter,
                            SubscriptionRepository subscriptionRepository,
                            PlatformSettingsService platformSettings,
+                           SubscriptionPlanService planService,
                            ObjectMapper objectMapper) {
         this.rateLimiter = rateLimiter;
         this.subscriptionRepository = subscriptionRepository;
         this.platformSettings = platformSettings;
+        this.planService = planService;
         this.objectMapper = objectMapper;
     }
 
@@ -140,10 +146,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         try {
             return subscriptionRepository.findByTenantId(tenantId)
                 .map(SubscriptionEntity::getApiRpmLimit)
-                .orElse(60); // 기본: free 플랜 한도
+                .orElseGet(() -> planService.defaultPlanRpmLimit(DEFAULT_RPM_LIMIT));
         } catch (Exception e) {
             log.warn("Failed to resolve RPM limit for tenant: {}, using default", tenantId, e);
-            return 60;
+            return DEFAULT_RPM_LIMIT;
         }
     }
 }

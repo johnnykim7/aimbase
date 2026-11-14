@@ -63,6 +63,10 @@ const CATEGORY_LABELS: Record<string, { label: string; description: string }> = 
   compaction: { label: "Compaction", description: "컨텍스트 압축 임계값 (% 단위)" },
   llm: { label: "LLM", description: "프로바이더/어댑터 정책 — Claude CLI 어댑터 허용 테넌트 등" },
   skills: { label: "Skills", description: "스킬 묶음 올리기 상한, 스킬 도구 읽기와 스크립트 실행 한도" },
+  plan: {
+    label: "플랜",
+    description: "플랜 목록, 처음 플랜, 플랜별 분당 요청 한도. 바꾼 한도는 새로 만들거나 플랜을 바꾼 테넌트부터 적용됩니다.",
+  },
   chat: { label: "Chat", description: "위젯 파일 만들기, 저장과 내보내기, 공유 링크" },
 };
 
@@ -101,7 +105,11 @@ export default function PlatformSettings() {
   return (
     <Page
       actions={
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {/* CR-191: 서버가 거절하면 고친 값은 칸에 남기고 이유를 보인다. 아래로 내려 고친 뒤 저장해도 보이도록 고정된 머리 줄에 둔다. 다음 저장을 시작하면 사라진다. */}
+          {updateMutation.isError && (
+            <span className="max-w-md text-right text-xs text-destructive">저장하지 못했습니다: {updateMutation.error.message}</span>
+          )}
           <ActionButton
             icon={<RotateCcw className="w-4 h-4" />}
             onClick={handleEvict}

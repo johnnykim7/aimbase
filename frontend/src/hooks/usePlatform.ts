@@ -64,6 +64,13 @@ export const useImpersonateTenant = () =>
     mutationFn: (id: string) => platformApi.impersonateTenant(id).then((r) => r.data.data),
   });
 
+export const usePlans = () =>
+  useQuery({
+    queryKey: ["plans"],
+    queryFn: () => platformApi.listPlans().then((r) => r.data.data),
+    retry: false,
+  });
+
 export const useSubscriptions = () =>
   useQuery({
     queryKey: ["subscriptions"],

@@ -8,6 +8,8 @@ import com.platform.repository.master.TenantUsageSummaryRepository;
 import com.platform.tenant.TenantDataSourceManager;
 import com.platform.tenant.migration.TenantMigrationRunner;
 import com.platform.tenant.onboarding.TenantOnboardingService;
+import com.platform.tenant.plan.SubscriptionPlanService;
+import com.platform.config.PlatformSettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -57,7 +59,8 @@ class PlatformControllerSubscriptionTest {
                 mock(TenantOnboardingService.class),
                 mock(TenantDataSourceManager.class),
                 mock(TenantMigrationRunner.class),
-                mock(JwtProvider.class));
+                mock(JwtProvider.class),
+                new SubscriptionPlanService(mock(PlatformSettingsService.class)));
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

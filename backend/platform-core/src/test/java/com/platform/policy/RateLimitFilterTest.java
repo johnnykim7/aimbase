@@ -5,6 +5,7 @@ import com.platform.config.PlatformSettingsService;
 import com.platform.domain.master.SubscriptionEntity;
 import com.platform.repository.master.SubscriptionRepository;
 import com.platform.tenant.TenantContext;
+import com.platform.tenant.plan.SubscriptionPlanService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,7 +53,8 @@ class RateLimitFilterTest {
                 .thenReturn(TokenBucketRateLimiter.RateLimitResult.allowed(60, 59));
         settings = mock(PlatformSettingsService.class);
         when(settings.getInt(eq(RateLimitFilter.AGENT_SIGNAL_LIMIT_KEY), anyInt())).thenReturn(60);
-        filter = new RateLimitFilter(rateLimiter, subscriptions, settings, new ObjectMapper());
+        filter = new RateLimitFilter(rateLimiter, subscriptions, settings, new SubscriptionPlanService(settings),
+                new ObjectMapper());
         TenantContext.setTenantId(TENANT);
     }
 
@@ -173,5 +175,16 @@ class RateLimitFilterTest {
         SubscriptionEntity sub = new SubscriptionEntity();
         sub.setApiRpmLimit(limit);
         return sub;
+    }
+
+    /** CR-191 TC-PLAN-010: 구독 행이 없는 테넌트는 코드의 60 이 아니라 기본 플랜의 한도로 센다(BIZ-153). */
+    @Test
+    void tcPlan010_noSubscriptionUsesDefaultPlanLimit() throws Exception {
+        when(settings.getString("plan.default", null)).thenReturn("free");
+        when(settings.getString("plan.free.api-rpm-limit", null)).thenReturn("30");
+
+        run("GET", "/api/v1/workflows", new MockHttpServletResponse());
+
+        verify(rateLimiter).tryAcquire(TENANT, 30);
     }
 }

@@ -3,7 +3,8 @@ import { Badge } from "../../components/common/Badge";
 import { ActionButton } from "../../components/common/ActionButton";
 import { DataTable, type Column } from "../../components/common/DataTable";
 import { Modal } from "../../components/common/Modal";
-import { FormField, inputStyle, selectStyle } from "../../components/common/FormField";
+import { FormField, inputStyle } from "../../components/common/FormField";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { EmptyState } from "../../components/common/EmptyState";
 import { LoadingSpinner } from "../../components/common/LoadingSpinner";
 import { Page } from "../../components/layout/Page";
@@ -11,6 +12,7 @@ import { Building2 } from "lucide-react";
 import {
   useTenants, useCreateTenant, useDeleteTenant,
   useSuspendTenant, useActivateTenant, useImpersonateTenant,
+  usePlans, useSubscriptions,
 } from "../../hooks/usePlatform";
 import { enterImpersonation } from "../../lib/impersonation";
 import type { Tenant, TenantRequest } from "../../types/tenant";
@@ -23,6 +25,10 @@ export default function Tenants() {
   const suspendTenant = useSuspendTenant();
   const activateTenant = useActivateTenant();
   const impersonate = useImpersonateTenant();
+  // CR-191: 테넌트 목록에는 플랜이 없어 구독 목록에서 찾는다. 생성 창의 선택지와 처음 선택은 플랜 목록을 따른다.
+  const { data: subscriptions = [] } = useSubscriptions();
+  const { data: planCatalog, isError: plansFailed } = usePlans();
+  const planOf = new Map(subscriptions.map((s) => [s.tenantId, s.plan]));
 
   // CR-096: 대상 테넌트로 진입 — 토큰 교체 후 루트로 이동(전체 화면이 그 테넌트로 동작)
   const handleEnter = (id: string, name: string) => {
@@ -35,7 +41,8 @@ export default function Tenants() {
   };
 
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState<TenantRequest>({ id: "", name: "", adminEmail: "", plan: "standard", domainApp: "" });
+  const [form, setForm] = useState<TenantRequest>({ id: "", name: "", adminEmail: "", plan: "", domainApp: "" });
+  const selectedPlan = form.plan || planCatalog?.defaultPlan || "";
 
   const columns: Column<Tenant>[] = [
     {
@@ -49,9 +56,7 @@ export default function Tenants() {
     {
       header: "플랜",
       render: (t) => (
-        <Badge color={t.plan === "enterprise" ? "purple" : t.plan === "standard" ? "accent" : "muted"}>
-          {t.plan ?? "standard"}
-        </Badge>
+        <Badge color="muted">{planOf.get(t.id) ?? "-"}</Badge>
       ),
       width: "100px",
     },
@@ -151,11 +156,17 @@ export default function Tenants() {
           <input type="email" style={inputStyle} placeholder="admin@mycompany.com" value={form.adminEmail} onChange={(e) => setForm((p) => ({ ...p, adminEmail: e.target.value }))} />
         </FormField>
         <FormField label="플랜">
-          <select style={selectStyle} value={form.plan} onChange={(e) => setForm((p) => ({ ...p, plan: e.target.value }))}>
-            <option value="free">Free</option>
-            <option value="standard">Standard</option>
-            <option value="enterprise">Enterprise</option>
-          </select>
+          <Select value={selectedPlan} onValueChange={(v) => setForm((p) => ({ ...p, plan: v }))} disabled={plansFailed}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(planCatalog?.plans ?? []).map((plan) => (
+                <SelectItem key={plan.code} value={plan.code}>{plan.code}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {plansFailed && <div className="text-[11px] text-destructive mt-1">플랜 목록을 읽지 못했습니다.</div>}
         </FormField>
         <div className="py-3 px-3.5 rounded-lg bg-primary/10 border border-primary/30 text-xs font-mono text-muted-foreground mb-4">
           ℹ️ 테넌트 생성 시 PostgreSQL DB가 자동 생성되고 Flyway 마이그레이션이 실행됩니다.
@@ -165,8 +176,8 @@ export default function Tenants() {
           <ActionButton
             variant="primary"
             icon="🏢"
-            disabled={createTenant.isPending}
-            onClick={() => createTenant.mutate(form, { onSuccess: () => setShowModal(false) })}
+            disabled={createTenant.isPending || plansFailed || !selectedPlan}
+            onClick={() => createTenant.mutate({ ...form, plan: selectedPlan }, { onSuccess: () => setShowModal(false) })}
           >
             생성
           </ActionButton>

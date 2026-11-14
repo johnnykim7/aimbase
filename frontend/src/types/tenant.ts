@@ -37,7 +37,6 @@ export interface Tenant {
   dbUsername?: string;
   adminEmail?: string;
   status: "active" | "suspended" | "terminated";
-  plan?: "free" | "standard" | "enterprise";
   createdAt?: string;
   updatedAt?: string;
 }
@@ -59,6 +58,17 @@ export interface AppTenantCreateRequest {
   adminEmail: string;
   initialAdminPassword: string;
   plan?: string;
+}
+
+// CR-191: 플랜 목록과 플랜별 분당 요청 한도. 이름과 값은 운영 설정(plan.*)에서 온다.
+export interface PlanInfo {
+  code: string;
+  apiRpmLimit: number;
+}
+
+export interface PlanCatalog {
+  defaultPlan: string;
+  plans: PlanInfo[];
 }
 
 export interface Subscription {

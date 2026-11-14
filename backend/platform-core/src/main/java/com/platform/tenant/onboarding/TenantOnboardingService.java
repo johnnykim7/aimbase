@@ -6,6 +6,7 @@ import com.platform.domain.master.TenantEntity;
 import com.platform.repository.master.SubscriptionRepository;
 import com.platform.repository.master.TenantRepository;
 import com.platform.tenant.TenantDataSourceManager;
+import com.platform.tenant.plan.SubscriptionPlanService;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
@@ -39,6 +40,7 @@ public class TenantOnboardingService {
     private final SubscriptionRepository subscriptionRepository;
     private final TenantDataSourceManager dataSourceManager;
     private final JdbcTemplate masterJdbcTemplate;
+    private final SubscriptionPlanService planService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     // tenant DB 서버의 기본 크레덴셜 (rollback/deprovision에서 admin 접속용)
@@ -48,11 +50,13 @@ public class TenantOnboardingService {
     public TenantOnboardingService(TenantRepository tenantRepository,
                                     SubscriptionRepository subscriptionRepository,
                                     TenantDataSourceManager dataSourceManager,
-                                    @Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate) {
+                                    @Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate,
+                                    SubscriptionPlanService planService) {
         this.tenantRepository = tenantRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.dataSourceManager = dataSourceManager;
         this.masterJdbcTemplate = masterJdbcTemplate;
+        this.planService = planService;
     }
 
     /**
@@ -67,34 +71,21 @@ public class TenantOnboardingService {
     public TenantOnboardingResult provision(TenantOnboardingRequest request) {
         log.info("Starting tenant provisioning: {}", request.tenantId());
 
+        // CR-191 BIZ-153: 없는 플랜이면 테넌트 행과 DB 를 남기지 않고 400 으로 끝나도록 무엇이든 만들기 전에 확인한다.
+        String plan = planService.resolveForCreate(request.plan());
+        int apiRpmLimit = planService.rpmLimit(plan);
+
         // Step 1: Master DB에 테넌트 레코드 저장
         TenantEntity tenant = createTenantEntity(request);
         tenantRepository.save(tenant);
 
         // Step 2~6: DB 생성 이후는 Master Transaction 밖에서 수행
         try {
-            // Step 2: PostgreSQL 데이터베이스 생성 (tenant DB 서버에 직접 연결)
             String dbName = "aimbase_" + request.tenantId();
-            createTenantDatabase(request.dbHost(), request.dbPort(), dbName, request.dbUsername(), request.dbPassword());
-
-            // Step 3~4: pgvector + Flyway 마이그레이션
-            HikariDataSource tenantDs = createTemporaryDataSource(
-                request.dbHost(), request.dbPort(), dbName,
-                request.dbUsername(), request.dbPassword()
-            );
-            runTenantMigration(tenantDs, dbName);
-            tenantDs.close();
-
-            // Step 5: 시드 데이터 (Admin 계정, 기본 역할)
-            DataSource registeredDs = dataSourceManager.addTenantDataSource(
-                request.tenantId(), request.dbHost(), request.dbPort(),
-                dbName, request.dbUsername(), request.dbPassword()
-            );
-            seedInitialData(registeredDs, request);
+            prepareTenantDatabase(request, dbName);
 
             // Step 6: 구독 정보 저장
-            SubscriptionEntity subscription = createSubscription(request);
-            subscriptionRepository.save(subscription);
+            subscriptionRepository.save(createSubscription(request.tenantId(), plan, apiRpmLimit));
 
             // Master DB 테넌트 상태 업데이트
             tenant.setDbName(dbName);
@@ -110,6 +101,29 @@ public class TenantOnboardingService {
             rollback(request.tenantId());
             throw new RuntimeException("Tenant provisioning failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Step 2~5. 단위시험이 DB 서버 없이 provision 의 앞뒤(플랜 확인, 구독 저장)를 볼 수 있게 한 덩어리로 둔다.
+     */
+    void prepareTenantDatabase(TenantOnboardingRequest request, String dbName) {
+        // Step 2: PostgreSQL 데이터베이스 생성 (tenant DB 서버에 직접 연결)
+        createTenantDatabase(request.dbHost(), request.dbPort(), dbName, request.dbUsername(), request.dbPassword());
+
+        // Step 3~4: pgvector + Flyway 마이그레이션
+        HikariDataSource tenantDs = createTemporaryDataSource(
+            request.dbHost(), request.dbPort(), dbName,
+            request.dbUsername(), request.dbPassword()
+        );
+        runTenantMigration(tenantDs, dbName);
+        tenantDs.close();
+
+        // Step 5: 시드 데이터 (Admin 계정, 기본 역할)
+        DataSource registeredDs = dataSourceManager.addTenantDataSource(
+            request.tenantId(), request.dbHost(), request.dbPort(),
+            dbName, request.dbUsername(), request.dbPassword()
+        );
+        seedInitialData(registeredDs, request);
     }
 
     /**
@@ -169,10 +183,11 @@ public class TenantOnboardingService {
         return tenant;
     }
 
-    private SubscriptionEntity createSubscription(TenantOnboardingRequest request) {
+    private SubscriptionEntity createSubscription(String tenantId, String plan, int apiRpmLimit) {
         SubscriptionEntity sub = new SubscriptionEntity();
-        sub.setTenantId(request.tenantId());
-        sub.setPlan(request.plan() != null ? request.plan() : "free");
+        sub.setTenantId(tenantId);
+        sub.setPlan(plan);
+        sub.setApiRpmLimit(apiRpmLimit);
         return sub;
     }
 
