@@ -2,7 +2,7 @@
 # CR-185 문서 3절(서버), 4.2 절(위젯 동작), 5절(정책 화면)이다. 9.2 의 순번 n 이 IT-18-00n 이다.
 # req 에 기능 번호, src 에 CR 번호를 적는다. 서버 판정(probe)은 시험준비 때 채운다.
 # 대화 승인 기다림 한도(chat.approval-timeout-seconds)와 위젯 허용 권한(widget.allowed-scopes)은 모든 테넌트가 같이 쓰는 설정이라
-# 시험이 바꾸지 않는다. 시간 지남은 처음 값 120초를 기다려 본다. 허용 권한에 workflow:approve 가 없으면 승인자 토큰을 받을 수 없어
+# 시험이 바꾸지 않는다. 시간 지남은 초기값 120초를 기다려 본다. 허용 권한에 workflow:approve 가 없으면 승인자 토큰을 받을 수 없어
 # IT-18-008, 011, 012 는 플랫폼 관리자가 그 권한을 넣어 둔 동안에만 돈다.
 
 ADMIN = 'Aimbase 관리 화면 정책(Policies) 메뉴. 시험 테넌트 관리자로 로그인'
@@ -64,7 +64,7 @@ dict(id='IT-18-003', flow='대화 중 도구 승인', kind='정상', title='카�
      req=['PRD-560'], src=['CR-185'], pri='High'),
 
 dict(id='IT-18-004', flow='대화 중 도구 승인', kind='예외', title='카드에서 정하지 않고 기다림 한도가 지나면 실행하지 않고 카드가 시간 지남으로 닫힌다',
-     pre=API_CHAT + '. ' + POLICY + '. 대화 승인 기다림 한도 chat.approval-timeout-seconds 는 처음 값 120초',
+     pre=API_CHAT + '. ' + POLICY + '. 대화 승인 기다림 한도 chat.approval-timeout-seconds 는 초기값 120초',
      steps='1. 위젯에 ' + ASK + ' 를 보낸다\n'
            '2. 카드에서 아무것도 누르지 않고 2분 넘게 기다린다',
      expect='1. 「이 작업을 실행할까요?」 카드가 뜬다\n'
@@ -107,7 +107,7 @@ dict(id='IT-18-006', flow='대화 중 도구 승인', kind='정상', title='Clau
 
 dict(id='IT-18-007', flow='대화 중 도구 승인', kind='예외', title='다른 사용자 토큰으로는 대화 승인을 정할 수 없고, 이미 정한 승인에 다시 보내면 409 다',
      pre=API_CHAT + '. ' + POLICY + '. 같은 테넌트의 위젯 토큰 둘(user_ref 사용자 A, 사용자 B, 권한 chat:stream)',
-     steps='1. 사용자 A 토큰의 위젯에 ' + ASK + ' 를 보내 카드를 띄운다\n'
+     steps='1. 사용자 A 토큰의 위젯에 ' + ASK + ' 를 보내 카드를 표시한다\n'
            '2. 사용자 B 토큰으로 POST /api/v1/chat/approvals/{승인 번호} 에 {"decision": "approve"} 를 보낸다\n'
            '3. 사용자 A 가 카드의 [승인] 을 누른다\n'
            '4. 사용자 A 토큰으로 같은 승인 번호에 {"decision": "reject"} 를 다시 보낸다',
