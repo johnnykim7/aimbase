@@ -102,6 +102,8 @@ interface ApprovalEvent {
     reason?: string;
     approvers: string[];
     timeout_at?: string;
+    /** 승인 번호. 구독 때 다시 받은 승인과 실시간으로 받은 승인이 같은지 이것으로 가린다. 옛 서버는 보내지 않는다 */
+    approval_id?: string;
 }
 interface WidgetOptions {
     /** Aimbase 서버 베이스 URL (예: https://aimbase.company.com) */
