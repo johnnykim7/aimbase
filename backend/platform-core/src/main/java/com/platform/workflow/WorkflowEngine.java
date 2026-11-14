@@ -38,6 +38,9 @@ public class WorkflowEngine {
 
     private static final Logger log = LoggerFactory.getLogger(WorkflowEngine.class);
 
+    private static final String WORKFLOW_APPROVAL_CHANNEL = "workflow";
+    private static final String APPROVAL_PENDING = "pending";
+
     private final WorkflowRepository workflowRepository;
     private final WorkflowRunRepository workflowRunRepository;
     private final PendingApprovalRepository pendingApprovalRepository;
@@ -423,14 +426,14 @@ public class WorkflowEngine {
         }
 
         List<PendingApprovalEntity> waiting = pendingApprovalRepository.findByActionLogId(runId).stream()
-                .filter(a -> "workflow".equals(a.getApprovalChannel()))
+                .filter(a -> WORKFLOW_APPROVAL_CHANNEL.equals(a.getApprovalChannel()))
                 .toList();
         if (!waiting.isEmpty()) {
             int closed = pendingApprovalRepository.closeWorkflowIfPending(
                     runId, approved ? "approved" : "rejected", decidedBy, reason, OffsetDateTime.now());
             if (closed == 0) {
                 String current = pendingApprovalRepository.findByActionLogId(runId).stream()
-                        .filter(a -> "workflow".equals(a.getApprovalChannel()))
+                        .filter(a -> WORKFLOW_APPROVAL_CHANNEL.equals(a.getApprovalChannel()))
                         .map(PendingApprovalEntity::getStatus).findFirst().orElse(null);
                 throw new com.platform.orchestrator.approval.ApprovalDecisionException(
                         org.springframework.http.HttpStatus.CONFLICT, "approval_closed", current);
@@ -900,10 +903,13 @@ public class WorkflowEngine {
     private void handleHumanInput(WorkflowStep step, WorkflowRunEntity run, StepContext context) {
         log.info("Run '{}': paused at HUMAN_INPUT step '{}'", run.getId(), step.id());
 
+        String reason = humanInputReason(step);
         PendingApprovalEntity approval = new PendingApprovalEntity();
         approval.setActionLogId(run.getId());   // runId를 역참조 키로 사용
         approval.setPolicyId(step.id());         // 대기 중인 스텝 ID 기록
-        approval.setApprovalChannel("workflow");
+        approval.setApprovalChannel(WORKFLOW_APPROVAL_CHANNEL);
+        // 구독 때 승인 대기를 다시 보낼 때 정의가 그 사이 바뀌어도 처음 물은 문구를 그대로 보이려고 같이 둔다
+        approval.setRequestMessage(reason);
 
         List<String> approvers = List.of();
         if (step.config() != null && step.config().get("approvers") instanceof List<?> rawApprovers) {
@@ -924,15 +930,35 @@ public class WorkflowEngine {
 
         // CR-058: 위젯이 소비앱 결재 플로우를 트리거할 수 있도록 approval 이벤트 발행.
         if (eventPublisher != null) {
-            String reason = null;
-            if (step.config() != null && step.config().get("reason") instanceof String r) reason = r;
             eventPublisher.approvalRequired(
                     run.getId(), run.getParentRunId(), step.id(),
                     step.id(),  // policyId 대용 (HUMAN_INPUT 은 스텝 자체가 정책)
                     reason,
                     approvers,
-                    approval.getTimeoutAt() != null ? approval.getTimeoutAt().toInstant() : null);
+                    approval.getTimeoutAt() != null ? approval.getTimeoutAt().toInstant() : null,
+                    approval.getId());
         }
+    }
+
+    private static String humanInputReason(WorkflowStep step) {
+        return step.config() != null && step.config().get("reason") instanceof String r ? r : null;
+    }
+
+    /**
+     * 이 런에서 아직 정해지지 않은 HUMAN_INPUT 승인을 실시간 알림과 같은 모양으로 돌려준다.
+     * 승인 대기에 들어간 뒤 구독한 화면은 그 알림을 받지 못했으므로 구독 응답이 이것으로 다시 보낸다.
+     */
+    public List<com.platform.workflow.event.WorkflowEvents.ApprovalRequired> pendingApprovalEvents(WorkflowRunEntity run) {
+        return pendingApprovalRepository.findByActionLogId(run.getId()).stream()
+                .filter(a -> WORKFLOW_APPROVAL_CHANNEL.equals(a.getApprovalChannel()))
+                .filter(a -> APPROVAL_PENDING.equals(a.getStatus()))
+                .map(a -> new com.platform.workflow.event.WorkflowEvents.ApprovalRequired(
+                        run.getId(), run.getParentRunId(), a.getPolicyId(), a.getPolicyId(),
+                        a.getRequestMessage(),
+                        a.getApprovers() != null ? a.getApprovers() : List.of(),
+                        a.getTimeoutAt() != null ? a.getTimeoutAt().toInstant() : null,
+                        a.getId()))
+                .toList();
     }
 
     /**

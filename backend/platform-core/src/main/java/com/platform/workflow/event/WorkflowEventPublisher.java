@@ -72,10 +72,10 @@ public class WorkflowEventPublisher {
     }
 
     public void approvalRequired(UUID runId, UUID parentRunId, String stepId, String policyId,
-                                 String reason, List<String> approvers, Instant timeoutAt) {
+                                 String reason, List<String> approvers, Instant timeoutAt, UUID approvalId) {
         safePublish(new WorkflowEvents.ApprovalRequired(
                 runId, parentRunId, stepId, policyId, reason,
-                approvers != null ? approvers : List.of(), timeoutAt));
+                approvers != null ? approvers : List.of(), timeoutAt, approvalId));
     }
 
     /**

@@ -77,6 +77,27 @@ class WorkflowControllerSubscribeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-119 승인 대기에 들어간 뒤 구독하면 등록한 다음 아직 정해지지 않은 승인을 그 화면에 다시 보낸다")
+    void subscribeRun_resendsOpenApprovalToLateSubscriber() throws Exception {
+        UUID runId = UUID.randomUUID();
+        WorkflowRunEntity run = new WorkflowRunEntity();
+        run.setId(runId);
+        run.setWorkflowId("wf-1");
+        run.setStatus("pending_approval");
+        run.setCurrentStep("h1");
+        when(workflowRunRepository.findById(runId)).thenReturn(Optional.of(run));
+        var pending = new com.platform.workflow.event.WorkflowEvents.ApprovalRequired(
+                runId, null, "h1", "h1", "출고 전 확인", java.util.List.of(), null, UUID.randomUUID());
+        when(workflowEngine.pendingApprovalEvents(run)).thenReturn(java.util.List.of(pending));
+
+        SseEmitter emitter = controller.subscribeRun(runId);
+
+        var order = org.mockito.Mockito.inOrder(subscriberRegistry);
+        order.verify(subscriberRegistry).register(runId, emitter);
+        order.verify(subscriberRegistry).sendApproval(emitter, pending);
+    }
+
+    @Test
     void subscribeRun_skipsRegistrationForCompletedRun() {
         UUID runId = UUID.randomUUID();
         WorkflowRunEntity run = new WorkflowRunEntity();
@@ -93,6 +114,7 @@ class WorkflowControllerSubscribeTest {
         assertThat(emitter).isNotNull();
         // 종료된 런은 즉시 close 되므로 register 호출되지 않아야 함
         verify(subscriberRegistry, never()).register(runId, emitter);
+        verify(workflowEngine, never()).pendingApprovalEvents(run);
     }
 
     @Test

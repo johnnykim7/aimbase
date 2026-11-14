@@ -356,6 +356,11 @@ public class WorkflowController {
                         "Workflow run not found: " + runId));
 
         SseEmitter emitter = new SseEmitter(30L * 60L * 1000L); // 30분
+        String status = run.getStatus();
+        boolean ended = "completed".equals(status) || "failed".equals(status) || "cancelled".equals(status);
+
+        // 진행 중인 런은 스냅샷보다 먼저 등록한다. 읽은 뒤 등록하기 전에 난 승인 대기를 아래 다시 보내기가 잡게 하려는 순서다.
+        if (!ended) subscriberRegistry.register(run.getId(), emitter);
 
         // 1) 연결 직후 현재 상태를 snapshot 으로 1회 전송.
         try {
@@ -377,8 +382,7 @@ public class WorkflowController {
         }
 
         // 2) 런이 이미 종료 상태면 snapshot 만 보내고 바로 close.
-        String status = run.getStatus();
-        if ("completed".equals(status) || "failed".equals(status) || "cancelled".equals(status)) {
+        if (ended) {
             try {
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("run_id", run.getId().toString());
@@ -394,8 +398,14 @@ public class WorkflowController {
             return emitter;
         }
 
-        // 3) 이벤트 스트림 구독자로 등록.
-        subscriberRegistry.register(run.getId(), emitter);
+        // 3) 승인 대기에 들어간 뒤 구독했으면 그 알림을 받지 못했으므로 아직 정해지지 않은 승인을 이 화면에 다시 보낸다.
+        try {
+            for (var approval : workflowEngine.pendingApprovalEvents(run)) {
+                subscriberRegistry.sendApproval(emitter, approval);
+            }
+        } catch (IOException e) {
+            emitter.completeWithError(e);
+        }
         return emitter;
     }
 

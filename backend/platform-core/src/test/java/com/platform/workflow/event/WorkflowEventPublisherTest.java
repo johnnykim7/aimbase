@@ -82,14 +82,16 @@ class WorkflowEventPublisherTest {
     void approvalRequired_defaultsEmptyApproversWhenNull() {
         UUID runId = UUID.randomUUID();
 
+        UUID approvalId = UUID.randomUUID();
         publisher.approvalRequired(runId, null, "confirm", "refund_policy",
-                "10만원 초과", null, Instant.now());
+                "10만원 초과", null, Instant.now(), approvalId);
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(springPublisher).publishEvent(captor.capture());
         WorkflowEvents.ApprovalRequired ev = (WorkflowEvents.ApprovalRequired) captor.getValue();
         assertThat(ev.approvers()).isEqualTo(List.of());
         assertThat(ev.policyId()).isEqualTo("refund_policy");
+        assertThat(ev.approvalId()).isEqualTo(approvalId);
     }
 
     // ─── CR-084 P4: iterationIndex 하위호환 + cyclic 회차 ──────────────

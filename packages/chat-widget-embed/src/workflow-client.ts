@@ -25,6 +25,8 @@ export class WorkflowClient {
     const token = await this.tokens.getToken();
     const url = `${baseUrl}/api/v1/workflows/runs/${encodeURIComponent(runId)}/subscribe?access_token=${encodeURIComponent(token)}`;
     const es = new EventSource(url);
+    // 서버는 구독할 때마다 아직 정해지지 않은 승인을 다시 보낸다. 재연결이나 실시간 알림과 겹친 것은 한 번만 전한다.
+    const seenApprovals = new Set<string>();
 
     es.addEventListener("workflow.snapshot", (e) => {
       try {
@@ -42,7 +44,12 @@ export class WorkflowClient {
     });
     es.addEventListener("workflow.approval", (e) => {
       try {
-        handlers.onApproval?.(JSON.parse((e as MessageEvent).data));
+        const ev = JSON.parse((e as MessageEvent).data) as ApprovalEvent;
+        if (ev.approval_id) {
+          if (seenApprovals.has(ev.approval_id)) return;
+          seenApprovals.add(ev.approval_id);
+        }
+        handlers.onApproval?.(ev);
       } catch (err) {
         handlers.onError?.(err as Error);
       }

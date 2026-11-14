@@ -1,7 +1,7 @@
 # T3-9 | CR-058 Aimbase Chat Widget SDK 상세 설계서
 
 **문서 번호**: T3-9
-**관련 CR**: CR-058, CR-177(워크플로우 끝남 알림 error, 2026-11-13)
+**관련 CR**: CR-058, CR-177(워크플로우 끝남 알림 error, 2026-11-13), CR-185(승인 대기 다시 보내기와 approval_id, 2026-11-14)
 **작성일**: 2026-04-24
 **상태**: ✅ Sprint 52 + Sprint 53 완료 (2026-04-24). 서버 3 Phase + 프론트 축소 MVP(Web Component + UMD 번들 17KB) + 샘플 BFF + 샘플 consumer HTML. 후속 CR-059~062 로 분리.
 **원본 요구사항**: [docs/origins/원본_요구사항_CR058_ChatWidget_20260424.md](origins/원본_요구사항_CR058_ChatWidget_20260424.md)
@@ -538,7 +538,8 @@ data: {"run_id":"...","step_id":"fetch_order","status":"running",
 
 event: workflow.approval
 data: {"run_id":"...","step_id":"confirm_refund","policy_id":"refund_over_100k",
-       "reason":"10만원 초과","approvers":["manager@..."],"timeout_at":"2026-04-24T10:30:00Z"}
+       "reason":"10만원 초과","approvers":["manager@..."],"timeout_at":"2026-04-24T10:30:00Z",
+       "approval_id":"..."}
 
 event: workflow.done
 data: {"run_id":"...","status":"completed","duration_ms":3420}
@@ -547,6 +548,8 @@ event: workflow.done
 data: {"run_id":"...","status":"failed","duration_ms":910,
        "error":{"reason":"Human approval rejected","detail":"금액 확인 필요"}}
 ```
+
+승인 대기 다시 보내기(CR-185): 진행 중인 런은 스냅샷보다 먼저 구독자로 등록하고, 스냅샷 다음에 아직 정해지지 않은 승인을 그 연결에만 `workflow.approval` 로 다시 보낸다. 승인 대기에 들어간 뒤 구독한 화면은 실시간 알림을 받지 못했기 때문이다. `approval_id` 는 pending_approvals.id 이고, 위젯 구독기는 같은 번호를 한 번만 전한다(재연결, 다시 보낸 것과 실시간 알림이 겹칠 때). 옛 서버처럼 번호가 없으면 그대로 전한다.
 
 `error` 는 실패한 런에 저장한 값이고 없으면 칸이 없다(CR-177).
 

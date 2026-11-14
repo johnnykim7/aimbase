@@ -96,9 +96,26 @@ class WorkflowRunSubscriberRegistryTest {
 
         registry.onApproval(new WorkflowEvents.ApprovalRequired(
                 runId, null, "confirm", "policy1", "reason",
-                List.of("u@x.com"), null));
+                List.of("u@x.com"), null, null));
 
         assertThat(emitter.sendCount).isEqualTo(1);
+    }
+
+    @Test
+    void sendApproval_sendsOnlyToGivenEmitterWithApprovalId() throws IOException {
+        UUID runId = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        RecordingEmitter other = new RecordingEmitter();
+        registry.register(runId, other);
+        RecordingEmitter late = new RecordingEmitter();
+
+        registry.sendApproval(late, new WorkflowEvents.ApprovalRequired(
+                runId, null, "h1", "h1", "출고 전 확인", List.of(), null, approvalId));
+
+        assertThat(late.sendCount).isEqualTo(1);
+        assertThat(other.sendCount).isZero();
+        assertThat(late.lastPayload).contains("\"approval_id\":\"" + approvalId + "\"")
+                .contains("workflow.approval");
     }
 
     @Test
@@ -137,8 +154,18 @@ class WorkflowRunSubscriberRegistryTest {
 
     private static class RecordingEmitter extends SseEmitter {
         int sendCount = 0;
+        String lastPayload = "";
         RecordingEmitter() { super(30_000L); }
-        @Override public void send(@NonNull SseEventBuilder builder) throws IOException { sendCount++; }
+        @Override public void send(@NonNull SseEventBuilder builder) throws IOException {
+            sendCount++;
+            StringBuilder sb = new StringBuilder();
+            for (var part : builder.build()) {
+                Object data = part.getData();
+                sb.append(data instanceof String str ? str
+                        : new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(data));
+            }
+            lastPayload = sb.toString();
+        }
     }
 
     private static class FailingEmitter extends SseEmitter {

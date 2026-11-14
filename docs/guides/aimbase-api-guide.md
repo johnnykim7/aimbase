@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.40.2** | 2026-11-13 | Aimbase v8.18.0 기준
+> **v3.40.3** | 2026-11-14 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1557,6 +1557,7 @@ curl -N "$AIMBASE/api/v1/workflows/runs/$RUN_ID/subscribe?access_token=$WIDGET_T
 - 타임아웃 30분
 - 연결 직후 `workflow.snapshot` 이벤트 1 회 (현재 DB 상태)
 - 이미 종료된 런이면 `workflow.snapshot` + `workflow.done` 즉시 발행 후 close
+- 진행 중인 런이 아직 정해지지 않은 승인을 기다리고 있으면 `workflow.snapshot` 다음에 그 연결에만 `workflow.approval` 을 한 번 더 보낸다. 승인 대기에 들어간 뒤 구독해도 승인 요청을 받는다. 같은 승인을 실시간 알림으로 또 받을 수 있으니 `approval_id` 로 하나만 다룬다 [CR-185]
 - 실행 중에는 `WorkflowEventPublisher` 가 발행하는 이벤트를 매칭해 브라우저로 forward
 
 **이벤트 4 종 payload 스펙**:
@@ -1579,7 +1580,8 @@ data: {"run_id":"...","step_id":"fetch_order","status":"completed",
 
 event: workflow.approval
 data: {"run_id":"...","step_id":"confirm_refund","policy_id":"confirm_refund",
-       "reason":"10만원 초과","approvers":["manager@company.com"],"timeout_at":"..."}
+       "reason":"10만원 초과","approvers":["manager@company.com"],"timeout_at":"...",
+       "approval_id":"..."}
 
 event: workflow.done
 data: {"run_id":"...","status":"completed","duration_ms":3420}
@@ -3356,7 +3358,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 ### 37-4. 워크플로우 승인에서 바뀐 점 `POST /api/v1/workflows/runs/{runId}/approve`
 
-- 위젯 토큰이면 권한 `workflow:approve` 가 있어야 한다. 없으면 403 `scope_required`. 이 권한은 `widget.allowed-scopes` 기본값에 없다. 테넌트가 런타임 설정에 넣고, 붙이는 앱이 토큰을 받을 때 요청해야 열린다
+- 위젯 토큰이면 권한 `workflow:approve` 가 있어야 한다. 없으면 403 `scope_required`. 이 권한은 `widget.allowed-scopes` 기본값에 없다. 플랫폼 관리자가 런타임 설정(모든 테넌트 공통)에 넣고, 붙이는 앱이 토큰을 받을 때 요청해야 열린다
 - 단계에 승인자 목록이 있으면 토큰 `user_ref` 가 그 안에 있어야 한다. 없으면 403 `not_approver`
 - 정한 사람을 승인 기록(`approved_by`)에 남긴다
 - 두 사람이 함께 누르면 먼저 닿은 하나만 지나고 나머지는 409 `approval_closed`, `data.status` 에 지금 상태
@@ -3366,6 +3368,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.40.3 | 2026-11-14 | **CR-185 승인 대기 런 구독** (§ 17-6, § 37-4). 승인 대기에 들어간 뒤 구독해도 `workflow.snapshot` 다음에 `workflow.approval` 을 다시 보낸다. 이벤트에 `approval_id` 추가. `workflow:approve` 는 플랫폼 런타임 설정(모든 테넌트 공통)에 넣는다고 보정 |
 | v3.40.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 31-1). CLI 연결의 `create_file` 은 허용 도구 목록이 아니라 실행기가 붙이는 계산 도구 통로(`/mcp-data`)로 부른다. 내장 도구만 쓰는 방식(NATIVE)도 같다 |
 | v3.40.1 | 2026-11-13 | **CR-186** (§ 35-4) ready 가 받아쓰기 서버 준비를 기다리는 것과 1011 경우 보정, 운용 가이드 절 번호 § 2-20 으로 바로잡음 |
 | v3.40.0 | 2026-11-13 | **CR-185 위젯 안 승인과 거절** (§ 37). 정책 `match_rules.tools` 와 `REQUIRE_APPROVAL` 로 도구 실행 전 승인, 대화 스트림 `approval_required`, `approval_resolved`, 결정 API `POST /api/v1/chat/approvals/{approvalId}`. 워크플로우 승인에 권한 `workflow:approve`, 승인자 확인, 정한 사람 기록, 409 |

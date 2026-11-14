@@ -109,7 +109,16 @@ public class WorkflowRunSubscriberRegistry {
         if (ev.reason() != null) m.put("reason", ev.reason());
         m.put("approvers", ev.approvers());
         if (ev.timeoutAt() != null) m.put("timeout_at", ev.timeoutAt().toString());
+        if (ev.approvalId() != null) m.put("approval_id", ev.approvalId().toString());
         return m;
+    }
+
+    /**
+     * 구독 직후 한 화면에만 승인 대기를 보낸다. 승인 대기에 들어간 뒤 구독한 화면은 실시간 알림을 받지 못했기 때문이다.
+     * 실시간 알림과 같은 이름, 같은 내용이라 위젯은 둘을 구분하지 않는다.
+     */
+    public void sendApproval(SseEmitter emitter, WorkflowEvents.ApprovalRequired ev) throws IOException {
+        emitter.send(SseEmitter.event().name("workflow.approval").data(toApprovalPayload(ev)));
     }
 
     /** 테스트용 — 현재 runId 구독자 수. */

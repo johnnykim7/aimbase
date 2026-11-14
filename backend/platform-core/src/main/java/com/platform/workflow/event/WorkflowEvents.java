@@ -57,7 +57,8 @@ public final class WorkflowEvents {
             String policyId,
             String reason,
             List<String> approvers,
-            Instant timeoutAt
+            Instant timeoutAt,
+            UUID approvalId           // pending_approvals.id. 구독 때 다시 보낸 것과 실시간 알림이 겹치면 위젯이 이것으로 하나만 그린다
     ) {}
 
     /**
