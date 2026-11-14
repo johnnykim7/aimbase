@@ -44,13 +44,11 @@ public class PlatformSettingsController {
 
         String userId = request.userId() != null ? request.userId() : "admin";
 
-        try {
-            int updated = settingsService.updateSettings(request.settings(), userId);
-            Map<String, List<SettingItem>> refreshed = settingsService.getAllGrouped(null);
-            return Map.of("success", true, "updated", updated, "data", refreshed);
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-        }
+        // CR-191: 거절 사유를 화면이 「저장하지 못했습니다: (서버 문구)」로 보이도록 IllegalArgumentException 은
+        // 공통 처리기에 맡겨 본문 error 에 문구를 싣는다. 상태 예외로 바꾸면 본문에는 Bad Request 만 남는다.
+        int updated = settingsService.updateSettings(request.settings(), userId);
+        Map<String, List<SettingItem>> refreshed = settingsService.getAllGrouped(null);
+        return Map.of("success", true, "updated", updated, "data", refreshed);
     }
 
     @PostMapping("/evict-cache")

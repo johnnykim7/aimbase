@@ -14,6 +14,7 @@ import com.platform.tenant.migration.TenantMigrationRunner;
 import com.platform.tenant.onboarding.TenantOnboardingRequest;
 import com.platform.tenant.onboarding.TenantOnboardingResult;
 import com.platform.tenant.onboarding.TenantOnboardingService;
+import com.platform.tenant.plan.SubscriptionPlanService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -53,6 +54,7 @@ public class PlatformController {
     private final TenantDataSourceManager dataSourceManager;
     private final TenantMigrationRunner migrationRunner;
     private final JwtProvider jwtProvider;
+    private final SubscriptionPlanService planService;
 
     @Value("${platform.impersonation.ttl-seconds:1800}")
     private long impersonationTtlSeconds;
@@ -75,7 +77,8 @@ public class PlatformController {
                                TenantOnboardingService onboardingService,
                                TenantDataSourceManager dataSourceManager,
                                TenantMigrationRunner migrationRunner,
-                               JwtProvider jwtProvider) {
+                               JwtProvider jwtProvider,
+                               SubscriptionPlanService planService) {
         this.tenantRepository = tenantRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.usageSummaryRepository = usageSummaryRepository;
@@ -83,6 +86,7 @@ public class PlatformController {
         this.dataSourceManager = dataSourceManager;
         this.migrationRunner = migrationRunner;
         this.jwtProvider = jwtProvider;
+        this.planService = planService;
     }
 
     // ─── Tenant CRUD ─────────────────────────────────────────────────
@@ -251,6 +255,12 @@ public class PlatformController {
 
     // ─── Subscription / Quota ────────────────────────────────────────
 
+    @GetMapping("/plans")
+    @Operation(summary = "플랜 목록과 플랜별 분당 요청 한도 (CR-191)")
+    public ApiResponse<SubscriptionPlanService.PlanCatalog> listPlans() {
+        return ApiResponse.ok(planService.catalog());
+    }
+
     @GetMapping("/subscriptions")
     @Operation(summary = "구독 목록 조회")
     public ApiResponse<List<SubscriptionEntity>> listSubscriptions() {
@@ -263,12 +273,18 @@ public class PlatformController {
             @PathVariable String tenantId,
             @RequestBody SubscriptionUpdateRequest request) {
         if (request.apiRpmLimit() != null) requireApiRpmLimit(request.apiRpmLimit());
+        String plan = request.plan() != null ? planService.requireKnown(request.plan()) : null;
+        Integer planRpmLimit = plan != null ? planService.rpmLimit(plan) : null;
 
         SubscriptionEntity sub = subscriptionRepository.findByTenantId(tenantId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                 "Subscription not found for tenant: " + tenantId));
 
-        if (request.plan() != null) sub.setPlan(request.plan());
+        if (plan != null) {
+            // BIZ-153: 다른 플랜으로 옮길 때만 그 플랜의 한도로 바꾼다. 같은 플랜을 다시 보내면 손으로 맞춘 한도를 지킨다.
+            if (!plan.equals(sub.getPlan())) sub.setApiRpmLimit(planRpmLimit);
+            sub.setPlan(plan);
+        }
         if (request.llmMonthlyTokenQuota() != null) sub.setLlmMonthlyTokenQuota(request.llmMonthlyTokenQuota());
         if (request.maxConnections() != null) sub.setMaxConnections(request.maxConnections());
         if (request.maxKnowledgeSources() != null) sub.setMaxKnowledgeSources(request.maxKnowledgeSources());

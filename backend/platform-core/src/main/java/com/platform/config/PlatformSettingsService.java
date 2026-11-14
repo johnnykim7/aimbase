@@ -3,6 +3,7 @@ package com.platform.config;
 import com.platform.domain.master.GlobalConfigEntity;
 import com.platform.policy.AuditLogger;
 import com.platform.repository.master.GlobalConfigRepository;
+import com.platform.tenant.plan.SubscriptionPlanService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -24,7 +25,8 @@ public class PlatformSettingsService {
     private static final long CACHE_TTL_MS = 5 * 60 * 1000L; // 5분
 
     // CR-147: skills 는 스킬 묶음 상한과 스킬 도구 한도(T3-17 3.11). 여기 없으면 런타임 설정 화면에 안 나온다.
-    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget", "llm", "skills");
+    // CR-191: plan 은 플랜 목록과 플랜별 분당 요청 한도(BIZ-153).
+    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget", "llm", "skills", "plan");
 
     private final GlobalConfigRepository configRepository;
     private final AuditLogger auditLogger;
@@ -142,20 +144,27 @@ public class PlatformSettingsService {
      * 설정값 수정. 캐시 무효화 + 감사 로그.
      */
     public int updateSettings(List<SettingUpdateRequest> updates, String userId) {
-        int updated = 0;
-
+        // CR-191: 플랜 목록, 기본 플랜, 한도는 서로 맞아야 해서 하나만 틀려도 같은 요청의 다른 값을 저장하지 않는다.
+        // 그래서 저장 전에 요청 전체를 먼저 검사한다.
+        Map<String, GlobalConfigEntity> targets = new HashMap<>();
         for (SettingUpdateRequest req : updates) {
             Optional<GlobalConfigEntity> opt = configRepository.findByConfigKey(req.key());
             if (opt.isEmpty()) {
                 log.warn("Setting key not found: {}", req.key());
                 continue;
             }
-
-            GlobalConfigEntity entity = opt.get();
-            String oldValue = entity.getConfigValue();
-
-            // 값 유효성 검증
             validateValue(req.key(), req.value());
+            targets.put(req.key(), opt.get());
+        }
+        validatePlanSettings(updates);
+
+        int updated = 0;
+        for (SettingUpdateRequest req : updates) {
+            GlobalConfigEntity entity = targets.get(req.key());
+            if (entity == null) {
+                continue;
+            }
+            String oldValue = entity.getConfigValue();
 
             entity.setConfigValue(req.value());
             entity.setUpdatedBy(userId);
@@ -179,6 +188,56 @@ public class PlatformSettingsService {
      */
     public void evictAll() {
         cache.clear();
+    }
+
+    /**
+     * BIZ-153: 플랜 목록에 든 이름마다 한도 키 행이 있어야 생성과 플랜 변경이 한도를 채울 수 있다.
+     * 한도 키 행은 마이그레이션으로만 생기므로 목록에 새 이름을 적는 것만으로는 플랜을 더할 수 없다.
+     */
+    private void validatePlanSettings(List<SettingUpdateRequest> updates) {
+        Map<String, String> changed = new HashMap<>();
+        for (SettingUpdateRequest req : updates) {
+            if (req.key().startsWith(SubscriptionPlanService.PREFIX)) {
+                changed.put(req.key(), req.value());
+            }
+        }
+        if (changed.isEmpty()) {
+            return;
+        }
+
+        for (Map.Entry<String, String> e : changed.entrySet()) {
+            if (SubscriptionPlanService.isRpmLimitKey(e.getKey())
+                    && SubscriptionPlanService.parseRpmLimit(e.getValue()) == null) {
+                throw new IllegalArgumentException(
+                        "Plan rpm limit must be an integer of 0 or greater: " + e.getKey() + "=" + e.getValue());
+            }
+        }
+
+        List<String> codes = SubscriptionPlanService.splitCodes(
+                changed.containsKey(SubscriptionPlanService.CODES_KEY)
+                        ? changed.get(SubscriptionPlanService.CODES_KEY)
+                        : storedValue(SubscriptionPlanService.CODES_KEY));
+        if (codes.isEmpty()) {
+            throw new IllegalArgumentException(SubscriptionPlanService.CODES_KEY + " must not be empty");
+        }
+        for (String code : codes) {
+            if (configRepository.findByConfigKey(SubscriptionPlanService.rpmLimitKey(code)).isEmpty()) {
+                throw new IllegalArgumentException("No setting for plan " + code + ": "
+                        + SubscriptionPlanService.rpmLimitKey(code));
+            }
+        }
+
+        String defaultPlan = changed.containsKey(SubscriptionPlanService.DEFAULT_KEY)
+                ? changed.get(SubscriptionPlanService.DEFAULT_KEY)
+                : storedValue(SubscriptionPlanService.DEFAULT_KEY);
+        if (defaultPlan == null || !codes.contains(defaultPlan.trim())) {
+            throw new IllegalArgumentException(SubscriptionPlanService.DEFAULT_KEY + " must be one of: "
+                    + String.join(", ", codes));
+        }
+    }
+
+    private String storedValue(String key) {
+        return configRepository.findByConfigKey(key).map(GlobalConfigEntity::getConfigValue).orElse(null);
     }
 
     private void validateValue(String key, String value) {
