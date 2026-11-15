@@ -813,7 +813,9 @@ curl -X POST /api/v1/connections \
   }'
 ```
 
-인증 타입: `API_KEY`(header), `BEARER`, `BASIC`, `NONE`. 시크릿은 `value_env`(환경변수 참조)를 권장하고 평문 `value`는 개발 환경 한정.
+인증 타입: `API_KEY`(`in` 은 `header` 기본, `query` 면 요청 주소 값으로 싣는다), `BEARER`, `BASIC`, `NONE`. 시크릿은 `value_env`(환경변수 참조)를 권장하고 평문 `value`는 개발 환경 한정.
+
+주소 값 인증(CR-197): `in=query` 면 `name=값` 이 주소에 붙고, 도구 입력 `query` 의 같은 이름(대소문자 무관)은 무시된다. 실행 기록의 요청 주소에는 `***` 로 남는다. 응답 본문과 머리값에 연결 인증값이 되돌아오면 도구 결과에서 `***` 로 바뀐다. 연결 조회(`GET /api/v1/connections`, `GET /api/v1/connections/{id}`)와 생성, 수정 응답의 `config.auth.value` 는 `***` 이며, 수정 요청에 `***` 를 그대로 보내면 저장된 값이 유지된다.
 
 **도구 실행 예시**
 
@@ -3368,6 +3370,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.40.4 | 2026-11-16 | **CR-197 HTTP 연결 주소 값 인증** (§ 7-6). `auth.in=query` 지원, 도구 결과에서 되돌아온 인증값 가림, 연결 조회 응답 `config.auth.value` 를 `***` 로 돌려줌 |
 | v3.40.3 | 2026-11-14 | **CR-185 승인 대기 런 구독** (§ 17-6, § 37-4). 승인 대기에 들어간 뒤 구독해도 `workflow.snapshot` 다음에 `workflow.approval` 을 다시 보낸다. 이벤트에 `approval_id` 추가. `workflow:approve` 는 플랫폼 런타임 설정(모든 테넌트 공통)에 넣는다고 보정 |
 | v3.40.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 31-1). CLI 연결의 `create_file` 은 허용 도구 목록이 아니라 실행기가 붙이는 계산 도구 통로(`/mcp-data`)로 부른다. 내장 도구만 쓰는 방식(NATIVE)도 같다 |
 | v3.40.1 | 2026-11-13 | **CR-186** (§ 35-4) ready 가 받아쓰기 서버 준비를 기다리는 것과 1011 경우 보정, 운용 가이드 절 번호 § 2-20 으로 바로잡음 |
