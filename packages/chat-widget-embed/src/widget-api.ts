@@ -1,6 +1,12 @@
 import type { TokenStore } from "./token-store";
 import type { FeedbackRating, WidgetSettings } from "./types";
 
+/** CR-194: 묻는 곳. 계정 묶음을 주면 연결보다 앞선다(BIZ-281) */
+export interface ConnectionTarget {
+  connectionId?: string;
+  connectionGroupId?: string;
+}
+
 /** 서버가 ApiResponse.error(code) 로 돌려준 거절 코드를 담는다. */
 export class WidgetApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) {
@@ -65,9 +71,10 @@ export class WidgetApi {
   }
 
   /** CR-177: locale 을 주면 평가 이유 이름이 그 언어로 온다. */
-  settings(connectionId: string | undefined, locale: string): Promise<WidgetSettings> {
+  settings(target: ConnectionTarget, locale: string): Promise<WidgetSettings> {
     const q = new URLSearchParams({ locale });
-    if (connectionId) q.set("connection_id", connectionId);
+    if (target.connectionGroupId) q.set("connection_group_id", target.connectionGroupId);
+    else if (target.connectionId) q.set("connection_id", target.connectionId);
     return this.request("GET", `/api/v1/chat/widget-settings?${q.toString()}`);
   }
 
@@ -91,10 +98,10 @@ export class WidgetApi {
     return this.request("DELETE", `/api/v1/chat/feedback?turn_id=${encodeURIComponent(turnId)}`);
   }
 
-  followUps(sessionId: string, turnId: string, connectionId?: string): Promise<{ follow_ups: string[]; title?: string }> {
-    return this.request("POST", `/api/v1/chat/sessions/${encodeURIComponent(sessionId)}/follow-ups`, {
-      turn_id: turnId,
-      connection_id: connectionId ?? null,
-    });
+  followUps(sessionId: string, turnId: string, target: ConnectionTarget): Promise<{ follow_ups: string[]; title?: string }> {
+    return this.request("POST", `/api/v1/chat/sessions/${encodeURIComponent(sessionId)}/follow-ups`,
+      target.connectionGroupId
+        ? { turn_id: turnId, connection_group_id: target.connectionGroupId }
+        : { turn_id: turnId, connection_id: target.connectionId ?? null });
   }
 }

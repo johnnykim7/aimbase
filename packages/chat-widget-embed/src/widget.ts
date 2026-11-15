@@ -56,7 +56,7 @@ import type {
   WidgetUpdate,
   WorkflowStepEvent,
 } from "./types";
-import { WidgetApi, WidgetApiError } from "./widget-api";
+import { WidgetApi, WidgetApiError, type ConnectionTarget } from "./widget-api";
 import { WorkflowClient } from "./workflow-client";
 
 const MAX_SUGGESTIONS = 4;
@@ -831,9 +831,14 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     fileInput.accept = (s.attachments?.accept ?? []).map((ext) => `.${ext}`).join(",");
   }
 
+  /** CR-194: 지금 묻는 곳. 붙은 뒤 속성이 바뀌면 다음 요청부터 따른다 */
+  function target(): ConnectionTarget {
+    return { connectionId: options.connectionId, connectionGroupId: options.connectionGroupId };
+  }
+
   async function loadSettings(): Promise<void> {
     try {
-      applySettings(await api.settings(options.connectionId, locale));
+      applySettings(await api.settings(target(), locale));
     } catch (e) {
       // 설정을 못 읽어도 대화는 된다. 붙이는 앱이 준 모델(또는 auto)로 묻는다.
       settings = null;
@@ -846,7 +851,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   /** 화면 언어를 바꾸면 평가 이유 이름만 그 언어로 다시 받는다. 못 받으면 앞 이름을 그대로 쓴다. */
   async function reloadSettingsFor(asked: Locale): Promise<void> {
     try {
-      const s = await api.settings(options.connectionId, asked);
+      const s = await api.settings(target(), asked);
       if (asked !== locale) return;
       if (settings) settings.feedback_reasons = s.feedback_reasons;
       else applySettings(s);
@@ -1512,6 +1517,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
           model: selectedModel,
           ragSourceId: options.ragSourceId,
           connectionId: options.connectionId,
+          connectionGroupId: options.connectionGroupId,
           actionsEnabled: options.actionsEnabled,
           context: options.contextProvider?.(),
           attachments: turn.attachments,
@@ -1638,7 +1644,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     if (!settings?.follow_ups_enabled || !v.turnId || v.stopped || v.error || !v.text.trim()) return;
     const askedIn = sessionId;
     try {
-      const res = await api.followUps(askedIn, v.turnId, options.connectionId);
+      const res = await api.followUps(askedIn, v.turnId, target());
       if (askedIn !== sessionId) return;
       v.followUps = (res.follow_ups ?? []).filter((q) => q && q.trim());
       if (res.title) {
@@ -2482,14 +2488,23 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
 
   /** CR-194: 붙이는 앱이 위젯 요소를 다시 만들지 않고 바꾼 옵션(T3-4 속성 변경). */
   function update(patch: WidgetUpdate): void {
+    let reload = false;
     if ("connectionId" in patch) {
       const next = patch.connectionId || undefined;
       if (next !== options.connectionId) {
         options.connectionId = next;
-        // 고를 수 있는 모델과 깊게 생각하기가 연결마다 달라 설정을 다시 받는다.
-        void loadSettings();
+        reload = true;
       }
     }
+    if ("connectionGroupId" in patch) {
+      const next = patch.connectionGroupId || undefined;
+      if (next !== options.connectionGroupId) {
+        options.connectionGroupId = next;
+        reload = true;
+      }
+    }
+    // 고를 수 있는 모델과 깊게 생각하기가 연결과 묶음마다 달라 설정을 다시 받는다.
+    if (reload) void loadSettings();
     if ("emptySubtitle" in patch) {
       options.emptySubtitle = patch.emptySubtitle ?? undefined;
       renderEmpty();

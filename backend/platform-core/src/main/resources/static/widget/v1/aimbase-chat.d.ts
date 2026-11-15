@@ -122,6 +122,11 @@ interface WidgetOptions {
     ragSourceId?: string;
     /** 사용할 Connection ID — chat request 의 connection_id 로 전달. 미지정 시 테넌트 default. */
     connectionId?: string;
+    /**
+     * CR-194: 계정 묶음 번호. 주면 대화, 위젯 설정, 다음 질문 제안이 그 묶음으로 가고 한 계정의 사용 한도가 차면
+     * 다음 계정이 답한다. connectionId 와 같이 주면 묶음을 쓰고 요청에 connection_id 를 싣지 않는다(BIZ-281).
+     */
+    connectionGroupId?: string;
     /** MCP 도구 자동 호출 활성화 — chat request 의 actions_enabled=true 로 전달. 기본 false. */
     actionsEnabled?: boolean;
     /** 모델 명시 지정 — chat request 의 model 로 전달. 미지정 시 "auto". */
@@ -189,6 +194,7 @@ interface WidgetSettings {
 /** CR-194: 위젯 요소를 다시 만들지 않고 바꾸는 옵션. 준 칸만 바꾼다 */
 interface WidgetUpdate {
     connectionId?: string | null;
+    connectionGroupId?: string | null;
     historyList?: boolean;
     emptySubtitle?: LocalizedText | null;
 }
@@ -246,7 +252,7 @@ declare class AimbaseChatElement extends HTMLElement {
     /**
      * CR-194 계약 6-1: 붙이는 앱은 화면을 옮겨도 위젯 요소 하나를 그대로 두고 속성만 바꾼다. 화면 키가 바뀌면 그 화면의
      * 토큰과 대화로 위젯을 다시 띄운다(응답 멈춤, 토큰 다시 받기, 위젯 설정 다시 읽기). 열려 있던 창은 연 채로 둔다.
-     * 연결, 대화 목록 끄기, 첫 화면 안내 줄은 그 자리에서 바꾼다. 그 밖의 속성은 지금처럼 붙을 때만 읽는다.
+     * 연결, 계정 묶음, 대화 목록 끄기, 첫 화면 안내 줄은 그 자리에서 바꾼다. 그 밖의 속성은 지금처럼 붙을 때만 읽는다.
      */
     attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void;
     connectedCallback(): void;
