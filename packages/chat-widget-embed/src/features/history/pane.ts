@@ -91,8 +91,10 @@ export class HistoryPane {
   private closeMenu: (() => void) | null = null;
 
   constructor(private readonly host: PaneHost) {
-    this.recent = newList((page) => host.api.sessions({ projectId: NO_PROJECT, page }));
-    this.search = newList((page) => host.api.sessions({ query: this.query, page }));
+    // CR-194: 메뉴 화면에서는 최근 대화와 검색을 그 화면 키의 대화로 거른다. 프로젝트 안 대화는 화면을 가리지 않는다.
+    const screenKey = host.ctx.screenKey() ?? undefined;
+    this.recent = newList((page) => host.api.sessions({ projectId: NO_PROJECT, screenKey, page }));
+    this.search = newList((page) => host.api.sessions({ query: this.query, screenKey, page }));
   }
 
   mount(body: HTMLElement): void {

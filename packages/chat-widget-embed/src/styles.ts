@@ -90,6 +90,12 @@ button { font: inherit; color: inherit; }
 .lp { width: 228px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--aimbase-border); background: var(--aimbase-assistant-bg); }
 .lp-body { flex: 1; min-height: 0; overflow-y: auto; }
 .lp.overlay { position: absolute; top: 0; bottom: 0; left: 0; width: 280px; max-width: 85%; z-index: 50; background: var(--aimbase-bg); box-shadow: 4px 0 16px rgba(0,0,0,.12); }
+/* CR-194: 메뉴 화면은 떠 있는 창에서 대화 목록을 대화 옆에 붙이고 판을 넓힌다(목록 240px, 대화 400px) */
+.panel.floating.dock:not(.expanded) { width: 640px; }
+.panel.dock .lp { width: 240px; }
+/* CR-194: 머리줄 아래 회색 띠 한 줄 */
+.hd-note { flex-shrink: 0; padding: 6px 14px; font-size: .85em; color: var(--aimbase-muted); background: var(--aimbase-assistant-bg); border-bottom: 1px solid var(--aimbase-border); }
+.notice .notice-act { margin-left: 8px; }
 .lp-scrim { display: none; position: absolute; inset: 0; background: rgba(24,24,27,.24); z-index: 45; }
 .lp-scrim.on { display: block; }
 .spane { width: 56%; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--aimbase-border); background: var(--aimbase-bg); }
