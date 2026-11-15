@@ -1191,7 +1191,8 @@ public class OrchestratorEngine {
         return new com.platform.session.TurnExtras(
                 w != null ? w.chatProjectId() : null,
                 w != null ? w.questionDisplay() : null,
-                toolNames);
+                toolNames,
+                w != null ? w.screenKey() : null);
     }
 
     /** CR-178: API 도구 루프가 부른 도구와 CLI 실행기가 알려 온 도구의 이름(중복 제외, 부른 순서). */

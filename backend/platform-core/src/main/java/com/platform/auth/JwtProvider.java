@@ -61,11 +61,22 @@ public class JwtProvider {
      */
     public String generateWidgetToken(String tenantId, String projectId, String userRef,
                                       List<String> scopes, String origin, long ttlSeconds) {
+        return generateWidgetToken(tenantId, projectId, userRef, null, null, scopes, origin, ttlSeconds);
+    }
+
+    /**
+     * CR-194 PRD-637: 묻는 사람 이름과 함께 보기 키를 같이 싣는다. 함께 보기 키는 붙이는 앱 서버가 그 사람이 그 건을
+     * 볼 수 있다고 보증한 값이라 브라우저가 고칠 수 없는 토큰에만 둔다.
+     */
+    public String generateWidgetToken(String tenantId, String projectId, String userRef, String userName,
+                                      String shareKey, List<String> scopes, String origin, long ttlSeconds) {
         Date now = new Date();
         Map<String, Object> claims = new HashMap<>();
         claims.put("tenant_id", tenantId);
         if (projectId != null) claims.put("project_id", projectId);
         if (userRef != null) claims.put("user_ref", userRef);
+        if (userName != null) claims.put("user_name", userName);
+        if (shareKey != null) claims.put("share_key", shareKey);
         claims.put("scopes", scopes);
         if (origin != null) claims.put("origin", origin);
         claims.put("type", "widget");

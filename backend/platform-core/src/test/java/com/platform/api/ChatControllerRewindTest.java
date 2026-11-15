@@ -41,6 +41,8 @@ class ChatControllerRewindTest {
     @Mock private com.platform.session.ChatWidgetSettingsService widgetSettings;
     @Mock private com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder;
 
+    @Mock private com.platform.session.ChatSessionOwnership sessionAccess;
+    @Mock private com.platform.session.SharedConversationService sharedConversations;
     @InjectMocks private ChatController controller;
 
     @Test

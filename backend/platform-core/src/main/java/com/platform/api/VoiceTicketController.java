@@ -30,8 +30,11 @@ public class VoiceTicketController {
 
     private final VoiceTicketService ticketService;
 
-    public VoiceTicketController(VoiceTicketService ticketService) {
+    private final com.platform.session.ChatSessionOwnership sessionAccess;
+
+    public VoiceTicketController(VoiceTicketService ticketService, com.platform.session.ChatSessionOwnership sessionAccess) {
         this.ticketService = ticketService;
+        this.sessionAccess = sessionAccess;
     }
 
     public record TicketRequest(@JsonProperty("session_id") String sessionId) {}
@@ -45,6 +48,8 @@ public class VoiceTicketController {
         if (WidgetScopes.lacks(auth, SCOPE)) {
             throw new ChatRejectedException(HttpStatus.FORBIDDEN, "voice_forbidden");
         }
+        // CR-194 BIZ-275: 들어갈 수 없는 대화에는 음성 대화를 열지 않는다
+        sessionAccess.requireIfExists(request.sessionId());
         return ApiResponse.ok(ticketService.issue(
                 request.sessionId(), WidgetScopes.principalId(auth), http.getHeader(HttpHeaders.ORIGIN)));
     }

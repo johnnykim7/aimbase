@@ -63,9 +63,15 @@ public record ChatRequest(
      * @param chatProjectId   세션을 처음 만들 때 넣을 위젯 프로젝트. 이미 있는 세션이면 null
      * @param questionDisplay 이어보기 화면에 보일 질문 글과 첨부({@code text}, {@code attachments})
      * @param widget          CR-179: 위젯 토큰 요청인지. 내 선호와 자동 기억은 위젯 사용자에게만 쓴다(BIZ-180)
+     * @param screenKey       CR-194: 대화를 처음 저장할 때 남길 화면 키(BIZ-277). 없으면 null
      */
     public record WidgetTurn(String ownerRef, java.util.UUID chatProjectId,
-                             java.util.Map<String, Object> questionDisplay, boolean widget) {
+                             java.util.Map<String, Object> questionDisplay, boolean widget, String screenKey) {
+
+        public WidgetTurn(String ownerRef, java.util.UUID chatProjectId,
+                          java.util.Map<String, Object> questionDisplay, boolean widget) {
+            this(ownerRef, chatProjectId, questionDisplay, widget, null);
+        }
 
         /** CR-179: 기억과 선호의 주인. 위젯 토큰이고 user_ref 가 있을 때만 값이 있다(BIZ-180). */
         public String memoryOwner() {
