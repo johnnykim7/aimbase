@@ -13,14 +13,17 @@ setup-token 을 띄워 값을 받고, 붙여 넣은 값을 계정 폴더의 토�
 
 토큰 값은 화면에 보이지 않게 받고 명령 인자, 기록, 출력에 싣지 않는다.
 """
+import fcntl
 import getpass
 import json
 import os
+import pty
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import termios
 from datetime import datetime, timedelta, timezone
 
 FILE_NAME = "oauth-token.json"
@@ -33,8 +36,9 @@ VERIFY_MODEL = os.environ.get("VERIFY_MODEL", "claude-haiku-5-5")
 # setup-token 화면이 터미널의 붙여넣기 표시 모드(ESC[?2004h)를 켠 채 끝나면, 다음 붙여넣기 앞뒤에
 # ESC[200~ 와 ESC[201~ 가 끼어 값이 sk-ant-oat01- 로 시작하지 않게 된다(2026-11-16 chaws work01).
 # 받기 전에 그 모드를 끄고, 받은 글에서도 제어 문자를 걷어 토큰 모양만 골라낸다.
-ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 TOKEN = re.compile(re.escape(PREFIX) + r"[A-Za-z0-9_-]+")
+TOKEN_CHARS = re.compile(r"[A-Za-z0-9_-]+")
 TRIES = 3
 
 
@@ -105,17 +109,78 @@ def verify(d):
         return "확인 못 함: " + type(e).__name__
 
 
+def token_from_screen(text):
+    """setup-token 화면 출력에서 마지막에 찍힌 토큰을 골라낸다. 화면 폭에서 줄이 꺾였으면 빈 줄 전까지 잇는다."""
+    text = ESCAPES.sub("", text).replace("\r", "")
+    i = text.rfind(PREFIX)
+    if i < 0:
+        return ""
+    parts = []
+    for line in text[i:].split("\n"):
+        line = line.strip()
+        m = TOKEN_CHARS.match(line)
+        if not m:
+            break
+        parts.append(m.group(0))
+        if m.end() < len(line):
+            break
+    tok = "".join(parts)
+    return tok if TOKEN.fullmatch(tok) else ""
+
+
+def run_on_screen(argv, env):
+    """명령을 사람의 터미널에 그대로 보이며 돌리고, 화면에 나간 글을 돌려준다.
+    가상 터미널로 돌려 끝나면 터미널 모드가 원래대로 돌아온다."""
+    seen = bytearray()
+    sized = []
+
+    def read(fd):
+        # 가상 터미널은 화면 폭을 모른다. 사람 터미널 폭을 넘겨야 승인 주소와 토큰이 80칸에서 꺾이지 않는다.
+        if not sized:
+            sized.append(True)
+            try:
+                fcntl.ioctl(fd, termios.TIOCSWINSZ, fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, b"\0" * 8))
+            except OSError:
+                pass
+        data = os.read(fd, 4096)
+        seen.extend(data)
+        return data
+
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        pty.spawn(argv, read)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    return seen.decode("utf-8", "replace")
+
+
 def setup_token():
-    """setup-token 은 값을 찍기만 한다. 계정 폴더에 아무것도 남기지 않게 빈 폴더에서 띄운다."""
+    """setup-token 을 띄우고 찍힌 값을 화면에서 바로 받는다. 받지 못하면 빈 문자열(그때는 붙여 넣는다).
+    값을 복사해 붙여 넣던 단계에서 setup-token 이 남긴 입력 찌꺼기 때문에 빈 값이 들어가 실패했다(2026-11-16 chaws work01).
+    계정 폴더에 아무것도 남기지 않게 빈 폴더에서 띄운다."""
     print("[token] 찍힌 주소를 브라우저에서 이 계정으로 승인하고, 받은 코드를 붙여 넣습니다.")
-    print("[token] 끝나면 sk-ant-oat01- 로 시작하는 값이 찍힙니다. 그 값을 복사해 둡니다.")
+    print("[token] 끝나면 찍히는 sk-ant-oat01- 값은 이 스크립트가 바로 받습니다.")
     tmp = tempfile.mkdtemp(prefix="setup-token-")
     try:
-        subprocess.run(["claude", "setup-token"], env=dict(os.environ, CLAUDE_CONFIG_DIR=tmp))
+        screen = run_on_screen(["claude", "setup-token"], dict(os.environ, CLAUDE_CONFIG_DIR=tmp))
     except OSError as e:
         print("[token] claude 를 띄우지 못했습니다: " + type(e).__name__)
+        return ""
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    return token_from_screen(screen)
+
+
+def drop_pending_input():
+    """앞 프로그램이 남긴 입력(빈 줄 등)을 버린다. 남아 있으면 토큰 입력 칸이 빈 값으로 바로 넘어간다."""
+    try:
+        with open("/dev/tty") as t:
+            termios.tcflush(t.fileno(), termios.TCIFLUSH)
+    except (OSError, termios.error):
+        pass
 
 
 def pick_token(raw):
@@ -127,6 +192,7 @@ def pick_token(raw):
 def read_token():
     """토큰을 화면에 보이지 않게 받는다. 모양이 틀리면 값은 찍지 않고 무엇이 왔는지만 알리고 다시 받는다."""
     for _ in range(TRIES):
+        drop_pending_input()
         if sys.stdout.isatty():
             sys.stdout.write("\x1b[?2004l")
             sys.stdout.flush()
@@ -167,9 +233,15 @@ def main():
         tok = ""
         print("[token] 옮김. 기한 %s. 로그인 파일은 그대로 둡니다" % expires.date())
     else:
+        tok = ""
         if ask("[token] claude setup-token 을 지금 띄울까요? 이미 값을 받았으면 n [Y/n] ") in ("", "y"):
-            setup_token()
-        tok = read_token()
+            tok = setup_token()
+            if tok:
+                print("[token] 화면에 찍힌 값을 받았습니다. 붙여 넣지 않아도 됩니다")
+            else:
+                print("[token] 화면에서 값을 찾지 못했습니다. 찍힌 값을 붙여 넣어 주세요")
+        if not tok:
+            tok = read_token()
         if not tok:
             print("[token] sk-ant-oat01- 값을 받지 못해 넣지 않았습니다")
             sys.exit(1)
