@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.42.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.42.1** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -3380,6 +3380,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 - 위젯 요소 하나를 두고 화면을 옮길 때 속성만 바꾼다. `screen-key` 는 다른 속성을 바꾼 뒤 맨 마지막에 바꾼다. 위젯이 토큰을 다시 받고(authResolver 를 다시 부른다) 그 화면의 대화로 바꾼다
 - `history-list="off"` 를 주면 왼쪽 대화 목록과 목록 단추를 숨긴다
+- 화면 키가 없는 화면은 CR-178 그대로다. `session-id` 를 주지 않으면 위젯은 지난 대화를 서버에 묻지 않는다
 - 서버 API 로 직접 쓰면 `GET /api/v1/chat/sessions?screen_key=` 로 거르고, `POST /api/v1/chat/completions` 요청 `screen_key` 로 남긴다(대화를 처음 저장할 때만)
 
 ### 38-2. 함께 보는 대화
@@ -3425,6 +3426,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 - 첫 연결은 묶음에 저장된 구성원 순서의 첫째입니다
 - `connection-id` 와 같이 주면 묶음을 씁니다. 위젯은 묶음을 받으면 요청에 `connection_id` 를 싣지 않습니다
 - 붙은 뒤 `connection-group-id` 를 바꾸면 위젯이 설정을 다시 받고 다음 질문부터 그 묶음으로 묻습니다
+- 연결 속성을 하나씩 바꿔도(묶음을 떼고 연결을 다는 식) 위젯은 마지막으로 바꾼 연결의 설정만 씁니다. 그 설정을 받기 전에 보낸 질문은 받을 때까지(최대 10초) 기다리고, 지금 모델이 그 연결 목록에 없으면 그 연결 기본 모델로 바꿔 묻습니다
 
 | 상태 | 코드 | 경우 |
 |---|---|---|
@@ -3432,12 +3434,21 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 | 400 | `connection_group_empty` | 구성원이 없는 묶음 |
 | 400 | `connection_group_no_common_model` | 구성원 모두가 받는 모델이 없는 묶음(위젯 설정 조회) |
 
+### 38-5. 붙이는 앱의 모달(건 창) 위에서
+
+모달이 열려 있어도 위젯은 눌리고 글이 쳐지며 답 복사가 됩니다. 위젯 자리는 `pointer-events: auto` 이고, 위젯 안의 누름, 초점, 휠 이벤트(pointerdown, mousedown, touchstart, touchmove, wheel, focusin, focusout)는 붙이는 앱 문서로 올라가지 않습니다. 그래서 모달의 바깥 누름 닫기와 바깥 휠 막기에 걸리지 않습니다.
+
+- 위젯이 막을 수 없는 것이 둘 있습니다. 문서 앞단(capture)에서 받는 모달의 Esc 와, 모달 안 요소를 떠날 때 모달 쪽에서 나는 focusout(초점 가두기)입니다. 붙이는 앱이 `[data-aimbase-widget]` 안에서 난 일이면 거릅니다. 백오피스2 는 Radix Dialog 에서 이 표시로 Esc 와 초점 가두기를 거릅니다
+- 위젯 단추, 대화창, 메뉴, 확인 창은 모두 `data-aimbase-widget` 표시가 달린 한 자리 안에 그려집니다
+- http 화면(브라우저 복사 기능이 없는 곳)에서 복사할 때 쓰는 숨은 칸도 위젯 자리 안에 둡니다
+
 ---
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.42.1 | 2026-11-16 | **CR-194 위젯 보정** (§ 38-1, § 38-4, § 38-5). 연결 속성을 하나씩 바꿀 때 마지막 연결 설정만 쓰고 받기 전 질문은 기다림. 모달 위 위젯 누름과 복사, `data-aimbase-widget` 표시. 화면 키 없는 화면에서 `session-id` 가 없으면 지난 대화를 묻지 않음 |
 | v3.42.0 | 2026-11-16 | **CR-194 위젯 계정 묶음** (§ 28-2, § 28-4, § 38-4). 위젯 설정 조회 질의와 다음 질문 제안 본문에 `connection_group_id`. 대화 요청 모델 검사를 묶음 구성원 모두로. 위젯 속성 `connection-group-id` |
 | v3.41.0 | 2026-11-15 | **CR-194 위젯 화면별 대화와 함께 보는 대화** (§ 17-2, § 38). 토큰 발급 `user_name`, `share_key`, 모르는 칸 무시. `POST /api/v1/chat/sessions/shared` 추가. 대화 목록 `screen_key`, 대화 요청 `screen_key`, 이어보기 `shared` 와 `question.asker`, 위젯 설정 `shared_available` 과 `user_name`. 대화 번호를 받는 위젯 API 의 접근 확인을 하나로 모아 대화 요청에도 건다 |
 | v3.40.3 | 2026-11-14 | **CR-185 승인 대기 런 구독** (§ 17-6, § 37-4). 승인 대기에 들어간 뒤 구독해도 `workflow.snapshot` 다음에 `workflow.approval` 을 다시 보낸다. 이벤트에 `approval_id` 추가. `workflow:approve` 는 플랫폼 런타임 설정(모든 테넌트 공통)에 넣는다고 보정 |
