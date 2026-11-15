@@ -73,6 +73,7 @@ export class AimbaseChatElement extends HTMLElement {
       "rag-source-id",
       "session-id",
       "connection-id",
+      "connection-group-id",
       "actions-enabled",
       "model",
       "suggestions",
@@ -89,7 +90,7 @@ export class AimbaseChatElement extends HTMLElement {
   /**
    * CR-194 계약 6-1: 붙이는 앱은 화면을 옮겨도 위젯 요소 하나를 그대로 두고 속성만 바꾼다. 화면 키가 바뀌면 그 화면의
    * 토큰과 대화로 위젯을 다시 띄운다(응답 멈춤, 토큰 다시 받기, 위젯 설정 다시 읽기). 열려 있던 창은 연 채로 둔다.
-   * 연결, 대화 목록 끄기, 첫 화면 안내 줄은 그 자리에서 바꾼다. 그 밖의 속성은 지금처럼 붙을 때만 읽는다.
+   * 연결, 계정 묶음, 대화 목록 끄기, 첫 화면 안내 줄은 그 자리에서 바꾼다. 그 밖의 속성은 지금처럼 붙을 때만 읽는다.
    */
   attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
     if (!this.handle || oldValue === newValue) return;
@@ -105,6 +106,9 @@ export class AimbaseChatElement extends HTMLElement {
       }
       case "connection-id":
         this.handle.update({ connectionId: newValue });
+        break;
+      case "connection-group-id":
+        this.handle.update({ connectionGroupId: newValue });
         break;
       case "history-list":
         this.handle.update({ historyList: newValue !== "off" });
@@ -159,6 +163,7 @@ export class AimbaseChatElement extends HTMLElement {
       sessionId: this.getAttribute("session-id") ?? undefined,
       ragSourceId: this.ragSourceId ?? this.getAttribute("rag-source-id") ?? undefined,
       connectionId: this.getAttribute("connection-id") ?? undefined,
+      connectionGroupId: this.getAttribute("connection-group-id") || undefined,
       actionsEnabled: actionsAttr === "true" || actionsAttr === "" ? true : undefined,
       model: this.getAttribute("model") ?? undefined,
       target: displayAttr === "inline" ? (this as HTMLElement) : undefined,

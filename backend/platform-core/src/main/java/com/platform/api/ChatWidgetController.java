@@ -48,8 +48,9 @@ public class ChatWidgetController {
     @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     public ApiResponse<Map<String, Object>> widgetSettings(
             @RequestParam(name = "connection_id", required = false) String connectionId,
+            @RequestParam(name = "connection_group_id", required = false) String connectionGroupId,
             @RequestParam(name = "locale", required = false) String locale) {
-        return ApiResponse.ok(widgetSettings.settings(connectionId, locale));
+        return ApiResponse.ok(widgetSettings.settings(connectionId, connectionGroupId, locale));
     }
 
     @PutMapping("/feedback")
@@ -92,7 +93,7 @@ public class ChatWidgetController {
                                                       @PathVariable String sessionId,
                                                       @RequestBody FollowUpRequest body) {
         return ApiResponse.ok(followUpService.generate(requester(principal), sessionId,
-                body.turnId(), body.connectionId()));
+                body.turnId(), body.connectionId(), body.connectionGroupId()));
     }
 
     /** 위젯 토큰은 user_ref(없으면 subject), 로그인은 사용자 id. 세션 주인 대조와 평가 주인에 쓴다. */
@@ -112,5 +113,6 @@ public class ChatWidgetController {
 
     public record FollowUpRequest(
             @JsonProperty("turn_id") String turnId,
-            @JsonProperty("connection_id") String connectionId) {}
+            @JsonProperty("connection_id") String connectionId,
+            @JsonProperty("connection_group_id") String connectionGroupId) {}
 }

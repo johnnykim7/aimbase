@@ -161,15 +161,18 @@ public class ChatController {
         // CR-194 BIZ-275: 들어갈 수 없는 대화는 응답을 시작하기 전에 거른다. 아직 없는 대화 번호(첫 질문)는 통과한다
         sessionAccess.requireIfExists(request.sessionId());
         String screenKey = validScreenKey(request.screenKey());
+        // CR-194 BIZ-281: 계정 묶음이면 구성원 모두, 아니면 요청 연결 하나. 첫째가 능력(생각, 첨부, 그림)을 정한다
+        List<String> targets = targetConnections(request);
+        String lead = targets.isEmpty() ? null : targets.get(0);
 
         // CR-184: 그림 질문은 모델을 부르지 않는다(BIZ-231)
         if (request.image() != null) {
-            return imageCompletion(request);
+            return imageCompletion(request, lead);
         }
 
         // CR-175: 모델, 깊게 생각하기 검사 뒤 되감기. 되감기는 스트림을 열기 전에 해야 오류를 HTTP 코드로 줄 수 있다.
-        validateModel(request);
-        Boolean thinkingOverride = parseThinking(request);
+        validateModel(request.model(), targets);
+        Boolean thinkingOverride = parseThinking(request, lead);
         // CR-178: 프로젝트는 응답을 시작하기 전에 거른다(PRD-424). 주인은 이 스레드에서 정해 실어 보낸다
         String owner = com.platform.session.ChatOwner.current();
         UUID chatProjectId = resolveChatProject(request, owner);
@@ -180,7 +183,7 @@ public class ChatController {
                 : documentEditService.prepare(request.sessionId(), request.documentEdit(),
                         request.connectionId(), request.connectionGroupId());
 
-        AdapterResolution resolved = resolveAdapter(request.model(), request.connectionId());
+        AdapterResolution resolved = resolveAdapter(request.model(), lead);
         // CR-183: 계산 도구가 붙는 요청이면 데이터 요약 끝에 계산 안내 틀을 붙인다(BIZ-221). 대화 API 요청은
         // CLI 면 언제나, API 면 데이터 파일이 있을 때 붙으므로 요청이 이 도구를 빼지 않았으면 붙는다.
         boolean dataGuide = request.toolFilter() == null || request.toolFilter().excludeTools() == null
@@ -890,11 +893,26 @@ public class ChatController {
 
     private record AdapterResolution(String modelId, com.platform.llm.adapter.AdapterCapability capability) {}
 
-    /** CR-175 BIZ-150: 연결 config 에 models 가 있으면 그 목록 밖의 모델은 받지 않는다. */
-    private void validateModel(ChatCompletionRequest request) {
-        if (request.connectionId() == null || request.connectionId().isBlank()) return;
-        if (!connectionAdapterFactory.isModelAllowed(request.connectionId(), request.model())) {
-            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "model_not_allowed");
+    /** CR-194: 연결과 묶음을 같이 주면 묶음을 쓴다(CR-161 과 같은 순서). 둘 다 없으면 빈 목록. */
+    private List<String> targetConnections(ChatCompletionRequest request) {
+        if (request.connectionGroupId() != null && !request.connectionGroupId().isBlank()) {
+            return widgetSettings.groupMembers(request.connectionGroupId());
+        }
+        if (request.connectionId() != null && !request.connectionId().isBlank()) {
+            return List.of(request.connectionId());
+        }
+        return List.of();
+    }
+
+    /**
+     * CR-175 BIZ-150: 연결 config 에 models 가 있으면 그 목록 밖의 모델은 받지 않는다.
+     * 묶음은 어느 구성원이 답할지 미리 모르므로 구성원 모두가 받아야 한다(CR-194 BIZ-281).
+     */
+    private void validateModel(String model, List<String> targets) {
+        for (String connectionId : targets) {
+            if (!connectionAdapterFactory.isModelAllowed(connectionId, model)) {
+                throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "model_not_allowed");
+            }
         }
     }
 
@@ -915,7 +933,7 @@ public class ChatController {
     }
 
     /** CR-175 BIZ-150: thinking 칸. 켜기를 요청했는데 그 연결 어댑터가 요청마다 바꾸지 못하면 400. */
-    private Boolean parseThinking(ChatCompletionRequest request) {
+    private Boolean parseThinking(ChatCompletionRequest request, String lead) {
         String thinking = request.thinking();
         if (thinking == null || thinking.isBlank()) return null;
         Boolean on = switch (thinking.toLowerCase(java.util.Locale.ROOT)) {
@@ -923,7 +941,7 @@ public class ChatController {
             case "off" -> Boolean.FALSE;
             default -> throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "thinking_invalid");
         };
-        if (on && !widgetSettings.thinkingSupported(request.connectionId(), request.model())) {
+        if (on && !widgetSettings.thinkingSupported(lead, request.model())) {
             throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "thinking_not_supported");
         }
         return on;
@@ -935,14 +953,14 @@ public class ChatController {
     /** 스트림을 기다리는 여유. 공급처 시간 한도가 지난 뒤 저장과 끝 이벤트를 보낼 시간이다. */
     private static final long IMAGE_STREAM_GRACE_MS = 60_000L;
 
-    private Object imageCompletion(ChatCompletionRequest request) {
+    private Object imageCompletion(ChatCompletionRequest request, String lead) {
         String sessionId = request.sessionId() != null && !request.sessionId().isBlank()
                 ? request.sessionId() : UUID.randomUUID().toString();
         List<com.platform.image.ImageGenerationService.RequestMessage> messages = request.messages().stream()
                 .map(m -> new com.platform.image.ImageGenerationService.RequestMessage(m.role(), m.content()))
                 .toList();
         com.platform.image.ImageGenerationService.Prepared prepared = imageGeneration.prepare(
-                request.connectionId(), sessionId, request.image().action(), request.image().sourceImageId(),
+                lead, sessionId, request.image().action(), request.image().sourceImageId(),
                 messages);
         rewindIfRequested(request);
 

@@ -106,6 +106,11 @@ export interface WidgetOptions {
   ragSourceId?: string;
   /** 사용할 Connection ID — chat request 의 connection_id 로 전달. 미지정 시 테넌트 default. */
   connectionId?: string;
+  /**
+   * CR-194: 계정 묶음 번호. 주면 대화, 위젯 설정, 다음 질문 제안이 그 묶음으로 가고 한 계정의 사용 한도가 차면
+   * 다음 계정이 답한다. connectionId 와 같이 주면 묶음을 쓰고 요청에 connection_id 를 싣지 않는다(BIZ-281).
+   */
+  connectionGroupId?: string;
   /** MCP 도구 자동 호출 활성화 — chat request 의 actions_enabled=true 로 전달. 기본 false. */
   actionsEnabled?: boolean;
   /** 모델 명시 지정 — chat request 의 model 로 전달. 미지정 시 "auto". */
@@ -165,6 +170,7 @@ export interface WidgetSettings {
 /** CR-194: 위젯 요소를 다시 만들지 않고 바꾸는 옵션. 준 칸만 바꾼다 */
 export interface WidgetUpdate {
   connectionId?: string | null;
+  connectionGroupId?: string | null;
   historyList?: boolean;
   emptySubtitle?: LocalizedText | null;
 }

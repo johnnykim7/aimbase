@@ -10,6 +10,7 @@ import com.platform.image.ImageConnectionResolver;
 import com.platform.image.ImageGenerationSettings;
 import com.platform.document.DocumentRenderer;
 import com.platform.llm.ConnectionAdapterFactory;
+import com.platform.llm.ConnectionGroupSelector;
 import com.platform.llm.LLMAdapterRegistry;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.orchestrator.FileCreateToolGate;
@@ -64,6 +65,7 @@ public class ChatWidgetSettingsService {
     private final DocumentRenderer documentRenderer;
     private final ChatShareSettings shareSettings;
     private final SttLocalConnections sttConnections;
+    private final ConnectionGroupSelector groupSelector;
 
     public ChatWidgetSettingsService(PlatformSettingsService platformSettings,
                                      ConnectionAdapterFactory connectionAdapterFactory,
@@ -76,7 +78,8 @@ public class ChatWidgetSettingsService {
                                      FileCreateToolGate fileCreateToolGate,
                                      DocumentRenderer documentRenderer,
                                      ChatShareSettings shareSettings,
-                                     SttLocalConnections sttConnections) {
+                                     SttLocalConnections sttConnections,
+                                     ConnectionGroupSelector groupSelector) {
         this.platformSettings = platformSettings;
         this.connectionAdapterFactory = connectionAdapterFactory;
         this.adapterRegistry = adapterRegistry;
@@ -89,16 +92,25 @@ public class ChatWidgetSettingsService {
         this.documentRenderer = documentRenderer;
         this.shareSettings = shareSettings;
         this.sttConnections = sttConnections;
+        this.groupSelector = groupSelector;
     }
 
     /**
      * GET /api/v1/chat/widget-settings 본문. 그 테넌트에 없는 연결이면 404.
      * locale 은 아쉬워요 이유 이름의 언어다(CR-177, BIZ-161). 비면 기본 이름.
+     * 계정 묶음을 주면 연결보다 앞서고, 모델은 구성원 모두가 받는 것, 나머지 능력은 첫 연결로 정한다(CR-194, BIZ-281).
      */
-    public Map<String, Object> settings(String connectionId, String locale) {
+    public Map<String, Object> settings(String connectionId, String connectionGroupId, String locale) {
         List<Map<String, String>> models;
         String defaultModel;
-        if (connectionId != null && !connectionId.isBlank()) {
+        if (connectionGroupId != null && !connectionGroupId.isBlank()) {
+            List<String> members = groupMembers(connectionGroupId);
+            connectionId = members.get(0);
+            models = commonModels(members);
+            String configured = connectionAdapterFactory.defaultModel(connectionId);
+            defaultModel = models.stream().anyMatch(m -> configured.equals(m.get("id")))
+                    ? configured : models.get(0).get("id");
+        } else if (connectionId != null && !connectionId.isBlank()) {
             if (!connectionRepository.existsById(connectionId)) {
                 throw new ChatRejectedException(HttpStatus.NOT_FOUND, "connection_not_found");
             }
@@ -146,6 +158,34 @@ public class ChatWidgetSettingsService {
         body.put("voice_max_utterance_seconds", platformSettings.getInt(VoiceRelayHandler.KEY_MAX_UTTERANCE, 60));
         body.put("voice_idle_end_seconds", platformSettings.getInt(VoiceTicketService.KEY_IDLE_END_SECONDS, 120));
         return body;
+    }
+
+    /**
+     * CR-194 BIZ-281: 계정 묶음의 구성원 연결, 저장된 순서. 첫째가 묶음의 모델 순서와 능력을 정한다.
+     * 묶음은 어댑터 종류가 하나라 첫 연결의 능력이 곧 묶음의 능력이다.
+     */
+    public List<String> groupMembers(String connectionGroupId) {
+        List<String> members = groupSelector.findMemberConnectionIds(connectionGroupId)
+                .orElseThrow(() -> new ChatRejectedException(HttpStatus.NOT_FOUND, "connection_group_not_found"));
+        if (members.isEmpty()) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "connection_group_empty");
+        }
+        return members;
+    }
+
+    /** 구성원 모두가 받는 모델. 순서와 이름은 첫 연결을 따른다. 대화 요청의 모델 검사와 같은 기준이다. */
+    private List<Map<String, String>> commonModels(List<String> members) {
+        List<Map<String, String>> models = new ArrayList<>();
+        for (Map<String, String> m : connectionAdapterFactory.selectableModels(members.get(0))) {
+            String id = m.get("id");
+            if (members.stream().allMatch(c -> connectionAdapterFactory.isModelAllowed(c, id))) {
+                models.add(m);
+            }
+        }
+        if (models.isEmpty()) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "connection_group_no_common_model");
+        }
+        return models;
     }
 
     /** 음성 대화를 켜 두었고 그 테넌트에 맥 받아쓰기 서버 연결이 있을 때만 위젯이 단추를 보인다. */
