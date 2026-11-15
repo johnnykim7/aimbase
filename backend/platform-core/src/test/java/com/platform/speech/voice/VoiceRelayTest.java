@@ -169,7 +169,8 @@ class VoiceRelayTest {
     @Test
     @DisplayName("TC-CHT-123 위젯 토큰에 chat:voice 가 없으면 403 voice_forbidden")
     void rejectsWidgetTokenWithoutScope() {
-        VoiceTicketController controller = new VoiceTicketController(ticketService);
+        VoiceTicketController controller = new VoiceTicketController(ticketService,
+                org.mockito.Mockito.mock(com.platform.session.ChatSessionOwnership.class));
         MockHttpServletRequest http = new MockHttpServletRequest();
         http.addHeader("Origin", ORIGIN);
 

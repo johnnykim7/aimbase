@@ -72,7 +72,7 @@ class ChatHistoryServiceTest {
                 shareService);
         lenient().when(settings.getInt(anyString(), anyInt())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(feedbackRepository.findByTurnIdInAndUserRef(any(), anyString())).thenReturn(List.of());
-        lenient().when(sessionRepository.findWidgetHistory(anyString(), anyInt(), any(), any(), any(Pageable.class)))
+        lenient().when(sessionRepository.findWidgetHistory(anyString(), anyInt(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(Page.empty());
         seq = 0;
     }
@@ -86,7 +86,7 @@ class ChatHistoryServiceTest {
 
         service.list(OWNER, projectId.toString(), null, 0, null);
 
-        verify(sessionRepository).findWidgetHistory(eq(OWNER), eq(1), eq(projectId.toString()), isNull(),
+        verify(sessionRepository).findWidgetHistory(eq(OWNER), eq(1), eq(projectId.toString()), isNull(), isNull(),
                 any(Pageable.class));
     }
 
@@ -94,7 +94,7 @@ class ChatHistoryServiceTest {
     void list_with_none_shows_only_sessions_outside_projects() {
         service.list(OWNER, ChatHistoryService.NO_PROJECT, null, 0, null);
 
-        verify(sessionRepository).findWidgetHistory(eq(OWNER), eq(2), isNull(), isNull(), any(Pageable.class));
+        verify(sessionRepository).findWidgetHistory(eq(OWNER), eq(2), isNull(), isNull(), isNull(), any(Pageable.class));
     }
 
     @Test
@@ -103,7 +103,7 @@ class ChatHistoryServiceTest {
 
         service.list(OWNER, null, null, 0, null);
 
-        verify(sessionRepository).findWidgetHistory(eq(OWNER), eq(0), isNull(), isNull(), pageable.capture());
+        verify(sessionRepository).findWidgetHistory(eq(OWNER), eq(0), isNull(), isNull(), isNull(), pageable.capture());
         assertThat(pageable.getValue().getPageSize()).isEqualTo(ChatHistoryService.DEFAULT_PAGE_SIZE);
     }
 
@@ -112,7 +112,7 @@ class ChatHistoryServiceTest {
         service.list(OWNER, UUID.randomUUID().toString(), "  50%_off  ", 0, 500);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(sessionRepository).findWidgetHistory(eq(OWNER), eq(0), isNull(), eq("%50\\%\\_off%"),
+        verify(sessionRepository).findWidgetHistory(eq(OWNER), eq(0), isNull(), eq("%50\\%\\_off%"), isNull(),
                 pageable.capture());
         assertThat(pageable.getValue().getPageSize()).isEqualTo(ChatHistoryService.MAX_PAGE_SIZE);
         verify(projectService, never()).requireOwned(anyString(), anyString());
@@ -123,7 +123,7 @@ class ChatHistoryServiceTest {
         ConversationSessionEntity s = session(OWNER);
         UUID projectId = UUID.randomUUID();
         s.setChatProjectId(projectId);
-        when(sessionRepository.findWidgetHistory(anyString(), anyInt(), any(), any(), any(Pageable.class)))
+        when(sessionRepository.findWidgetHistory(anyString(), anyInt(), any(), any(), any(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(s)));
 
         Map<String, Object> row = service.list(OWNER, null, null, 0, null).getContent().get(0);

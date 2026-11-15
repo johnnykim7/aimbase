@@ -50,9 +50,10 @@ class ChatSttControllerTest {
     @Mock private AudioMimeValidator mimeValidator;
     @Mock private PlatformSettingsService settings;
     @Mock private AuditLogger auditLogger;
+    @Mock private com.platform.session.ChatSessionOwnership sessionAccess;
 
     private ChatSttController newController() {
-        return new ChatSttController(speechService, rateLimiter, mimeValidator, settings, auditLogger);
+        return new ChatSttController(speechService, rateLimiter, mimeValidator, settings, auditLogger, sessionAccess);
     }
 
     private MockMultipartFile webmFile() {

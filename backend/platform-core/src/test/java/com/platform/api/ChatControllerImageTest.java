@@ -59,6 +59,8 @@ class ChatControllerImageTest {
     @Mock private ImageGenerationService imageGeneration;
     @Mock private ImageGenerationSettings imageSettings;
 
+    @Mock private com.platform.session.ChatSessionOwnership sessionAccess;
+    @Mock private com.platform.session.SharedConversationService sharedConversations;
     @InjectMocks private ChatController controller;
 
     private static final ImageConnection CONN = new ImageConnection("img-1", "gpt-image-1", "medium", "sk");

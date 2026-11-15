@@ -24,8 +24,11 @@ public class AttachmentController {
 
     private final AttachmentService service;
 
-    public AttachmentController(AttachmentService service) {
+    private final com.platform.session.ChatSessionOwnership sessionAccess;
+
+    public AttachmentController(AttachmentService service, com.platform.session.ChatSessionOwnership sessionAccess) {
         this.service = service;
+        this.sessionAccess = sessionAccess;
     }
 
     @PostMapping(consumes = "multipart/form-data")
@@ -35,6 +38,8 @@ public class AttachmentController {
             @RequestParam("session_id") String sessionId,
             @RequestParam("file") MultipartFile file) {
 
+        // CR-194 BIZ-275: 들어갈 수 없는 대화에는 올리지 못한다
+        sessionAccess.requireIfExists(sessionId);
         ChatAttachmentEntity saved = service.save(sessionId, file);
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -53,6 +58,7 @@ public class AttachmentController {
     public ResponseEntity<Void> delete(
             @PathVariable("attachmentId") UUID attachmentId,
             @RequestParam("session_id") String sessionId) {
+        sessionAccess.requireIfExists(sessionId);
         service.delete(attachmentId, sessionId);
         return ResponseEntity.noContent().build();
     }

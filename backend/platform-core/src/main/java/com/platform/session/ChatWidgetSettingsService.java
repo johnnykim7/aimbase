@@ -122,6 +122,9 @@ public class ChatWidgetSettingsService {
         body.put("image_generation", imageGeneration(connectionId));
         // CR-178: user_ref 없는 위젯 토큰은 주인이 하나로 모여 남의 대화가 보이므로 목록과 프로젝트를 쓰지 못한다(BIZ-170)
         body.put("history_enabled", ChatOwner.current() != null);
+        // CR-194: 토큰에 함께 보기 키가 있으면 위젯은 그 건의 함께 보는 대화를 연다. 이름은 지금 묻는 질문 위에 보인다
+        body.put("shared_available", ChatOwner.currentShareKey() != null);
+        body.put("user_name", ChatOwner.currentUserName());
         body.put("project_instructions_max_chars", platformSettings.getInt(
                 "widget.project-instructions-max-chars", ChatProjectService.DEFAULT_INSTRUCTIONS_MAX));
         body.put("project_files_max_count", platformSettings.getInt(

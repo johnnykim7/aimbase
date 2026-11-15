@@ -66,6 +66,8 @@ public class ChatController {
     private static final java.util.regex.Pattern RENDER_FEATURE = java.util.regex.Pattern.compile("[a-z0-9-]{1,40}");
     private static final int MAX_RENDER_FEATURES = 10;
     private final com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService;
+    private final com.platform.session.ChatSessionOwnership sessionAccess;
+    private final com.platform.session.SharedConversationService sharedConversations;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -84,8 +86,12 @@ public class ChatController {
                           com.platform.repository.ConversationSessionRepository sessionRepository,
                           com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder,
                           com.platform.chatdoc.DocumentEditService documentEditService,
-                          com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService) {
+                          com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService,
+                          com.platform.session.ChatSessionOwnership sessionAccess,
+                          com.platform.session.SharedConversationService sharedConversations) {
         this.approvalDecisionService = approvalDecisionService;
+        this.sessionAccess = sessionAccess;
+        this.sharedConversations = sharedConversations;
         this.chatProjectService = chatProjectService;
         this.sessionRepository = sessionRepository;
         this.attachmentPromptBuilder = attachmentPromptBuilder;
@@ -138,6 +144,8 @@ public class ChatController {
     @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     @Operation(summary = "스트림 중지", description = "진행 중인 SSE 스트림을 즉시 중지한다.")
     public ApiResponse<Map<String, Object>> abort(@PathVariable String sessionId) {
+        // CR-194 BIZ-275: 들어갈 수 없는 대화의 답은 멈추지 못한다
+        sessionAccess.requireIfExists(sessionId);
         boolean cancelled = cancellationRegistry.cancel(sessionId);
         if (!cancelled) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "활성 스트림 없음: " + sessionId);
@@ -150,6 +158,9 @@ public class ChatController {
     public Object completions(@Valid @RequestBody ChatCompletionRequest request) {
         // CR-045 L0: working_directory 화이트리스트 조기 차단 (400)
         validateWorkingDirectory(request.workingDirectory());
+        // CR-194 BIZ-275: 들어갈 수 없는 대화는 응답을 시작하기 전에 거른다. 아직 없는 대화 번호(첫 질문)는 통과한다
+        sessionAccess.requireIfExists(request.sessionId());
+        String screenKey = validScreenKey(request.screenKey());
 
         // CR-184: 그림 질문은 모델을 부르지 않는다(BIZ-231)
         if (request.image() != null) {
@@ -217,7 +228,8 @@ public class ChatController {
                 request.systemPromptOverride()
         ).withThinkingOverride(thinkingOverride)
                 .withWidgetTurn(new ChatRequest.WidgetTurn(owner, chatProjectId, questionDisplay(request),
-                        com.platform.session.ChatOwner.isWidget(com.platform.session.ChatOwner.currentPrincipal())))
+                        com.platform.session.ChatOwner.isWidget(com.platform.session.ChatOwner.currentPrincipal()),
+                        screenKey))
                 // CR-183: 대화 API 요청 표시(계산 도구 붙이기)와 위젯이 그릴 수 있는 형식(BIZ-222, BIZ-223)
                 .withChatFeatures(true, renderFeatures)
                 .withFileCreate(Boolean.TRUE.equals(request.fileCreate()) || (documentEdit != null && documentEdit.fileCreate()))
@@ -497,7 +509,9 @@ public class ChatController {
             // CR-182: 파일 만들기 도구를 준다. 런타임 설정이 꺼져 있으면 무시한다(BIZ-210)
             @JsonProperty("file_create") Boolean fileCreate,
             // CR-181: 옆 창 문서 고치기(PRD-480). 비우면 평소 대화
-            @JsonProperty("document_edit") com.platform.chatdoc.DocumentEditRequest documentEdit
+            @JsonProperty("document_edit") com.platform.chatdoc.DocumentEditRequest documentEdit,
+            // CR-194: 대화를 처음 저장할 때 남길 화면 키. 이미 있는 대화면 쓰지 않는다(BIZ-277)
+            @JsonProperty("screen_key") String screenKey
     ) {
         /** CR-184 이전 15칸 호환(그림 없음) */
         public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
@@ -507,7 +521,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, null, null, null, null, null);
+                    thinking, null, null, null, null, null, null);
         }
 
         /** CR-184 다음 16칸 호환(위젯 프로젝트, 그리기 형식 없음) */
@@ -518,7 +532,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking, ImageDto image) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, null, null, null, null);
+                    thinking, image, null, null, null, null, null);
         }
 
         /** CR-183 이전 17칸 호환(그리기 형식 없음) */
@@ -529,7 +543,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, null, null, null);
+                    thinking, image, chatProjectId, null, null, null, null);
         }
 
         /** CR-182 이전 18칸 호환(파일 만들기, 문서 고치기 없음) */
@@ -541,7 +555,7 @@ public class ChatController {
                                      List<String> renderFeatures) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, renderFeatures, null, null);
+                    thinking, image, chatProjectId, renderFeatures, null, null, null);
         }
 
         /** CR-181 이전 19칸 호환(문서 고치기 없음) */
@@ -553,7 +567,20 @@ public class ChatController {
                                      List<String> renderFeatures, Boolean fileCreate) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, renderFeatures, fileCreate, null);
+                    thinking, image, chatProjectId, renderFeatures, fileCreate, null, null);
+        }
+
+        /** CR-194 이전 20칸 호환(화면 키 없음) */
+        public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
+                                     boolean actionsEnabled, String connectionId, String connectionGroupId,
+                                     ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
+                                     String workingDirectory, String toolMode, String systemPromptOverride,
+                                     Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId,
+                                     List<String> renderFeatures, Boolean fileCreate,
+                                     com.platform.chatdoc.DocumentEditRequest documentEdit) {
+            this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
+                    toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
+                    thinking, image, chatProjectId, renderFeatures, fileCreate, documentEdit, null);
         }
     }
 
@@ -645,7 +672,33 @@ public class ChatController {
         Map<String, Object> display = new java.util.LinkedHashMap<>();
         display.put("text", text.toString());
         display.put("attachments", attachments);
+        Map<String, Object> asker = asker();
+        if (asker != null) display.put(com.platform.session.SharedConversationService.AskerKeys.ASKER, asker);
         return display;
+    }
+
+    /**
+     * CR-194 BIZ-278: 묻는 사람. 위젯 토큰의 user_ref 와 질문 당시 이름을 남긴다. user_ref 없는 토큰과 로그인은 남기지 않는다.
+     */
+    private static Map<String, Object> asker() {
+        var principal = com.platform.session.ChatOwner.currentPrincipal();
+        if (!com.platform.session.ChatOwner.isWidget(principal)) return null;
+        String ref = com.platform.session.ChatOwner.of(principal);
+        if (ref == null) return null;
+        Map<String, Object> asker = new java.util.LinkedHashMap<>();
+        asker.put(com.platform.session.SharedConversationService.AskerKeys.USER_REF, ref);
+        String name = com.platform.session.ChatOwner.userNameOf(principal);
+        if (name != null) asker.put(com.platform.session.SharedConversationService.AskerKeys.USER_NAME, name);
+        return asker;
+    }
+
+    /** CR-194 BIZ-277: 화면 키 글자 규칙. 비었으면 없는 것으로 본다. */
+    private static String validScreenKey(String screenKey) {
+        String key = com.platform.session.ChatKeys.blankToNull(screenKey);
+        if (key != null && !com.platform.session.ChatKeys.isValid(key)) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "session_invalid:screen_key");
+        }
+        return key;
     }
 
     // ─── CR-045 L0: 화이트리스트 조기 차단 ───
@@ -992,6 +1045,9 @@ public class ChatController {
         if (request.sessionId() == null || request.sessionId().isBlank()) {
             throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "rewind_invalid:no_session");
         }
+        // CR-194 BIZ-280: 함께 보는 대화는 마지막 질문을 한 사람만 그 질문을 되감는다
+        sharedConversations.checkRewind(request.sessionId(), request.rewindFromSeq(),
+                com.platform.session.ChatOwner.current());
         try {
             rewindService.rewind(request.sessionId(), request.rewindFromSeq(),
                     request.connectionId(), request.connectionGroupId());
