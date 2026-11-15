@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.42.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.44.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -2283,9 +2283,9 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
-| v3.42.0 | 2026-11-16 | **CR-194 계정 1년 인증** (§ 2-10). 기동 스크립트 `token <대상> <계정>` 단계가 `claude setup-token` 인증을 계정 폴더에 넣는다. 넣은 뒤 실행기 재시작 |
-| v3.41.0 | 2026-11-16 | **CR-194 일반 화면 실행기 계정 묶음** (§ 2-10). 계정 하나짜리 위젯 연결 대신 계정마다 연결과 묶음 `cli-runner-bp-wes-assist-rr`. 로그인 계정 work01, work02, work03 |
-| v3.40.0 | 2026-11-16 | **CR-194 bp-wes 일반 화면 실행기** (§ 2-10). 실행기 `aimbase-agent-wes-assist`, 조회 계정 `wes_assist_ai`, 위젯 연결 `cli-runner-bp-wes-assist-001` 을 59 와 운영에 세우는 차례. `./deploy.sh agent-wes-assist`, `chaws-agent-wes-assist`, `chaws-bootstrap.sh connections wes-assist` |
+| v3.44.0 | 2026-11-16 | **CR-194 계정 1년 인증** (§ 2-10). 기동 스크립트 `token <대상> <계정>` 단계가 `claude setup-token` 인증을 계정 폴더에 넣는다. 넣은 뒤 실행기 재시작 |
+| v3.43.0 | 2026-11-16 | **CR-194 일반 화면 실행기 계정 묶음** (§ 2-10). 계정 하나짜리 위젯 연결 대신 계정마다 연결과 묶음 `cli-runner-bp-wes-assist-rr`. 로그인 계정 work01, work02, work03 |
+| v3.42.0 | 2026-11-16 | **CR-194 bp-wes 일반 화면 실행기** (§ 2-10). 실행기 `aimbase-agent-wes-assist`, 조회 계정 `wes_assist_ai`, 위젯 연결 `cli-runner-bp-wes-assist-001` 을 59 와 운영에 세우는 차례. `./deploy.sh agent-wes-assist`, `chaws-agent-wes-assist`, `chaws-bootstrap.sh connections wes-assist` |
 | v3.39.0 | 2026-11-15 | **CR-193 검사 반복 코드 대조** (§ 3-5). 검사 반복 config `code_check` 로 회차마다 스킬 스크립트를 돌려 판정과 다음 작성 지적에 더한다. 스크립트 입출력 규약과 실패 처리 |
 | v3.38.0 | 2026-11-14 | **CR-191 플랜별 분당 요청 한도** (§ 2-2). 테넌트 생성과 플랜 변경 때 그 플랜의 기본 한도를 넣는다. 플랜 목록 API, 운영 설정 「플랜」 카드 |
 | v3.37.1 | 2026-11-14 | **CR-187 파일 위치 안내** (§ 2-10, § 2-21). 테넌트 프롬프트 틀 `widget.artifact-out`(테넌트 V90). 실행기 연결 대화에 질문마다 붙는다 |

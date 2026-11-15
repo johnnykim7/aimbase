@@ -840,8 +840,8 @@ flowchart LR
 | PRD-637 | 위젯 토큰 발급 칸 user_name, share_key, 모르는 칸 무시 | | 단위시험 TC-CHT-145 | BE | 설계중 |
 | PRD-636 | 대화 번호를 받는 위젯 창구의 접근 확인을 한 곳으로, 대화 요청은 응답 전에 확인 | 위 토큰 칸 | 단위시험 TC-CHT-146 | BE | 설계중 |
 | PRD-630, PRD-631, PRD-632, PRD-633 | 함께 보는 대화 열기, 목록 화면 키 조건, 이어보기 shared 와 asker, 묻는 사람 저장, 함께 보는 대화 되감기 제한, 위젯 설정 두 칸 | 위 접근 확인 | 단위시험 TC-CHT-147 부터 150 | BE | 설계중 |
-| PRD-630 부터 PRD-635 | 위젯 속성 screen-key, history-list, 붙은 뒤 속성 변경 반영, 함께 보는 대화 화면, 묻는 사람 표시 | 위 BE, 화면 컨셉 승인 | 단위시험 TC-CHT-151, 시험항목 영역 24 | 위젯 | 설계중 |
-| PRD-638 | 계정 묶음: 위젯 설정 조회와 다음 질문 제안의 connection_group_id, 대화 모델 검사를 구성원 모두로, 위젯 속성 connection-group-id | 위 BE, CR-161 | 단위시험 TC-CHT-152, TC-CHT-153, 시험항목 IT-24-011, IT-24-012 | BE, 위젯 | 설계중 |
+| PRD-630 부터 PRD-635 | 위젯 속성 screen-key, history-list, 붙은 뒤 속성 변경 반영, 함께 보는 대화 화면, 묻는 사람 표시 | 위 BE, 화면 컨셉 승인 | 단위시험 TC-CHT-151, 시험항목 영역 26 | 위젯 | 설계중 |
+| PRD-638 | 계정 묶음: 위젯 설정 조회와 다음 질문 제안의 connection_group_id, 대화 모델 검사를 구성원 모두로, 위젯 속성 connection-group-id | 위 BE, CR-161 | 단위시험 TC-CHT-152, TC-CHT-153, 시험항목 IT-26-011, IT-26-012 | BE, 위젯 | 설계중 |
 | (레포 간) | bp-wes 토큰 발급 칸 user_ref, user_name, share_key. 백오피스2 위젯 속성 | aimbase 반영 뒤 | 백오피스2 화면에서 화면 옮기기와 함께 보는 대화 확인 | bp-wes, bp-backoffice2 | 계약 CR-WES-372 |
 
 ---

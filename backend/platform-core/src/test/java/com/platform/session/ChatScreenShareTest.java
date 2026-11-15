@@ -45,7 +45,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * TC-CHT-146 부터 TC-CHT-150 (CR-194): 대화 접근 규칙, 함께 보는 대화 열기, 화면 키 목록, 묻는 사람, 되감기 제한.
- * 함께 보기 키의 부분 고유 색인과 목록 SQL 은 실제 DB 에서 API 로 확인한다(IT-24-003, IT-24-006).
+ * 함께 보기 키의 부분 고유 색인과 목록 SQL 은 실제 DB 에서 API 로 확인한다(IT-26-003, IT-26-006).
  */
 @ExtendWith(MockitoExtension.class)
 class ChatScreenShareTest {
