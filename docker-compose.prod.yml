@@ -27,6 +27,8 @@ services:
       - ./workspace:/data/workspace
       # CR-187: CS 실행기 작업 폴더. 실행기와 같은 경로로 붙여 대화 폴더를 그 안에 잡는다(AIMBASE_WORKSPACE_RUNNER_BASES).
       - ./workspace-wes-cs:/data/workspace-wes-cs
+      # CR-194: 일반 화면용 실행기 작업 폴더. 같은 이유로 같은 경로에 붙인다.
+      - ./workspace-wes-assist:/data/workspace-wes-assist
       - ./claude-accounts:/home/appuser/.claude-accounts
       # CR-137 Phase 0: 업로드 스토리지 영속화.
       # LocalStorageService 가 /data/aimbase 아래에 첨부 파일을 쓰는데(application.yml
@@ -52,7 +54,7 @@ services:
       # turn 이 먼저 끊고 BE 가 그 신호를 받게 함(CR-109 동시발동 회피). 넘으면 retry 이어하기(CR-106).
       ANTHROPIC_CLI_HTTP_TIMEOUT_SECONDS: "660"
       CLAUDE_CODE_WORKING_DIRECTORY: /data/workspace
-      AIMBASE_WORKSPACE_RUNNER_BASES: "cli-runner-bp-wes-cs=/data/workspace-wes-cs"
+      AIMBASE_WORKSPACE_RUNNER_BASES: "cli-runner-bp-wes-cs=/data/workspace-wes-cs,cli-runner-bp-wes-assist=/data/workspace-wes-assist"
       SKILL_SANDBOX_URL: http://skill-sandbox:8300
       AIMBASE_TTS_SIDECAR_URL: http://tts-sidecar:8310
     # skill-sandbox 는 skill-sandbox-net 에만 있으므로 api 가 그 망에 더 붙는다.
@@ -334,6 +336,55 @@ services:
         required: false
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8298/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # bp-wes BO2 일반 화면(메뉴 화면, 건 화면) AI 대화 전용 실행기(CR-194, CR-WES-372 계약 5절).
+  # 연결 cli-runner-bp-wes-assist-001 이 이리로 보낸다. 개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 wes_assist_ai 계정만 쥔다.
+  # 접속 계정이 CS 실행기와 달라 계정 폴더와 작업 폴더를 나눈다. 지난 대화에 접속값과 조회 결과가 남는다.
+  # 폴더는 ./deploy.sh agent-wes-assist 가 실행 계정 소유로 만든다. 계정 로그인은 사람이 한다(운용 가이드 § 2-10).
+  aimbase-agent-wes-assist:
+    build:
+      context: ./backend
+      dockerfile: aimbase-agent/Dockerfile
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - api
+    volumes:
+      - ./claude-accounts-wes-assist:/home/appuser/.claude-accounts
+      # api 가 같은 폴더를 같은 경로로 붙인다(CR-187).
+      - ./workspace-wes-assist:/data/workspace-wes-assist
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_API_KEY: "${RUNNER_API_KEY:?RUNNER_API_KEY 값이 .env 에 없습니다}"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "2"
+      AIMBASE_RUNNER_MAX_PROCESSES: "2"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://aimbase-api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_API_KEY: "${WES_SERVER_MCP_API_KEY:?WES_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes-assist"
+      SERVER_PORT: "8306"
+      AGENT_NAME: "cli-runner-bp-wes-assist"
+      AGENT_AIMBASE_URL: "http://aimbase-api:8080"
+      AGENT_API_KEY: "${WES_SERVER_MCP_API_KEY:?WES_SERVER_MCP_API_KEY 값이 .env 에 없습니다}"
+      AGENT_TENANT_ID: "bp_wes"
+      AGENT_MCP_PORT: "8307"
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-wes-assist:8306"
+      PGHOST: "59.8.160.12"
+      PGPORT: "5432"
+      PGDATABASE: "bp_fulfillment"
+      PGUSER: "wes_assist_ai"
+    env_file:
+      - path: .env.runner-wes-assist   # PGPASSWORD
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8306/v1/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10

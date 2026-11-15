@@ -54,7 +54,7 @@ services:
       CLAUDE_CODE_WORKING_DIRECTORY: /data/workspace
       AIMBASE_WORKSPACE_BASE: /data/workspace
       AIMBASE_WORKSPACE_WHITELIST: /data/workspace
-      AIMBASE_WORKSPACE_RUNNER_BASES: "cli-runner-bp-wes-cs=/data/workspace-wes-cs"
+      AIMBASE_WORKSPACE_RUNNER_BASES: "cli-runner-bp-wes-cs=/data/workspace-wes-cs,cli-runner-bp-wes-assist=/data/workspace-wes-assist"
     mem_limit: 2g
     # 관리 API 는 맥에서 SSH 터널로만 부른다. bp-wms 는 aimbase-apps 망으로 부른다.
     ports: ["127.0.0.1:8280:8080"]
@@ -64,6 +64,8 @@ services:
       - ./workspace:/data/workspace
       # CR-187: CS 실행기 작업 폴더. 실행기와 같은 경로로 붙여 대화 폴더를 그 안에 잡는다.
       - ./workspace-wes-cs:/data/workspace-wes-cs
+      # CR-194: 일반 화면용 실행기 작업 폴더. 같은 이유로 같은 경로에 붙인다.
+      - ./workspace-wes-assist:/data/workspace-wes-assist
     networks:
       default: {}
       aimbase-apps:
@@ -184,6 +186,63 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8298/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # bp-wes BO2 일반 화면(메뉴 화면, 건 화면) AI 대화 전용 실행기(CR-194, CR-WES-372 계약 5절). 연결 cli-runner-bp-wes-assist-001 이 이리로 보낸다.
+  # 개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 wes_assist_ai 계정만 쥔다. 접속 계정이 CS 실행기와 달라 계정 폴더와 작업 폴더를 나눈다.
+  # 이미지 이름을 따로 둔다. ./deploy.sh chaws-agent-wes-assist 로 올린다.
+  aimbase-agent-wes-assist:
+    image: aimbase-aimbase-agent-wes-assist:latest
+    build:
+      context: ./build/backend
+      dockerfile: aimbase-agent/Dockerfile
+    init: true
+    restart: unless-stopped
+    # 실행기 호출 키(AIMBASE_RUNNER_API_KEY)와 bp_wes 테넌트 실행기 전용 키(AIMBASE_RUNNER_SERVER_MCP_API_KEY, AGENT_API_KEY 같은 값).
+    # wes_assist_ai 의 PGPASSWORD 는 agent-wes-assist-db.env 에 둔다.
+    # 처음 세우기 전에는 두 파일이 없다. 없어도 다른 서비스를 올릴 때 compose 가 멈추지 않게 required 를 끈다.
+    env_file:
+      - path: agent-wes-assist.env
+        required: false
+      - path: agent-wes-assist-db.env
+        required: false
+    environment:
+      AIMBASE_RUNNER_ENABLED: "true"
+      AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
+      AIMBASE_RUNNER_MAX_WORKERS: "2"
+      # 실행기 전체 Claude 프로세스 상한(CR-173 14절). 하나에 170MB 부터 300MB 라 java 와 합쳐 메모리 한도 안에 둔다.
+      AIMBASE_RUNNER_MAX_PROCESSES: "2"
+      AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
+      AIMBASE_RUNNER_SERVER_MCP_BASE_URL: "http://api:8080"
+      AIMBASE_RUNNER_SERVER_MCP_AGENT_ID: "cli-runner-bp-wes-assist"
+      SERVER_PORT: "8306"
+      AGENT_NAME: "cli-runner-bp-wes-assist"
+      AGENT_AIMBASE_URL: "http://api:8080"
+      AGENT_TENANT_ID: "bp_wes"
+      AGENT_MCP_PORT: "8307"
+      AGENT_TURN_ENABLED: "false"
+      AGENT_RUNNER_ENDPOINT: "http://aimbase-agent-wes-assist:8306"
+      PGHOST: "bp-postgres"
+      PGPORT: "5432"
+      PGDATABASE: "bp_fulfillment"
+      PGUSER: "wes_assist_ai"
+    networks:
+      default: {}
+      bp-infra: {}
+    mem_limit: 1536m
+    # 계정 폴더 work01 을 붙인다. 위젯 연결 -001 이 config.config_dir 로 고른다.
+    volumes:
+      - ./claude-accounts-wes-assist:/home/appuser/.claude-accounts
+      # api 가 같은 폴더를 같은 경로로 붙인다(CR-187).
+      - ./workspace-wes-assist:/data/workspace-wes-assist
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8306/v1/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10

@@ -14,6 +14,7 @@
 #         ./deploy.sh agent   (러너 1개 — aimbase-agent 만)
 #         ./deploy.sh agents  (러너 전체, 아래 AGENT_SERVICES)
 #         ./deploy.sh agent-wes-cs (bp-wes CS 실행기만. api 와 다른 러너는 다시 올리지 않는다)
+#         ./deploy.sh agent-wes-assist (bp-wes 일반 화면 실행기만. 처음이면 폴더를 만든다. api 와 다른 러너는 다시 올리지 않는다)
 #         ./deploy.sh mcp     (BE + 러너 전체 — MCP 프로토콜 변경 시 필수)
 #         ./deploy.sh sandbox (스킬 실행 컨테이너 소스 동기화 + 이미지 재빌드 + 재기동)
 #         ./deploy.sh tts     (같은 목소리 음성 생성기 소스 동기화 + 이미지 재빌드 + 재기동)
@@ -30,6 +31,7 @@
 #         ./deploy.sh chaws-be    (DB, Redis, api)
 #         ./deploy.sh chaws-agent (실행기)
 #         ./deploy.sh chaws-agent-wes-cs (bp-wes CS 실행기. chaws 묶음에 들지 않는다)
+#         ./deploy.sh chaws-agent-wes-assist (bp-wes 일반 화면 실행기. chaws 묶음에 들지 않는다)
 #         ./deploy.sh chaws-bootstrap    (설치 스크립트만 서버에 둔다. api 를 다시 올리지 않는다)
 #         ./deploy.sh chaws-tts   (같은 목소리 음성 생성기. chaws 묶음에 들지 않는다)
 #         ./deploy.sh chaws       (be, agent 를 이 순서로)
@@ -144,7 +146,7 @@ deploy_agent() {
 }
 
 # 운영 러너 전체 — docker-compose.prod.yml 의 aimbase-agent* 서비스 목록과 일치해야 한다.
-AGENT_SERVICES="aimbase-agent aimbase-agent-axopm aimbase-agent-workmap aimbase-agent-wes aimbase-agent-wes-cs aimbase-agent-lexflow aimbase-agent-bp-office aimbase-agent-3plgw"
+AGENT_SERVICES="aimbase-agent aimbase-agent-axopm aimbase-agent-workmap aimbase-agent-wes aimbase-agent-wes-cs aimbase-agent-wes-assist aimbase-agent-lexflow aimbase-agent-bp-office aimbase-agent-3plgw"
 
 deploy_agents() {
   echo "━━━ Agent(Runner) 빌드 ━━━"
@@ -168,23 +170,32 @@ deploy_agents() {
   echo "✅ Agent 전체 완료 → $AGENT_SERVICES"
 }
 
-# CR-173 bp-wes CS 실행기만 새 jar 로 다시 올린다. api 와 다른 러너는 건드리지 않는다.
+# 실행기 하나만 새 jar 로 다시 올린다(CR-173 CS 실행기, CR-194 일반 화면 실행기). api 와 다른 러너는 건드리지 않는다.
 # --no-deps 를 빼면 depends_on 의 api 까지 다시 만들 수 있다. 다른 러너에도 같은 jar 를 실으려면 agents 로 올린다.
-deploy_agent_wes_cs() {
-  echo "[agent-wes-cs] 실행기 jar 빌드"
+deploy_agent_only() {
+  local svc="$1"
+  echo "[$svc] 실행기 jar 빌드"
   cd backend
   ./gradlew aimbase-agent:bootJar
   cd ..
 
-  echo "[agent-wes-cs] jar, Dockerfile, compose 전송"
+  echo "[$svc] jar, Dockerfile, compose 전송"
   ssh_run "mkdir -p $REMOTE/backend/aimbase-agent/build/libs"
   AGENT_JAR=$(find backend/aimbase-agent/build/libs -name '*.jar' ! -name '*plain*')
   scp_send "$AGENT_JAR" "$SERVER:$REMOTE/backend/aimbase-agent/build/libs/$(basename "$AGENT_JAR")"
   scp_send backend/aimbase-agent/Dockerfile "$SERVER:$REMOTE/backend/aimbase-agent/Dockerfile"
   scp_send docker-compose.prod.yml "$SERVER:$REMOTE/docker-compose.yml"
-  ssh_run "cd $REMOTE && docker compose build aimbase-agent-wes-cs && docker compose up -d --no-deps --force-recreate aimbase-agent-wes-cs"
-  echo "[agent-wes-cs] 완료"
+  ssh_run "cd $REMOTE && docker compose build $svc"
+  # 처음 올릴 때 붙일 폴더가 없으면 docker 가 root 소유로 만들어 실행기가 쓰지 못한다. 실행 계정 소유로 먼저 맞춘다.
+  if [ -n "${2:-}" ]; then
+    ssh_run "cd $REMOTE && docker compose run --rm --no-deps --user 0 --entrypoint sh $svc -c '$2'"
+  fi
+  ssh_run "cd $REMOTE && docker compose up -d --no-deps --force-recreate $svc"
+  echo "[$svc] 완료"
 }
+
+# CR-194 일반 화면 실행기의 계정 폴더 work01 과 작업 폴더. 계정 폴더는 로그인 파일이 있어 실행 계정만 연다.
+WES_ASSIST_DIRS='mkdir -p /home/appuser/.claude-accounts/work01 /data/workspace-wes-assist && chown -R appuser:appuser /home/appuser/.claude-accounts /data/workspace-wes-assist && chmod 700 /home/appuser/.claude-accounts'
 
 # CR-174 품고 수리 실행기만 다시 올린다(GitHub 토큰, env 를 바꿨을 때). api 와 다른 실행기는 건드리지 않는다.
 # 실행기 jar 가 바뀌었으면 agents 로 전체를 올린다(한 서비스만 빌드하면 나머지는 옛 이미지로 남는다).
@@ -329,7 +340,8 @@ deploy_chaws_init() {
     docker run --rm -v $CHAWS_REMOTE:/w --entrypoint sh pgvector/pgvector:pg16 -c 'umask 077; cd /w \
       && mkdir -p claude-accounts/work01 claude-accounts/work02 claude-accounts/work03 workspace aimbase-storage \
          claude-accounts-wes-cs/work01 claude-accounts-wes-cs/work02 workspace-wes-cs \
-      && chown -R 999 claude-accounts workspace aimbase-storage claude-accounts-wes-cs workspace-wes-cs'"
+         claude-accounts-wes-assist/work01 workspace-wes-assist \
+      && chown -R 999 claude-accounts workspace aimbase-storage claude-accounts-wes-cs workspace-wes-cs claude-accounts-wes-assist workspace-wes-assist'"
   echo "[chaws-init] 완료"
 }
 
@@ -455,31 +467,33 @@ deploy_chaws_bootstrap() {
   echo "[chaws-bootstrap] build/chaws-bootstrap.sh 를 커밋 ${CHAWS_SHA:0:9} 것으로 둠"
 }
 
-# bp-wes CS 실행기(CR-173). 키 파일 agent-wes-cs.env 는 bootstrap tenant wes-cs 가 만든다(운용 가이드 § 2-10).
-deploy_chaws_agent_wes_cs() {
+# 운영 3PL DB 를 읽는 bp-wes 실행기(CR-173 CS 실행기 wes-cs, CR-194 일반 화면 실행기 wes-assist). 인자는 대상과 조회 계정이다.
+# 키 파일 agent-<대상>.env 는 bootstrap tenant <대상> 이 만든다(운용 가이드 § 2-10).
+deploy_chaws_agent_wes() {
+  local t="$1" dbuser="$2" svc="aimbase-agent-$1"
   chaws_require_env
-  if ! chaws_run "cd $CHAWS_REMOTE && [ -d claude-accounts-wes-cs ] && [ -d workspace-wes-cs ]"; then
-    echo "chaws $CHAWS_REMOTE 에 claude-accounts-wes-cs, workspace-wes-cs 폴더가 없습니다. ./deploy.sh chaws-init 을 먼저 실행하세요."
+  if ! chaws_run "cd $CHAWS_REMOTE && [ -d claude-accounts-$t ] && [ -d workspace-$t ]"; then
+    echo "chaws $CHAWS_REMOTE 에 claude-accounts-$t, workspace-$t 폴더가 없습니다. ./deploy.sh chaws-init 을 먼저 실행하세요."
     exit 1
   fi
   if ! chaws_run "docker network inspect bp-infra_default >/dev/null 2>&1"; then
     echo "chaws 에 운영 3PL 망 bp-infra_default 가 없습니다. 실행기가 운영 3PL DB 에 닿지 못합니다."
     exit 1
   fi
-  if ! chaws_run "cd $CHAWS_REMOTE && grep -Eq '^AIMBASE_RUNNER_API_KEY=.+' agent-wes-cs.env && grep -Eq '^AIMBASE_RUNNER_SERVER_MCP_API_KEY=.+' agent-wes-cs.env && grep -Eq '^AGENT_API_KEY=.+' agent-wes-cs.env" 2>/dev/null; then
-    echo "chaws $CHAWS_REMOTE/agent-wes-cs.env 에 실행기 키가 없습니다. bootstrap admin wes-cs, bootstrap tenant wes-cs 를 먼저 실행하세요(운용 가이드 § 2-10)."
+  if ! chaws_run "cd $CHAWS_REMOTE && grep -Eq '^AIMBASE_RUNNER_API_KEY=.+' agent-$t.env && grep -Eq '^AIMBASE_RUNNER_SERVER_MCP_API_KEY=.+' agent-$t.env && grep -Eq '^AGENT_API_KEY=.+' agent-$t.env" 2>/dev/null; then
+    echo "chaws $CHAWS_REMOTE/agent-$t.env 에 실행기 키가 없습니다. bootstrap admin $t, bootstrap tenant $t 를 먼저 실행하세요(운용 가이드 § 2-10)."
     exit 1
   fi
-  chaws_run "cd $CHAWS_REMOTE && grep -Eq '^PGPASSWORD=.+' agent-wes-cs-db.env" 2>/dev/null \
-    || echo "[chaws-agent-wes-cs] agent-wes-cs-db.env 에 wes_cs_ai 비밀번호가 없습니다. 실행기는 뜨지만 CS 조회가 운영 3PL DB 에 붙지 못합니다."
+  chaws_run "cd $CHAWS_REMOTE && grep -Eq '^PGPASSWORD=.+' agent-$t-db.env" 2>/dev/null \
+    || echo "[chaws-$svc] agent-$t-db.env 에 $dbuser 비밀번호가 없습니다. 실행기는 뜨지만 조회가 운영 3PL DB 에 붙지 못합니다."
   chaws_checkout
   chaws_build_send aimbase-agent
   chaws_sync_compose
-  chaws_keep_image aimbase-aimbase-agent-wes-cs aimbase-agent-wes-cs
-  echo "[chaws-agent-wes-cs] 이미지 빌드와 실행기 재시작"
-  chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build aimbase-agent-wes-cs && docker compose up -d --no-deps --force-recreate aimbase-agent-wes-cs"
-  chaws_wait_healthy aimbase-agent-wes-cs
-  chaws_record aimbase-agent-wes-cs
+  chaws_keep_image "aimbase-$svc" "$svc"
+  echo "[chaws-$svc] 이미지 빌드와 실행기 재시작"
+  chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build $svc && docker compose up -d --no-deps --force-recreate $svc"
+  chaws_wait_healthy "$svc"
+  chaws_record "$svc"
 }
 
 deploy_chaws_tts() {
@@ -504,7 +518,8 @@ case "$TARGET" in
   chaws-init)  deploy_chaws_init; exit 0 ;;
   chaws-be)    deploy_chaws_be; echo "배포 완료: 운영 chaws $CHAWS_SERVER db, redis, api"; exit 0 ;;
   chaws-agent) deploy_chaws_agent; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent"; exit 0 ;;
-  chaws-agent-wes-cs) deploy_chaws_agent_wes_cs; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent-wes-cs"; exit 0 ;;
+  chaws-agent-wes-cs) deploy_chaws_agent_wes wes-cs wes_cs_ai; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent-wes-cs"; exit 0 ;;
+  chaws-agent-wes-assist) deploy_chaws_agent_wes wes-assist wes_assist_ai; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent-wes-assist"; exit 0 ;;
   chaws-agent-3plgw) deploy_chaws_agent_3plgw; echo "배포 완료: 운영 chaws $CHAWS_SERVER aimbase-agent-3plgw"; exit 0 ;;
   chaws-bootstrap) deploy_chaws_bootstrap; exit 0 ;;
   chaws-tts)  deploy_chaws_tts; echo "배포 완료: 운영 chaws $CHAWS_SERVER tts-sidecar"; exit 0 ;;
@@ -524,14 +539,15 @@ case "$TARGET" in
   be)    deploy_be ;;
   rag)   deploy_rag ;;
   agent)  deploy_agent ;;
-  agent-wes-cs) deploy_agent_wes_cs ;;
+  agent-wes-cs) deploy_agent_only aimbase-agent-wes-cs ;;
+  agent-wes-assist) deploy_agent_only aimbase-agent-wes-assist "$WES_ASSIST_DIRS" ;;
   agents) deploy_agents ;;
   agent-3plgw) deploy_agent_3plgw ;;
   mcp)    deploy_mcp ;;
   sandbox) deploy_sandbox ;;
   tts)    deploy_tts ;;
   all)   deploy_fe && deploy_rag && deploy_be ;;
-  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agent-wes-cs|agents|agent-3plgw|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-agent-wes-cs|chaws-agent-3plgw|chaws-bootstrap|chaws-tts|chaws]"; exit 1 ;;
+  *)     echo "사용법: ./deploy.sh [fe|be|rag|agent|agent-wes-cs|agent-wes-assist|agents|agent-3plgw|mcp|sandbox|tts|all|wjbid-sandbox|wjbid-be|wjbid-agent|wjbid|chaws-init|chaws-be|chaws-agent|chaws-agent-wes-cs|chaws-agent-wes-assist|chaws-agent-3plgw|chaws-bootstrap|chaws-tts|chaws]"; exit 1 ;;
 esac
 
 echo ""

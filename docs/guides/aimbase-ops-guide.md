@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.39.0** | 2026-11-15 | Aimbase v8.18.0 기준
+> **v3.40.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -551,6 +551,22 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 | 4 | `process slot wait timeout` | 300초 안에 자리가 나지 않아 실패했다. 몰림이 잦으면 상한이 아니라 계정이나 실행기를 늘린다 |
 
 59 의 같은 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-cs` 를 씁니다. api 와 다른 실행기는 다시 만들지 않습니다.
+
+**bp-wes 일반 화면 실행기 [CR-194]**: BO2 의 메뉴 화면과 건 화면 AI 대화(위젯)는 실행기 `aimbase-agent-wes-assist`(이름 `cli-runner-bp-wes-assist`)로 갑니다. CS 실행기와 같은 틀이고 조회 계정만 `wes_assist_ai` 입니다(개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 계정, bp-wes 가 만든다). 접속 계정이 달라 계정 폴더와 작업 폴더를 `claude-accounts-wes-assist`, `workspace-wes-assist` 로 나눕니다. 연결은 위젯 연결 `cli-runner-bp-wes-assist-001` 하나이고(`tool_mode=NATIVE`, 도구 `bash`, `get_current_time`, 계정 `work01`), 시스템 지시 대체값을 두지 않습니다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않습니다. bp-wes 는 이 연결 번호를 일반 화면 위젯 연결로 씁니다.
+
+| 순번 | 59 | 운영 chaws |
+|---|---|---|
+| 1 | `.env.runner-wes-assist` 에 `PGPASSWORD=<wes_assist_ai 비밀번호>` | `./deploy.sh chaws-init`(폴더), `bootstrap tenant wes-assist`(`agent-wes-assist.env`), `agent-wes-assist-db.env` 에 `PGPASSWORD` |
+| 2 | `./deploy.sh agent-wes-assist`: 폴더를 실행 계정 소유로 만들고 실행기만 올린다 | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-wes-assist` |
+| 3 | `./deploy.sh be`: api 가 `workspace-wes-assist` 를 붙이고 `AIMBASE_WORKSPACE_RUNNER_BASES` 에 이 실행기가 더해진다 | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-be`(같은 이유) |
+| 4 | 계정 로그인 `work01`(사람이 한다. 아래 명령) | 같다 |
+| 5 | `bash build/chaws-bootstrap.sh connections wes-assist`(서버 폴더에서) | `bootstrap connections wes-assist` |
+
+```bash
+ssh -t therecommerce@59.8.160.12 'cd /home/therecommerce/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent-wes-assist claude'
+```
+
+로그인 파일을 다른 실행기 폴더에서 복사하지 않습니다. 같은 계정 토큰을 두 폴더가 갱신하면 한쪽이 끊깁니다. 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-assist` 를 씁니다.
 
 **위젯 공개 주소**: 운영 BO2 CS 상세의 AI 대화는 브라우저가 `https://ai.banpoom.co.kr` 로 직접 붙습니다(`aimbase.banpoom.co.kr` 은 개발기 관리 화면 주소). 서버 nginx 사이트 설정은 `/etc/nginx/sites-available/ai.banpoom.co.kr.conf`, 인증서는 Let's Encrypt(webroot) 이고 기존 certbot 타이머가 갱신합니다. 위젯이 쓰는 두 경로만 통과시키고 나머지는 모두 막습니다.
 
@@ -2261,6 +2277,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.40.0 | 2026-11-16 | **CR-194 bp-wes 일반 화면 실행기** (§ 2-10). 실행기 `aimbase-agent-wes-assist`, 조회 계정 `wes_assist_ai`, 위젯 연결 `cli-runner-bp-wes-assist-001` 을 59 와 운영에 세우는 차례. `./deploy.sh agent-wes-assist`, `chaws-agent-wes-assist`, `chaws-bootstrap.sh connections wes-assist` |
 | v3.39.0 | 2026-11-15 | **CR-193 검사 반복 코드 대조** (§ 3-5). 검사 반복 config `code_check` 로 회차마다 스킬 스크립트를 돌려 판정과 다음 작성 지적에 더한다. 스크립트 입출력 규약과 실패 처리 |
 | v3.38.0 | 2026-11-14 | **CR-191 플랜별 분당 요청 한도** (§ 2-2). 테넌트 생성과 플랜 변경 때 그 플랜의 기본 한도를 넣는다. 플랜 목록 API, 운영 설정 「플랜」 카드 |
 | v3.37.1 | 2026-11-14 | **CR-187 파일 위치 안내** (§ 2-10, § 2-21). 테넌트 프롬프트 틀 `widget.artifact-out`(테넌트 V90). 실행기 연결 대화에 질문마다 붙는다 |
