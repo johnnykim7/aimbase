@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.40.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.41.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -552,14 +552,14 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 
 59 의 같은 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-cs` 를 씁니다. api 와 다른 실행기는 다시 만들지 않습니다.
 
-**bp-wes 일반 화면 실행기 [CR-194]**: BO2 의 메뉴 화면과 건 화면 AI 대화(위젯)는 실행기 `aimbase-agent-wes-assist`(이름 `cli-runner-bp-wes-assist`)로 갑니다. CS 실행기와 같은 틀이고 조회 계정만 `wes_assist_ai` 입니다(개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 계정, bp-wes 가 만든다). 접속 계정이 달라 계정 폴더와 작업 폴더를 `claude-accounts-wes-assist`, `workspace-wes-assist` 로 나눕니다. 연결은 위젯 연결 `cli-runner-bp-wes-assist-001` 하나이고(`tool_mode=NATIVE`, 도구 `bash`, `get_current_time`, 계정 `work01`, 기본 모델 Sonnet 5.5, 대화창 모델 목록 Sonnet 5.5, Haiku 5.5. 실행기 CLI 2.1.197 은 Opus 5.5, Fable 5.2 를 거절한다), 시스템 지시 대체값을 두지 않습니다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않습니다. bp-wes 는 이 연결 번호를 일반 화면 위젯 연결로 씁니다.
+**bp-wes 일반 화면 실행기 [CR-194]**: BO2 의 메뉴 화면과 건 화면 AI 대화(위젯)는 실행기 `aimbase-agent-wes-assist`(이름 `cli-runner-bp-wes-assist`)로 갑니다. CS 실행기와 같은 틀이고 조회 계정만 `wes_assist_ai` 입니다(개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 계정, bp-wes 가 만든다). 접속 계정이 달라 계정 폴더와 작업 폴더를 `claude-accounts-wes-assist`, `workspace-wes-assist` 로 나눕니다. 연결은 CS 와 같이 로그인된 계정마다 `cli-runner-bp-wes-assist-<계정>` 과 묶음 `cli-runner-bp-wes-assist-rr`(`ROUND_ROBIN`)이고(`tool_mode=NATIVE`, 도구 `bash`, `get_current_time`, 기본 모델 Sonnet 5.5, 대화창 모델 목록 Sonnet 5.5, Haiku 5.5. 실행기 CLI 2.1.197 은 Opus 5.5, Fable 5.2 를 거절한다), 시스템 지시 대체값을 두지 않습니다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않습니다. bp-wes 는 묶음 번호를 위젯 속성 `connection-group-id` 로 줍니다. 한 계정의 사용 한도가 차면 다음 계정이 답합니다(API 가이드 § 38-4). 처음 세운 계정 하나짜리 연결 `cli-runner-bp-wes-assist-001` 은 bp-wes 가 묶음 번호로 바꾼 뒤 지웁니다.
 
 | 순번 | 59 | 운영 chaws |
 |---|---|---|
 | 1 | `.env.runner-wes-assist` 에 `PGPASSWORD=<wes_assist_ai 비밀번호>` | `./deploy.sh chaws-init`(폴더), `bootstrap tenant wes-assist`(`agent-wes-assist.env`), `agent-wes-assist-db.env` 에 `PGPASSWORD` |
 | 2 | `./deploy.sh agent-wes-assist`: 폴더를 실행 계정 소유로 만들고 실행기만 올린다 | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-wes-assist` |
 | 3 | `./deploy.sh be`: api 가 `workspace-wes-assist` 를 붙이고 `AIMBASE_WORKSPACE_RUNNER_BASES` 에 이 실행기가 더해진다 | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-be`(같은 이유) |
-| 4 | 계정 로그인 `work01`(사람이 한다. 아래 명령) | 같다 |
+| 4 | 계정 로그인 `work01`, `work02`, `work03`(사람이 한다. 아래 명령에서 계정 폴더만 바꾼다) | 같다 |
 | 5 | `bash build/chaws-bootstrap.sh connections wes-assist`(서버 폴더에서) | `bootstrap connections wes-assist` |
 
 ```bash
@@ -2277,6 +2277,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.41.0 | 2026-11-16 | **CR-194 일반 화면 실행기 계정 묶음** (§ 2-10). 계정 하나짜리 위젯 연결 대신 계정마다 연결과 묶음 `cli-runner-bp-wes-assist-rr`. 로그인 계정 work01, work02, work03 |
 | v3.40.0 | 2026-11-16 | **CR-194 bp-wes 일반 화면 실행기** (§ 2-10). 실행기 `aimbase-agent-wes-assist`, 조회 계정 `wes_assist_ai`, 위젯 연결 `cli-runner-bp-wes-assist-001` 을 59 와 운영에 세우는 차례. `./deploy.sh agent-wes-assist`, `chaws-agent-wes-assist`, `chaws-bootstrap.sh connections wes-assist` |
 | v3.39.0 | 2026-11-15 | **CR-193 검사 반복 코드 대조** (§ 3-5). 검사 반복 config `code_check` 로 회차마다 스킬 스크립트를 돌려 판정과 다음 작성 지적에 더한다. 스크립트 입출력 규약과 실패 처리 |
 | v3.38.0 | 2026-11-14 | **CR-191 플랜별 분당 요청 한도** (§ 2-2). 테넌트 생성과 플랜 변경 때 그 플랜의 기본 한도를 넣는다. 플랜 목록 API, 운영 설정 「플랜」 카드 |

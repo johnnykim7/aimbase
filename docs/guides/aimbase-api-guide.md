@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.41.0** | 2026-11-15 | Aimbase v8.18.0 기준
+> **v3.42.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -2565,7 +2565,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 7, "model": "claude-
 
 ### 28-2. 위젯 설정 (`GET /api/v1/chat/widget-settings?connection_id=&locale=`)
 
-위젯이 뜰 때 한 번 부릅니다.
+위젯이 뜰 때 한 번 부릅니다. 계정 묶음으로 물을 때는 `connection_id` 대신 `connection_group_id` 를 줍니다(§ 38-4).
 
 ```json
 {
@@ -2612,7 +2612,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 
 ### 28-4. 후속 질문과 대화 제목 (`POST /api/v1/chat/sessions/{session_id}/follow-ups`)
 
-답이 끝난 뒤 부릅니다. 본문 `{"turn_id": "...", "connection_id": "..."}`.
+답이 끝난 뒤 부릅니다. 본문 `{"turn_id": "...", "connection_id": "..."}`. 계정 묶음으로 물을 때는 `connection_id` 대신 `connection_group_id` 를 줍니다(§ 38-4).
 
 ```json
 {"follow_ups": ["13박스 중 몇 박스가 출고됐나요?", "택배사 조회 결과도 보여 주세요", "고객 답변 초안을 다시 써 주세요"], "title": "라이프러버 13박스 누락 문의"}
@@ -3408,12 +3408,36 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 | 404 | `session_not_found` | 접근할 수 없는 대화 |
 | 409 | `rewind_rejected:shared` | 함께 보는 대화에서 마지막 질문이 아니거나 남의 질문을 되감음 |
 
+### 38-4. 계정 묶음으로 묻기
+
+연결을 계정 하나로 두면 그 계정의 사용 한도가 찼을 때 한도가 풀릴 때까지 위젯이 답하지 못합니다. 위젯 속성 `connection-group-id` 에 연결 묶음(§ 25) 번호를 주면 대화, 위젯 설정 조회, 다음 질문 제안이 그 묶음으로 가고, 한도가 찬 계정은 한도가 풀릴 때까지 건너뜁니다.
+
+```html
+<aimbase-chat connection-group-id="cli-runner-bp-wes-assist-rr"></aimbase-chat>
+```
+
+| 순번 | API | 묶음일 때 |
+|---|---|---|
+| 1 | `GET /api/v1/chat/widget-settings?connection_group_id=` | `models` 는 구성원 모두가 받는 모델(순서와 이름은 첫 연결), `default_model` 은 첫 연결의 기본값이 그 안에 있으면 그것 아니면 첫 모델. 깊게 생각하기, 그림 만들기, 첨부 칸은 첫 연결로 정한다 |
+| 2 | `POST /api/v1/chat/completions` 본문 `connection_group_id` | 모델 검사(400 `model_not_allowed`)를 구성원 모두로 본다. 실시간 답은 첫 이벤트를 보낸 뒤에는 다음 구성원으로 가지 않는다(§ 25) |
+| 3 | `POST /api/v1/chat/sessions/{session_id}/follow-ups` 본문 `connection_group_id` | 그 묶음으로 부르고 한도가 찬 구성원은 건너뛴다 |
+
+- 첫 연결은 묶음에 저장된 구성원 순서의 첫째입니다
+- `connection-id` 와 같이 주면 묶음을 씁니다. 위젯은 묶음을 받으면 요청에 `connection_id` 를 싣지 않습니다
+- 붙은 뒤 `connection-group-id` 를 바꾸면 위젯이 설정을 다시 받고 다음 질문부터 그 묶음으로 묻습니다
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 404 | `connection_group_not_found` | 그 테넌트에 없는 묶음 |
+| 400 | `connection_group_empty` | 구성원이 없는 묶음 |
+
 ---
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.42.0 | 2026-11-16 | **CR-194 위젯 계정 묶음** (§ 28-2, § 28-4, § 38-4). 위젯 설정 조회 질의와 다음 질문 제안 본문에 `connection_group_id`. 대화 요청 모델 검사를 묶음 구성원 모두로. 위젯 속성 `connection-group-id` |
 | v3.41.0 | 2026-11-15 | **CR-194 위젯 화면별 대화와 함께 보는 대화** (§ 17-2, § 38). 토큰 발급 `user_name`, `share_key`, 모르는 칸 무시. `POST /api/v1/chat/sessions/shared` 추가. 대화 목록 `screen_key`, 대화 요청 `screen_key`, 이어보기 `shared` 와 `question.asker`, 위젯 설정 `shared_available` 과 `user_name`. 대화 번호를 받는 위젯 API 의 접근 확인을 하나로 모아 대화 요청에도 건다 |
 | v3.40.3 | 2026-11-14 | **CR-185 승인 대기 런 구독** (§ 17-6, § 37-4). 승인 대기에 들어간 뒤 구독해도 `workflow.snapshot` 다음에 `workflow.approval` 을 다시 보낸다. 이벤트에 `approval_id` 추가. `workflow:approve` 는 플랫폼 런타임 설정(모든 테넌트 공통)에 넣는다고 보정 |
 | v3.40.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 31-1). CLI 연결의 `create_file` 은 허용 도구 목록이 아니라 실행기가 붙이는 계산 도구 통로(`/mcp-data`)로 부른다. 내장 도구만 쓰는 방식(NATIVE)도 같다 |

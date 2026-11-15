@@ -2997,7 +2997,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **상태**: 59 반영 완료 (2026-11-15 19:39, ae115786). 로컬 확인 IT-23-001 ~ 007, 59 확인은 CR 문서 9절
 
 ### CR-194 | 대화창 화면별 지난 대화 불러오기
-- **대상 기능 ID**: PRD-630 부터 PRD-637(신규), BIZ-275 부터 BIZ-280(신규), BIZ-170(함께 보는 대화 예외 한 줄), PRD-420, PRD-421(CR-178)
+- **대상 기능 ID**: PRD-630 부터 PRD-638(신규), BIZ-275 부터 BIZ-281(신규), BIZ-170(함께 보는 대화 예외 한 줄), PRD-420, PRD-421(CR-178)
 - **변경 타입**: 신규
 - **원본 요구사항**: [docs/origins/원본_요구사항_CR194_대화창_화면별_지난_대화_불러오기_20261115.md](origins/원본_요구사항_CR194_대화창_화면별_지난_대화_불러오기_20261115.md)
 - **변경 내용**:
@@ -3008,11 +3008,12 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   5. 붙은 뒤 속성이 바뀌면 반영한다. `screen-key` 가 바뀌면 토큰을 다시 받고 그 화면의 대화로 바꾼다
   6. 대화 번호를 받는 위젯 창구의 접근 확인을 한 곳으로 모은다. 대화 요청이 주인을 보지 않던 구멍을 막는다(근본 수정)
   7. 위젯 토큰 발급에 `user_name`, `share_key` 를 받고 모르는 칸은 무시한다
-- **결정**: 11/15 20:30 부터 20:37 사용자 결정(대화는 화면에 붙는다, 건 화면은 함께 보기, 메뉴 화면은 사람마다, AI 는 조회만). 20:57 대화 목록은 위젯 옵션. 21:02 화면 컨셉 ① 컨셉과 실화면 목업. 21:29 화면(메뉴 화면은 대화 목록을 대화창 왼쪽에 붙인다)과 문구 2개 승인, 서버 구현 착수 승인
-- **영향 모듈**: platform-core `WidgetTokenController`, `JwtProvider`, `JwtAuthenticationFilter`, `ChatOwner`, `ChatSessionOwnership`, `ChatController`, `ChatHistoryController`, `ChatHistoryService`, `ChatWidgetSettingsService`, `SessionStore`. 위젯 `web-component.ts`, `features/history/`
+  8. 위젯 속성 `connection-group-id` 로 계정 묶음을 받아 대화, 위젯 설정 조회, 다음 질문 제안을 그 묶음으로 보낸다. 한 계정의 사용 한도가 차면 다음 계정이 답한다. 일반 화면 실행기 연결을 계정마다 두고 묶는다
+- **결정**: 11/15 20:30 부터 20:37 사용자 결정(대화는 화면에 붙는다, 건 화면은 함께 보기, 메뉴 화면은 사람마다, AI 는 조회만). 20:57 대화 목록은 위젯 옵션. 21:02 화면 컨셉 ① 컨셉과 실화면 목업. 21:29 화면(메뉴 화면은 대화 목록을 대화창 왼쪽에 붙인다)과 문구 2개 승인, 서버 구현 착수 승인. 11/16 01:54 사용자 지적(일반 화면 연결이 계정 하나라 한도가 차면 끊긴다), 01:57 위젯 계정 묶음 승인
+- **영향 모듈**: platform-core `WidgetTokenController`, `JwtProvider`, `JwtAuthenticationFilter`, `ChatOwner`, `ChatSessionOwnership`, `ChatController`, `ChatHistoryController`, `ChatHistoryService`, `ChatWidgetSettingsService`, `SessionStore`, `ConnectionGroupSelector`, `FollowUpService`, `ConnectionAdapterFactory`. 위젯 `web-component.ts`, `features/history/`, `chat-client.ts`, `widget-api.ts`. 운영 스크립트 `chaws-bootstrap.sh`, `deploy.sh`
 - **영향도**: High (위젯 대화 접근 확인이 모든 대화 창구에 걸린다. 속성을 주지 않는 기존 소비앱은 지금과 같다)
 - **영향 범위**: CR-178(지난 대화), CR-175(답 평가), CR-182(내보내기, 공유 링크). 요청 쪽 bp-wes CR-WES-372(계약 주인), bp-backoffice2 CR-1000
-- **영향 설계서**: T1-1 v7.20(PRD-630 부터 637), T1-3 v5.22(BIZ-275 부터 280), T1-7 v3.29(CR-194 묶음), T1-10 v1.9(용어 4개, 함께 보는 대화 승인), T3-1 v4.25, T3-2 v7.26, T3-3 v3.19, T3-4 v3.17, T3-5 v4.23(TC-CHT-145 부터 151), API 가이드 v3.41.0(§ 17-2, § 38), 위젯 통합 가이드(속성 둘)
+- **영향 설계서**: T1-1 v7.21(PRD-630 부터 638), T1-3 v5.23(BIZ-275 부터 281), T1-7 v3.30(CR-194 묶음), T1-10 v1.9(용어 4개, 함께 보는 대화 승인), T3-1 v4.25, T3-2 v7.27, T3-3 v3.19, T3-4 v3.17, T3-5 v4.24(TC-CHT-145 부터 153), API 가이드 v3.42.0(§ 17-2, § 28-2, § 28-4, § 38), 위젯 통합 가이드(속성 셋), 운용 가이드 v3.41.0(§ 2-10)
 - **영향 없음 확인**: T1-5, T1-6(상태 전환, 이벤트 없음), T2-1, T2-2(새 라이브러리와 구현 규약 없음)
 - **상태**: 설계 완료, 구현중
 
