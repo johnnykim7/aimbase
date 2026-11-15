@@ -157,6 +157,20 @@ class ClaudeCliCommandBuilderTest {
         assertThat(textOnly).doesNotContain("--include-partial-messages");
     }
 
+    /** CR-195: 생각 내용 표시는 stream-json 모드에서만, 값을 줄 때만 붙는다. */
+    @Test
+    void thinking_display_only_with_stream_json_and_value() {
+        List<String> streaming = ClaudeCliCommandBuilder.builder("claude")
+                .streamJson(true).thinkingDisplay("summarized").build();
+        List<String> textOnly = ClaudeCliCommandBuilder.builder("claude")
+                .prompt("hi").outputFormat("json").thinkingDisplay("summarized").build();
+        List<String> unset = ClaudeCliCommandBuilder.builder("claude").streamJson(true).build();
+
+        assertThat(streaming).containsSequence("--thinking-display", "summarized");
+        assertThat(textOnly).doesNotContain("--thinking-display");
+        assertThat(unset).doesNotContain("--thinking-display");
+    }
+
     @Test
     @DisplayName("AIMBASE 모드: ClaudeCodeTool 시나리오 (-p prompt + max-turns + json output)")
     void aimbase_codetool_scenario() {

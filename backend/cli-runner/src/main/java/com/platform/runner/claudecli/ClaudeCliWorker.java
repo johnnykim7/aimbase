@@ -177,6 +177,8 @@ public class ClaudeCliWorker implements AutoCloseable {
     // 요청 값이 이것과 다를 때만 신호를 보낸다. turnLock 안에서만 읽고 쓴다.
     private Boolean appliedThinking;
     static final String THINKING_CONTROL_SUBTYPE = "set_max_thinking_tokens";
+    // CR-195: 생각 내용을 요약해 싣게 한다. 대화창 생각 칸(CR-175)이 이 글을 보여 준다.
+    static final String THINKING_DISPLAY = "summarized";
 
     // CR-173: 실행기 전체 상한에 걸리면 풀이 쉬고 있는 워커를 닫아 자리를 낸다. 요청이 쥐고 있는 워커는 닫지 않는다.
     private final java.util.concurrent.atomic.AtomicInteger leases = new java.util.concurrent.atomic.AtomicInteger();
@@ -1541,6 +1543,7 @@ public class ClaudeCliWorker implements AutoCloseable {
                 .streamJson(true)
                 .verbose(true)
                 .includePartialMessages(true)
+                .thinkingDisplay(THINKING_DISPLAY)
                 .resume(resumeSessionId, forkSession)
                 .systemPromptOverride(systemPromptOverride)
                 .model(model)
