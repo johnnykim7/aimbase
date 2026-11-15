@@ -48,7 +48,7 @@ case "$TARGET" in
     TENANT="bp_wes"; APP="bp-wes"; LABEL="bp-wes CS"; TAG="CR-173"
     RUNNER="cli-runner-bp-wes-cs"; AGENT_SERVICE="aimbase-agent-wes-cs"; AGENT_ENV="agent-wes-cs.env"
     TOOL_MODE="NATIVE"; EXPOSED_TOOLS="bash get_current_time"
-    # 위젯은 연결 묶음을 보내지 못해 연결 하나로 간다(bp-wes WES_CS_AIMBASE_WIDGET_CONNECTION_ID).
+    # CS 상세 위젯은 연결 하나로 간다(bp-wes WES_CS_AIMBASE_WIDGET_CONNECTION_ID). 위젯은 CR-194 부터 묶음 번호도 받는다.
     WIDGET_CONNECTION="$RUNNER-001"
     WIDGET_ORIGIN="${WIDGET_ORIGIN:-https://admin.banpoom.co.kr}" ;;
   wes-assist)
