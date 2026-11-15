@@ -1,7 +1,9 @@
 # T3-7 | CR-055 Evaluator-Optimizer 워크플로우 노드 상세 설계서
 
+> 설계 버전: 1.1 | 최종 수정: 2026-11-15 | 관련 CR: CR-055, CR-193
+
 **문서 번호**: T3-7
-**관련 CR**: CR-055
+**관련 CR**: CR-055, CR-193(16절 코드 대조)
 **작성일**: 2026-04-23
 **상태**: 작성 완료 — 구현 착수 대기
 **원본 요구사항**: [docs/origins/원본_요구사항_CR055_EvaluatorOptimizer_20260423.md](origins/원본_요구사항_CR055_EvaluatorOptimizer_20260423.md)
@@ -619,3 +621,130 @@ except TransientException:
 - WorkflowValidator의 검증 규칙 7가지 (Phase 3)
 - WorkflowRunDetail iteration 확장 뷰 (Phase 8) — `EvaluatorLoopDetail` 내장 컴포넌트로 구현
 
+---
+
+## 16. 코드 대조 (code_check) [CR-193, 2026-11-15]
+
+### 16.1 목적과 범위
+
+검사 LLM 이 글자 대조(예: 작성 결과의 법조문이 사건자료에 글자 그대로 있는가)를 놓치는 문제를 코드로 막는다. 회차마다 작성 결과에 스킬 묶음의 대조 스크립트를 돌리고, 그 결과를 회차 판정과 다음 작성 지적에 더한다. LLM 검사는 그대로 둔다. 요청과 결정은 [CR-193](CR-193_검사_반복에_코드_대조_결과를_더하는_기능.md), 규칙은 BIZ-195, 기능은 PRD-377.
+
+포함: 설정 묶음 `code_check`, 회차 흐름, 스크립트 입출력 규약, 회차 기록, 저장 검증, 편집 화면과 실행 상세의 표시.
+제외: 대조 스크립트 자체(쓰는 쪽 몫), 검사 LLM 에 대조 결과를 따로 넘기는 변수, 실패 시 재시도.
+
+### 16.2 설정
+
+```json
+"code_check": {
+  "skill": "lexflow-draft-checks",
+  "version": 1,
+  "script": "scripts/check_laws.py",
+  "timeout_seconds": 30,
+  "input": {
+    "case": "{{input.case}}",
+    "docType": "{{input.docType}}",
+    "guide": "{{guide.output}}"
+  }
+}
+```
+
+| 칸 | 형식 | 필수 | 뜻 |
+|---|---|---|---|
+| `skill` | 글 | 예 | 스킬 묶음 이름. 테넌트 전용이 먼저다(BIZ-120) |
+| `version` | 정수 1 이상 | 아니오 | 묶음 판. 없으면 단계가 시작할 때의 최신 판으로 한 번 고정한다 |
+| `script` | 글 | 예 | 묶음 안 경로. 확장자는 `skills.runnable-extensions` 중 하나 |
+| `timeout_seconds` | 정수 1 이상 | 아니오 | 회차당 실행 시간 한도. 없으면 `skills.script-timeout-seconds`, `skills.script-timeout-max-seconds` 를 넘으면 그 값 |
+| `input` | 객체 | 아니오 | 스크립트에 넘길 값. 값마다 틀을 푼다. `{{참조}}` 하나뿐인 글은 참조한 값을 객체 그대로(`StepContext.resolveObject`), 그 밖의 글은 글로 푼다(`StepContext.resolve`). 객체와 배열 안의 글도 같은 규칙. `{{loop.*}}` 도 쓸 수 있다(검사 LLM 이 보는 것과 같은 값) |
+
+### 16.3 회차 흐름
+
+```
+단계 시작
+  code_check 가 있으면 준비한다(여기서 실패하면 단계 실패, 작성 호출 없음)
+    스킬 해석: SkillCatalog.resolve(skill, version) 로 판 고정
+    작업장: StepContext.workspacePath 가 없으면 실패(BIZ-122)
+    묶음 풀기: SkillWorkspaceInstaller.install, script 가 묶음 안의 파일인지, 확장자가 실행 가능한지
+    시간 한도 결정
+회차 i
+  1) 작성 (지금과 같다. 실패하면 코드 대조도 검사도 하지 않는다)
+  2) 코드 대조: 입력 파일을 쓰고 스크립트를 돌려 결과를 회차 기록 code_check 에 넣는다
+  3) 검사 LLM (지금과 같다. 코드 대조가 위반을 찾아도 돈다)
+  4) 판정: 검사 결과가 통과 기준을 통과하고, 코드 대조가 passed true 일 때만 통과
+  5) 미통과면 다음 작성 지적 = 코드 대조 feedback(위반일 때) 다음 줄에 검사 feedback. 빈 쪽은 뺀다
+```
+
+- 코드 대조가 오류인 회차는 통과가 아니다. 다음 작성 지적에는 검사 feedback 만 넘긴다.
+- 검사 LLM 의 `{{loop.previous_feedback}}` 에는 5) 에서 만든 합친 지적이 들어간다. 두 번째 검사가 코드 지적이 고쳐졌는지도 본다.
+- 통과한 회차의 `final_verdict` 는 지금처럼 검사 결과다. 결과의 다른 칸(`output`, `structured_data`, `final_iteration`, `loop_exhausted`)의 뜻은 그대로다.
+
+### 16.4 대조 스크립트 입출력 규약
+
+| 항목 | 규약 |
+|---|---|
+| 작업 폴더 | run 작업장 |
+| 인자 | 입력 파일의 작업장 기준 상대 경로 하나. 파일은 `.code-check/` 아래 회차마다 새 이름으로 쓰고, 실행이 끝나면 지운다 |
+| 입력 파일 | UTF-8 JSON `{"step_id", "iteration", "output", "output_text", "input"}`. `iteration` 은 0 부터. `output` 은 작성 결과의 구조화 출력(없으면 null), `output_text` 는 작성 결과 글, `input` 은 16.2 의 `input` 을 푼 값(없으면 빈 객체) |
+| 출력 | stdout 전체가 JSON 객체 하나. `passed` boolean 필수. `passed` 가 false 면 `feedback` 이 비지 않은 글이어야 한다. `issues` 는 선택이며 있으면 배열 |
+| 종료 코드 | 0. 위반도 0 으로 끝내고 `passed: false` 로 알린다 |
+| 시간 | `timeout_seconds`. 넘으면 실행 컨테이너가 프로세스를 죽인다 |
+| 출력 상한 | stdout, stderr 각각 `skills.script-output-max-bytes`. 잘린 stdout 은 규약 밖 출력이다 |
+| 환경 | 실행 컨테이너(BIZ-122). Python 3.12(python-docx, openpyxl, pillow, pyhwp, playwright), Node.js(docx), bash. 인터넷과 비밀값 없음, 표준 입력 없음, 환경 변수는 PATH, HOME, LANG 뿐 |
+
+### 16.5 회차 기록
+
+`iterations[i].code_check` 를 더한다. `code_check` 설정이 없거나 작성이 실패한 회차에는 없다.
+
+```json
+"code_check": {
+  "passed": false,
+  "feedback": "민법 제598조가 사건자료와 작성법에 없다. [확인 필요]로 바꾼다",
+  "issues": [ { "rule": 1, "where": "민법 제598조", "fix": "[확인 필요]" } ],
+  "exit_code": 0,
+  "timed_out": false,
+  "duration_ms": 412,
+  "error": null
+}
+```
+
+- 오류 회차는 `passed` 가 null, `error` 에 까닭(`exit code 1`, `timed out after 30s`, `stdout is not a JSON object`, `passed must be a boolean`, `feedback is required when passed is false`, `issues must be an array`, 실행 컨테이너 문구), `stderr` 에 실행 컨테이너가 돌려준 stderr 를 남긴다.
+- 실행 컨테이너에 닿지 못한 오류는 `exit_code`, `timed_out`, `duration_ms` 가 없다.
+
+### 16.6 실패 처리
+
+| 상황 | 언제 알 수 있나 | 처리 |
+|---|---|---|
+| 칸 누락, 칸 형식 | 저장 | 400 (16.7) |
+| 없는 스킬이나 판, 묶음 밖이거나 없는 스크립트, 실행할 수 없는 확장자, 작업장 없음 | 단계 시작 | 단계 실패. 작성 호출 없음 |
+| 종료 코드 0 아님, 시간 초과, 규약 밖 출력, 실행 컨테이너 오류 | 회차 | 그 회차 미통과, 오류 기록, WARN 로그, 다음 회차. 재시도 없음. 단계는 실패하지 않는다 |
+
+### 16.7 저장 검증 (WorkflowValidator)
+
+`config.code_check` 가 있으면 객체이고, `skill`, `script` 는 비지 않은 글, `version`, `timeout_seconds` 는 있으면 1 이상 정수, `input` 은 있으면 객체다. 스킬과 판이 있는지, 확장자가 실행 가능한지는 저장 때 보지 않는다(판은 저장 뒤에 올라올 수 있고, 실행 가능한 확장자는 운영 설정이다). 문구는 `step '<id>': code_check.<칸> ...`.
+
+### 16.8 구성 요소
+
+| 부품 | 변경 | 내용 |
+|---|---|---|
+| `skill/SkillScriptRunner` | 신규 | 묶음을 작업장에 풀고 스크립트 경로가 묶음 안인지 확인, 시간 한도 계산, 실행 컨테이너 호출. `SkillRunTool` 과 코드 대조가 같이 쓴다 |
+| `tool/builtin/SkillRunTool` | 수정 | 위 세 가지를 `SkillScriptRunner` 로 옮긴다. 동작과 문구는 그대로 |
+| `workflow/step/CodeCheckRunner` | 신규 | 16.3 의 준비, 입력 파일 쓰기와 지우기, 출력 해석, 회차 기록 만들기 |
+| `workflow/step/EvaluatorLoopStepExecutor` | 수정 | 단계 시작 때 준비, 회차마다 코드 대조, 판정과 지적 합치기 |
+| `workflow/WorkflowValidator` | 수정 | 16.7 |
+
+### 16.9 화면
+
+| 화면 | 변경 |
+|---|---|
+| 워크플로우 편집 속성 패널(`ConfigPanel`) | 검사 반복에 「코드 대조 (JSON, 선택)」 칸. `JSON_CONFIG_KEYS` 에 `code_check` 를 넣어 객체로 저장한다. 비우면 칸을 지운다. 지금은 모르는 객체 칸을 열었다 저장하면 글로 바뀌어 저장 검증에 걸린다 |
+| 실행 상세 반복 이력(`WorkflowDetail`) | 회차 머리에 「코드 대조 통과」, 「코드 대조 위반」, 「코드 대조 오류」 표시. 펼치면 지적, issues, 오류와 stderr |
+
+### 16.10 호환과 영향 없음
+
+- `code_check` 가 없는 단계는 동작과 결과가 같다.
+- 테이블, API, 상태, 이벤트는 바뀌지 않는다. 회차 기록은 `workflow_runs.step_results` JSONB 안에 칸이 더해질 뿐이다.
+- 실행 컨테이너 동시 실행 수(`SANDBOX_MAX_CONCURRENCY`, 기본 2)를 `skill_run` 과 나눠 쓴다. 자리를 기다리는 시간은 `aimbase.skill-sandbox.response-grace-seconds` 안에서 기다린다.
+
+### 16.11 시험
+
+- 단위: T3-5 「검사 반복 코드 대조 (CR-193)」 TC-ECK-001 ~ 015
+- 통합: 시험항목 IT-23-001 ~ 007
