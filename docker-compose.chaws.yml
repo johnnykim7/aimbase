@@ -175,7 +175,7 @@ services:
     networks:
       default: {}
       bp-infra: {}
-    mem_limit: 1536m
+    mem_limit: 2g
     # 계정 폴더 work01, work02 를 붙인다. 연결마다 config.config_dir 로 폴더를 고른다.
     volumes:
       - ./claude-accounts-wes-cs:/home/appuser/.claude-accounts
