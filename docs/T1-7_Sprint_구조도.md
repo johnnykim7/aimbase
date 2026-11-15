@@ -853,7 +853,7 @@ flowchart LR
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
 | PRD-640, BIZ-283 | `ClaudeAccountToken`(토큰 파일 읽기와 검사), 워커 환경(`CLAUDE_CODE_OAUTH_TOKEN`, 앞서는 인증 변수 빼기), 두 워커 공장에 검사, 갈래 워커 실행 오류 때 run 자리 반환 | CR-161 | 단위시험 TC-TOK-001 ~ 008, 시험항목 IT-25-001 ~ 004 | 실행기 | 설계중 |
-| PRD-640 | 기동 스크립트 `token` 단계(토큰 파일, 로그인 파일의 1년 토큰 옮기기, 서비스 이름 받기), `connections` 구성원 세기, `scripts/cli-token.sh` | 위 실행기 | 시험항목 IT-25-005 ~ 007 | 스크립트 | 설계중 |
+| PRD-640 | 기동 스크립트 `token` 단계(토큰 파일, 로그인 파일의 1년 토큰 옮기기, 서비스 이름 받기), `connections` 구성원 세기, `scripts/cli-token.py` | 위 실행기 | 시험항목 IT-25-005 ~ 007 | 스크립트 | 설계중 |
 | PRD-641 | 실행기 `GET /v1/account-token` | 위 실행기 | 단위시험 TC-TOK-009, 시험항목 IT-25-008 | 실행기 | 설계중 |
 | PRD-641, BIZ-284 | 마스터 V95 `cli_token_expiry_notices`, 운영 설정 분류 runner, 하루 한 번 확인과 bp-notification 발송 | 위 조회, bp-notification 양식 | 단위시험 TC-TOK-010 ~ 014, 시험항목 IT-25-009 ~ 011 | BE | 설계중 |
 | (레포 간) | bp-notification Aimbase 솔루션 키와 양식 둘 | | 59 에서 메일과 문자 한 번 | bp-notification | 요청 |

@@ -16,24 +16,26 @@
 # 비밀값은 secrets/ 와 실행기 비밀값 파일에만 쓰고 화면과 명령 인자에 싣지 않는다. 이미 된 일은 건너뛴다.
 #   admin        첫 관리자(tenant_admins)와 CLI 허용 테넌트에 대상 테넌트
 #   tenant       대상 테넌트와 DB, 실행기 호출 키와 실행기 전용 키(실행기 비밀값 파일), 소비앱 키
-#   connections  로그인된 계정마다 연결 하나와 ROUND_ROBIN 묶음. 계정은 실행기의 claude-accounts 아래
-#                로그인 파일이 있는 폴더다. 계정을 새로 로그인한 뒤 다시 돌리면 연결을 더하고 묶음 구성원을 맞춘다.
+#   connections  1년 토큰을 넣은 계정마다 연결 하나와 ROUND_ROBIN 묶음. 계정은 실행기의 claude-accounts 아래
+#                토큰 파일(oauth-token.json)이 있는 폴더다. 토큰을 새로 넣은 뒤 다시 돌리면 연결을 더하고 묶음 구성원을 맞춘다.
 #                ACCOUNTS="work01 work02" 처럼 주면 그 목록을 쓴다. 위젯 연결의 계정은 WIDGET_ACCOUNT(기본 work01)
 #   widget       위젯 허용 주소(widget.allowed-origins)에 대상의 화면 주소. WIDGET_ORIGIN 으로 바꿀 수 있다
 #   http         (3plgw) HTTP 연결 bp-3plgw, github-bp-3plgw. 3PLGW 주소는 TPLGW_BASE_URL 로 준다
 #   workflow     워크플로우 정의(표준 입력)를 등록한다. wms 는 단계 opinion 의 연결을 work01 로 바꾼다.
 #                3plgw 는 표준 입력이 없으면 build/poomgo-change-repair.workflow.json 을 쓴다
-#   smoke        소비앱이 부르는 길로 한 번 불러 본다. work01 로그인 뒤에 한다. 3plgw 는 등록 상태와 실행기 도구를 본다
-#   token        계정 하나에 1년 인증(claude setup-token)을 넣는다. 셋째 인자가 계정 폴더 이름이다. 사람이 ssh -t 로 친다.
-#                넣은 뒤 실행기를 재시작해야 /login 인증을 들고 있던 CLI 가 파일을 되돌려 쓰지 않는다
+#   smoke        소비앱이 부르는 길로 한 번 불러 본다. work01 토큰을 넣은 뒤에 한다. 3plgw 는 등록 상태와 실행기 도구를 본다
+#   token        계정 하나에 1년 토큰(claude setup-token)을 넣는다(CR-196). 셋째 인자가 계정 폴더 이름이다.
+#                사람이 ssh -t 로 친다. 실행기는 토큰 파일이 없거나 기한이 지난 계정으로 CLI 를 띄우지 않는다.
+#                둘째 인자가 대상 이름이 아니면 실행기 compose 서비스 이름으로 본다(59 의 aimbase-agent-axopm 등)
 set -euo pipefail
 umask 077
 
 STEP="${1:?단계를 주세요: admin | tenant | connections | widget | http | workflow | smoke | token}"
 TARGET="${2:-wms}"
 ACCOUNT="${3:-}"
-# claude setup-token 인증의 유효 기간. CLI 가 기한을 보고 갱신을 시도하지 않게 인증 파일에 같이 적는다.
+# claude setup-token 토큰의 유효 기간. 토큰은 기한을 알려 주지 않아 넣은 날부터 세어 토큰 파일에 적는다.
 TOKEN_DAYS="${TOKEN_DAYS:-365}"
+TOKEN_PY="$(dirname "$0")/cli-token.py"
 API="http://127.0.0.1:8280/api/v1"
 ADMIN_EMAIL="platform-admin@aimbase.local"
 ACCOUNTS="${ACCOUNTS:-}"
@@ -42,6 +44,19 @@ WIDGET_CONNECTION=""
 MODEL="claude-sonnet-4-5"
 MODELS=""
 WORKFLOW_STEP_CONNECTION="opinion"
+# 계정 하나에 1년 토큰을 넣는다(CR-196, 사용자 2026-11-16 06:01, 06:06). 실행기 컨테이너 안에서 cli-token.py 가
+# setup-token 을 띄우고, 붙여 넣은 값을 계정 폴더의 oauth-token.json 으로 적은 뒤 실행기와 같은 인증으로 확인한다.
+# 로그인 파일에 이미 1년 토큰이 있으면(CR-194 단계) 다시 받지 않고 옮길지 묻는다. 로그인 파일은 고치지 않는다.
+# 토큰 값은 컨테이너 안의 화면 입력으로만 받는다. 이 스크립트, 명령 인자, 기록에는 지나가지 않는다.
+step_token() {
+  [ -n "$ACCOUNT" ] || { echo "계정을 주세요: token <대상 또는 실행기 서비스> <계정>"; exit 1; }
+  [ -t 0 ] || { echo "[token] 사람이 ssh -t 로 칩니다. 토큰 값을 화면에서 받습니다"; exit 1; }
+  [ -f "$TOKEN_PY" ] || { echo "[token] $TOKEN_PY 가 없습니다. deploy.sh 가 build/ 에 같이 올립니다"; exit 1; }
+  echo "[token] 실행기 $AGENT_SERVICE 계정 $ACCOUNT"
+  docker compose exec -e TOKEN_DAYS="$TOKEN_DAYS" "$AGENT_SERVICE" \
+    python3 -c "$(cat "$TOKEN_PY")" "/home/appuser/.claude-accounts/$ACCOUNT"
+}
+
 case "$TARGET" in
   wms)
     TENANT="bp_wms"; APP="bp-wms"; LABEL="bp-wms"; TAG="CR-162"
@@ -73,7 +88,9 @@ case "$TARGET" in
     TOOL_MODE="HYBRID"; EXPOSED_TOOLS="get_current_time"
     WORKFLOW_STEP_CONNECTION=""
     WIDGET_ORIGIN="${WIDGET_ORIGIN:-}" ;;
-  *) echo "대상: wms | wes-cs | wes-assist | 3plgw"; exit 1 ;;
+  *)
+    if [ "$STEP" = token ]; then AGENT_SERVICE="$TARGET"; step_token; exit 0; fi
+    echo "대상: wms | wes-cs | wes-assist | 3plgw"; exit 1 ;;
 esac
 # 비밀값 배치. chaws 는 실행기마다 env 파일에 호출 키(AIMBASE_RUNNER_API_KEY)를 둔다.
 # 59 는 compose 가 .env 의 RUNNER_API_KEY(실행기 공유)와 실행기 전용 키 변수를 실행기 환경에 넣는다(docker-compose.prod.yml).
@@ -226,9 +243,9 @@ PY
 }
 
 # 계정 폴더는 실행 계정 999 소유라 서버 계정으로는 못 읽는다. 실행기 컨테이너 안에서 센다.
-logged_in_accounts() {
+token_accounts() {
   docker compose exec -T "$AGENT_SERVICE" sh -c \
-    'for d in /home/appuser/.claude-accounts/*/; do [ -s "$d.credentials.json" ] && basename "$d"; done; true' \
+    'for d in /home/appuser/.claude-accounts/*/; do [ -s "${d}oauth-token.json" ] && basename "$d"; done; true' \
     | sort | paste -sd ' ' -
 }
 
@@ -269,9 +286,9 @@ PY
 
 step_connections() {
   if [ -z "$ACCOUNTS" ]; then
-    ACCOUNTS=$(logged_in_accounts)
-    [ -n "${ACCOUNTS// /}" ] || { echo "[connections] 로그인된 계정이 없음. 계정 로그인 뒤 다시 돌린다"; exit 1; }
-    echo "[connections] 로그인된 계정: $ACCOUNTS"
+    ACCOUNTS=$(token_accounts)
+    [ -n "${ACCOUNTS// /}" ] || { echo "[connections] 1년 토큰을 넣은 계정이 없음. token 단계 뒤 다시 돌린다"; exit 1; }
+    echo "[connections] 토큰을 넣은 계정: $ACCOUNTS"
   fi
   login_tenant
   for a in $ACCOUNTS; do
@@ -444,36 +461,6 @@ step_smoke() {
     wes-assist) smoke_runner_db connection_group_id "$GROUP" "$MODEL" ;;
     3plgw) smoke_3plgw ;;
   esac
-}
-
-# 계정 하나에 1년 인증을 넣는다(CR-194, 사용자 2026-11-16 05:43). /login 인증은 8시간마다 갱신해야 해서
-# 계정 묶음을 돌리는 동안 갱신이 어긋나면 그 계정이 끊긴다. 59 local-agent-1 과 같은 형태(갱신 값 없음)로 적는다.
-# 인증 값은 화면 입력으로만 받는다. 명령 인자, 기록, 계정 폴더의 인증 파일 말고는 어디에도 남기지 않는다.
-# 표준 입력이 필요 없는 exec 는 </dev/null 로 둔다. 그러지 않으면 붙여 넣는 값을 컨테이너가 먼저 읽어 간다.
-step_token() {
-  [ -n "$ACCOUNT" ] || { echo "계정을 주세요: token <대상> <계정>"; exit 1; }
-  [ -t 0 ] || { echo "[token] 사람이 ssh -t 로 칩니다. 인증 값을 화면에서 받습니다"; exit 1; }
-  local dir="/home/appuser/.claude-accounts/$ACCOUNT" tmp="/tmp/setup-token-$$" tok sub
-  echo "[token] $AGENT_SERVICE 계정 $ACCOUNT. 찍힌 주소를 맥 브라우저에서 그 계정으로 승인하고 받은 코드를 붙여 넣습니다."
-  echo "[token] 끝나면 sk-ant-oat01- 로 시작하는 인증 값이 찍힙니다. 그 값을 복사해 둡니다."
-  docker compose exec -e CLAUDE_CONFIG_DIR="$tmp" "$AGENT_SERVICE" claude setup-token || true
-  docker compose exec -T "$AGENT_SERVICE" rm -rf "$tmp" </dev/null
-  read -rsp "[token] 인증 값을 붙여 넣고 Enter(화면에 보이지 않습니다): " tok; echo
-  case "$tok" in sk-ant-oat01-*) ;; *) tok=""; echo "[token] sk-ant-oat01- 로 시작하지 않아 넣지 않았습니다"; exit 1 ;; esac
-  sub=$(docker compose exec -T "$AGENT_SERVICE" sh -c "cat '$dir/.credentials.json' 2>/dev/null || true" </dev/null \
-    | python3 -c 'import json, sys
-try: print(json.load(sys.stdin)["claudeAiOauth"].get("subscriptionType") or "max")
-except Exception: print("max")')
-  printf '%s' "$tok" | python3 -c '
-import json, sys, time
-tok = sys.stdin.read().strip()
-print(json.dumps({"claudeAiOauth": {"accessToken": tok, "refreshToken": "",
-    "expiresAt": int((time.time() + int(sys.argv[1]) * 86400) * 1000),
-    "scopes": ["user:inference", "user:profile"], "subscriptionType": sys.argv[2]}}))' "$TOKEN_DAYS" "$sub" \
-    | docker compose exec -T "$AGENT_SERVICE" sh -c "umask 077; mkdir -p '$dir' && cat > '$dir/.credentials.json.new' && mv '$dir/.credentials.json.new' '$dir/.credentials.json'"
-  tok=""
-  echo "[token] 넣음. 기한 $(date -u -d "+$TOKEN_DAYS days" +%Y-%m-%d), 구독 $sub"
-  echo "[token] 확인: $(docker compose exec -T -e CLAUDE_CONFIG_DIR="$dir" "$AGENT_SERVICE" timeout 120 claude -p 'ok 라고만 답하세요' --model claude-haiku-5-5 </dev/null 2>&1 | tail -1 | head -c 200)"
 }
 
 case "$STEP" in

@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.42.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.43.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -490,28 +490,28 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 3. `bootstrap admin`: 플랫폼 관리자(비밀번호는 `secrets/admin-password`), master `global_config` 의 CLI 허용 테넌트에 `bp_wms`
 4. `bootstrap tenant`: 테넌트 `bp_wms`, 실행기 전용 키(`agent.env` 에 덧붙임), 소비앱 키(`secrets/bp-wms-api-key`)
 5. `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent`: 실행기. 실행기 기록에 `Agent registered successfully: name=cli-runner-bp-wms` 가 나오면 된 것
-6. 계정 로그인(아래)
-7. `bootstrap connections`: 로그인된 계정(실행기의 `claude-accounts` 아래 로그인 파일이 있는 폴더)마다 CLI 커넥션(`cli-runner-bp-wms-<계정>`, `config_dir` 만 다름)과 묶음 `cli-runner-bp-wms-rr`(`ROUND_ROBIN`). 목록을 손으로 줄 때는 `ACCOUNTS="work01 work02"`
+6. 계정 1년 토큰(아래)
+7. `bootstrap connections`: 1년 토큰을 넣은 계정(실행기의 `claude-accounts` 아래 토큰 파일 `oauth-token.json` 이 있는 폴더)마다 CLI 커넥션(`cli-runner-bp-wms-<계정>`, `config_dir` 만 다름)과 묶음 `cli-runner-bp-wms-rr`(`ROUND_ROBIN`). 목록을 손으로 줄 때는 `ACCOUNTS="work01 work02"`
 8. `bootstrap workflow < <워크플로우 JSON>`: 등록하거나 고친다. 단계 `opinion` 의 커넥션은 `cli-runner-bp-wms-work01`
 9. `bootstrap smoke`: bp-wms 가 부르는 길(망 `aimbase-apps`, 소비앱 키)로 워크플로우를 한 번 돌려 상태와 결과를 찍는다
 
 `bootstrap` 은 이미 된 일을 건너뛰어 다시 돌려도 됩니다. 응답 본문에 키가 섞여 있어 오류일 때도 `message` 만 찍습니다.
 
-**계정 로그인** (처음 한 번, 계정마다. 사람이 칩니다):
+**계정 1년 토큰** (CR-196, 처음 한 번, 계정마다. 사람이 칩니다): 실행기는 계정 폴더의 1년 토큰(`claude setup-token`)으로만 CLI 를 띄웁니다. `/login` 인증은 8시간마다 갱신해야 해서 계정 하나를 CLI 여럿이 같이 쓰면 갱신이 어긋나 끊깁니다. 토큰이 없는 계정은 요청이 `cli_account_token_missing:<계정 폴더>`, 기한이 지난 계정은 `cli_account_token_expired:<계정 폴더>:expires_at=<시각>` 으로 실패합니다.
 ```bash
-ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent claude'
+ssh -t chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh token wms work01'
 ```
-CLI 가 뜨면 `/login` 을 치고, 나온 주소를 맥 브라우저에서 그 계정으로 승인한 뒤 받은 코드를 붙여 넣습니다. `/exit` 로 나와 다른 계정도 같이 합니다(지금은 `work01`, `work02`). 로그인 정보는 서버 `claude-accounts/<계정>` 에만 남습니다.
+실행기 컨테이너 안에서 `claude setup-token` 이 뜹니다. 찍힌 주소를 맥 브라우저에서 그 계정으로 승인하고 코드를 붙여 넣으면 `sk-ant-oat01-` 로 시작하는 값이 찍힙니다. 이어 묻는 칸에 그 값을 붙여 넣으면(화면에 보이지 않음) 계정 폴더의 `oauth-token.json` 에 넣은 시각, 기한(1년)과 함께 적고, 실행기와 같은 인증으로 짧은 질문 하나를 던져 확인합니다. 값은 그 파일 말고는 남지 않습니다. 실행기는 다시 올리지 않습니다. 다음에 띄우는 CLI 부터 그 토큰을 씁니다.
 
-**계정 1년 인증** (CR-194): `/login` 인증은 8시간마다 갱신해야 해서 계정 묶음을 돌리는 동안 갱신이 어긋나면 그 계정이 끊깁니다. 계정 묶음에 드는 계정은 `claude setup-token` 의 1년 인증으로 넣습니다. 계정마다 사람이 칩니다.
-```bash
-ssh -t chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh token wes-assist work02'
-```
-찍힌 주소를 맥 브라우저에서 그 계정으로 승인하고 코드를 붙여 넣으면 `sk-ant-oat01-` 로 시작하는 인증 값이 찍힙니다. 이어 묻는 칸에 그 값을 붙여 넣으면(화면에 보이지 않음) 계정 폴더의 인증 파일에 기한(1년)과 함께 적고 짧은 질문 하나로 확인합니다. 인증 값은 그 파일 말고는 남지 않습니다. 넣은 계정이 전부 끝나면 실행기를 재시작합니다(`docker compose restart aimbase-agent-wes-assist`). 재시작하지 않으면 `/login` 인증을 들고 있던 CLI 가 갱신하며 파일을 되돌려 씁니다. 기한이 다가오면 같은 명령으로 다시 넣습니다.
+- 둘째 인자는 대상(`wms`, `wes-cs`, `wes-assist`, `3plgw`)이나 실행기 compose 서비스 이름(59 의 `aimbase-agent-axopm` 등)입니다. 셋째 인자가 계정 폴더 이름입니다
+- 로그인 파일(`.credentials.json`)에 CR-194 단계로 넣은 1년 토큰이 있으면 다시 받지 않고 토큰 파일로 옮길지 묻습니다. 로그인 파일은 고치지 않습니다
+- 이 단계가 쓰는 `build/cli-token.py` 는 chaws 는 `./deploy.sh chaws-bootstrap`, 59 는 `./deploy.sh be` 가 `chaws-bootstrap.sh` 와 같이 올립니다
+- CR-196 실행기로 올리기 전에 그 실행기가 쓰는 계정마다 토큰을 먼저 넣습니다. 새 실행기는 토큰이 없는 계정을 바로 막습니다
+- 기한이 다가오면 같은 명령으로 새 값을 넣습니다
 
-**계정 늘리기**: 새 계정(예: `work04`)은 폴더를 만들며 로그인하고 `bootstrap connections` 를 한 번 돌립니다. 커넥션을 더하고 묶음 구성원을 로그인된 계정으로 맞춥니다. api 와 실행기는 계정 폴더의 부모를 통째로 붙여 두어 다시 만들지 않습니다. 실행기의 동시 CLI 는 계정 수와 상관없이 3개입니다.
+**계정 늘리기**: 새 계정(예: `work04`)은 `token` 단계로 토큰을 넣고(폴더가 없으면 만듭니다) `bootstrap connections` 를 한 번 돌립니다. 커넥션을 더하고 묶음 구성원을 토큰을 넣은 계정으로 맞춥니다. api 와 실행기는 계정 폴더의 부모를 통째로 붙여 두어 다시 만들지 않습니다. 실행기의 동시 CLI 는 계정 수와 상관없이 3개입니다.
 ```bash
-ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work04 aimbase-agent sh -c "mkdir -p \$CLAUDE_CONFIG_DIR && claude"'
+ssh -t chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh token wms work04'
 ```
 
 **고치기**: `./deploy.sh chaws-be` 는 api 만, `./deploy.sh chaws-agent` 는 실행기만 다시 만듭니다(`--no-deps`). 올릴 커밋은 `CHAWS_COMMIT` 으로 줍니다. 맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있어, 그 커밋만 받은 별도 worktree(`~/.cache/aimbase-chaws-build`)에서 jar 를 빌드하고 Dockerfile, compose, 설치 스크립트도 거기서 보냅니다. 무엇이 도는지는 서버 `deploy-backup/deployed.log` 에 서비스별 커밋으로 남습니다. db, redis 와 운영 3PL 컨테이너는 다시 만들지 않습니다. 운영 3PL 의 자동 배포는 자기 서비스만 다시 만들고 꼬리표 없는 이미지만 지워 Aimbase 와 겹치지 않습니다.
@@ -537,14 +537,14 @@ bp-wes 의 CS 초안과 CS 상세 AI 대화(위젯)는 실행기 `aimbase-agent-
 4. `bootstrap tenant wes-cs`: 테넌트 `bp_wes` 와 DB, `agent-wes-cs.env`, `secrets/bp-wes-api-key`
 5. `agent-wes-cs-db.env` 에 `PGPASSWORD=<wes_cs_ai 비밀번호>` 를 둔다. 없으면 실행기는 뜨지만 CS 조회가 DB 에 붙지 못한다
 6. `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-wes-cs`: 실행기 기록에 `Agent registered successfully: name=cli-runner-bp-wes-cs` 가 나오면 된 것
-7. 계정 로그인 `work01`, `work02`(위와 같은 방법, 서비스 이름만 `aimbase-agent-wes-cs`)
+7. 계정 1년 토큰 `work01`, `work02`(위와 같은 방법, 대상만 `wes-cs`)
 8. `bootstrap connections wes-cs`: 계정마다 `cli-runner-bp-wes-cs-<계정>`, 묶음 `cli-runner-bp-wes-cs-rr`, 위젯 연결 `cli-runner-bp-wes-cs-001`(계정 `WIDGET_ACCOUNT`, 기본 `work01`). 설정은 59 와 같게 `tool_mode=NATIVE`, 도구 `bash`, `get_current_time`
 
 **작업 폴더 경로 [CR-187]**: api 와 CS 실행기가 `workspace-wes-cs` 를 같은 컨테이너 경로 `/data/workspace-wes-cs` 로 붙이고, api 환경설정 `AIMBASE_WORKSPACE_RUNNER_BASES=cli-runner-bp-wes-cs=/data/workspace-wes-cs` 로 연결 설정 `agent_name` 이 `cli-runner-bp-wes-cs` 인 대화의 작업 폴더를 그 아래 `chat/{세션}` 에 잡습니다. 경로가 다르면 실행기 기록에 `workingDirectory ... is not a directory, using default cwd` 가 남고, 실행기가 만든 파일이 대화 파일 카드로 올라오지 않습니다. 실행기를 더 나눌 때도 같게 하고 `실행기 이름=폴더` 를 쉼표로 더합니다. 그 폴더는 허용 폴더에 저절로 들어갑니다. 59 와 chaws 의 compose 에 들어 있습니다. 실행기 연결 대화에는 서버가 질문마다 프롬프트 틀 `widget.artifact-out`(파일은 `./out/` 에)을 붙이므로, 연결 시스템 프롬프트에 같은 규약을 따로 적지 않아도 됩니다(§ 2-21 프롬프트 틀).
 9. `bootstrap smoke wes-cs`: 실행기의 DB 계정이 `wes_cs_ai` 인지 보고, bp-wes 가 부르는 길(망 `aimbase-apps`, 소비앱 키, 묶음, `stream=false`)로 CLI 에게 `select current_user` 를 시켜 응답을 찍는다
 
 ```bash
-ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent-wes-cs claude'
+ssh -t chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh token wes-cs work01'
 ```
 
 **프로세스 상한** (CR-173 14절): CS 실행기는 Claude 프로세스를 실행기 전체에서 2개까지만 띄웁니다(`AIMBASE_RUNNER_MAX_PROCESSES: "2"`, compose 에 있음). 하나가 170MB 에서 300MB 라 java 와 합쳐 메모리 한도 1.5GB 안에 둡니다. 그보다 많은 요청이 한꺼번에 오면 온 순서대로 줄을 서고, 기다리는 동안 답을 마치고 쉬고 있는 프로세스를 오래 쉰 것부터 닫아 자리를 냅니다. 300초(`AIMBASE_RUNNER_PROCESS_QUEUE_TIMEOUT_SECONDS`, api 가 실행기를 기다리는 시간과 같다) 안에 자리가 나지 않으면 그 요청은 실패로 돌아갑니다. `AIMBASE_RUNNER_MAX_WORKERS` 는 요청 하나 안의 상한이라 실행기 전체 수를 막지 못합니다. 다른 실행기는 상한을 두지 않습니다(값 0).
@@ -558,21 +558,21 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 
 59 의 같은 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-cs` 를 씁니다. api 와 다른 실행기는 다시 만들지 않습니다.
 
-**bp-wes 일반 화면 실행기 [CR-194]**: BO2 의 메뉴 화면과 건 화면 AI 대화(위젯)는 실행기 `aimbase-agent-wes-assist`(이름 `cli-runner-bp-wes-assist`)로 갑니다. CS 실행기와 같은 틀이고 조회 계정만 `wes_assist_ai` 입니다(개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 계정, bp-wes 가 만든다). 접속 계정이 달라 계정 폴더와 작업 폴더를 `claude-accounts-wes-assist`, `workspace-wes-assist` 로 나눕니다. 연결은 CS 와 같이 로그인된 계정마다 `cli-runner-bp-wes-assist-<계정>` 과 묶음 `cli-runner-bp-wes-assist-rr`(`ROUND_ROBIN`)이고(`tool_mode=NATIVE`, 도구 `bash`, `get_current_time`, 기본 모델 Sonnet 5.5, 대화창 모델 목록 Sonnet 5.5, Haiku 5.5. 실행기 CLI 2.1.197 은 Opus 5.5, Fable 5.2 를 거절한다), 시스템 지시 대체값을 두지 않습니다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않습니다. bp-wes 는 묶음 번호를 위젯 속성 `connection-group-id` 로 줍니다. 한 계정의 사용 한도가 차면 다음 계정이 답합니다(API 가이드 § 38-4). 처음 세운 계정 하나짜리 연결 `cli-runner-bp-wes-assist-001` 은 bp-wes 가 묶음 번호로 바꾼 뒤 지웁니다.
+**bp-wes 일반 화면 실행기 [CR-194]**: BO2 의 메뉴 화면과 건 화면 AI 대화(위젯)는 실행기 `aimbase-agent-wes-assist`(이름 `cli-runner-bp-wes-assist`)로 갑니다. CS 실행기와 같은 틀이고 조회 계정만 `wes_assist_ai` 입니다(개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 계정, bp-wes 가 만든다). 접속 계정이 달라 계정 폴더와 작업 폴더를 `claude-accounts-wes-assist`, `workspace-wes-assist` 로 나눕니다. 연결은 CS 와 같이 토큰을 넣은 계정마다 `cli-runner-bp-wes-assist-<계정>` 과 묶음 `cli-runner-bp-wes-assist-rr`(`ROUND_ROBIN`)이고(`tool_mode=NATIVE`, 도구 `bash`, `get_current_time`, 기본 모델 Sonnet 5.5, 대화창 모델 목록 Sonnet 5.5, Haiku 5.5. 실행기 CLI 2.1.197 은 Opus 5.5, Fable 5.2 를 거절한다), 시스템 지시 대체값을 두지 않습니다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않습니다. bp-wes 는 묶음 번호를 위젯 속성 `connection-group-id` 로 줍니다. 한 계정의 사용 한도가 차면 다음 계정이 답합니다(API 가이드 § 38-4). 처음 세운 계정 하나짜리 연결 `cli-runner-bp-wes-assist-001` 은 bp-wes 가 묶음 번호로 바꾼 뒤 지웁니다.
 
 | 순번 | 59 | 운영 chaws |
 |---|---|---|
 | 1 | `.env.runner-wes-assist` 에 `PGPASSWORD=<wes_assist_ai 비밀번호>` | `./deploy.sh chaws-init`(폴더), `bootstrap tenant wes-assist`(`agent-wes-assist.env`), `agent-wes-assist-db.env` 에 `PGPASSWORD` |
 | 2 | `./deploy.sh agent-wes-assist`: 폴더를 실행 계정 소유로 만들고 실행기만 올린다 | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-wes-assist` |
 | 3 | `./deploy.sh be`: api 가 `workspace-wes-assist` 를 붙이고 `AIMBASE_WORKSPACE_RUNNER_BASES` 에 이 실행기가 더해진다 | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-be`(같은 이유) |
-| 4 | 계정 로그인 `work01`, `work02`, `work03`(사람이 한다. 아래 명령에서 계정 폴더만 바꾼다) | 같다 |
+| 4 | 계정 1년 토큰 `work01`, `work02`, `work03`(사람이 한다. 아래 명령에서 계정 폴더만 바꾼다) | `bootstrap token wes-assist <계정>` |
 | 5 | `bash build/chaws-bootstrap.sh connections wes-assist`(서버 폴더에서) | `bootstrap connections wes-assist` |
 
 ```bash
-ssh -t therecommerce@59.8.160.12 'cd /home/therecommerce/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent-wes-assist claude'
+ssh -t therecommerce@59.8.160.12 'cd /home/therecommerce/aimbase && bash build/chaws-bootstrap.sh token wes-assist work01'
 ```
 
-로그인 파일을 다른 실행기 폴더에서 복사하지 않습니다. 같은 계정 토큰을 두 폴더가 갱신하면 한쪽이 끊깁니다. 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-assist` 를 씁니다.
+이 실행기의 계정 폴더(`claude-accounts-wes-assist`)는 다른 실행기와 따로라 토큰도 이 실행기로 따로 넣습니다. CS 실행기(`claude-accounts-wes-cs`)도 같습니다. 그 밖의 실행기는 `claude-accounts` 를 같이 붙여 쓰므로 한 실행기에서 넣은 토큰이 모두에 들어갑니다. 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-assist` 를 씁니다.
 
 **위젯 공개 주소**: 운영 BO2 CS 상세의 AI 대화는 브라우저가 `https://ai.banpoom.co.kr` 로 직접 붙습니다(`aimbase.banpoom.co.kr` 은 개발기 관리 화면 주소). 서버 nginx 사이트 설정은 `/etc/nginx/sites-available/ai.banpoom.co.kr.conf`, 인증서는 Let's Encrypt(webroot) 이고 기존 certbot 타이머가 갱신합니다. 위젯이 쓰는 두 경로만 통과시키고 나머지는 모두 막습니다.
 
@@ -726,7 +726,7 @@ SELECT config_key, config_value FROM global_config WHERE config_key LIKE 'tts.%'
 2. `admin 3plgw`: CLI 허용 테넌트에 `bp_3plgw` 를 더한다
 3. `tenant 3plgw`: 테넌트 `bp_3plgw`, 실행기 전용 키, 소비앱 키(`secrets/bp-3plgw-api-key`, 3PLGW 에 전한다). env 에 빠진 비밀값을 경고로 찍는다
 4. 실행기 기동. 59 는 처음에 `./deploy.sh agents`(모든 실행기), 토큰이나 env 만 바꿨으면 `./deploy.sh agent-3plgw`(이 실행기만, api 와 다른 실행기는 그대로), chaws 는 `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-3plgw`. 기록에 `Agent registered successfully: name=cli-runner-bp-3plgw` 가 나오면 된 것
-5. 계정 로그인: 공용 `claude-accounts/<계정>/` 에 이미 로그인된 work01, work02, work03 을 그대로 쓴다. 없으면 § 2-10 과 같은 방법으로 로그인한다
+5. 계정 1년 토큰: 공용 `claude-accounts/<계정>/` 에 토큰을 넣은 work01, work02, work03 을 그대로 쓴다. 없으면 § 2-10 과 같은 방법(대상 `3plgw`)으로 넣는다
 6. `connections 3plgw`: 계정마다 CLI 연결 `cli-runner-bp-3plgw-<계정>`(HYBRID)과 묶음 `cli-runner-bp-3plgw-rr`
 7. `TPLGW_BASE_URL=<3PLGW 주소> bootstrap http 3plgw`: HTTP 연결 `bp-3plgw`(59 도 운영도 `http://bp-3plgw:8187`. 59 는 3plgw compose 가 aimbase_default 망에 별칭 bp-3plgw 로 동승)와 `github-bp-3plgw`
 8. `workflow 3plgw`: `scripts/poomgo-change-repair.workflow.json` 을 등록하거나 고친다(chaws 는 `build/` 에 같이 올라간다)
@@ -1951,6 +1951,17 @@ CLI(`/mcp/sse`) 경로와 API 어댑터가 모델에 싣는 도구 화이트리�
 **업그레이드:**
 - 새 설치 패키지를 덮어 설치. 사용자 설정(`~/.aimbase-agent/config/`)은 유지됨
 
+**CLI 실행기 계정 1년 토큰 [CR-196]:**
+- PC 에서 CLI 실행기를 돌리면 계정 폴더마다 1년 토큰 파일 `oauth-token.json` 이 있어야 CLI 가 뜹니다. 계정 폴더는 커넥션의 `config_dir`, 없으면 `CLAUDE_CONFIG_DIR`, 그것도 없으면 사용자 폴더의 `.claude` 입니다
+- 레포가 있는 맥, 리눅스: `python3 scripts/cli-token.py [계정 폴더]`. setup-token 을 띄우고, 붙여 넣은 값을 파일로 적은 뒤 짧은 질문 하나로 확인합니다
+- 설치 패키지만 있는 PC(맥, 윈도): `claude setup-token` 으로 값을 받고 계정 폴더에 아래 파일을 만듭니다. 그 사용자만 읽게 둡니다(맥은 `chmod 600`)
+
+```json
+{"token": "sk-ant-oat01-...", "issued_at": "2026-11-16T09:00:00+09:00", "expires_at": "2027-11-16T09:00:00+09:00"}
+```
+
+- `issued_at` 은 넣은 시각, `expires_at` 은 그로부터 1년 뒤입니다. 기한이 지나면 실행기가 그 계정으로 CLI 를 띄우지 않습니다
+
 **장기 AGENT_CALL turn timeout 정렬 [CR-111 / CR-106]:**
 
 정확도 요구가 큰 AGENT_CALL(다수 PDF 적재·11항목 추출 등)은 거대 출력을 만드느라 turn이 수 분 걸린다. 이전엔 agent의 async timeout 미설정 + 300초 상한이 turn을 조기 절단했다. 다음 3겹을 함께 상향·정렬해야 한다(한 곳만 짧으면 거기서 끊김).
@@ -2011,7 +2022,7 @@ claude-code:
 **목적**: 한 실행기(Runner)의 Claude CLI 사용을 계정 여러 개에 나눠, 한 계정이 한도에 걸리면 다른 계정이 이어받게 한다. 계정을 바꾸는 단위는 커넥션이고, 커넥션을 묶는 것은 커넥션 그룹(CR-015)이다.
 
 **준비**:
-1. 실행기 서버에 계정마다 로그인 폴더를 둔다(예: `claude-accounts/work01`, `work02`). 폴더마다 그 계정으로 CLI 로그인을 한 번 해 둔다. 로그인 정보는 그 폴더 안에만 있고 Aimbase 에 넣지 않는다
+1. 실행기 서버에 계정마다 폴더를 둔다(예: `claude-accounts/work01`, `work02`). 폴더마다 그 계정의 1년 토큰을 넣는다(§ 2-10 계정 1년 토큰, PC 는 시나리오 H). 토큰은 그 폴더 안에만 있고 Aimbase 에 넣지 않는다
 2. 커넥션을 계정마다 하나씩 만든다. 기존 실행기 커넥션의 config 를 그대로 복사하고 `config_dir` 만 그 계정 폴더로 바꾼다. 이름은 `<기존 이름>-work01` 식으로 붙인다. 기존 커넥션은 되돌리기용으로 남긴다
 3. 커넥션 그룹을 만든다(`POST /api/v1/connection-groups`, adapter `anthropic-cli`, 전략 `ROUND_ROBIN`, 멤버는 위 커넥션들)
 4. 쓰는 쪽에 그룹을 지정한다. 워크플로우는 단계 config 의 `connection_id` 자리에 `connection_group_id`, 채팅은 요청 본문에 `connection_group_id` (API 가이드 § 25)
@@ -2024,7 +2035,7 @@ claude-code:
 - 차례와 빠짐 상태는 Aimbase 서버 메모리에 있어 api 를 재기동하면 처음부터 센다. 그룹을 고치거나 지우면 그 그룹의 차례와 고정이 지워진다
 
 **계정 추가와 되돌리기**:
-- 계정 추가: 로그인 폴더 준비, 커넥션 1개 추가, 그룹 멤버에 추가(`PUT /api/v1/connection-groups/{id}`)
+- 계정 추가: 토큰을 넣은 계정 폴더 준비, 커넥션 1개 추가, 그룹 멤버에 추가(`PUT /api/v1/connection-groups/{id}`)
 - 한 계정만 잠시 빼기: 그룹 멤버에서 뺀다
 - 되돌리기: 쓰는 쪽의 `connection_group_id` 를 지우고 기존 커넥션 `connection_id` 로 되돌린다
 
@@ -2283,6 +2294,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.43.0 | 2026-11-16 | **CR-196 계정 1년 토큰** (§ 2-10, § 2-13, 시나리오 H, P). 실행기는 계정 폴더의 `oauth-token.json` 으로만 CLI 를 띄우고(`CLAUDE_CODE_OAUTH_TOKEN`), 없거나 기한이 지난 계정은 막는다. `token` 단계가 이 파일을 쓰고 로그인 파일의 1년 토큰을 옮긴다. 계정 로그인 절차와 CR-194 인증 파일 끼워 넣기를 걷어냄. PC 는 `scripts/cli-token.py` 또는 손으로 만든 파일 |
 | v3.42.0 | 2026-11-16 | **CR-194 계정 1년 인증** (§ 2-10). 기동 스크립트 `token <대상> <계정>` 단계가 `claude setup-token` 인증을 계정 폴더에 넣는다. 넣은 뒤 실행기 재시작 |
 | v3.41.0 | 2026-11-16 | **CR-194 일반 화면 실행기 계정 묶음** (§ 2-10). 계정 하나짜리 위젯 연결 대신 계정마다 연결과 묶음 `cli-runner-bp-wes-assist-rr`. 로그인 계정 work01, work02, work03 |
 | v3.40.0 | 2026-11-16 | **CR-194 bp-wes 일반 화면 실행기** (§ 2-10). 실행기 `aimbase-agent-wes-assist`, 조회 계정 `wes_assist_ai`, 위젯 연결 `cli-runner-bp-wes-assist-001` 을 59 와 운영에 세우는 차례. `./deploy.sh agent-wes-assist`, `chaws-agent-wes-assist`, `chaws-bootstrap.sh connections wes-assist` |

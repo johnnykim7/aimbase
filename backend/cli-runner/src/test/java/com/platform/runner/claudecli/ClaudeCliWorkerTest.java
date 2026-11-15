@@ -962,4 +962,48 @@ class ClaudeCliWorkerTest {
     private static Set<PosixFilePermission> exec() {
         return EnumSet.of(PosixFilePermission.OWNER_EXECUTE);
     }
+
+    // CR-196 BIZ-283: 계정의 1년 토큰은 환경변수로만 CLI 에 간다.
+
+    @Test
+    @DisplayName("TC-TOK-004 앞서는 인증 다섯을 빼고 CLAUDE_CODE_OAUTH_TOKEN 을 넣는다")
+    void cr196_oauth_token_replaces_overriding_auth() {
+        Map<String, String> env = new java.util.HashMap<>(Map.of(
+                "ANTHROPIC_AUTH_TOKEN", "a", "ANTHROPIC_API_KEY", "b", "CLAUDE_CODE_USE_BEDROCK", "1",
+                "CLAUDE_CODE_USE_VERTEX", "1", "CLAUDE_CODE_USE_FOUNDRY", "1", "PATH", "/bin"));
+
+        ClaudeCliWorker.applyOauthToken(env, ClaudeAccountTokenTest.TOKEN);
+
+        assertThat(env).containsOnly(
+                Map.entry("PATH", "/bin"), Map.entry("CLAUDE_CODE_OAUTH_TOKEN", ClaudeAccountTokenTest.TOKEN));
+
+        Map<String, String> untouched = new java.util.HashMap<>(Map.of("ANTHROPIC_API_KEY", "b"));
+        ClaudeCliWorker.applyOauthToken(untouched, null);
+        assertThat(untouched).containsOnly(Map.entry("ANTHROPIC_API_KEY", "b"));
+    }
+
+    @Test
+    @DisplayName("TC-TOK-004,005 CLI 는 토큰을 환경변수로 받고 명령 인자에는 없다")
+    void cr196_cli_gets_token_by_env_not_args() throws IOException {
+        Path dump = tempDir.resolve("auth-" + System.nanoTime() + ".txt");
+        Path stub = writeStub("""
+                #!/bin/bash
+                { echo "env=${CLAUDE_CODE_OAUTH_TOKEN:-unset}"; echo "args=$*"; } > '%s'
+                while IFS= read -r line; do
+                  if [ -z "$line" ]; then continue; fi
+                  echo '{"type":"system","subtype":"init","session_id":"sess-tok"}'
+                  echo '{"type":"result","subtype":"success","result":"ok","session_id":"sess-tok","total_cost_usd":0.0,"usage":{"input_tokens":1,"output_tokens":1}}'
+                done
+                """.formatted(dump));
+        worker = new ClaudeCliWorker(stub.toString(), null, null, false, null, Duration.ofSeconds(10));
+        worker.setOauthToken(ClaudeAccountTokenTest.TOKEN);
+        worker.start();
+
+        worker.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        List<String> lines = Files.readAllLines(dump);
+        assertThat(lines.get(0)).isEqualTo("env=" + ClaudeAccountTokenTest.TOKEN);
+        assertThat(lines.get(1)).doesNotContain(ClaudeAccountTokenTest.TOKEN);
+        assertThatThrownBy(() -> worker.setOauthToken("x")).isInstanceOf(IllegalStateException.class);
+    }
 }

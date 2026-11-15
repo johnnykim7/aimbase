@@ -78,6 +78,7 @@ deploy_be() {
   # 설치 스크립트와 워크플로우 정의는 서버 폴더에서 bash build/chaws-bootstrap.sh <단계> <대상> 으로 돌린다(CR-174)
   ssh_run "mkdir -p $REMOTE/build"
   scp_send scripts/chaws-bootstrap.sh "$SERVER:$REMOTE/build/chaws-bootstrap.sh"
+  scp_send scripts/cli-token.py "$SERVER:$REMOTE/build/cli-token.py"
   scp_send scripts/poomgo-change-repair.workflow.json "$SERVER:$REMOTE/build/poomgo-change-repair.workflow.json"
   ssh_run "cd $REMOTE && docker compose build api && docker compose up -d --force-recreate api"
   echo "✅ BE 완료 → $REMOTE/backend/platform-core/build/libs/platform-core.jar"
@@ -417,6 +418,7 @@ deploy_chaws_be() {
   chaws_checkout
   chaws_build_send platform-core
   chaws_send "$CHAWS_WORKTREE/scripts/chaws-bootstrap.sh" "$CHAWS_SERVER:$CHAWS_REMOTE/build/chaws-bootstrap.sh"
+  chaws_send "$CHAWS_WORKTREE/scripts/cli-token.py" "$CHAWS_SERVER:$CHAWS_REMOTE/build/cli-token.py"
   chaws_send "$CHAWS_WORKTREE/scripts/poomgo-change-repair.workflow.json" "$CHAWS_SERVER:$CHAWS_REMOTE/build/poomgo-change-repair.workflow.json"
   chaws_sync_compose
   echo "[chaws-be] DB, Redis"
@@ -464,7 +466,8 @@ deploy_chaws_bootstrap() {
   chaws_require_env
   chaws_checkout
   chaws_send "$CHAWS_WORKTREE/scripts/chaws-bootstrap.sh" "$CHAWS_SERVER:$CHAWS_REMOTE/build/chaws-bootstrap.sh"
-  echo "[chaws-bootstrap] build/chaws-bootstrap.sh 를 커밋 ${CHAWS_SHA:0:9} 것으로 둠"
+  chaws_send "$CHAWS_WORKTREE/scripts/cli-token.py" "$CHAWS_SERVER:$CHAWS_REMOTE/build/cli-token.py"
+  echo "[chaws-bootstrap] build/chaws-bootstrap.sh, cli-token.py 를 커밋 ${CHAWS_SHA:0:9} 것으로 둠"
 }
 
 # 운영 3PL DB 를 읽는 bp-wes 실행기(CR-173 CS 실행기 wes-cs, CR-194 일반 화면 실행기 wes-assist). 인자는 대상과 조회 계정이다.

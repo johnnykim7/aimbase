@@ -588,6 +588,10 @@ public class ClaudeCliWorkerPool {
             } catch (IOException e) {
                 rw.slots.release();
                 throw new ClaudeCliException("Failed to spawn fork worker for run " + runId, e);
+            } catch (RuntimeException e) {
+                // CR-196: 계정 토큰 실패 같은 기동 전 실행 오류도 run 자리를 돌려줘야 다음 갈래가 대기하지 않는다.
+                rw.slots.release();
+                throw e;
             }
         } finally {
             if (slotHeld) returnProcessSlot();

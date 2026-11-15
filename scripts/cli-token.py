@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""실행기 계정 하나에 1년 토큰(claude setup-token)을 넣는다(CR-196, BIZ-283, 운용 가이드 시나리오 H).
+
+실행기는 계정 폴더의 oauth-token.json 만 보고 CLAUDE_CODE_OAUTH_TOKEN 으로 CLI 에 넘긴다.
+로그인 파일(.credentials.json)은 읽기만 하고 고치지 않는다.
+
+맥, 리눅스 PC:
+    python3 scripts/cli-token.py [계정 폴더]
+setup-token 을 띄워 값을 받고, 붙여 넣은 값을 계정 폴더의 토큰 파일로 적은 뒤 짧은 질문 하나로 확인한다.
+계정 폴더를 주지 않으면 CLAUDE_CONFIG_DIR, 그것도 없으면 ~/.claude 다. 실행기가 같은 순서로 찾는다.
+
+서버는 chaws-bootstrap.sh token 단계가 실행기 컨테이너 안에서 이 파일을 돌린다.
+
+토큰 값은 화면에 보이지 않게 받고 명령 인자, 기록, 출력에 싣지 않는다.
+"""
+import getpass
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+
+FILE_NAME = "oauth-token.json"
+PREFIX = "sk-ant-oat01-"
+# 실행기 ClaudeAccountToken.OVERRIDING_ENV 와 같다. 확인 질문도 실행기와 같은 인증으로 가게 뺀다.
+OVERRIDING_ENV = ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK",
+                  "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
+KST = timezone(timedelta(hours=9))
+VERIFY_MODEL = os.environ.get("VERIFY_MODEL", "claude-haiku-5-5")
+
+
+def account_dir(arg):
+    if arg:
+        return arg
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def read_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def current(d):
+    """이미 넣은 토큰 파일의 기한. 없거나 모양이 틀리면 None."""
+    data = read_json(os.path.join(d, FILE_NAME))
+    if not isinstance(data, dict) or not str(data.get("token", "")).startswith(PREFIX):
+        return None
+    return data.get("expires_at")
+
+
+def adoptable(d):
+    """로그인 파일에 갱신 값 없는 1년 토큰이 있으면 (토큰, 기한) 을 준다(CR-194 단계로 넣은 계정)."""
+    data = read_json(os.path.join(d, ".credentials.json"))
+    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+    if not isinstance(oauth, dict):
+        return None
+    tok = str(oauth.get("accessToken") or "")
+    if not tok.startswith(PREFIX) or oauth.get("refreshToken"):
+        return None
+    try:
+        expires = datetime.fromtimestamp(int(oauth["expiresAt"]) / 1000, KST)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return tok, expires
+
+
+def write(d, tok, issued, expires):
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    path = os.path.join(d, FILE_NAME)
+    tmp = path + ".new"
+    body = json.dumps({"token": tok,
+                       "issued_at": issued.isoformat(timespec="seconds"),
+                       "expires_at": expires.isoformat(timespec="seconds")})
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(body + "\n")
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
+
+
+def verify(d):
+    """실행기와 같은 환경으로 짧은 질문 하나를 던져 본다."""
+    data = read_json(os.path.join(d, FILE_NAME)) or {}
+    env = {k: v for k, v in os.environ.items() if k not in OVERRIDING_ENV and k != "CLAUDECODE"}
+    env["CLAUDE_CONFIG_DIR"] = d
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = data.get("token", "")
+    try:
+        r = subprocess.run(["claude", "-p", "ok 라고만 답하세요", "--model", VERIFY_MODEL],
+                           env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+        out = (r.stdout.strip() or r.stderr.strip()).splitlines()
+        return (out[-1] if out else "(빈 답)")[:200]
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return "확인 못 함: " + type(e).__name__
+
+
+def setup_token():
+    """setup-token 은 값을 찍기만 한다. 계정 폴더에 아무것도 남기지 않게 빈 폴더에서 띄운다."""
+    print("[token] 찍힌 주소를 브라우저에서 이 계정으로 승인하고, 받은 코드를 붙여 넣습니다.")
+    print("[token] 끝나면 sk-ant-oat01- 로 시작하는 값이 찍힙니다. 그 값을 복사해 둡니다.")
+    tmp = tempfile.mkdtemp(prefix="setup-token-")
+    try:
+        subprocess.run(["claude", "setup-token"], env=dict(os.environ, CLAUDE_CONFIG_DIR=tmp))
+    except OSError as e:
+        print("[token] claude 를 띄우지 못했습니다: " + type(e).__name__)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def ask(prompt):
+    try:
+        return input(prompt).strip().lower()
+    except EOFError:
+        return ""
+
+
+def main():
+    args = sys.argv[1:]
+    d = account_dir(args[0] if args else None)
+    days = int(os.environ.get("TOKEN_DAYS", "365"))
+    now = datetime.now(KST)
+    print("[token] 계정 폴더 " + d)
+
+    expires_at = current(d)
+    if expires_at and ask("[token] 이미 토큰이 있습니다(기한 %s). 새 값으로 바꿀까요? [y/N] " % expires_at) != "y":
+        print("[token] 그대로 둡니다. 확인: " + verify(d))
+        return
+
+    old = None if expires_at else adoptable(d)
+    if old and ask("[token] 로그인 파일에 1년 토큰이 있습니다(기한 %s). 토큰 파일로 옮길까요? [Y/n] "
+                   % old[1].date()) in ("", "y"):
+        tok, expires = old
+        write(d, tok, expires - timedelta(days=days), expires)
+        tok = ""
+        print("[token] 옮김. 기한 %s. 로그인 파일은 그대로 둡니다" % expires.date())
+    else:
+        if ask("[token] claude setup-token 을 지금 띄울까요? 이미 값을 받았으면 n [Y/n] ") in ("", "y"):
+            setup_token()
+        tok = getpass.getpass("[token] claude setup-token 이 찍은 sk-ant-oat01- 값을 붙여 넣고 Enter"
+                              "(화면에 보이지 않습니다): ").strip()
+        if not tok.startswith(PREFIX) or tok == PREFIX:
+            print("[token] sk-ant-oat01- 로 시작하지 않아 넣지 않았습니다")
+            sys.exit(1)
+        write(d, tok, now, now + timedelta(days=days))
+        tok = ""
+        print("[token] 넣음. 기한 %s" % (now + timedelta(days=days)).date())
+    print("[token] 확인: " + verify(d))
+
+
+if __name__ == "__main__":
+    main()
