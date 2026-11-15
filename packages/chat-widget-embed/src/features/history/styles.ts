@@ -1,5 +1,7 @@
 /** 대화 목록 기능 화면 모양. 색은 위젯 본체의 --aimbase-* 값을 따른다. */
 export const CSS = `
+.u .asker { font-size: .78em; color: var(--aimbase-muted); margin: 0 4px 3px; }
+.u .asker.me { color: var(--aimbase-primary); font-weight: 600; }
 .hist { position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; font-size: .92em; }
 .hist [hidden], .hist-dlg [hidden] { display: none !important; }
 .hist-top { padding: 10px 8px 6px; display: flex; flex-direction: column; gap: 6px; }

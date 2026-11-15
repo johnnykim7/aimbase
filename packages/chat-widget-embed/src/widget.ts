@@ -10,9 +10,11 @@ import type {
   AnswerView,
   ArtifactActionSpec,
   ArtifactOpenerSpec,
+  Asker,
   ComposerModeSpec,
   ComposerToolSpec,
   ConversationView,
+  QuestionView,
   TitleTagSpec,
   WidgetContext,
   WidgetEvents,
@@ -51,6 +53,7 @@ import type {
   WidgetHandle,
   WidgetOptions,
   WidgetSettings,
+  WidgetUpdate,
   WorkflowStepEvent,
 } from "./types";
 import { WidgetApi, WidgetApiError } from "./widget-api";
@@ -168,6 +171,8 @@ interface AnswerVersion {
   error?: string;
   /** 서버가 요청을 받기 전에 거절했다. 서버 대화 기록은 바뀌지 않았다. */
   rejected: boolean;
+  /** CR-194: 거절한 오류 코드 */
+  errorCode?: string;
   rating?: FeedbackRating;
   feedbackOpen: boolean;
   followUps: string[];
@@ -197,6 +202,8 @@ interface Turn {
   askedAt: Date;
   /** CR-177: 이 질문을 보낼 때 기능이 더한 칸. 다시 생성, 질문 수정, 다시 시도에 그대로 쓴다. */
   requestBody: Record<string, unknown>;
+  /** CR-194: 묻는 사람. 함께 보는 대화에서만 있다 */
+  asker?: Asker;
   versions: AnswerVersion[];
   shown: number;
   el: HTMLDivElement;
@@ -237,7 +244,9 @@ function newVersion(): AnswerVersion {
   };
 }
 
-export function createWidget(options: WidgetOptions): WidgetHandle {
+export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
+  // CR-194: update 로 바꾸는 칸이 있어 붙이는 앱이 준 객체를 고치지 않도록 사본을 쓴다.
+  const options: WidgetOptions = { ...initialOptions };
   const display: DisplayMode = options.display ?? "bubble";
   const theme = options.theme?.mode ?? "auto";
 
@@ -325,6 +334,13 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   const escapeHandlers: Array<() => boolean> = [];
   let composerMode: ComposerModeSpec | null = null;
   let titleTag: TitleTagSpec | null = null;
+  // CR-194: 함께 보는 대화
+  let asker: Asker | null = null;
+  let rewindGuard: ((q: QuestionView) => boolean) | null = null;
+  const questionDecorators: Array<(q: QuestionView) => HTMLElement | null> = [];
+  let headerNotice: (() => string) | null = null;
+  /** 판 틀(Panes)이 만들어진 뒤 크게 보기를 바꾸면 왼쪽 칸을 붙일지 다시 정하게 한다 */
+  let afterExpand: () => void = () => {};
   let markedInstance = createMarked(markdownExtensions);
 
   // ── 틀 ─────────────────────────
@@ -371,6 +387,9 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     header.appendChild(closeBtn);
   }
   main.appendChild(header);
+  const headerNoteEl = el("div", "hd-note");
+  headerNoteEl.hidden = true;
+  main.appendChild(headerNoteEl);
 
   // 대화 칸
   const stack = el("div", "stack");
@@ -451,11 +470,14 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     main,
     header,
     setExpanded: (v) => setExpanded(v),
+    canDock: () => display === "bubble" && !expanded,
     closeLabel: () => T.close,
     iconButton: (html, label) => htmlButton(html, label),
     leftToggleIcon: icon("panelLeft"),
     closeIcon: icon("x"),
   });
+
+  afterExpand = () => panes.refresh();
 
   const toast = el("div", "toast");
   panel.appendChild(toast);
@@ -495,6 +517,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     backdrop.classList.toggle("on", v);
     expandBtn.innerHTML = icon(v ? "min" : "max");
     expandBtn.setAttribute("aria-pressed", String(v));
+    afterExpand();
   }
 
   function applyFontSize(size: FontSize): void {
@@ -568,10 +591,47 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   }
 
   /** CR-177: 기능이 대화 칸에 남기는 회색 안내 줄. 오류 줄과 구분한다. */
-  function appendInfo(text: string): void {
+  function appendInfo(text: string, action?: { label: string; run: () => void }): void {
     emptyEl.remove();
-    thread.appendChild(el("div", "notice info", text));
+    const line = el("div", "notice info", text);
+    if (action) {
+      const b = el("button", "btn notice-act", action.label);
+      b.type = "button";
+      b.addEventListener("click", () => {
+        line.remove();
+        if (!turns.length && thread.childElementCount === 0) thread.appendChild(emptyEl);
+        guarded("notice action", action.run);
+      });
+      line.appendChild(b);
+    }
+    thread.appendChild(line);
     scrollToBottom();
+  }
+
+  function renderHeaderNotice(): void {
+    const text = headerNotice ? guarded("header notice", headerNotice) : undefined;
+    headerNoteEl.textContent = text ?? "";
+    headerNoteEl.hidden = !text;
+  }
+
+  function questionView(turn: Turn): QuestionView {
+    return {
+      sessionId,
+      turnId: latestVersion(turn)?.turnId,
+      asker: turn.asker,
+      last: turns[turns.length - 1] === turn,
+    };
+  }
+
+  function latestVersion(turn: Turn): AnswerVersion | undefined {
+    return turn.versions[turn.versions.length - 1];
+  }
+
+  /** CR-194: 질문 수정과 다시 생성을 둘지. 기능이 정하지 않았으면 둔다. */
+  function rewindAllowed(turn: Turn): boolean {
+    if (!rewindGuard) return true;
+    const guard = rewindGuard;
+    return guarded("rewind guard", () => guard(questionView(turn))) === true;
   }
 
   /** 오류 코드를 글로 바꾼다. 위젯 본체 문구, 기능이 더한 문구 순으로 찾는다. */
@@ -829,6 +889,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     stopRec.setAttribute("aria-label", T.recStopTitle);
     setRecState(recState);
     renderEmpty();
+    renderHeaderNotice();
     renderModelControls();
     renderMode();
     renderChips();
@@ -876,6 +937,13 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   function renderUser(turn: Turn, index: number): void {
     const u = turn.userEl;
     u.innerHTML = "";
+    if (questionDecorators.length) {
+      const q = questionView(turn);
+      for (const render of questionDecorators) {
+        const node = guarded("question decorator", () => render(q));
+        if (node) u.appendChild(node);
+      }
+    }
     const bub = el("div", "bub");
     if (turn.question) bub.appendChild(el("div", "q-text", turn.question));
     for (const name of turn.attachmentNames) {
@@ -888,7 +956,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     }
     u.appendChild(bub);
     const acts = el("div", "acts");
-    const editable = latestSeq(turn) !== undefined;
+    const editable = latestSeq(turn) !== undefined && rewindAllowed(turn);
     if (editable) {
       const editBtn = iconButton("pencil", T.edit, "sm needs-idle");
       editBtn.addEventListener("click", () => beginEdit(index));
@@ -952,6 +1020,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       artifacts: v.artifacts,
       stopped: v.stopped,
       error: v.error,
+      errorCode: v.errorCode,
       latest: isLastTurn && turn.versions[turn.versions.length - 1] === v,
       at: v.at,
       requestBody: turn.requestBody,
@@ -1074,7 +1143,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
 
     const isLastTurn = turns[turns.length - 1] === turn;
     const isLatest = turn.shown === turn.versions.length - 1;
-    if (isLastTurn && isLatest && v.turnSeq !== undefined) {
+    if (isLastTurn && isLatest && v.turnSeq !== undefined && rewindAllowed(turn)) {
       const regenBtn = iconButton("redo", T.regenerate, "sm needs-idle");
       regenBtn.addEventListener("click", () => void regenerate(turn));
       acts.appendChild(regenBtn);
@@ -1364,10 +1433,15 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     const previousLast = turns[turns.length - 1];
     const modeFields = collectModeFields();
     const turn = buildTurn(trimmed, names, payload, {});
+    if (asker) turn.asker = asker;
     turns.push(turn);
     thread.appendChild(turn.el);
     renderUser(turn, turns.length - 1);
-    if (previousLast) renderAnswer(previousLast);
+    if (previousLast) {
+      // 질문 수정은 기능이 마지막 질문에만 둘 수 있어(CR-194) 앞 질문도 다시 그린다.
+      renderUser(previousLast, turns.length - 2);
+      renderAnswer(previousLast);
+    }
     if (turns.length === 1 && !titleFromServer && trimmed) setTitle(trimmed.slice(0, TITLE_MAX_CHARS));
     scrollToBottom(true);
     // 기능이 더하는 칸(파일 만들기 등)은 위젯 설정을 받은 뒤에 모아야 실린다(CR-188)
@@ -1451,6 +1525,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       );
     } catch (e) {
       version.rejected = e instanceof WidgetApiError;
+      version.errorCode = e instanceof WidgetApiError ? e.code : undefined;
       version.error = errorText(e);
       options.on?.onError?.(e as Error);
     } finally {
@@ -1642,6 +1717,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       const names = (t.question.attachments ?? []).map((a) => a.filename);
       const turn = buildTurn(t.question.text, names, [], t.answer.requestBody ?? {});
       turn.askedAt = t.question.at ?? new Date();
+      if (t.question.asker) turn.asker = t.question.asker;
       const v = newVersion();
       v.live = false;
       v.text = t.answer.text;
@@ -2276,6 +2352,8 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
     isRecording: () => recState !== "idle",
     widgetSettings: () => settings,
     connectionId: () => options.connectionId ?? null,
+    screenKey: () => options.screenKey || null,
+    historyList: () => options.historyList !== false,
     allowApproval: () => options.allowApproval !== false,
     on: (name, cb) => events.on(name, cb),
     ui: {
@@ -2311,6 +2389,19 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
           titleTag = spec;
           renderTitleTag();
         },
+        setNotice: (text) => {
+          headerNotice = text;
+          renderHeaderNotice();
+        },
+        setNewConversationVisible: (visible) => {
+          newBtn.hidden = !visible;
+        },
+      },
+      question: {
+        addDecorator: (render) => {
+          questionDecorators.push(render);
+          turns.forEach((turn, i) => renderUser(turn, i));
+        },
       },
       addErrorTexts: (map) => void Object.assign(featureErrorTexts, map),
       renderMarkdown: (target, text) => rich(target, text),
@@ -2321,7 +2412,7 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       },
       layer: panel,
       toast: (text) => showToast(text),
-      notice: (text) => appendInfo(text),
+      notice: (text, action) => appendInfo(text, action),
       onEscape: (fn) => {
         escapeHandlers.push(fn);
         return () => {
@@ -2346,12 +2437,23 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
       checkAttachment: (file) => validateFile(file),
       addRequestFields: (fn) => void requestFieldFns.push(fn),
       waitBeforeSend: (task) => startup.hold(task),
+      setAsker: (next) => {
+        asker = next;
+      },
+      setRewindGuard: (allow) => {
+        rewindGuard = allow;
+        turns.forEach((turn, i) => {
+          renderUser(turn, i);
+          renderAnswer(turn);
+        });
+      },
     },
     api: {
       request: (method, path, body) => api.request(method, path, body),
       requestBlob: (method, path, body, opts) => api.requestBlob(method, path, body, opts),
       hasScope: (scope) => tokens.hasScope(scope),
       hasUserRef: () => tokens.hasUserRef(),
+      userRef: () => tokens.userRef(),
       wsUrl: (path) => api.wsUrl(path),
     },
   };
@@ -2378,9 +2480,31 @@ export function createWidget(options: WidgetOptions): WidgetHandle {
   );
   void startup.finish();
 
+  /** CR-194: 붙이는 앱이 위젯 요소를 다시 만들지 않고 바꾼 옵션(T3-4 속성 변경). */
+  function update(patch: WidgetUpdate): void {
+    if ("connectionId" in patch) {
+      const next = patch.connectionId || undefined;
+      if (next !== options.connectionId) {
+        options.connectionId = next;
+        // 고를 수 있는 모델과 깊게 생각하기가 연결마다 달라 설정을 다시 받는다.
+        void loadSettings();
+      }
+    }
+    if ("emptySubtitle" in patch) {
+      options.emptySubtitle = patch.emptySubtitle ?? undefined;
+      renderEmpty();
+    }
+    if ("historyList" in patch && patch.historyList !== undefined) {
+      options.historyList = patch.historyList;
+    }
+    events.emit("optionsChange", undefined);
+  }
+
   return {
     open: () => setOpen(true),
     close: () => setOpen(false),
+    isOpen: () => open,
+    update: (patch: WidgetUpdate) => update(patch),
     sendMessage: (text: string) => sendMessage(text),
     abort: () => stop(),
     subscribeWorkflow: (runId: string) => {

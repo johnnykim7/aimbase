@@ -2,12 +2,16 @@ import type { LeftPaneHandle, LeftPaneSpec, SidePaneSpec } from "./context";
 
 /** 위젯 폭이 이보다 넓으면 왼쪽 칸을 옆에 붙이고, 옆 창을 크게 보기 없이 연다. */
 const WIDE_MIN_PX = 760;
+/** CR-194: 붙여 넓힌 판(640px)이 오른쪽 여백과 함께 들어가는 브라우저 창 폭. 모자라면 칸을 덮어 연다(T3-3). */
+export const DOCK_MIN_VIEWPORT_PX = 680;
 
 export interface PanesHost {
   panel: HTMLElement;
   main: HTMLElement;
   header: HTMLElement;
   setExpanded(v: boolean): void;
+  /** CR-194: 지금 왼쪽 칸을 붙여 판을 넓힐 수 있는지(떠 있는 창이고 크게 보기가 아님) */
+  canDock(): boolean;
   closeLabel(): string;
   iconButton(iconHtml: string, label: string): HTMLButtonElement;
   leftToggleIcon: string;
@@ -19,6 +23,7 @@ interface LeftState {
   el: HTMLElement;
   toggle: HTMLButtonElement;
   open: boolean;
+  available: boolean;
 }
 
 interface SideState {
@@ -36,6 +41,7 @@ export class Panes {
   private readonly sideBody: HTMLDivElement;
   private readonly sideFoot: HTMLDivElement;
   private observer: ResizeObserver | null = null;
+  private readonly onViewport = () => this.refresh();
 
   constructor(private readonly host: PanesHost) {
     this.scrim = document.createElement("div");
@@ -78,7 +84,8 @@ export class Panes {
       else this.openLeft();
     });
     this.host.header.insertBefore(toggle, this.host.header.firstChild);
-    this.left = { spec, el, toggle, open: false };
+    this.left = { spec, el, toggle, open: false, available: true };
+    if (spec.dock && typeof window !== "undefined") window.addEventListener("resize", this.onViewport);
     try {
       spec.render(body);
     } catch (e) {
@@ -89,11 +96,19 @@ export class Panes {
       open: () => this.openLeft(),
       close: () => this.closeLeft(),
       isOpen: () => this.left?.open ?? false,
+      setAvailable: (available) => this.setLeftAvailable(available),
+      docks: () => this.left?.available === true && this.docked(),
     };
   }
 
   openLeft(): void {
+    if (!this.left?.available) return;
     this.setLeftOpen(true);
+  }
+
+  /** CR-194: 크게 보기를 켜고 끄거나 브라우저 창 폭이 바뀌면 붙일지 덮을지 다시 정한다. */
+  refresh(): void {
+    if (this.left) this.setLeftOpen(this.left.open);
   }
 
   closeLeft(): void {
@@ -102,7 +117,7 @@ export class Panes {
 
   /** Esc: 겹쳐 열린 왼쪽 칸만 닫는다. 옆에 붙은 칸은 그대로다. */
   closeOverlayLeft(): boolean {
-    if (!this.left?.open || this.wide) return false;
+    if (!this.left?.open || this.wide || this.docked()) return false;
     this.closeLeft();
     return true;
   }
@@ -147,15 +162,36 @@ export class Panes {
   destroy(): void {
     this.observer?.disconnect();
     this.observer = null;
+    if (typeof window !== "undefined") window.removeEventListener("resize", this.onViewport);
+  }
+
+  /** 넓지 않은 판에서 왼쪽 칸을 덮지 않고 붙여 판을 넓히는 경우(CR-194 메뉴 화면). */
+  private docked(): boolean {
+    return !this.wide
+      && this.left?.spec.dock === true
+      && this.host.canDock()
+      && typeof window !== "undefined"
+      && window.innerWidth >= DOCK_MIN_VIEWPORT_PX;
+  }
+
+  private setLeftAvailable(available: boolean): void {
+    if (!this.left) return;
+    this.left.available = available;
+    this.left.toggle.hidden = !available;
+    if (!available) this.setLeftOpen(false);
   }
 
   private setLeftOpen(open: boolean): void {
     if (!this.left) return;
-    this.left.open = open;
-    this.left.el.hidden = !open;
-    this.left.el.classList.toggle("overlay", !this.wide);
-    this.scrim.classList.toggle("on", open && !this.wide);
-    this.left.toggle.setAttribute("aria-pressed", String(open));
+    const on = open && this.left.available;
+    const docked = this.docked();
+    const overlay = !this.wide && !docked;
+    this.left.open = on;
+    this.left.el.hidden = !on;
+    this.left.el.classList.toggle("overlay", overlay);
+    this.scrim.classList.toggle("on", on && overlay);
+    this.host.panel.classList.toggle("dock", on && docked);
+    this.left.toggle.setAttribute("aria-pressed", String(on));
   }
 
   private onResize(): void {

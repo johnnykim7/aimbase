@@ -35,6 +35,12 @@ export class TokenStore {
     return typeof claims?.user_ref === "string" && claims.user_ref.length > 0;
   }
 
+  /** CR-194: 토큰의 user_ref. 없거나 토큰을 받기 전이면 null */
+  userRef(): string | null {
+    const ref = this.claims()?.user_ref;
+    return typeof ref === "string" && ref.length > 0 ? ref : null;
+  }
+
   private claimsOf: { token: string; claims: Record<string, unknown> | null } | null = null;
 
   private claims(): Record<string, unknown> | null {
