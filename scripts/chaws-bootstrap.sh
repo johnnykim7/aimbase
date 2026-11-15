@@ -383,16 +383,26 @@ print("[smoke] 결과", json.dumps(o.get("structured_data") or o.get("error") or
   rm -f secrets/.smoke.json secrets/.smoke-run.json
 }
 
-# 실행기의 DB 계정을 보고, bp-wes 가 부르는 길(묶음, stream=false)로 CLI 가 그 계정으로 psql 을 부르게 한다.
-smoke_wes_cs() {
+# 실행기의 DB 계정을 보고, bp-wes 가 부르는 길(stream=false)로 CLI 가 그 계정으로 psql 을 부르게 한다.
+# 인자는 부르는 길(connection_group_id 또는 connection_id), 그 값, 모델(없으면 연결 기본)이다.
+smoke_runner_db() {
   echo "[smoke] 실행기 DB 계정: $(docker compose exec -T "$AGENT_SERVICE" psql -tAc 'select current_user' 2>&1 | head -c 300)"
-  python3 - "$GROUP" <<'PY' > secrets/.smoke.json
+  python3 - "$1" "$2" "${3:-}" <<'PY' > secrets/.smoke.json
 import json, sys
-print(json.dumps({"connection_group_id": sys.argv[1], "stream": False,
-                  "messages": [{"role": "user", "content": "Bash 도구로 psql -tAc 'select current_user' 를 실행하고 출력 한 줄만 답하세요."}]},
-                 ensure_ascii=False))
+body = {sys.argv[1]: sys.argv[2], "stream": False,
+        "messages": [{"role": "user", "content": "Bash 도구로 psql -tAc 'select current_user' 를 실행하고 출력 한 줄만 답하세요."}]}
+if sys.argv[3]:
+    body["model"] = sys.argv[3]
+print(json.dumps(body, ensure_ascii=False))
 PY
-  app --max-time 330 -w '\n%{http_code}' -X POST -d @/s/.smoke.json http://aimbase-api:8080/api/v1/chat/completions > secrets/.smoke-run.txt
+  if [ "$LAYOUT" = dotenv ]; then
+    # 59 에는 소비앱 키와 aimbase-apps 망이 없다. 관리자가 테넌트로 대리 로그인해 같은 API 를 부른다.
+    login_tenant
+    curl -sS --max-time 330 -w '\n%{http_code}' -H @"$HDR" -H 'Content-Type: application/json' -H "X-Tenant-Id: $TENANT" \
+      -X POST -d @secrets/.smoke.json "$API/chat/completions" > secrets/.smoke-run.txt
+  else
+    app --max-time 330 -w '\n%{http_code}' -X POST -d @/s/.smoke.json http://aimbase-api:8080/api/v1/chat/completions > secrets/.smoke-run.txt
+  fi
   python3 -c '
 import json
 body, _, code = open("secrets/.smoke-run.txt").read().rpartition("\n")
@@ -418,7 +428,8 @@ smoke_3plgw() {
 step_smoke() {
   case "$TARGET" in
     wms) smoke_wms ;;
-    wes-cs) smoke_wes_cs ;;
+    wes-cs) smoke_runner_db connection_group_id "$GROUP" ;;
+    wes-assist) smoke_runner_db connection_id "$WIDGET_CONNECTION" "$MODEL" ;;
     3plgw) smoke_3plgw ;;
   esac
 }
