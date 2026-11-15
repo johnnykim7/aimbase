@@ -3016,7 +3016,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 모듈**: platform-core `WidgetTokenController`, `JwtProvider`, `JwtAuthenticationFilter`, `ChatOwner`, `ChatSessionOwnership`, `ChatController`, `ChatHistoryController`, `ChatHistoryService`, `ChatWidgetSettingsService`, `SessionStore`, `ConnectionGroupSelector`, `FollowUpService`, `ConnectionAdapterFactory`. 위젯 `web-component.ts`, `features/history/`, `chat-client.ts`, `widget-api.ts`. 운영 스크립트 `chaws-bootstrap.sh`, `deploy.sh`
 - **영향도**: High (위젯 대화 접근 확인이 모든 대화 창구에 걸린다. 속성을 주지 않는 기존 소비앱은 지금과 같다)
 - **영향 범위**: CR-178(지난 대화), CR-175(답 평가), CR-182(내보내기, 공유 링크). 요청 쪽 bp-wes CR-WES-372(계약 주인), bp-backoffice2 CR-1000
-- **영향 설계서**: T1-1 v7.21(PRD-630 부터 638), T1-3 v5.23(BIZ-275 부터 281), T1-7 v3.30(CR-194 묶음), T1-10 v1.9(용어 4개, 함께 보는 대화 승인), T3-1 v4.25, T3-2 v7.27, T3-3 v3.19, T3-4 v3.18, T3-5 v4.25(TC-CHT-145 부터 155), API 가이드 v3.43.1(§ 17-2, § 28-2, § 28-4, § 38), 위젯 통합 가이드(속성 셋), 운용 가이드 v3.44.0(§ 2-10)
+- **영향 설계서**: T1-1 v7.21(PRD-630 부터 638), T1-3 v5.23(BIZ-275 부터 281), T1-7 v3.30(CR-194 묶음), T1-10 v1.9(용어 4개, 함께 보는 대화 승인), T3-1 v4.25, T3-2 v7.27, T3-3 v3.19, T3-4 v3.18, T3-5 v4.25(TC-CHT-145 부터 155), API 가이드 v3.43.1(§ 17-2, § 28-2, § 28-4, § 38), 위젯 통합 가이드(속성 셋), 운용 가이드 v3.43.0(§ 2-10)
 - **영향 없음 확인**: T1-5, T1-6(상태 전환, 이벤트 없음), T2-1, T2-2(새 라이브러리와 구현 규약 없음)
 - **상태**: 설계 완료, 구현중
 
