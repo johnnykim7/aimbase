@@ -34,6 +34,9 @@ ADMIN_EMAIL="platform-admin@aimbase.local"
 ACCOUNTS="${ACCOUNTS:-}"
 WIDGET_CONNECTION=""
 WIDGET_ONLY=""
+# 연결 기본 모델과 위젯에서 고를 수 있는 모델(config.models, 「id=이름」 을 쉼표로). 대상이 정하지 않으면 지금 값이다.
+MODEL="claude-sonnet-4-5"
+MODELS=""
 WORKFLOW_STEP_CONNECTION="opinion"
 case "$TARGET" in
   wms)
@@ -56,6 +59,9 @@ case "$TARGET" in
     RUNNER="cli-runner-bp-wes-assist"; AGENT_SERVICE="aimbase-agent-wes-assist"; AGENT_ENV="agent-wes-assist.env"
     TOOL_MODE="NATIVE"; EXPOSED_TOOLS="bash get_current_time"
     WIDGET_CONNECTION="$RUNNER-001"; WIDGET_ONLY=1
+    # 대화창 모델 목록(사용자 2026-11-16 01:37 승인). 적은 순서가 화면 순서다.
+    MODEL="claude-opus-5-5"
+    MODELS="claude-opus-5-5=Opus 5.5,claude-fable-5-2=Fable 5.2,claude-sonnet-5-5=Sonnet 5.5,claude-haiku-5-5=Haiku 5.5"
     WIDGET_ORIGIN="${WIDGET_ORIGIN:-https://admin.banpoom.co.kr}" ;;
   3plgw)
     # 품고 변경 수리 실행기(CR-174). CLI 가 레포를 고치고 PR 을 만들므로 HYBRID. 워크플로우 정의는 연결을 바꾸지 않는다.
@@ -226,14 +232,16 @@ logged_in_accounts() {
 # 연결 하나를 없으면 만든다. 인자는 연결 ID, 계정 폴더 이름, 연결 이름.
 ensure_connection() {
   if [ "$(status "$API/connections/$1")" = 200 ]; then echo "[connections] $1 있음"; return; fi
-  code=$(python3 - "$1" "$2" "$3" "$RUNNER" "$RUNNER_KEY_FILE" "$RUNNER_KEY_VAR" "$TOOL_MODE" $EXPOSED_TOOLS <<'PY' | call -X POST -d @- "$API/connections"
+  code=$(python3 - "$1" "$2" "$3" "$RUNNER" "$RUNNER_KEY_FILE" "$RUNNER_KEY_VAR" "$TOOL_MODE" "$MODEL" "$MODELS" $EXPOSED_TOOLS <<'PY' | call -X POST -d @- "$API/connections"
 import json, sys
-cid, acct, name, runner, env_file, key_var, tool_mode = sys.argv[1:8]
+cid, acct, name, runner, env_file, key_var, tool_mode, model, models = sys.argv[1:10]
 key = [l.split("=", 1)[1].strip() for l in open(env_file) if l.startswith(key_var + "=")][0]
-print(json.dumps({"id": cid, "name": name, "adapter": "anthropic-cli", "type": "llm",
-                  "config": {"model": "claude-sonnet-4-5", "tool_mode": tool_mode, "agent_name": runner,
-                             "config_dir": f"/home/appuser/.claude-accounts/{acct}",
-                             "exposed_tools": sys.argv[8:], "runner_api_key": key}}))
+config = {"model": model, "tool_mode": tool_mode, "agent_name": runner,
+          "config_dir": f"/home/appuser/.claude-accounts/{acct}",
+          "exposed_tools": sys.argv[10:], "runner_api_key": key}
+if models:
+    config["models"] = [{"id": i.strip(), "label": l.strip()} for i, l in (m.split("=", 1) for m in models.split(","))]
+print(json.dumps({"id": cid, "name": name, "adapter": "anthropic-cli", "type": "llm", "config": config}))
 PY
 )
   echo "[connections] $1 만들기 응답 $code"
