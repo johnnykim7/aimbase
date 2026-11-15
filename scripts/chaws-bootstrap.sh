@@ -228,8 +228,25 @@ logged_in_accounts() {
 }
 
 # 연결 하나를 없으면 만든다. 인자는 연결 ID, 계정 폴더 이름, 연결 이름.
+# 이미 있는 연결은 기본 모델과 모델 목록만 이 스크립트 값으로 맞춘다. 다른 설정과 실행기 열쇠는 그대로 둔다(CR-195).
+align_models() {
+  [ -n "$MODELS" ] || { echo "[connections] $1 있음"; return; }
+  local code
+  code=$(curl -fsS -H @"$HDR" -H "X-Tenant-Id: $TENANT" "$API/connections/$1" \
+    | python3 -c '
+import json, sys
+c = json.load(sys.stdin)["data"]
+model, models = sys.argv[1], sys.argv[2]
+cfg = dict(c.get("config") or {})
+cfg["model"] = model
+cfg["models"] = [{"id": i.strip(), "label": l.strip()} for i, l in (m.split("=", 1) for m in models.split(","))]
+print(json.dumps({"name": c["name"], "adapter": c["adapter"], "type": c["type"], "config": cfg}))' "$MODEL" "$MODELS" \
+    | call -X PUT -d @- "$API/connections/$1")
+  echo "[connections] $1 있음, 모델을 맞춤 응답 $code"
+}
+
 ensure_connection() {
-  if [ "$(status "$API/connections/$1")" = 200 ]; then echo "[connections] $1 있음"; return; fi
+  if [ "$(status "$API/connections/$1")" = 200 ]; then align_models "$1"; return; fi
   code=$(python3 - "$1" "$2" "$3" "$RUNNER" "$RUNNER_KEY_FILE" "$RUNNER_KEY_VAR" "$TOOL_MODE" "$MODEL" "$MODELS" $EXPOSED_TOOLS <<'PY' | call -X POST -d @- "$API/connections"
 import json, sys
 cid, acct, name, runner, env_file, key_var, tool_mode, model, models = sys.argv[1:10]
