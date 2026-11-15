@@ -552,7 +552,7 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 
 59 의 같은 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-cs` 를 씁니다. api 와 다른 실행기는 다시 만들지 않습니다.
 
-**bp-wes 일반 화면 실행기 [CR-194]**: BO2 의 메뉴 화면과 건 화면 AI 대화(위젯)는 실행기 `aimbase-agent-wes-assist`(이름 `cli-runner-bp-wes-assist`)로 갑니다. CS 실행기와 같은 틀이고 조회 계정만 `wes_assist_ai` 입니다(개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 계정, bp-wes 가 만든다). 접속 계정이 달라 계정 폴더와 작업 폴더를 `claude-accounts-wes-assist`, `workspace-wes-assist` 로 나눕니다. 연결은 위젯 연결 `cli-runner-bp-wes-assist-001` 하나이고(`tool_mode=NATIVE`, 도구 `bash`, `get_current_time`, 계정 `work01`, 기본 모델 Opus 5.5, 대화창 모델 목록 Opus 5.5, Fable 5.2, Sonnet 5.5, Haiku 5.5), 시스템 지시 대체값을 두지 않습니다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않습니다. bp-wes 는 이 연결 번호를 일반 화면 위젯 연결로 씁니다.
+**bp-wes 일반 화면 실행기 [CR-194]**: BO2 의 메뉴 화면과 건 화면 AI 대화(위젯)는 실행기 `aimbase-agent-wes-assist`(이름 `cli-runner-bp-wes-assist`)로 갑니다. CS 실행기와 같은 틀이고 조회 계정만 `wes_assist_ai` 입니다(개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 계정, bp-wes 가 만든다). 접속 계정이 달라 계정 폴더와 작업 폴더를 `claude-accounts-wes-assist`, `workspace-wes-assist` 로 나눕니다. 연결은 위젯 연결 `cli-runner-bp-wes-assist-001` 하나이고(`tool_mode=NATIVE`, 도구 `bash`, `get_current_time`, 계정 `work01`, 기본 모델 Sonnet 5.5, 대화창 모델 목록 Sonnet 5.5, Haiku 5.5. 실행기 CLI 2.1.197 은 Opus 5.5, Fable 5.2 를 거절한다), 시스템 지시 대체값을 두지 않습니다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않습니다. bp-wes 는 이 연결 번호를 일반 화면 위젯 연결로 씁니다.
 
 | 순번 | 59 | 운영 chaws |
 |---|---|---|
