@@ -110,8 +110,16 @@
 
 ## 6. 반영
 
-- 59 반영은 사용자 승인 뒤(`[승인요청]`)
+- 59 반영은 사용자 승인 뒤(`[승인요청]`). 승인 2026-11-16 06:44(컨타 전달)
 - 59 의 lexflow 테넌트 연결 등록과 실제 법제처 호출 확인은 lexflow 창이 한다
+
+### 6-1. 59 반영 (2026-11-16 06:46)
+
+- 59 api 는 origin/dev 에 없는 CR-194 가지(`cr194-screen-history`, origin/dev 위 16 커밋)로 02:42 에 올라가 있었다. origin/dev 사본으로 치면 CR-194 가 59 에서 빠지므로, 그 가지를 내보낸 사본에 이 건 코드 커밋(`b9836b68`)만 얹고 59 jar 의 위젯을 그대로 얹어 쳤다
+- 치기 전 59 jar 와 항목별 CRC 대조: 차이는 `HttpRequestTool`, `ConnectionController`(와 `ConnectionRequest`), `ConnectionEntity`, 새 `ConnectionSecretMasker` 뿐이다. `tool-sdk` 두 jar 는 안쪽 항목이 같다
+- 함께 보내는 Dockerfile, compose, `poomgo-change-repair.workflow.json` 은 59 와 같았다. `chaws-bootstrap.sh` 는 59 에 커밋되지 않은 CR-195 판이 있어 59 파일을 그대로 다시 보냈다
+- 반영 뒤: 59 jar 와 빌드 jar md5 같음, `Started PlatformApplication` 06:46:36, ERROR 0, `http_request`, `skill_run` 도구 노출 확인
+- dev 푸시: `f7e99116..651f86af`
 
 ## 7. 진행 기록
 
@@ -121,3 +129,4 @@
 | 2 | 2026-11-16 06:22 | 컨타 요청으로 응답 본문, 머리값 가림 추가(3-2-1) |
 | 3 | 2026-11-16 06:30 | 단위시험 36건 통과(도구 27, 조회 가림 9). 메인 폴더가 origin/dev 보다 355 커밋 뒤라 origin/dev 기준 작업 사본(가지 `cr197-http-query-auth`)으로 옮김 |
 | 4 | 2026-11-16 | 로컬 확인 5건 통과(5-2), 통합시험 항목 IT-24-001~004 추가 |
+| 5 | 2026-11-16 06:46 | 59 api 반영(6-1). 실제 법제처 호출 확인은 lexflow 창 |
