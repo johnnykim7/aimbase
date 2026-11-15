@@ -264,10 +264,13 @@ const handle = createWidget({
 | `locale` | `ko` \| `en` | `ko` | 화면 언어 기본값. `en-US` 처럼 지역이 붙어도 된다. 사용자가 더 보기에서 바꾸면 그 브라우저에서는 그 값을 따른다 (CR-177) |
 | `font-size` | `small` \| `medium` \| `large` | `medium` | 글자 크기 기본값. 사용자가 더보기에서 바꾸면 그 브라우저에서는 그 값을 따른다 (CR-175) |
 | `allow-approval` | `true` \| `false` | `true` | 워크플로우 승인 카드에 승인, 거절 단추를 둘지. `false` 면 카드에 단추를 두지 않고 `onApprovalRequired` 로만 알린다. 붙이는 앱이 자기 결재 화면을 쓸 때 끈다. 대화 중 도구 승인 카드는 서버가 기다리므로 이 값과 상관없이 뜬다 (CR-185) |
+| `screen-key` | string | 없음 | 화면 키. 그 화면에서 나눈 내 대화만 목록에 보이고, 위젯이 뜰 때 그 화면의 대화를 연다. 붙은 뒤 바꾸면 토큰을 다시 받고 그 화면의 대화로 바꾼다. 다른 속성을 바꾼 뒤 맨 마지막에 바꾼다. 위젯 토큰에 `user_ref` 가 있어야 한다 (CR-194) |
+| `history-list` | `off` | 보임 | `off` 면 왼쪽 대화 목록과 목록 단추를 숨긴다. 붙은 뒤 바꿔도 바로 반영한다 (CR-194) |
 
 JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 - `contextProvider`: 현재 화면 컨텍스트(예: `{orderId}`)를 매 대화 자동 주입
 - `on.onMessage` / `on.onWorkflowStep` / `on.onApprovalRequired` / `on.onError` / `on.onTokenExpiring`
+- `screenKey`, `historyList`: 위 속성과 같다. 한 건을 여는 사람 모두가 같은 대화를 보는 함께 보는 대화는 속성이 아니라 BFF 가 토큰 발급에 싣는 `share_key` 로 연다(API 가이드 § 38) (CR-194)
 - `suggestions`, `emptyTitle`, `emptySubtitle`, `fontSize`, `locale`, `allowApproval`: 위 속성과 같다. 언어별 값은 `{ ko: ..., en: ... }` 객체로 준다 (CR-175, CR-177)
 - `sendMessage(text)`: 위젯을 만든 직후 불러도 된다. 위젯이 서버의 위젯 설정과 사용자 선호를 받을 때까지 기다렸다가 파일 만들기와 고른 모델을 실어 보낸다. 길어도 10초 기다리고, 그때까지 받지 못하면 서버 기본값으로 보낸다. 입력칸에서 보낸 질문도 같다 (CR-188)
 - `on.onNewConversation({previousSessionId, sessionId})`: 사용자가 새 대화를 시작했을 때. 엘리먼트로 붙였으면 `new-conversation` 이벤트(`detail` 에 같은 값). 앞 대화는 서버에 남는다 (CR-175)
