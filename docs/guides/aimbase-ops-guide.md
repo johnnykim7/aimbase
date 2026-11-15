@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.41.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.42.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -502,6 +502,12 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
 ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent claude'
 ```
 CLI 가 뜨면 `/login` 을 치고, 나온 주소를 맥 브라우저에서 그 계정으로 승인한 뒤 받은 코드를 붙여 넣습니다. `/exit` 로 나와 다른 계정도 같이 합니다(지금은 `work01`, `work02`). 로그인 정보는 서버 `claude-accounts/<계정>` 에만 남습니다.
+
+**계정 1년 인증** (CR-194): `/login` 인증은 8시간마다 갱신해야 해서 계정 묶음을 돌리는 동안 갱신이 어긋나면 그 계정이 끊깁니다. 계정 묶음에 드는 계정은 `claude setup-token` 의 1년 인증으로 넣습니다. 계정마다 사람이 칩니다.
+```bash
+ssh -t chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh token wes-assist work02'
+```
+찍힌 주소를 맥 브라우저에서 그 계정으로 승인하고 코드를 붙여 넣으면 `sk-ant-oat01-` 로 시작하는 인증 값이 찍힙니다. 이어 묻는 칸에 그 값을 붙여 넣으면(화면에 보이지 않음) 계정 폴더의 인증 파일에 기한(1년)과 함께 적고 짧은 질문 하나로 확인합니다. 인증 값은 그 파일 말고는 남지 않습니다. 넣은 계정이 전부 끝나면 실행기를 재시작합니다(`docker compose restart aimbase-agent-wes-assist`). 재시작하지 않으면 `/login` 인증을 들고 있던 CLI 가 갱신하며 파일을 되돌려 씁니다. 기한이 다가오면 같은 명령으로 다시 넣습니다.
 
 **계정 늘리기**: 새 계정(예: `work04`)은 폴더를 만들며 로그인하고 `bootstrap connections` 를 한 번 돌립니다. 커넥션을 더하고 묶음 구성원을 로그인된 계정으로 맞춥니다. api 와 실행기는 계정 폴더의 부모를 통째로 붙여 두어 다시 만들지 않습니다. 실행기의 동시 CLI 는 계정 수와 상관없이 3개입니다.
 ```bash
@@ -2277,6 +2283,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.42.0 | 2026-11-16 | **CR-194 계정 1년 인증** (§ 2-10). 기동 스크립트 `token <대상> <계정>` 단계가 `claude setup-token` 인증을 계정 폴더에 넣는다. 넣은 뒤 실행기 재시작 |
 | v3.41.0 | 2026-11-16 | **CR-194 일반 화면 실행기 계정 묶음** (§ 2-10). 계정 하나짜리 위젯 연결 대신 계정마다 연결과 묶음 `cli-runner-bp-wes-assist-rr`. 로그인 계정 work01, work02, work03 |
 | v3.40.0 | 2026-11-16 | **CR-194 bp-wes 일반 화면 실행기** (§ 2-10). 실행기 `aimbase-agent-wes-assist`, 조회 계정 `wes_assist_ai`, 위젯 연결 `cli-runner-bp-wes-assist-001` 을 59 와 운영에 세우는 차례. `./deploy.sh agent-wes-assist`, `chaws-agent-wes-assist`, `chaws-bootstrap.sh connections wes-assist` |
 | v3.39.0 | 2026-11-15 | **CR-193 검사 반복 코드 대조** (§ 3-5). 검사 반복 config `code_check` 로 회차마다 스킬 스크립트를 돌려 판정과 다음 작성 지적에 더한다. 스크립트 입출력 규약과 실패 처리 |
