@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.26 | 최종 수정: 2026-11-15 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194
+> 설계 버전: 7.27 | 최종 수정: 2026-11-16 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3360,6 +3360,16 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 | GET | /api/v1/chat/sessions/{session_id}/messages | 응답 맨 위 `shared`, 질문마다 `question.asker {user_ref, user_name}`(없을 수 있다) |
 | POST | /api/v1/chat/completions | 요청 `screen_key`(선택, 대화를 처음 저장할 때만 남긴다). 400 `session_invalid:screen_key`. 함께 보는 대화에서 마지막 질문이 아니거나 그 질문을 한 사람이 아닌 되감기는 409 `rewind_rejected:shared`(BIZ-280) |
 | PATCH, DELETE | /api/v1/chat/sessions/{session_id} | 함께 보는 대화면 404 `session_not_found`(BIZ-280) |
+
+### 계정 묶음으로 묻기 [PRD-638, BIZ-281]
+
+| 메서드 | 경로 | 더하는 것 |
+|---|---|---|
+| GET | /api/v1/chat/widget-settings | 질의 `connection_group_id`. 주면 `models` 는 구성원 모두가 받는 모델(순서와 이름은 첫 연결), `default_model` 은 첫 연결의 기본값이 그 안에 있으면 그것 아니면 첫 모델, `thinking_supported`, `thinking_default`, `image_generation`, `attachments` 는 첫 연결로 정한다. 없는 묶음 404 `connection_group_not_found`, 구성원 없음 400 `connection_group_empty` |
+| POST | /api/v1/chat/sessions/{session_id}/follow-ups | 본문 `connection_group_id`. 주면 그 묶음으로 부르고 한도가 찬 구성원은 건너뛴다(CR-161) |
+| POST | /api/v1/chat/completions | 이미 받는 `connection_group_id`(CR-161)에서 모델 검사(400 `model_not_allowed`)를 구성원 모두로 본다. 깊게 생각하기 검사, 첨부 처리, 그림 만들기는 첫 연결로 본다 |
+
+첫 연결은 묶음에 저장된 구성원 순서의 첫째다(돌려 쓰기 순서와 관계없다).
 
 ## 위젯 옆 창 문서를 대화로 고치기 [v7.13, CR-181]
 
