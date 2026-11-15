@@ -6,6 +6,8 @@
 #   wms     테넌트 bp_wms, 실행기 aimbase-agent(cli-runner-bp-wms), 비밀값 agent.env, 소비앱 키 secrets/bp-wms-api-key
 #   wes-cs  테넌트 bp_wes, 실행기 aimbase-agent-wes-cs(cli-runner-bp-wes-cs), 비밀값 agent-wes-cs.env,
 #           소비앱 키 secrets/bp-wes-api-key. CS 상세 AI 대화(위젯)용 연결 -001 을 더 둔다
+#   wes-assist  테넌트 bp_wes, 실행기 aimbase-agent-wes-assist(cli-runner-bp-wes-assist), 비밀값 agent-wes-assist.env.
+#           BO2 일반 화면 AI 대화(위젯) 연결 -001 하나만 둔다(CR-194). 계정별 연결과 묶음은 부르는 곳이 없어 두지 않는다
 #   3plgw   테넌트 bp_3plgw, 실행기 aimbase-agent-3plgw(cli-runner-bp-3plgw), 비밀값 agent-3plgw.env,
 #           소비앱 키 secrets/bp-3plgw-api-key. 품고 변경 수리(CR-174). HTTP 연결은 http 단계
 # 59 도 같은 스크립트로 세운다. ./deploy.sh be 가 build/ 에 올리고 서버 폴더(/home/therecommerce/aimbase)에서 돌린다.
@@ -31,6 +33,7 @@ API="http://127.0.0.1:8280/api/v1"
 ADMIN_EMAIL="platform-admin@aimbase.local"
 ACCOUNTS="${ACCOUNTS:-}"
 WIDGET_CONNECTION=""
+WIDGET_ONLY=""
 WORKFLOW_STEP_CONNECTION="opinion"
 case "$TARGET" in
   wms)
@@ -46,6 +49,14 @@ case "$TARGET" in
     # 위젯은 연결 묶음을 보내지 못해 연결 하나로 간다(bp-wes WES_CS_AIMBASE_WIDGET_CONNECTION_ID).
     WIDGET_CONNECTION="$RUNNER-001"
     WIDGET_ORIGIN="${WIDGET_ORIGIN:-https://admin.banpoom.co.kr}" ;;
+  wes-assist)
+    # BO2 일반 화면 AI 대화(CR-194, CR-WES-372 계약 5절). CS 와 같은 틀에 조회 계정만 wes_assist_ai 다.
+    # 시스템 지시 대체값을 두지 않는다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않는다.
+    TENANT="bp_wes"; APP="bp-wes"; LABEL="bp-wes 일반 화면"; TAG="CR-194"
+    RUNNER="cli-runner-bp-wes-assist"; AGENT_SERVICE="aimbase-agent-wes-assist"; AGENT_ENV="agent-wes-assist.env"
+    TOOL_MODE="NATIVE"; EXPOSED_TOOLS="bash get_current_time"
+    WIDGET_CONNECTION="$RUNNER-001"; WIDGET_ONLY=1
+    WIDGET_ORIGIN="${WIDGET_ORIGIN:-https://admin.banpoom.co.kr}" ;;
   3plgw)
     # 품고 변경 수리 실행기(CR-174). CLI 가 레포를 고치고 PR 을 만들므로 HYBRID. 워크플로우 정의는 연결을 바꾸지 않는다.
     TENANT="bp_3plgw"; APP="bp-3plgw"; LABEL="bp-3plgw"; TAG="CR-174"
@@ -53,7 +64,7 @@ case "$TARGET" in
     TOOL_MODE="HYBRID"; EXPOSED_TOOLS="get_current_time"
     WORKFLOW_STEP_CONNECTION=""
     WIDGET_ORIGIN="${WIDGET_ORIGIN:-}" ;;
-  *) echo "대상: wms | wes-cs | 3plgw"; exit 1 ;;
+  *) echo "대상: wms | wes-cs | wes-assist | 3plgw"; exit 1 ;;
 esac
 # 비밀값 배치. chaws 는 실행기마다 env 파일에 호출 키(AIMBASE_RUNNER_API_KEY)를 둔다.
 # 59 는 compose 가 .env 의 RUNNER_API_KEY(실행기 공유)와 실행기 전용 키 변수를 실행기 환경에 넣는다(docker-compose.prod.yml).
@@ -229,6 +240,15 @@ PY
 }
 
 step_connections() {
+  if [ -n "$WIDGET_ONLY" ]; then
+    case " $(logged_in_accounts) " in
+      *" $WIDGET_ACCOUNT "*) ;;
+      *) echo "[connections] 계정 $WIDGET_ACCOUNT 에 로그인이 없음. 로그인 뒤 다시 돌린다"; exit 1 ;;
+    esac
+    login_tenant
+    ensure_connection "$WIDGET_CONNECTION" "$WIDGET_ACCOUNT" "$LABEL 위젯 $WIDGET_ACCOUNT"
+    return
+  fi
   if [ -z "$ACCOUNTS" ]; then
     ACCOUNTS=$(logged_in_accounts)
     [ -n "${ACCOUNTS// /}" ] || { echo "[connections] 로그인된 계정이 없음. 계정 로그인 뒤 다시 돌린다"; exit 1; }
