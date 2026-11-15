@@ -195,7 +195,7 @@ deploy_agent_only() {
 }
 
 # CR-194 일반 화면 실행기의 계정 폴더 work01 과 작업 폴더. 계정 폴더는 로그인 파일이 있어 실행 계정만 연다.
-WES_ASSIST_DIRS='mkdir -p /home/appuser/.claude-accounts/work01 /data/workspace-wes-assist && chown -R appuser:appuser /home/appuser/.claude-accounts /data/workspace-wes-assist && chmod 700 /home/appuser/.claude-accounts'
+WES_ASSIST_DIRS='mkdir -p /home/appuser/.claude-accounts/work01 /home/appuser/.claude-accounts/work02 /home/appuser/.claude-accounts/work03 /data/workspace-wes-assist && chown -R appuser:appuser /home/appuser/.claude-accounts /data/workspace-wes-assist && chmod 700 /home/appuser/.claude-accounts'
 
 # CR-174 품고 수리 실행기만 다시 올린다(GitHub 토큰, env 를 바꿨을 때). api 와 다른 실행기는 건드리지 않는다.
 # 실행기 jar 가 바뀌었으면 agents 로 전체를 올린다(한 서비스만 빌드하면 나머지는 옛 이미지로 남는다).
@@ -340,7 +340,7 @@ deploy_chaws_init() {
     docker run --rm -v $CHAWS_REMOTE:/w --entrypoint sh pgvector/pgvector:pg16 -c 'umask 077; cd /w \
       && mkdir -p claude-accounts/work01 claude-accounts/work02 claude-accounts/work03 workspace aimbase-storage \
          claude-accounts-wes-cs/work01 claude-accounts-wes-cs/work02 workspace-wes-cs \
-         claude-accounts-wes-assist/work01 workspace-wes-assist \
+         claude-accounts-wes-assist/work01 claude-accounts-wes-assist/work02 claude-accounts-wes-assist/work03 workspace-wes-assist \
       && chown -R 999 claude-accounts workspace aimbase-storage claude-accounts-wes-cs workspace-wes-cs claude-accounts-wes-assist workspace-wes-assist'"
   echo "[chaws-init] 완료"
 }

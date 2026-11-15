@@ -7,7 +7,7 @@
 #   wes-cs  테넌트 bp_wes, 실행기 aimbase-agent-wes-cs(cli-runner-bp-wes-cs), 비밀값 agent-wes-cs.env,
 #           소비앱 키 secrets/bp-wes-api-key. CS 상세 AI 대화(위젯)용 연결 -001 을 더 둔다
 #   wes-assist  테넌트 bp_wes, 실행기 aimbase-agent-wes-assist(cli-runner-bp-wes-assist), 비밀값 agent-wes-assist.env.
-#           BO2 일반 화면 AI 대화(위젯) 연결 -001 하나만 둔다(CR-194). 계정별 연결과 묶음은 부르는 곳이 없어 두지 않는다
+#           BO2 일반 화면 AI 대화(위젯). 위젯이 계정 묶음을 받으므로 CS 와 같이 계정별 연결과 묶음을 둔다(CR-194 3.9)
 #   3plgw   테넌트 bp_3plgw, 실행기 aimbase-agent-3plgw(cli-runner-bp-3plgw), 비밀값 agent-3plgw.env,
 #           소비앱 키 secrets/bp-3plgw-api-key. 품고 변경 수리(CR-174). HTTP 연결은 http 단계
 # 59 도 같은 스크립트로 세운다. ./deploy.sh be 가 build/ 에 올리고 서버 폴더(/home/therecommerce/aimbase)에서 돌린다.
@@ -33,7 +33,6 @@ API="http://127.0.0.1:8280/api/v1"
 ADMIN_EMAIL="platform-admin@aimbase.local"
 ACCOUNTS="${ACCOUNTS:-}"
 WIDGET_CONNECTION=""
-WIDGET_ONLY=""
 # 연결 기본 모델과 위젯에서 고를 수 있는 모델(config.models, 「id=이름」 을 쉼표로). 대상이 정하지 않으면 지금 값이다.
 MODEL="claude-sonnet-4-5"
 MODELS=""
@@ -58,7 +57,6 @@ case "$TARGET" in
     TENANT="bp_wes"; APP="bp-wes"; LABEL="bp-wes 일반 화면"; TAG="CR-194"
     RUNNER="cli-runner-bp-wes-assist"; AGENT_SERVICE="aimbase-agent-wes-assist"; AGENT_ENV="agent-wes-assist.env"
     TOOL_MODE="NATIVE"; EXPOSED_TOOLS="bash get_current_time"
-    WIDGET_CONNECTION="$RUNNER-001"; WIDGET_ONLY=1
     # 대화창 모델 목록. 적은 순서가 화면 순서다. 실행기 CLI 2.1.197 은 Opus 5.5 와 Fable 5.2 를 거절해 지금은 둘만 둔다(2026-11-16).
     MODEL="claude-sonnet-5-5"
     MODELS="claude-sonnet-5-5=Sonnet 5.5,claude-haiku-5-5=Haiku 5.5"
@@ -248,15 +246,6 @@ PY
 }
 
 step_connections() {
-  if [ -n "$WIDGET_ONLY" ]; then
-    case " $(logged_in_accounts) " in
-      *" $WIDGET_ACCOUNT "*) ;;
-      *) echo "[connections] 계정 $WIDGET_ACCOUNT 에 로그인이 없음. 로그인 뒤 다시 돌린다"; exit 1 ;;
-    esac
-    login_tenant
-    ensure_connection "$WIDGET_CONNECTION" "$WIDGET_ACCOUNT" "$LABEL 위젯 $WIDGET_ACCOUNT"
-    return
-  fi
   if [ -z "$ACCOUNTS" ]; then
     ACCOUNTS=$(logged_in_accounts)
     [ -n "${ACCOUNTS// /}" ] || { echo "[connections] 로그인된 계정이 없음. 계정 로그인 뒤 다시 돌린다"; exit 1; }
@@ -387,10 +376,11 @@ print("[smoke] 결과", json.dumps(o.get("structured_data") or o.get("error") or
 # 인자는 부르는 길(connection_group_id 또는 connection_id), 그 값, 모델(없으면 연결 기본)이다.
 smoke_runner_db() {
   echo "[smoke] 실행기 DB 계정: $(docker compose exec -T "$AGENT_SERVICE" psql -tAc 'select current_user' 2>&1 | head -c 300)"
+  # 같은 질문은 답 저장분에서 나와 실행기에 닿지 않으므로 질문마다 시험 번호를 붙인다.
   python3 - "$1" "$2" "${3:-}" <<'PY' > secrets/.smoke.json
-import json, sys
+import json, sys, time
 body = {sys.argv[1]: sys.argv[2], "stream": False,
-        "messages": [{"role": "user", "content": "Bash 도구로 psql -tAc 'select current_user' 를 실행하고 출력 한 줄만 답하세요."}]}
+        "messages": [{"role": "user", "content": "시험 %d. Bash 도구로 psql -tAc 'select current_user' 를 실행하고 출력 한 줄만 답하세요." % time.time_ns()}]}
 if sys.argv[3]:
     body["model"] = sys.argv[3]
 print(json.dumps(body, ensure_ascii=False))
@@ -429,7 +419,7 @@ step_smoke() {
   case "$TARGET" in
     wms) smoke_wms ;;
     wes-cs) smoke_runner_db connection_group_id "$GROUP" ;;
-    wes-assist) smoke_runner_db connection_id "$WIDGET_CONNECTION" "$MODEL" ;;
+    wes-assist) smoke_runner_db connection_group_id "$GROUP" "$MODEL" ;;
     3plgw) smoke_3plgw ;;
   esac
 }
