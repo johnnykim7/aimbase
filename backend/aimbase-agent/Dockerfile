@@ -36,7 +36,10 @@ RUN apt-get update && apt-get install -y python3 python3-pip fonts-nanum && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI 설치 (Runner 가 spawn 하는 바이너리)
-RUN npm install -g @anthropic-ai/claude-code
+# CR-195: CLI 판을 고정한다. 판을 정하지 않으면 이미지를 만들 때마다 최신판이 들어와 실행기 동작이 바뀐다.
+#   2.1.197 은 5.5 모델에 깊게 생각하기 끄기를 보내면 400 을 받는다. 판을 올릴 때는 로컬 실행기로 먼저 확인한다.
+ARG CLAUDE_CODE_VERSION=2.1.325
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 RUN groupadd -r appuser && useradd -r -g appuser -m appuser
 

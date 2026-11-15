@@ -59,7 +59,8 @@ class FollowUpServiceTest {
     @BeforeEach
     void setUp() {
         service = new FollowUpService(widgetSettings, turnLookup, promptTemplateService, connectionAdapterFactory,
-                adapterRegistry, messageRepository, sessionRepository, usageLogRepository, new ObjectMapper());
+                adapterRegistry, messageRepository, sessionRepository, usageLogRepository, new ObjectMapper(),
+                org.mockito.Mockito.mock(com.platform.llm.ConnectionGroupSelector.class));
         session = new ConversationSessionEntity();
         session.setSessionId("s-1");
         session.setTitle("박스가 몇 개 나갔나요?");
@@ -81,7 +82,7 @@ class FollowUpServiceTest {
         when(adapter.chat(any())).thenReturn(reply(
                 "```json\n{\"follow_ups\": [\"몇 박스 출고?\", \"택배사는?\", \"답변 초안\", \"넷째\"], \"title\": \"13박스 누락 문의\"}\n```"));
 
-        Map<String, Object> body = service.generate("user-1", "s-1", turnId.toString(), "conn-1");
+        Map<String, Object> body = service.generate("user-1", "s-1", turnId.toString(), "conn-1", null);
 
         assertThat(body.get("follow_ups")).isEqualTo(List.of("몇 박스 출고?", "택배사는?", "답변 초안"));
         assertThat(body.get("title")).isEqualTo("13박스 누락 문의");
@@ -109,7 +110,7 @@ class FollowUpServiceTest {
                 .thenReturn(false);
         when(adapter.chat(any())).thenReturn(reply("{\"follow_ups\": [\"하나\"], \"title\": \"\"}"));
 
-        Map<String, Object> body = service.generate("user-1", "s-1", turnId.toString(), "conn-1");
+        Map<String, Object> body = service.generate("user-1", "s-1", turnId.toString(), "conn-1", null);
 
         assertThat(body).doesNotContainKey("title");
         assertThat(session.getTitle()).isEqualTo("박스가 몇 개 나갔나요?");
@@ -124,7 +125,7 @@ class FollowUpServiceTest {
         // TC-CHT-014
         when(widgetSettings.followUpsEnabled()).thenReturn(false);
 
-        assertRejected(() -> service.generate("user-1", "s-1", turnId.toString(), "conn-1"),
+        assertRejected(() -> service.generate("user-1", "s-1", turnId.toString(), "conn-1", null),
                 HttpStatus.CONFLICT, "follow_ups_disabled");
     }
 
@@ -136,7 +137,7 @@ class FollowUpServiceTest {
                 .thenReturn(true);
         when(adapter.chat(any())).thenReturn(reply("질문을 세 개 드릴게요"));
 
-        assertRejected(() -> service.generate("user-1", "s-1", turnId.toString(), "conn-1"),
+        assertRejected(() -> service.generate("user-1", "s-1", turnId.toString(), "conn-1", null),
                 HttpStatus.BAD_GATEWAY, "follow_ups_failed");
     }
 
@@ -152,9 +153,45 @@ class FollowUpServiceTest {
             return reply("{}").join();
         });
 
-        assertRejected(() -> service.generate("user-1", "s-1", turnId.toString(), "conn-1"),
+        assertRejected(() -> service.generate("user-1", "s-1", turnId.toString(), "conn-1", null),
                 HttpStatus.BAD_GATEWAY, "follow_ups_failed");
         verify(adapter).cleanupSession("s-1:follow-ups:" + turnId);
+    }
+
+    @Test
+    @DisplayName("TC-CHT-152 4 묶음으로_부르면_한도가_찬_구성원을_건너뛰고_다음_구성원이_그_기본_모델로_답한다")
+    void group_skips_member_at_limit() {
+        com.platform.repository.ConnectionGroupRepository groupRepository =
+                org.mockito.Mockito.mock(com.platform.repository.ConnectionGroupRepository.class);
+        com.platform.domain.ConnectionGroupEntity group = new com.platform.domain.ConnectionGroupEntity();
+        group.setId("g1");
+        group.setName("g1");
+        group.setAdapter("anthropic-cli");
+        group.setStrategy("PRIORITY");
+        group.setMembers(List.of(Map.of("connection_id", "conn-1", "priority", 1, "weight", 1),
+                Map.of("connection_id", "conn-2", "priority", 2, "weight", 1)));
+        when(groupRepository.findById("g1")).thenReturn(java.util.Optional.of(group));
+        service = new FollowUpService(widgetSettings, turnLookup, promptTemplateService, connectionAdapterFactory,
+                adapterRegistry, messageRepository, sessionRepository, usageLogRepository, new ObjectMapper(),
+                new com.platform.llm.ConnectionGroupSelector(groupRepository, connectionAdapterFactory,
+                        org.mockito.Mockito.mock(com.platform.config.PlatformSettingsService.class)));
+        LLMAdapter second = org.mockito.Mockito.mock(LLMAdapter.class);
+        when(widgetSettings.groupMembers("g1")).thenReturn(List.of("conn-1", "conn-2"));
+        when(connectionAdapterFactory.getAdapter("conn-2")).thenReturn(second);
+        when(connectionAdapterFactory.defaultModel("conn-2")).thenReturn("claude-haiku-5-5");
+        long resetsAt = java.time.Instant.now().plusSeconds(3600).getEpochSecond();
+        when(adapter.chat(any())).thenReturn(CompletableFuture.failedFuture(
+                new IllegalStateException("cli_account_limited:resets_at=" + resetsAt)));
+        when(second.chat(any())).thenReturn(reply("{\"follow_ups\": [\"하나\"]}"));
+        when(messageRepository.existsBySessionIdAndRoleAndSeqLessThanAndDeletedAtIsNull("s-1", "assistant", 4))
+                .thenReturn(true);
+
+        Map<String, Object> body = service.generate("user-1", "s-1", turnId.toString(), null, "g1");
+
+        assertThat(body.get("follow_ups")).isEqualTo(List.of("하나"));
+        ArgumentCaptor<LLMRequest> request = ArgumentCaptor.forClass(LLMRequest.class);
+        verify(second).chat(request.capture());
+        assertThat(request.getValue().model()).isEqualTo("claude-haiku-5-5");
     }
 
     private ChatTurnLookup.Turn turn() {

@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.40.3** | 2026-11-14 | Aimbase v8.18.0 기준
+> **v3.43.1** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1481,6 +1481,8 @@ curl -X POST $AIMBASE/api/v1/sessions/issue-widget-token \
 
 **JWT claims**: `sub=user_ref`, `tenant_id`, `project_id`, `user_ref`, `scopes[]`, `origin`, `type: "widget"`, `exp`.
 
+**묻는 사람 이름과 함께 보기 키** [CR-194]: 요청에 `user_name`(100자 이하), `share_key`(함께 보기 키)를 더할 수 있고 토큰에 실린다. 모르는 칸은 무시한다. 쓰는 법은 § 38.
+
 ### 17-3. 위젯 토큰으로 Aimbase API 호출
 
 브라우저는 `Authorization: Bearer <token>` 헤더, SSE 는 `?access_token=<token>` 쿼리로 전달 (EventSource 가 커스텀 헤더를 못 다루므로). **access 토큰은 쿼리 전달 금지**(로그 유출 리스크) — 위젯 토큰만 쿼리 파라미터를 수용한다.
@@ -2565,7 +2567,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 7, "model": "claude-
 
 ### 28-2. 위젯 설정 (`GET /api/v1/chat/widget-settings?connection_id=&locale=`)
 
-위젯이 뜰 때 한 번 부릅니다.
+위젯이 뜰 때 한 번 부릅니다. 계정 묶음으로 물을 때는 `connection_id` 대신 `connection_group_id` 를 줍니다(§ 38-4).
 
 ```json
 {
@@ -2612,7 +2614,7 @@ curl -X PUT "$AIMBASE/api/v1/chat/feedback" -H "Authorization: Bearer $WIDGET_TO
 
 ### 28-4. 후속 질문과 대화 제목 (`POST /api/v1/chat/sessions/{session_id}/follow-ups`)
 
-답이 끝난 뒤 부릅니다. 본문 `{"turn_id": "...", "connection_id": "..."}`.
+답이 끝난 뒤 부릅니다. 본문 `{"turn_id": "...", "connection_id": "..."}`. 계정 묶음으로 물을 때는 `connection_id` 대신 `connection_group_id` 를 줍니다(§ 38-4).
 
 ```json
 {"follow_ups": ["13박스 중 몇 박스가 출고됐나요?", "택배사 조회 결과도 보여 주세요", "고객 답변 초안을 다시 써 주세요"], "title": "라이프러버 13박스 누락 문의"}
@@ -3366,10 +3368,91 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 - 두 사람이 함께 누르면 먼저 닿은 하나만 지나고 나머지는 409 `approval_closed`, `data.status` 에 지금 상태
 - 관리자 승인 API `POST /api/v1/admin/approvals/{id}/approve`, `/reject` 도 대화 승인을 정하고, 이미 정해졌으면 409 `approval_closed`
 
+## 38. 위젯 화면별 대화와 함께 보는 대화 [CR-194]
+
+설계 상세: `docs/CR-194_대화창_화면별_지난_대화_불러오기.md`. 위젯 토큰은 `user_ref` 가 있어야 한다(§ 34).
+
+### 38-1. 화면 키로 대화 나누기
+
+위젯 속성 `screen-key` 에 화면 키를 주면 그 화면에서 나눈 내 대화만 목록에 보이고, 새 대화의 첫 질문에 화면 키가 남는다. 키는 128자 이하, 영문, 숫자, `:`, `/`, `-`, `_`, `.`, `[`, `]` 만 쓴다. aimbase 는 뜻을 해석하지 않는다.
+
+```html
+<aimbase-chat screen-key="bo2:menu:/oms/orders"></aimbase-chat>
+```
+
+- 위젯 요소 하나를 두고 화면을 옮길 때 속성만 바꾼다. `screen-key` 는 다른 속성을 바꾼 뒤 맨 마지막에 바꾼다. 위젯이 토큰을 다시 받고(authResolver 를 다시 부른다) 그 화면의 대화로 바꾼다
+- `history-list="off"` 를 주면 왼쪽 대화 목록과 목록 단추를 숨긴다
+- 화면 키가 없는 화면은 CR-178 그대로다. `session-id` 를 주지 않으면 위젯은 지난 대화를 서버에 묻지 않는다
+- 서버 API 로 직접 쓰면 `GET /api/v1/chat/sessions?screen_key=` 로 거르고, `POST /api/v1/chat/completions` 요청 `screen_key` 로 남긴다(대화를 처음 저장할 때만)
+
+### 38-2. 함께 보는 대화
+
+한 건을 여는 사람 모두가 같은 대화를 보게 하려면 소비앱 서버가 그 사람의 건 권한을 확인한 뒤 토큰 발급 요청에 `share_key` 를 싣는다. 브라우저가 정한 키를 그대로 실으면 키만 바꿔 남의 건 대화를 볼 수 있으니 서버에서 정한다.
+
+```json
+{"user_ref": "123", "user_name": "kim01", "share_key": "bo2:case:/wes/cs/[id]:3311", "scopes": ["chat:stream"], "origin": "https://bo.company.com"}
+```
+
+- 위젯은 설정 `shared_available` 이 참이면 `POST /api/v1/chat/sessions/shared` 로 그 키의 대화 번호를 받아 연다. 없으면 서버가 만든다. 같은 키에는 언제나 대화 하나다
+- 함께 보는 대화는 목록, 새 대화, 삭제, 이름 바꾸기, 프로젝트로 옮기기가 없다. 다시 생성과 질문 수정은 마지막 질문을 한 사람만 한다(409 `rewind_rejected:shared`)
+- 이어보기 응답에 `shared` 와 질문마다 `question.asker {user_ref, user_name}` 가 실린다
+
+### 38-3. 대화 접근
+
+대화 번호를 받는 위젯 API 는 모두 같은 확인을 거친다. 함께 보기 키가 있는 대화는 같은 키의 토큰만, 없는 대화는 주인만 쓴다. 접근할 수 없으면 404 `session_not_found` 다. 이미 주인 확인이 있던 산출물(404 `artifact_not_found`), 이미지(403), 세션 이어 쓰기(403)는 거절 코드가 지금 그대로다. 대화 요청도 응답을 시작하기 전에 같은 확인을 한다.
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `widget_token_invalid:share_key` | 함께 보기 키 글자 규칙 위반 |
+| 400 | `widget_token_invalid:user_ref` | share_key 를 주었는데 user_ref 가 없음 |
+| 400 | `widget_token_invalid:user_name` | 이름 100자 초과 |
+| 400 | `share_key_required` | 함께 보기 키 없는 토큰으로 함께 보는 대화 열기 |
+| 400 | `session_invalid:screen_key` | 화면 키 글자 규칙 위반 |
+| 404 | `session_not_found` | 접근할 수 없는 대화 |
+| 409 | `rewind_rejected:shared` | 함께 보는 대화에서 마지막 질문이 아니거나 남의 질문을 되감음 |
+
+### 38-4. 계정 묶음으로 묻기
+
+연결을 계정 하나로 두면 그 계정의 사용 한도가 찼을 때 한도가 풀릴 때까지 위젯이 답하지 못합니다. 위젯 속성 `connection-group-id` 에 연결 묶음(§ 25) 번호를 주면 대화, 위젯 설정 조회, 다음 질문 제안이 그 묶음으로 가고, 한도가 찬 계정은 한도가 풀릴 때까지 건너뜁니다.
+
+```html
+<aimbase-chat connection-group-id="cli-runner-bp-wes-assist-rr"></aimbase-chat>
+```
+
+| 순번 | API | 묶음일 때 |
+|---|---|---|
+| 1 | `GET /api/v1/chat/widget-settings?connection_group_id=` | `models` 는 구성원 모두가 받는 모델(순서와 이름은 첫 연결), `default_model` 은 첫 연결의 기본값이 그 안에 있으면 그것 아니면 첫 모델. 깊게 생각하기, 그림 만들기, 실행기 파일 고치기 칸은 첫 연결로 정한다 |
+| 2 | `POST /api/v1/chat/completions` 본문 `connection_group_id` | 모델 검사(400 `model_not_allowed`)를 구성원 모두로 본다. 실시간 답은 첫 이벤트를 보낸 뒤에는 다음 구성원으로 가지 않는다(§ 25) |
+| 3 | `POST /api/v1/chat/sessions/{session_id}/follow-ups` 본문 `connection_group_id` | 그 묶음으로 부르고 한도가 찬 구성원은 건너뛴다 |
+
+- 첫 연결은 묶음에 저장된 구성원 순서의 첫째입니다
+- `connection-id` 와 같이 주면 묶음을 씁니다. 위젯은 묶음을 받으면 요청에 `connection_id` 를 싣지 않습니다
+- 붙은 뒤 `connection-group-id` 를 바꾸면 위젯이 설정을 다시 받고 다음 질문부터 그 묶음으로 묻습니다
+- 연결 속성을 하나씩 바꿔도(묶음을 떼고 연결을 다는 식) 위젯은 마지막으로 바꾼 연결의 설정만 씁니다. 그 설정을 받기 전에 보낸 질문은 받을 때까지(최대 10초) 기다리고, 지금 모델이 그 연결 목록에 없으면 그 연결 기본 모델로 바꿔 묻습니다
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 404 | `connection_group_not_found` | 그 테넌트에 없는 묶음 |
+| 400 | `connection_group_empty` | 구성원이 없는 묶음 |
+| 400 | `connection_group_no_common_model` | 구성원 모두가 받는 모델이 없는 묶음(위젯 설정 조회) |
+
+### 38-5. 붙이는 앱의 모달(건 창) 위에서
+
+모달이 열려 있어도 위젯은 눌리고 글이 쳐지며 답 복사가 됩니다. 위젯 자리는 `pointer-events: auto` 이고, 위젯 안의 누름, 초점, 휠 이벤트(pointerdown, mousedown, touchstart, touchmove, wheel, focusin, focusout)는 붙이는 앱 문서로 올라가지 않습니다. 그래서 모달의 바깥 누름 닫기와 바깥 휠 막기에 걸리지 않습니다.
+
+- 위젯이 막을 수 없는 것이 둘 있습니다. 문서 앞단(capture)에서 받는 모달의 Esc 와, 모달 안 요소를 떠날 때 모달 쪽에서 나는 focusout(초점 가두기)입니다. 붙이는 앱이 `[data-aimbase-widget]` 안에서 난 일이면 거릅니다. 백오피스2 는 Radix Dialog 에서 이 표시로 Esc 와 초점 가두기를 거릅니다
+- 위젯 단추, 대화창, 메뉴, 확인 창은 모두 `data-aimbase-widget` 표시가 달린 한 자리 안에 그려집니다
+- http 화면(브라우저 복사 기능이 없는 곳)에서 복사할 때 쓰는 숨은 칸도 위젯 자리 안에 둡니다
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.43.1 | 2026-11-16 | **CR-194 위젯 보정** (§ 38-1, § 38-4, § 38-5). 연결 속성을 하나씩 바꿀 때 마지막 연결 설정만 쓰고 받기 전 질문은 기다림. 모달 위 위젯 누름과 복사, `data-aimbase-widget` 표시. 화면 키 없는 화면에서 `session-id` 가 없으면 지난 대화를 묻지 않음 |
+| v3.43.0 | 2026-11-16 | **CR-194 위젯 계정 묶음** (§ 28-2, § 28-4, § 38-4). 위젯 설정 조회 질의와 다음 질문 제안 본문에 `connection_group_id`. 대화 요청 모델 검사를 묶음 구성원 모두로. 위젯 속성 `connection-group-id` |
+| v3.42.0 | 2026-11-15 | **CR-194 위젯 화면별 대화와 함께 보는 대화** (§ 17-2, § 38). 토큰 발급 `user_name`, `share_key`, 모르는 칸 무시. `POST /api/v1/chat/sessions/shared` 추가. 대화 목록 `screen_key`, 대화 요청 `screen_key`, 이어보기 `shared` 와 `question.asker`, 위젯 설정 `shared_available` 과 `user_name`. 대화 번호를 받는 위젯 API 의 접근 확인을 하나로 모아 대화 요청에도 건다 |
 | v3.40.4 | 2026-11-16 | **CR-197 HTTP 연결 주소 값 인증** (§ 7-6). `auth.in=query` 지원, 도구 결과에서 되돌아온 인증값 가림, 연결 조회 응답 `config.auth.value` 를 `***` 로 돌려줌 |
 | v3.40.3 | 2026-11-14 | **CR-185 승인 대기 런 구독** (§ 17-6, § 37-4). 승인 대기에 들어간 뒤 구독해도 `workflow.snapshot` 다음에 `workflow.approval` 을 다시 보낸다. 이벤트에 `approval_id` 추가. `workflow:approve` 는 플랫폼 런타임 설정(모든 테넌트 공통)에 넣는다고 보정 |
 | v3.40.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 31-1). CLI 연결의 `create_file` 은 허용 도구 목록이 아니라 실행기가 붙이는 계산 도구 통로(`/mcp-data`)로 부른다. 내장 도구만 쓰는 방식(NATIVE)도 같다 |

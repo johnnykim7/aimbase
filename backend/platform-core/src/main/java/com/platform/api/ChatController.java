@@ -66,6 +66,8 @@ public class ChatController {
     private static final java.util.regex.Pattern RENDER_FEATURE = java.util.regex.Pattern.compile("[a-z0-9-]{1,40}");
     private static final int MAX_RENDER_FEATURES = 10;
     private final com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService;
+    private final com.platform.session.ChatSessionOwnership sessionAccess;
+    private final com.platform.session.SharedConversationService sharedConversations;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -84,8 +86,12 @@ public class ChatController {
                           com.platform.repository.ConversationSessionRepository sessionRepository,
                           com.platform.attachment.data.AttachmentPromptBuilder attachmentPromptBuilder,
                           com.platform.chatdoc.DocumentEditService documentEditService,
-                          com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService) {
+                          com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService,
+                          com.platform.session.ChatSessionOwnership sessionAccess,
+                          com.platform.session.SharedConversationService sharedConversations) {
         this.approvalDecisionService = approvalDecisionService;
+        this.sessionAccess = sessionAccess;
+        this.sharedConversations = sharedConversations;
         this.chatProjectService = chatProjectService;
         this.sessionRepository = sessionRepository;
         this.attachmentPromptBuilder = attachmentPromptBuilder;
@@ -138,6 +144,8 @@ public class ChatController {
     @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     @Operation(summary = "스트림 중지", description = "진행 중인 SSE 스트림을 즉시 중지한다.")
     public ApiResponse<Map<String, Object>> abort(@PathVariable String sessionId) {
+        // CR-194 BIZ-275: 들어갈 수 없는 대화의 답은 멈추지 못한다
+        sessionAccess.requireIfExists(sessionId);
         boolean cancelled = cancellationRegistry.cancel(sessionId);
         if (!cancelled) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "활성 스트림 없음: " + sessionId);
@@ -150,15 +158,21 @@ public class ChatController {
     public Object completions(@Valid @RequestBody ChatCompletionRequest request) {
         // CR-045 L0: working_directory 화이트리스트 조기 차단 (400)
         validateWorkingDirectory(request.workingDirectory());
+        // CR-194 BIZ-275: 들어갈 수 없는 대화는 응답을 시작하기 전에 거른다. 아직 없는 대화 번호(첫 질문)는 통과한다
+        sessionAccess.requireIfExists(request.sessionId());
+        String screenKey = validScreenKey(request.screenKey());
+        // CR-194 BIZ-281: 계정 묶음이면 구성원 모두, 아니면 요청 연결 하나. 첫째가 능력(생각, 첨부, 그림)을 정한다
+        List<String> targets = targetConnections(request);
+        String lead = targets.isEmpty() ? null : targets.get(0);
 
         // CR-184: 그림 질문은 모델을 부르지 않는다(BIZ-231)
         if (request.image() != null) {
-            return imageCompletion(request);
+            return imageCompletion(request, lead);
         }
 
         // CR-175: 모델, 깊게 생각하기 검사 뒤 되감기. 되감기는 스트림을 열기 전에 해야 오류를 HTTP 코드로 줄 수 있다.
-        validateModel(request);
-        Boolean thinkingOverride = parseThinking(request);
+        validateModel(request.model(), targets);
+        Boolean thinkingOverride = parseThinking(request, lead);
         // CR-178: 프로젝트는 응답을 시작하기 전에 거른다(PRD-424). 주인은 이 스레드에서 정해 실어 보낸다
         String owner = com.platform.session.ChatOwner.current();
         UUID chatProjectId = resolveChatProject(request, owner);
@@ -169,7 +183,7 @@ public class ChatController {
                 : documentEditService.prepare(request.sessionId(), request.documentEdit(),
                         request.connectionId(), request.connectionGroupId());
 
-        AdapterResolution resolved = resolveAdapter(request.model(), request.connectionId());
+        AdapterResolution resolved = resolveAdapter(request.model(), lead);
         // CR-183: 계산 도구가 붙는 요청이면 데이터 요약 끝에 계산 안내 틀을 붙인다(BIZ-221). 대화 API 요청은
         // CLI 면 언제나, API 면 데이터 파일이 있을 때 붙으므로 요청이 이 도구를 빼지 않았으면 붙는다.
         boolean dataGuide = request.toolFilter() == null || request.toolFilter().excludeTools() == null
@@ -217,7 +231,8 @@ public class ChatController {
                 request.systemPromptOverride()
         ).withThinkingOverride(thinkingOverride)
                 .withWidgetTurn(new ChatRequest.WidgetTurn(owner, chatProjectId, questionDisplay(request),
-                        com.platform.session.ChatOwner.isWidget(com.platform.session.ChatOwner.currentPrincipal())))
+                        com.platform.session.ChatOwner.isWidget(com.platform.session.ChatOwner.currentPrincipal()),
+                        screenKey))
                 // CR-183: 대화 API 요청 표시(계산 도구 붙이기)와 위젯이 그릴 수 있는 형식(BIZ-222, BIZ-223)
                 .withChatFeatures(true, renderFeatures)
                 .withFileCreate(Boolean.TRUE.equals(request.fileCreate()) || (documentEdit != null && documentEdit.fileCreate()))
@@ -497,7 +512,9 @@ public class ChatController {
             // CR-182: 파일 만들기 도구를 준다. 런타임 설정이 꺼져 있으면 무시한다(BIZ-210)
             @JsonProperty("file_create") Boolean fileCreate,
             // CR-181: 옆 창 문서 고치기(PRD-480). 비우면 평소 대화
-            @JsonProperty("document_edit") com.platform.chatdoc.DocumentEditRequest documentEdit
+            @JsonProperty("document_edit") com.platform.chatdoc.DocumentEditRequest documentEdit,
+            // CR-194: 대화를 처음 저장할 때 남길 화면 키. 이미 있는 대화면 쓰지 않는다(BIZ-277)
+            @JsonProperty("screen_key") String screenKey
     ) {
         /** CR-184 이전 15칸 호환(그림 없음) */
         public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
@@ -507,7 +524,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, null, null, null, null, null);
+                    thinking, null, null, null, null, null, null);
         }
 
         /** CR-184 다음 16칸 호환(위젯 프로젝트, 그리기 형식 없음) */
@@ -518,7 +535,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking, ImageDto image) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, null, null, null, null);
+                    thinking, image, null, null, null, null, null);
         }
 
         /** CR-183 이전 17칸 호환(그리기 형식 없음) */
@@ -529,7 +546,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, null, null, null);
+                    thinking, image, chatProjectId, null, null, null, null);
         }
 
         /** CR-182 이전 18칸 호환(파일 만들기, 문서 고치기 없음) */
@@ -541,7 +558,7 @@ public class ChatController {
                                      List<String> renderFeatures) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, renderFeatures, null, null);
+                    thinking, image, chatProjectId, renderFeatures, null, null, null);
         }
 
         /** CR-181 이전 19칸 호환(문서 고치기 없음) */
@@ -553,7 +570,20 @@ public class ChatController {
                                      List<String> renderFeatures, Boolean fileCreate) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, renderFeatures, fileCreate, null);
+                    thinking, image, chatProjectId, renderFeatures, fileCreate, null, null);
+        }
+
+        /** CR-194 이전 20칸 호환(화면 키 없음) */
+        public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
+                                     boolean actionsEnabled, String connectionId, String connectionGroupId,
+                                     ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
+                                     String workingDirectory, String toolMode, String systemPromptOverride,
+                                     Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId,
+                                     List<String> renderFeatures, Boolean fileCreate,
+                                     com.platform.chatdoc.DocumentEditRequest documentEdit) {
+            this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
+                    toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
+                    thinking, image, chatProjectId, renderFeatures, fileCreate, documentEdit, null);
         }
     }
 
@@ -645,7 +675,33 @@ public class ChatController {
         Map<String, Object> display = new java.util.LinkedHashMap<>();
         display.put("text", text.toString());
         display.put("attachments", attachments);
+        Map<String, Object> asker = asker();
+        if (asker != null) display.put(com.platform.session.SharedConversationService.AskerKeys.ASKER, asker);
         return display;
+    }
+
+    /**
+     * CR-194 BIZ-278: 묻는 사람. 위젯 토큰의 user_ref 와 질문 당시 이름을 남긴다. user_ref 없는 토큰과 로그인은 남기지 않는다.
+     */
+    private static Map<String, Object> asker() {
+        var principal = com.platform.session.ChatOwner.currentPrincipal();
+        if (!com.platform.session.ChatOwner.isWidget(principal)) return null;
+        String ref = com.platform.session.ChatOwner.of(principal);
+        if (ref == null) return null;
+        Map<String, Object> asker = new java.util.LinkedHashMap<>();
+        asker.put(com.platform.session.SharedConversationService.AskerKeys.USER_REF, ref);
+        String name = com.platform.session.ChatOwner.userNameOf(principal);
+        if (name != null) asker.put(com.platform.session.SharedConversationService.AskerKeys.USER_NAME, name);
+        return asker;
+    }
+
+    /** CR-194 BIZ-277: 화면 키 글자 규칙. 비었으면 없는 것으로 본다. */
+    private static String validScreenKey(String screenKey) {
+        String key = com.platform.session.ChatKeys.blankToNull(screenKey);
+        if (key != null && !com.platform.session.ChatKeys.isValid(key)) {
+            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "session_invalid:screen_key");
+        }
+        return key;
     }
 
     // ─── CR-045 L0: 화이트리스트 조기 차단 ───
@@ -837,11 +893,26 @@ public class ChatController {
 
     private record AdapterResolution(String modelId, com.platform.llm.adapter.AdapterCapability capability) {}
 
-    /** CR-175 BIZ-150: 연결 config 에 models 가 있으면 그 목록 밖의 모델은 받지 않는다. */
-    private void validateModel(ChatCompletionRequest request) {
-        if (request.connectionId() == null || request.connectionId().isBlank()) return;
-        if (!connectionAdapterFactory.isModelAllowed(request.connectionId(), request.model())) {
-            throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "model_not_allowed");
+    /** CR-194: 연결과 묶음을 같이 주면 묶음을 쓴다(CR-161 과 같은 순서). 둘 다 없으면 빈 목록. */
+    private List<String> targetConnections(ChatCompletionRequest request) {
+        if (request.connectionGroupId() != null && !request.connectionGroupId().isBlank()) {
+            return widgetSettings.groupMembers(request.connectionGroupId());
+        }
+        if (request.connectionId() != null && !request.connectionId().isBlank()) {
+            return List.of(request.connectionId());
+        }
+        return List.of();
+    }
+
+    /**
+     * CR-175 BIZ-150: 연결 config 에 models 가 있으면 그 목록 밖의 모델은 받지 않는다.
+     * 묶음은 어느 구성원이 답할지 미리 모르므로 구성원 모두가 받아야 한다(CR-194 BIZ-281).
+     */
+    private void validateModel(String model, List<String> targets) {
+        for (String connectionId : targets) {
+            if (!connectionAdapterFactory.isModelAllowed(connectionId, model)) {
+                throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "model_not_allowed");
+            }
         }
     }
 
@@ -862,7 +933,7 @@ public class ChatController {
     }
 
     /** CR-175 BIZ-150: thinking 칸. 켜기를 요청했는데 그 연결 어댑터가 요청마다 바꾸지 못하면 400. */
-    private Boolean parseThinking(ChatCompletionRequest request) {
+    private Boolean parseThinking(ChatCompletionRequest request, String lead) {
         String thinking = request.thinking();
         if (thinking == null || thinking.isBlank()) return null;
         Boolean on = switch (thinking.toLowerCase(java.util.Locale.ROOT)) {
@@ -870,7 +941,7 @@ public class ChatController {
             case "off" -> Boolean.FALSE;
             default -> throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "thinking_invalid");
         };
-        if (on && !widgetSettings.thinkingSupported(request.connectionId(), request.model())) {
+        if (on && !widgetSettings.thinkingSupported(lead, request.model())) {
             throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "thinking_not_supported");
         }
         return on;
@@ -882,14 +953,14 @@ public class ChatController {
     /** 스트림을 기다리는 여유. 공급처 시간 한도가 지난 뒤 저장과 끝 이벤트를 보낼 시간이다. */
     private static final long IMAGE_STREAM_GRACE_MS = 60_000L;
 
-    private Object imageCompletion(ChatCompletionRequest request) {
+    private Object imageCompletion(ChatCompletionRequest request, String lead) {
         String sessionId = request.sessionId() != null && !request.sessionId().isBlank()
                 ? request.sessionId() : UUID.randomUUID().toString();
         List<com.platform.image.ImageGenerationService.RequestMessage> messages = request.messages().stream()
                 .map(m -> new com.platform.image.ImageGenerationService.RequestMessage(m.role(), m.content()))
                 .toList();
         com.platform.image.ImageGenerationService.Prepared prepared = imageGeneration.prepare(
-                request.connectionId(), sessionId, request.image().action(), request.image().sourceImageId(),
+                lead, sessionId, request.image().action(), request.image().sourceImageId(),
                 messages);
         rewindIfRequested(request);
 
@@ -992,6 +1063,9 @@ public class ChatController {
         if (request.sessionId() == null || request.sessionId().isBlank()) {
             throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "rewind_invalid:no_session");
         }
+        // CR-194 BIZ-280: 함께 보는 대화는 마지막 질문을 한 사람만 그 질문을 되감는다
+        sharedConversations.checkRewind(request.sessionId(), request.rewindFromSeq(),
+                com.platform.session.ChatOwner.current());
         try {
             rewindService.rewind(request.sessionId(), request.rewindFromSeq(),
                     request.connectionId(), request.connectionGroupId());

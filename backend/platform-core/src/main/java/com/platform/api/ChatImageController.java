@@ -47,9 +47,12 @@ public class ChatImageController {
     public ResponseEntity<byte[]> image(@PathVariable String imageId,
                                         @RequestParam("session_id") String sessionId) {
         ImageGenerationService.LoadedImage loaded = imageGeneration.loadForSession(imageId, sessionId);
-        String owner = sessionRepository.findBySessionId(sessionId).map(s -> s.getUserId()).orElse(null);
-        String current = currentUserId();
-        if (owner != null && !owner.isBlank() && current != null && !owner.equals(current)) {
+        // CR-194 BIZ-275: 대화 접근 규칙 하나로 본다. 함께 보는 대화는 같은 함께 보기 키의 토큰만 받는다
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean allowed = sessionRepository.findBySessionId(sessionId)
+                .map(s -> com.platform.session.ChatSessionOwnership.allows(s, auth))
+                .orElse(true);
+        if (!allowed) {
             throw new ChatRejectedException(HttpStatus.FORBIDDEN, CODE_FORBIDDEN);
         }
         return ResponseEntity.ok()
@@ -57,13 +60,5 @@ public class ChatImageController {
                 .cacheControl(CacheControl.maxAge(CACHE_MAX_AGE).cachePrivate())
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline().build().toString())
                 .body(loaded.bytes());
-    }
-
-    /** 대화 지우기(ConversationController)와 같은 사람 판정. */
-    private static String currentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated()) return null;
-        if (auth.getPrincipal() instanceof com.platform.auth.UserPrincipal up) return up.getUsername();
-        return auth.getName();
     }
 }

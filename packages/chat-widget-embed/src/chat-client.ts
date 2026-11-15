@@ -10,6 +10,8 @@ export interface SendMessageArgs {
   model?: string;
   ragSourceId?: string;
   connectionId?: string;
+  /** CR-194: 계정 묶음. 주면 connection_id 대신 connection_group_id 를 싣는다(BIZ-281) */
+  connectionGroupId?: string;
   /** MCP 도구 자동 호출 활성화 — true 면 body.actions_enabled=true 송신. */
   actionsEnabled?: boolean;
   context?: Record<string, unknown>;
@@ -27,7 +29,7 @@ export interface SendMessageArgs {
 
 /** 기능이 덮어쓸 수 없는 요청 본문 칸 */
 export const CORE_KEYS: readonly string[] = [
-  "model", "session_id", "stream", "messages", "connection_id", "rag_source_id",
+  "model", "session_id", "stream", "messages", "connection_id", "connection_group_id", "rag_source_id",
   "actions_enabled", "rewind_from_seq", "thinking", "render_features",
 ];
 
@@ -97,7 +99,8 @@ export class ChatClient {
     });
     if (args.renderFeatures?.length) body.render_features = args.renderFeatures;
     if (args.ragSourceId) body.rag_source_id = args.ragSourceId;
-    if (args.connectionId) body.connection_id = args.connectionId;
+    if (args.connectionGroupId) body.connection_group_id = args.connectionGroupId;
+    else if (args.connectionId) body.connection_id = args.connectionId;
     if (args.actionsEnabled) body.actions_enabled = true;
     if (args.rewindFromSeq !== undefined) body.rewind_from_seq = args.rewindFromSeq;
     if (args.thinking) body.thinking = args.thinking;

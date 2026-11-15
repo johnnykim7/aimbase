@@ -74,6 +74,24 @@ class JwtAuthenticationFilterWidgetTest {
     }
 
     @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-145 4 토큰의 묻는 사람 이름과 함께 보기 키가 사용자 정보에 실린다")
+    void widgetToken_carriesUserNameAndShareKey() throws Exception {
+        String token = jwtProvider.generateWidgetToken(
+                "tenant-abc", null, "123", "cs_kim", "bo2:cs-inquiry:12345",
+                List.of("chat:stream"), "https://oms.com", 60L);
+        when(request.getHeader("Authorization")).thenReturn("Bearer " + token);
+        when(request.getHeader("Origin")).thenReturn("https://oms.com");
+
+        filter.doFilter(request, response, chain);
+
+        com.platform.auth.UserPrincipal principal =
+                (com.platform.auth.UserPrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        assertThat(com.platform.session.ChatOwner.of(principal)).isEqualTo("123");
+        assertThat(com.platform.session.ChatOwner.userNameOf(principal)).isEqualTo("cs_kim");
+        assertThat(com.platform.session.ChatOwner.shareKeyOf(principal)).isEqualTo("bo2:cs-inquiry:12345");
+    }
+
+    @Test
     void widgetToken_rejectsWhenOriginMismatch() throws Exception {
         String token = jwtProvider.generateWidgetToken(
                 "tenant-abc", null, null,

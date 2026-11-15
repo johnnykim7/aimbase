@@ -39,6 +39,7 @@ class ChatWidgetSettingsServiceTest {
     @Mock private LLMAdapter apiAdapter;
     @Mock private LLMAdapter cliAdapter;
     @Mock private com.platform.attachment.AttachmentService attachmentService;
+    @Mock private com.platform.llm.ConnectionGroupSelector groupSelector;
 
     private ChatWidgetSettingsService service;
 
@@ -50,7 +51,7 @@ class ChatWidgetSettingsServiceTest {
                 org.mockito.Mockito.mock(com.platform.orchestrator.FileCreateToolGate.class),
                 org.mockito.Mockito.mock(com.platform.document.DocumentRenderer.class),
                 org.mockito.Mockito.mock(com.platform.share.ChatShareSettings.class),
-                sttConnections);
+                sttConnections, groupSelector);
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FEEDBACK_REASONS_KEY), anyString()))
                 .thenReturn("[{\"code\":\"WRONG_INFO\",\"label\":\"틀린 정보\"}]");
         lenient().when(platformSettings.getString(eq(ChatWidgetSettingsService.FOLLOW_UPS_ENABLED_KEY), anyString()))
@@ -70,7 +71,7 @@ class ChatWidgetSettingsServiceTest {
         when(apiAdapter.supportsThinkingOverride()).thenReturn(true);
         when(connectionAdapterFactory.resolveModelConfig("api-1")).thenReturn(ModelConfig.defaults());
 
-        Map<String, Object> body = service.settings("api-1", null);
+        Map<String, Object> body = service.settings("api-1", null, null);
 
         assertThat(body.get("default_model")).isEqualTo("claude-sonnet-5-5");
         assertThat((List<?>) body.get("models")).hasSize(2);
@@ -84,7 +85,7 @@ class ChatWidgetSettingsServiceTest {
     void cli_connection_supports_thinking_and_starts_on_without_setting() {
         stubCliConnection(ModelConfig.defaults());
 
-        Map<String, Object> body = service.settings("cli-1", null);
+        Map<String, Object> body = service.settings("cli-1", null, null);
 
         assertThat((List<?>) body.get("models")).hasSize(1);
         assertThat(body.get("thinking_supported")).isEqualTo(true);
@@ -95,7 +96,7 @@ class ChatWidgetSettingsServiceTest {
     void connection_thinking_setting_wins_over_adapter_default() {
         stubCliConnection(new ModelConfig(null, null, null, null, false, null));
 
-        assertThat(service.settings("cli-1", null).get("thinking_default")).isEqualTo(false);
+        assertThat(service.settings("cli-1", null, null).get("thinking_default")).isEqualTo(false);
     }
 
     private void stubCliConnection(ModelConfig config) {
@@ -116,7 +117,7 @@ class ChatWidgetSettingsServiceTest {
         when(adapterRegistry.getAdapter("anthropic/claude-sonnet-4-5")).thenReturn(apiAdapter);
         when(apiAdapter.supportsThinkingOverride()).thenReturn(true);
 
-        Map<String, Object> body = service.settings(null, null);
+        Map<String, Object> body = service.settings(null, null, null);
 
         assertThat(body.get("default_model")).isEqualTo("anthropic/claude-sonnet-4-5");
         assertThat((List<?>) body.get("models")).hasSize(1);
@@ -131,8 +132,8 @@ class ChatWidgetSettingsServiceTest {
         when(imageSettings.maxPromptChars()).thenReturn(4000);
         when(imageSettings.maxSourceImages()).thenReturn(4);
 
-        Map<?, ?> on = (Map<?, ?>) service.settings("cli-1", null).get("image_generation");
-        Map<?, ?> off = (Map<?, ?>) service.settings("cli-1", null).get("image_generation");
+        Map<?, ?> on = (Map<?, ?>) service.settings("cli-1", null, null).get("image_generation");
+        Map<?, ?> off = (Map<?, ?>) service.settings("cli-1", null, null).get("image_generation");
 
         assertThat(on.get("enabled")).isEqualTo(true);
         assertThat(on.get("max_prompt_chars")).isEqualTo(4000);
@@ -146,7 +147,7 @@ class ChatWidgetSettingsServiceTest {
         when(connectionAdapterFactory.platformDefaultModel()).thenReturn("anthropic/claude-sonnet-4-5");
         when(adapterRegistry.hasAdapter("anthropic/claude-sonnet-4-5")).thenReturn(false);
 
-        Map<?, ?> image = (Map<?, ?>) service.settings(null, null).get("image_generation");
+        Map<?, ?> image = (Map<?, ?>) service.settings(null, null, null).get("image_generation");
 
         assertThat(image.get("enabled")).isEqualTo(false);
         org.mockito.Mockito.verifyNoInteractions(imageConnectionResolver);
@@ -163,10 +164,59 @@ class ChatWidgetSettingsServiceTest {
     }
 
     @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-152 1 묶음의_모델은_구성원_모두가_받는_것이고_순서와_능력은_첫_연결을_따른다")
+    void group_lists_common_models_in_first_member_order() {
+        when(groupSelector.findMemberConnectionIds("g1")).thenReturn(java.util.Optional.of(List.of("cli-1", "cli-2")));
+        when(connectionAdapterFactory.selectableModels("cli-1")).thenReturn(List.of(
+                Map.of("id", "claude-opus-5-5", "label", "Opus 5.5"),
+                Map.of("id", "claude-sonnet-5-5", "label", "Sonnet 5.5"),
+                Map.of("id", "claude-haiku-5-5", "label", "Haiku 5.5")));
+        when(connectionAdapterFactory.isModelAllowed(eq("cli-1"), anyString())).thenReturn(true);
+        when(connectionAdapterFactory.isModelAllowed(eq("cli-2"), anyString()))
+                .thenAnswer(inv -> !"claude-opus-5-5".equals(inv.getArgument(1)));
+        when(connectionAdapterFactory.defaultModel("cli-1")).thenReturn("claude-opus-5-5");
+        when(connectionAdapterFactory.getAdapter("cli-1")).thenReturn(cliAdapter);
+        when(connectionAdapterFactory.resolveModelConfig("cli-1")).thenReturn(ModelConfig.defaults());
+        when(cliAdapter.supportsThinkingOverride()).thenReturn(true);
+        when(imageConnectionResolver.isConfigured("cli-1")).thenReturn(true);
+
+        Map<String, Object> body = service.settings("solo", "g1", null);
+
+        assertThat(((List<?>) body.get("models")).stream().map(m -> String.valueOf(((Map<?, ?>) m).get("id"))).toList())
+                .containsExactly("claude-sonnet-5-5", "claude-haiku-5-5");
+        assertThat(body.get("default_model")).isEqualTo("claude-sonnet-5-5");
+        assertThat(body.get("thinking_supported")).isEqualTo(true);
+        assertThat(((Map<?, ?>) body.get("image_generation")).get("enabled")).isEqualTo(true);
+        org.mockito.Mockito.verifyNoInteractions(connectionRepository);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-152 2 없는_묶음은_404_구성원이_없으면_400_같이_받는_모델이_없으면_400")
+    void group_errors() {
+        when(groupSelector.findMemberConnectionIds("none")).thenReturn(java.util.Optional.empty());
+        when(groupSelector.findMemberConnectionIds("empty")).thenReturn(java.util.Optional.of(List.of()));
+        when(groupSelector.findMemberConnectionIds("apart")).thenReturn(java.util.Optional.of(List.of("cli-1", "cli-2")));
+        when(connectionAdapterFactory.selectableModels("cli-1")).thenReturn(List.of(
+                Map.of("id", "claude-opus-5-5", "label", "Opus 5.5")));
+        when(connectionAdapterFactory.isModelAllowed("cli-1", "claude-opus-5-5")).thenReturn(true);
+        when(connectionAdapterFactory.isModelAllowed("cli-2", "claude-opus-5-5")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.settings(null, "none", null))
+                .isInstanceOf(ChatRejectedException.class).hasMessage("connection_group_not_found")
+                .extracting("status").isEqualTo(org.springframework.http.HttpStatus.NOT_FOUND);
+        assertThatThrownBy(() -> service.settings(null, "empty", null))
+                .isInstanceOf(ChatRejectedException.class).hasMessage("connection_group_empty")
+                .extracting("status").isEqualTo(org.springframework.http.HttpStatus.BAD_REQUEST);
+        assertThatThrownBy(() -> service.settings(null, "apart", null))
+                .isInstanceOf(ChatRejectedException.class).hasMessage("connection_group_no_common_model")
+                .extracting("status").isEqualTo(org.springframework.http.HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void connection_of_another_tenant_is_not_found() {
         when(connectionRepository.existsById("other-tenant-conn")).thenReturn(false);
 
-        assertThatThrownBy(() -> service.settings("other-tenant-conn", null))
+        assertThatThrownBy(() -> service.settings("other-tenant-conn", null, null))
                 .isInstanceOf(ChatRejectedException.class)
                 .hasMessage("connection_not_found")
                 .extracting("status").isEqualTo(HttpStatus.NOT_FOUND);
@@ -199,7 +249,7 @@ class ChatWidgetSettingsServiceTest {
         when(connectionAdapterFactory.platformDefaultModel()).thenReturn("anthropic/claude-sonnet-4-5");
 
         @SuppressWarnings("unchecked")
-        List<Map<String, String>> reasons = (List<Map<String, String>>) service.settings(null, "en").get("feedback_reasons");
+        List<Map<String, String>> reasons = (List<Map<String, String>>) service.settings(null, null, "en").get("feedback_reasons");
 
         assertThat(reasons.get(0).get("label")).isEqualTo("Incorrect information");
     }
@@ -242,10 +292,10 @@ class ChatWidgetSettingsServiceTest {
         when(platformSettings.getInt(eq("widget.project-files-max-count"), anyInt())).thenReturn(15);
         try {
             signInWidget(Map.of());
-            assertThat(service.settings("api-1", null).get("history_enabled")).isEqualTo(false);
+            assertThat(service.settings("api-1", null, null).get("history_enabled")).isEqualTo(false);
 
             signInWidget(Map.of(ChatOwner.USER_REF_KEY, "u-77"));
-            Map<String, Object> body = service.settings("api-1", null);
+            Map<String, Object> body = service.settings("api-1", null, null);
             assertThat(body.get("history_enabled")).isEqualTo(true);
             assertThat(body.get("project_instructions_max_chars")).isEqualTo(3000);
             assertThat(body.get("project_files_max_count")).isEqualTo(15);
@@ -276,7 +326,7 @@ class ChatWidgetSettingsServiceTest {
         when(platformSettings.getInt(eq(com.platform.speech.voice.VoiceTicketService.KEY_IDLE_END_SECONDS), anyInt())).thenReturn(120);
         when(sttConnections.findActive()).thenReturn(java.util.Optional.of(new com.platform.domain.ConnectionEntity()));
 
-        Map<String, Object> body = service.settings(null, null);
+        Map<String, Object> body = service.settings(null, null, null);
 
         assertThat(body).containsEntry("tts_enabled", true).containsEntry("tts_max_chars", 300)
                 .containsEntry("voice_chat_enabled", true).containsEntry("voice_end_silence_ms", 1200)

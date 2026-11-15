@@ -36,11 +36,15 @@ public class ChatSttController {
     private final PlatformSettingsService settings;
     private final AuditLogger auditLogger;
 
+    private final com.platform.session.ChatSessionOwnership sessionAccess;
+
     public ChatSttController(SpeechService speechService,
                              SttRateLimiter rateLimiter,
                              AudioMimeValidator mimeValidator,
                              PlatformSettingsService settings,
-                             AuditLogger auditLogger) {
+                             AuditLogger auditLogger,
+                             com.platform.session.ChatSessionOwnership sessionAccess) {
+        this.sessionAccess = sessionAccess;
         this.speechService = speechService;
         this.rateLimiter = rateLimiter;
         this.mimeValidator = mimeValidator;
@@ -58,6 +62,8 @@ public class ChatSttController {
 
         String sessionId = (sessionIdParam != null && !sessionIdParam.isBlank())
                 ? sessionIdParam : "anonymous";
+        // CR-194 BIZ-275: 대화 번호를 주면 그 대화에 들어갈 수 있어야 한다. 대화가 아닌 한도 단위 값은 행이 없어 통과한다
+        sessionAccess.requireIfExists(sessionIdParam);
 
         // BIZ-104 — 세션당 분당 호출 한도
         try {

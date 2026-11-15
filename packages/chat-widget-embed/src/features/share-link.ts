@@ -250,7 +250,7 @@ class ShareLink {
   private renderResult(result: HTMLElement, row: ShareRow, say: Say): void {
     const { t } = this;
     const line = el("div", "shr-linkrow");
-    line.append(el("div", "shr-url", row.url), textButton("chipb", t.copy, () => void this.copy(row.url, say)));
+    line.append(el("div", "shr-url", row.url), textButton("chipb", t.copy, () => void this.copy(row.url, say, line)));
     result.replaceChildren(line, el("div", "shr-until", t.until(shown(row.expires_at))));
     result.hidden = false;
   }
@@ -271,7 +271,7 @@ class ShareLink {
       if (row.status === "ACTIVE") {
         const acts = el("span", "shr-acts");
         acts.append(
-          textButton("chipb", t.copy, () => void this.copy(row.url, say)),
+          textButton("chipb", t.copy, () => void this.copy(row.url, say, r)),
           textButton("chipb", t.revoke, () => void this.revoke(row, box, rows, say)),
         );
         r.appendChild(acts);
@@ -296,8 +296,8 @@ class ShareLink {
     }
   }
 
-  private async copy(text: string, say: Say): Promise<void> {
-    const ok = await copyText(text);
+  private async copy(text: string, say: Say, near: Node): Promise<void> {
+    const ok = await copyText(text, near);
     say(ok ? this.t.copied : this.t.copyFailed, !ok);
   }
 }

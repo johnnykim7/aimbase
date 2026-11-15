@@ -122,6 +122,11 @@ interface WidgetOptions {
     ragSourceId?: string;
     /** 사용할 Connection ID — chat request 의 connection_id 로 전달. 미지정 시 테넌트 default. */
     connectionId?: string;
+    /**
+     * CR-194: 계정 묶음 번호. 주면 대화, 위젯 설정, 다음 질문 제안이 그 묶음으로 가고 한 계정의 사용 한도가 차면
+     * 다음 계정이 답한다. connectionId 와 같이 주면 묶음을 쓰고 요청에 connection_id 를 싣지 않는다(BIZ-281).
+     */
+    connectionGroupId?: string;
     /** MCP 도구 자동 호출 활성화 — chat request 의 actions_enabled=true 로 전달. 기본 false. */
     actionsEnabled?: boolean;
     /** 모델 명시 지정 — chat request 의 model 로 전달. 미지정 시 "auto". */
@@ -136,6 +141,13 @@ interface WidgetOptions {
     locale?: string;
     /** CR-175: 글자 크기 기본값. 사용자가 더보기에서 바꾸면 그 브라우저에서는 그 값을 따른다. */
     fontSize?: FontSize;
+    /**
+     * CR-194: 화면 키(BIZ-277). 주면 대화 목록을 이 화면의 대화로 거르고, 위젯이 뜰 때 이 탭이 이 화면에서 보던 대화나
+     * 가장 최근 대화를 연다. 새 대화는 첫 질문에 이 키를 남긴다
+     */
+    screenKey?: string;
+    /** CR-194: false 면 대화 목록과 목록 단추를 숨긴다. 기본 true */
+    historyList?: boolean;
     /** 위젯 안에서 승인과 거절 단추를 둘지. 기본 true(CR-185). false 면 붙이는 앱이 onApprovalRequired 로 자기 결재 화면을 쓴다 */
     allowApproval?: boolean;
     theme?: {
@@ -179,9 +191,20 @@ interface WidgetSettings {
         max_bytes: Partial<Record<"image" | "pdf" | "data" | "text", number>>;
     };
 }
+/** CR-194: 위젯 요소를 다시 만들지 않고 바꾸는 옵션. 준 칸만 바꾼다 */
+interface WidgetUpdate {
+    connectionId?: string | null;
+    connectionGroupId?: string | null;
+    historyList?: boolean;
+    emptySubtitle?: LocalizedText | null;
+}
 interface WidgetHandle {
     open(): void;
     close(): void;
+    /** CR-194 */
+    isOpen(): boolean;
+    /** CR-194: 다음 질문부터 바뀐 옵션을 쓴다 */
+    update(patch: WidgetUpdate): void;
     sendMessage(text: string): Promise<void>;
     abort(): Promise<void>;
     subscribeWorkflow(runId: string): () => void;
@@ -208,7 +231,7 @@ interface SttResult {
 /** CR-060: 위젯 STT 녹음 상태 머신 */
 type SttRecordingState = "idle" | "requesting-permission" | "recording" | "uploading" | "error";
 
-declare function createWidget(options: WidgetOptions): WidgetHandle;
+declare function createWidget(initialOptions: WidgetOptions): WidgetHandle;
 
 /**
  * <aimbase-chat> 커스텀 엘리먼트.
@@ -226,6 +249,12 @@ declare class AimbaseChatElement extends HTMLElement {
     contextProvider: WidgetOptions["contextProvider"] | null;
     ragSourceId: string | null;
     static get observedAttributes(): string[];
+    /**
+     * CR-194 계약 6-1: 붙이는 앱은 화면을 옮겨도 위젯 요소 하나를 그대로 두고 속성만 바꾼다. 화면 키가 바뀌면 그 화면의
+     * 토큰과 대화로 위젯을 다시 띄운다(응답 멈춤, 토큰 다시 받기, 위젯 설정 다시 읽기). 열려 있던 창은 연 채로 둔다.
+     * 연결, 계정 묶음, 대화 목록 끄기, 첫 화면 안내 줄은 그 자리에서 바꾼다. 그 밖의 속성은 지금처럼 붙을 때만 읽는다.
+     */
+    attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void;
     connectedCallback(): void;
     disconnectedCallback(): void;
     /** JS 에서 프로그램적으로 워크플로우 구독 */
@@ -282,11 +311,20 @@ interface LeftPaneSpec {
     label: () => string;
     /** 빈 칸을 받아 그린다. 언어가 바뀌면 다시 그리는 것은 기능이 한다 */
     render: (body: HTMLElement) => void;
+    /**
+     * CR-194: 떠 있는 창(bubble)에서 칸을 열면 대화를 덮지 않고 옆에 붙이고 판을 넓힌다. 크게 보기와 브라우저 창 폭이
+     * 모자랄 때는 CR-177 그대로다
+     */
+    dock?: boolean;
 }
 interface LeftPaneHandle {
     open(): void;
     close(): void;
     isOpen(): boolean;
+    /** CR-194: 거짓이면 칸을 닫고 머리줄 여닫기 단추를 숨긴다 */
+    setAvailable(available: boolean): void;
+    /** CR-194: 지금 열면 대화 옆에 붙는지(dock 칸, 떠 있는 창, 크게 보기 아님, 브라우저 창 폭 충분) */
+    docks(): boolean;
 }
 interface SidePaneSpec {
     /** 같은 id 로 다시 열면 내용만 새로 그린다 */
@@ -328,6 +366,8 @@ interface AnswerView {
     artifacts: ChatArtifact[];
     stopped: boolean;
     error?: string;
+    /** CR-194: 서버가 요청을 거절한 오류 코드. 없으면 비운다 */
+    errorCode?: string;
     /** 마지막 질문의 마지막 버전 */
     latest: boolean;
     at: Date;
@@ -368,6 +408,19 @@ interface TitleTagSpec {
     icon?: string;
     onClick?: () => void;
 }
+/** CR-194: 질문한 사람(BIZ-278). 이름이 없으면 userRef 를 보인다 */
+interface Asker {
+    userRef: string;
+    userName?: string;
+}
+/** CR-194: 질문 보기. 질문 위 꾸밈과 되감기 허용을 기능이 정할 때 받는다 */
+interface QuestionView {
+    sessionId: string;
+    turnId?: string;
+    asker?: Asker;
+    /** 마지막 질문 */
+    last: boolean;
+}
 interface ConversationView {
     sessionId: string;
     title?: string;
@@ -385,6 +438,7 @@ interface ConversationView {
                 mediaType: string;
                 available: boolean;
             }>;
+            asker?: Asker;
         };
         answer: {
             text: string;
@@ -454,6 +508,8 @@ interface WidgetEvents {
         title: string;
     };
     settingsLoaded: WidgetSettings;
+    /** CR-194: 붙이는 앱이 위젯 요소를 다시 만들지 않고 속성(history-list 등)을 바꿨을 때 */
+    optionsChange: void;
     workflowApproval: WorkflowApprovalEvent;
     /** 워크플로우 진행 칸의 런이 끝났을 때 */
     workflowDone: WorkflowDoneEvent;
@@ -467,10 +523,16 @@ interface WidgetContext {
     text(value: LocalizedText | undefined): string | undefined;
     list(value: LocalizedList | undefined): string[];
     sessionId(): string;
+    /** 붙이는 앱이 준 대화 번호(session-id). 주지 않았으면 null */
+    givenSessionId(): string | null;
     isBusy(): boolean;
     isRecording(): boolean;
     widgetSettings(): WidgetSettings | null;
     connectionId(): string | null;
+    /** CR-194: 붙이는 앱이 준 화면 키(screen-key). 없으면 null */
+    screenKey(): string | null;
+    /** CR-194: 붙이는 앱이 대화 목록을 끄지 않았으면 참(history-list) */
+    historyList(): boolean;
     /** 붙이는 앱 옵션 allowApproval(속성 allow-approval). 기본 참 */
     allowApproval(): boolean;
     on<K extends keyof WidgetEvents>(name: K, cb: (payload: WidgetEvents[K]) => void): () => void;
@@ -500,6 +562,14 @@ interface WidgetContext {
         };
         header: {
             setTitleTag(spec: TitleTagSpec | null): void;
+            /** CR-194: 머리줄 아래 회색 띠 한 줄. null 이면 없앤다. 언어가 바뀌면 다시 부른다 */
+            setNotice(text: (() => string) | null): void;
+            /** CR-194: 머리줄 새 대화 단추 */
+            setNewConversationVisible(visible: boolean): void;
+        };
+        /** CR-194: 질문 풍선 위에 붙인다. 돌려준 요소가 없으면 붙이지 않는다 */
+        question: {
+            addDecorator(render: (q: QuestionView) => HTMLElement | null): void;
         };
         addErrorTexts(map: Record<string, () => string>): void;
         /** 응답 본문과 같은 모양(표 단추, 코드 강조, 등록된 마크다운 확장, 지금 언어 문구)으로 마크다운을 그린다 */
@@ -509,7 +579,11 @@ interface WidgetContext {
         setFontSize(size: FontSize): void;
         layer: HTMLElement;
         toast(text: string): void;
-        notice(text: string): void;
+        /** 대화 칸 회색 안내 줄. action 을 주면 줄 끝에 단추를 단다(CR-194) */
+        notice(text: string, action?: {
+            label: string;
+            run: () => void;
+        }): void;
         onEscape(fn: () => boolean): () => void;
     };
     chat: {
@@ -536,6 +610,10 @@ interface WidgetContext {
          * 시한이 지날 때까지 기다렸다 보낸다(CR-188). 위젯 설정을 처음 받을 때(settingsLoaded)까지 건 것만 기다린다
          */
         waitBeforeSend(task: Promise<unknown>): void;
+        /** CR-194: 이 위젯에서 보내는 질문의 묻는 사람. 질문 보기(QuestionView)에 실린다 */
+        setAsker(asker: Asker | null): void;
+        /** CR-194: 질문 수정과 다시 생성을 그 질문에 둘지. 거짓이면 숨긴다. null 이면 위젯 기본 */
+        setRewindGuard(allow: ((q: QuestionView) => boolean) | null): void;
     };
     api: {
         /** body 가 FormData 면 multipart 로 그대로, 그 밖에는 JSON 으로 싣는다 */
@@ -548,6 +626,8 @@ interface WidgetContext {
         hasScope(scope: string): boolean;
         /** 위젯 토큰에 사용자 식별값(user_ref)이 있으면 참. hasScope 와 같이 토큰을 받기 전에는 거짓 */
         hasUserRef(): boolean;
+        /** CR-194: 위젯 토큰의 user_ref. 없거나 토큰을 받기 전이면 null */
+        userRef(): string | null;
         /** 위젯 서버 주소로 만든 절대 웹소켓 주소. http 는 ws, https 는 wss */
         wsUrl(path: string): string;
     };
@@ -572,6 +652,8 @@ declare class TokenStore {
      * 서명은 서버가 검사하므로 여기서는 화면을 정하는 데만 쓴다.
      */
     hasUserRef(): boolean;
+    /** CR-194: 토큰의 user_ref. 없거나 토큰을 받기 전이면 null */
+    userRef(): string | null;
     private claimsOf;
     private claims;
     /** 토큰 메타 미리 로드 (getToken 호출로 초기화만 수행) */

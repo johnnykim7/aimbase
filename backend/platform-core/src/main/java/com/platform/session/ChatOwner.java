@@ -14,6 +14,10 @@ public final class ChatOwner {
     public static final String WIDGET_ROLE = "WIDGET";
     /** 위젯 토큰 사용자 정보에 user_ref 를 담는 칸. JwtAuthenticationFilter 가 채운다. */
     public static final String USER_REF_KEY = "user_ref";
+    /** CR-194: 묻는 사람 이름(BIZ-278). */
+    public static final String USER_NAME_KEY = "user_name";
+    /** CR-194: 함께 보기 키(BIZ-275). */
+    public static final String SHARE_KEY_KEY = "share_key";
 
     private ChatOwner() {}
 
@@ -40,6 +44,34 @@ public final class ChatOwner {
     /** 지금 요청의 주인. */
     public static String current() {
         return of(currentPrincipal());
+    }
+
+    /** CR-194: 위젯 토큰의 묻는 사람 이름. 위젯 토큰이 아니거나 이름이 없으면 null. */
+    public static String userNameOf(UserPrincipal principal) {
+        return widgetValue(principal, USER_NAME_KEY);
+    }
+
+    /** CR-194: 위젯 토큰의 함께 보기 키. 위젯 토큰이 아니거나 키가 없으면 null. 로그인은 함께 보는 대화를 열지 않는다. */
+    public static String shareKeyOf(UserPrincipal principal) {
+        return widgetValue(principal, SHARE_KEY_KEY);
+    }
+
+    public static String shareKeyOf(Authentication auth) {
+        return auth != null && auth.getPrincipal() instanceof UserPrincipal up ? shareKeyOf(up) : null;
+    }
+
+    public static String currentUserName() {
+        return userNameOf(currentPrincipal());
+    }
+
+    public static String currentShareKey() {
+        return shareKeyOf(currentPrincipal());
+    }
+
+    private static String widgetValue(UserPrincipal principal, String key) {
+        if (!isWidget(principal)) return null;
+        Object value = principal.getPermissions().get(key);
+        return value instanceof String s && !s.isBlank() ? s : null;
     }
 
     /**
