@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.42.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.43.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -727,6 +727,7 @@ DELETE /api/v1/workflows/{id}
 | 404 | 리소스 없음 | ID 확인 |
 | 503 | RAG 사이드카 미기동 | 사이드카 상태 확인 (port 8002) |
 | 503 | `connection_group_unavailable:retry_after=<시각>` 연결 묶음에 고를 커넥션이 없음 (CR-161) | `retry_after` 뒤에 다시 요청 (§ 25-3) |
+| 503 | `cli_account_token_missing:`, `cli_account_token_expired:` 단일 CLI 커넥션의 계정에 1년 토큰이 없거나 기한이 지남 (CR-196) | 다시 보내도 같다. Aimbase 담당에게 알린다. 연결 묶음을 쓰면 다른 계정으로 넘어간다 (§ 25-3) |
 
 ---
 
@@ -2328,6 +2329,8 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 |---|---|---|---|
 | 1 | `connection_group_unavailable:retry_after=<ISO-8601>` | 고를 수 있는 커넥션이 없다. 가장 먼저 풀리는 시각 | 503 |
 | 2 | `cli_account_limited:resets_at=<epoch 초>:type=<한도 종류>:` | CLI 계정 한도. 그룹이 아닌 단일 커넥션 요청이면 그대로 돌려준다 | 503 |
+| 3 | `cli_account_token_missing:<계정 폴더>` | CLI 계정에 1년 토큰이 없다. 그룹은 그 커넥션을 5분 빼고 다음으로 넘기고, 단일 커넥션 요청이면 그대로 돌려준다. 다시 보내도 같고 Aimbase 담당이 토큰을 넣어야 풀린다 (CR-196) | 503 |
+| 4 | `cli_account_token_expired:<계정 폴더>:expires_at=<ISO-8601>` | CLI 계정의 1년 토큰 기한이 지났다. 나머지는 3 과 같다 (CR-196) | 503 |
 
 실시간은 SSE `error` 이벤트로 끝납니다. 워크플로우 단계는 단계 실패로 남고 메시지는 위와 같습니다.
 
@@ -3438,6 +3441,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.43.0 | 2026-11-16 | **CR-196 CLI 계정 1년 토큰 오류** (§ 5, § 25-3). 오류 머리 `cli_account_token_missing`, `cli_account_token_expired`. 연결 묶음은 그 커넥션을 5분 빼고 다음으로 넘기고, 단일 커넥션 비실시간은 503 |
 | v3.42.0 | 2026-11-16 | **CR-194 위젯 계정 묶음** (§ 28-2, § 28-4, § 38-4). 위젯 설정 조회 질의와 다음 질문 제안 본문에 `connection_group_id`. 대화 요청 모델 검사를 묶음 구성원 모두로. 위젯 속성 `connection-group-id` |
 | v3.41.0 | 2026-11-15 | **CR-194 위젯 화면별 대화와 함께 보는 대화** (§ 17-2, § 38). 토큰 발급 `user_name`, `share_key`, 모르는 칸 무시. `POST /api/v1/chat/sessions/shared` 추가. 대화 목록 `screen_key`, 대화 요청 `screen_key`, 이어보기 `shared` 와 `question.asker`, 위젯 설정 `shared_available` 과 `user_name`. 대화 번호를 받는 위젯 API 의 접근 확인을 하나로 모아 대화 요청에도 건다 |
 | v3.40.3 | 2026-11-14 | **CR-185 승인 대기 런 구독** (§ 17-6, § 37-4). 승인 대기에 들어간 뒤 구독해도 `workflow.snapshot` 다음에 `workflow.approval` 을 다시 보낸다. 이벤트에 `approval_id` 추가. `workflow:approve` 는 플랫폼 런타임 설정(모든 테넌트 공통)에 넣는다고 보정 |

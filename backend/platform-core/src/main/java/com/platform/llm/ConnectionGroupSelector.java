@@ -41,6 +41,12 @@ public class ConnectionGroupSelector {
     /** cli-runner ClaudeCliWorker.ACCOUNT_LIMITED_PREFIX 와 같은 값. platform-core 는 cli-runner 를 의존하지 않는다. */
     public static final String ACCOUNT_LIMITED_PREFIX = "cli_account_limited:";
     public static final String GROUP_UNAVAILABLE_PREFIX = "connection_group_unavailable:";
+    /**
+     * CR-196 BIZ-283: 계정에 1년 토큰이 없거나 기한이 지났다. cli-runner ClaudeAccountToken.MISSING_PREFIX,
+     * EXPIRED_PREFIX 와 같은 값. 실행기는 CLI 를 띄우기 전에 거절하므로 다른 계정으로 넘겨도 같은 일을 두 번 하지 않는다.
+     */
+    public static final List<String> ACCOUNT_TOKEN_PREFIXES =
+            List.of("cli_account_token_missing:", "cli_account_token_expired:");
 
     private static final Pattern RESETS_AT = Pattern.compile("cli_account_limited:resets_at=(\\d+)");
     /** 실행기에 닿지 못한 실패. 요청이 간 뒤 끊긴 것(AGENT_TIMEOUT, TURN_BROKEN_PIPE)은 다른 계정에서 같은 일을 또 하게 되므로 넘기지 않는다. */
@@ -64,7 +70,7 @@ public class ConnectionGroupSelector {
     private final ConcurrentHashMap<String, Pin> pins = new ConcurrentHashMap<>();
     private volatile long lastPinSweepAt;
 
-    private enum Failure { ACCOUNT_LIMITED, UNREACHED, OTHER }
+    private enum Failure { ACCOUNT_LIMITED, ACCOUNT_TOKEN, UNREACHED, OTHER }
 
     private static final class Pin {
         final String connectionId;
@@ -140,6 +146,9 @@ public class ConnectionGroupSelector {
                 if (failure == Failure.ACCOUNT_LIMITED) {
                     Instant until = parseResetsAt(e);
                     cb.openUntil(until != null ? until : clock.instant().plusMillis(CB_OPEN_DURATION_MS));
+                } else if (failure == Failure.ACCOUNT_TOKEN) {
+                    // 토큰을 넣으면 풀리므로 정해진 시각이 없다. 한도 시각을 모를 때와 같은 간격으로 다시 본다.
+                    cb.openUntil(clock.instant().plusMillis(CB_OPEN_DURATION_MS));
                 } else {
                     cb.recordFailure();
                 }
@@ -195,6 +204,9 @@ public class ConnectionGroupSelector {
     private Failure classify(String connectionId, Throwable e) {
         String chain = messageChain(e);
         if (chain.contains(ACCOUNT_LIMITED_PREFIX)) return Failure.ACCOUNT_LIMITED;
+        for (String prefix : ACCOUNT_TOKEN_PREFIXES) {
+            if (chain.contains(prefix)) return Failure.ACCOUNT_TOKEN;
+        }
         if (!adapterFactory.isCliConnection(connectionId)) return Failure.UNREACHED; // CR-015: API 멤버는 모든 실패에서 넘긴다
         for (String marker : CLI_UNREACHED_MARKERS) {
             if (chain.contains(marker)) return Failure.UNREACHED;

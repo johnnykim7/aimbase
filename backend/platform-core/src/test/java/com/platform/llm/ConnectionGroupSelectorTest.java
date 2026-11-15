@@ -92,6 +92,39 @@ class ConnectionGroupSelectorTest {
         assertThat(calls).doesNotContain("w01");
     }
 
+    /** CR-196 TC-TOK-015: 토큰 없는 계정과 기한 지난 계정은 한도 계정처럼 빼고 다음 멤버로 넘긴다. 5분 뒤 다시 본다. */
+    @Test
+    void tc_tok_015_tokenUnavailableAccountIsSkipped() {
+        for (String head : List.of("cli_account_token_missing:/root/.claude-accounts/work01",
+                "cli_account_token_expired:/root/.claude-accounts/work01:expires_at=2026-11-16T08:59+09:00")) {
+            ConnectionGroupSelector sel = new ConnectionGroupSelector(groupRepository, adapterFactory,
+                    settingsWithDefaults(), clock);
+            List<String> calls = new ArrayList<>();
+            RuntimeException wrapped = new RuntimeException("LLM call failed: x",
+                    new RuntimeException("Runner /v1/chat 실패: {\"error\":\"" + head + "\"}"));
+            String used = sel.execute(GROUP, "s1", id -> {
+                calls.add(id);
+                if (id.equals("w01")) throw wrapped;
+                return id;
+            });
+            assertThat(used).isEqualTo("w02");
+            assertThat(calls).containsExactly("w01", "w02");
+            assertThat(sel.getCircuitBreakerState("w01")).isEqualTo("OPEN");
+        }
+    }
+
+    /** CR-196 TC-TOK-015: 모든 멤버가 토큰 때문에 빠지면 묶음 사용 불가이고, 다시 볼 시각은 5분 뒤다. */
+    @Test
+    void tc_tok_015_allMembersWithoutTokenRetryAfterFiveMinutes() {
+        Instant now = clock.instant();
+        assertThatThrownBy(() -> selector.execute(GROUP, "s1", id -> {
+            throw new RuntimeException("cli_account_token_missing:/root/.claude-accounts/" + id);
+        }))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageStartingWith("connection_group_unavailable:retry_after="
+                        + now.plus(Duration.ofMinutes(5)));
+    }
+
     @Test
     void tc_cg_104_limitMarkerInsideStreamErrorChain() {
         RuntimeException wrapped = new RuntimeException("LLM call failed: x",
@@ -198,6 +231,12 @@ class ConnectionGroupSelectorTest {
     @Test
     void memberConnectionIdsListsGroupMembers() {
         assertThat(selector.memberConnectionIds(GROUP)).containsExactly("w01", "w02");
+    }
+
+    private static PlatformSettingsService settingsWithDefaults() {
+        PlatformSettingsService settings = mock(PlatformSettingsService.class);
+        when(settings.getInt(anyString(), anyInt())).thenAnswer(inv -> inv.getArgument(1));
+        return settings;
     }
 
     private String run(String pinKey, List<String> calls) {

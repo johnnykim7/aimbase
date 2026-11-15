@@ -3046,12 +3046,13 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   3. 기동 스크립트 `token` 단계가 토큰 파일을 쓴다. CR-194 단계의 로그인 파일 끼워 넣기를 걷어내고, 로그인 파일에 들어 있던 1년 토큰은 옮긴다. `connections` 는 토큰 파일이 있는 계정만 센다. 맥과 리눅스 PC 는 `scripts/cli-token.py`
   4. 갈래 워커를 만들다 실행 오류가 나도 run 자리를 돌려준다
   5. 실행기 `GET /v1/account-token`, api 의 하루 한 번 만료 확인과 bp-notification 메일, 문자(만료 30, 7, 1, 0일 전, 문턱마다 한 번)
-- **결정**: 11/16 06:01 정석(환경변수). 06:06 실행기가 도는 곳 모두. 06:15 bp-notification 메일과 문자. 06:18 대규모 승인. 06:20 토큰 먼저, 알림은 이어서
-- **영향 모듈**: cli-runner `ClaudeCliWorker`, `ClaudeCliWorkerPool`, `ClaudeCliAdapterConfig`, 새 `ClaudeAccountToken`. aimbase-agent `RunnerAutoConfiguration`, `RunnerController`. platform-core 만료 확인과 발송, `PlatformSettingsService`. scripts `chaws-bootstrap.sh`, 새 `cli-token.py`
+  6. api 는 토큰 실패를 계정 한도처럼 다룬다. 연결 묶음은 그 계정을 5분 빼고 다음 계정으로 넘기고, 단일 커넥션 비실시간은 503 에 그 머리 그대로. API 가이드 § 5, § 25-3 과 소비앱 세 곳 알림
+- **결정**: 11/16 06:01 정석(환경변수). 06:06 실행기가 도는 곳 모두. 06:15 bp-notification 메일과 문자. 06:18 대규모 승인. 06:20 토큰 먼저, 알림은 이어서. 06:54 토큰 실패는 한도처럼 넘기고 소비앱에 알림. 06:59 이 창의 구현을 정본으로 하고 다른 창의 CR-196 은 쓰지 않는다
+- **영향 모듈**: cli-runner `ClaudeCliWorker`, `ClaudeCliWorkerPool`, `ClaudeCliAdapterConfig`, 새 `ClaudeAccountToken`. aimbase-agent `RunnerAutoConfiguration`, `RunnerController`. platform-core `ConnectionGroupSelector`, `ClaudeCliAdapter`, 새 `CliAccountTokenException`, `GlobalExceptionHandler`, 만료 확인과 발송, `PlatformSettingsService`. scripts `chaws-bootstrap.sh`, 새 `cli-token.py`, `deploy.sh`
 - **영향도**: High (토큰 파일이 없는 계정은 새 실행기에서 바로 막힌다. 토큰을 먼저 넣고 실행기를 올린다)
-- **영향 범위**: CR-161(계정 묶음), CR-162(운영 chaws 계정), CR-194(token 단계), CR-195(실행기 CLI 판). 다른 레포 bp-notification(양식 등록)
-- **영향 설계서**: T1-1 v7.22(PRD-640, 641), T1-3 v5.24(BIZ-283, 284), T1-7 v3.31(CR-196 묶음), T3-1 v4.26(cli_token_expiry_notices, runner 설정), T3-5 v4.25(TC-TOK-001 ~ 014), T3-12 15절, 운용 가이드
-- **영향 없음 확인**: T1-5, T1-6(상태 전환, 이벤트 없음), T2-1, T2-2(새 라이브러리와 구현 규약 없음), T3-2 와 API 가이드(소비앱이 부르는 API 변경 없음), T3-3, T3-4(화면 변경 없음, 운영 설정 화면에 분류 하나)
+- **영향 범위**: CR-161(계정 묶음), CR-162(운영 chaws 계정), CR-194(token 단계), CR-195(실행기 CLI 판). 다른 레포 bp-notification(양식 등록), bp-wes, bp-wms, bp-3plgw(오류 머리 알림, 바꿀 것 없음)
+- **영향 설계서**: T1-1 v7.22(PRD-640, 641), T1-3 v5.24(BIZ-283, 284), T1-7 v3.31(CR-196 묶음), T3-1 v4.26(cli_token_expiry_notices, runner 설정), T3-2 v7.28(커넥션 그룹 오류 3, 4), T3-5 v4.25(TC-TOK-001 ~ 016), T3-12 15절, API 가이드 v3.43.0(§ 5, § 25-3), 운용 가이드
+- **영향 없음 확인**: T1-5, T1-6(상태 전환, 이벤트 없음), T2-1, T2-2(새 라이브러리와 구현 규약 없음), 소비앱이 부르는 API 의 요청과 응답 모양(오류 머리 둘만 는다), T3-3, T3-4(화면 변경 없음, 운영 설정 화면에 분류 하나)
 - **상태**: 1단계 구현(서버 반영 전), 2단계 설계
 
 ## CR 후보 (발번 전)
