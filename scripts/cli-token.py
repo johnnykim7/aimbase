@@ -16,6 +16,7 @@ setup-token 을 띄워 값을 받고, 붙여 넣은 값을 계정 폴더의 토�
 import getpass
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,12 @@ OVERRIDING_ENV = ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_
                   "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 KST = timezone(timedelta(hours=9))
 VERIFY_MODEL = os.environ.get("VERIFY_MODEL", "claude-haiku-5-5")
+# setup-token 화면이 터미널의 붙여넣기 표시 모드(ESC[?2004h)를 켠 채 끝나면, 다음 붙여넣기 앞뒤에
+# ESC[200~ 와 ESC[201~ 가 끼어 값이 sk-ant-oat01- 로 시작하지 않게 된다(2026-11-16 chaws work01).
+# 받기 전에 그 모드를 끄고, 받은 글에서도 제어 문자를 걷어 토큰 모양만 골라낸다.
+ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+TOKEN = re.compile(re.escape(PREFIX) + r"[A-Za-z0-9_-]+")
+TRIES = 3
 
 
 def account_dir(arg):
@@ -111,6 +118,28 @@ def setup_token():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def pick_token(raw):
+    """붙여 넣은 글에서 토큰만 골라낸다. 없으면 빈 문자열."""
+    m = TOKEN.search(ESCAPES.sub("", raw))
+    return m.group(0) if m else ""
+
+
+def read_token():
+    """토큰을 화면에 보이지 않게 받는다. 모양이 틀리면 값은 찍지 않고 무엇이 왔는지만 알리고 다시 받는다."""
+    for _ in range(TRIES):
+        if sys.stdout.isatty():
+            sys.stdout.write("\x1b[?2004l")
+            sys.stdout.flush()
+        raw = getpass.getpass("[token] claude setup-token 이 찍은 sk-ant-oat01- 값을 붙여 넣고 Enter"
+                              "(화면에 보이지 않습니다): ")
+        tok = pick_token(raw)
+        if tok:
+            return tok
+        print("[token] 받은 글 %d자에 sk-ant-oat01- 값이 없습니다(제어 문자 %d개). 값만 다시 붙여 넣어 주세요"
+              % (len(raw), len(ESCAPES.findall(raw))))
+    return ""
+
+
 def ask(prompt):
     try:
         return input(prompt).strip().lower()
@@ -140,10 +169,9 @@ def main():
     else:
         if ask("[token] claude setup-token 을 지금 띄울까요? 이미 값을 받았으면 n [Y/n] ") in ("", "y"):
             setup_token()
-        tok = getpass.getpass("[token] claude setup-token 이 찍은 sk-ant-oat01- 값을 붙여 넣고 Enter"
-                              "(화면에 보이지 않습니다): ").strip()
-        if not tok.startswith(PREFIX) or tok == PREFIX:
-            print("[token] sk-ant-oat01- 로 시작하지 않아 넣지 않았습니다")
+        tok = read_token()
+        if not tok:
+            print("[token] sk-ant-oat01- 값을 받지 못해 넣지 않았습니다")
             sys.exit(1)
         write(d, tok, now, now + timedelta(days=days))
         tok = ""
