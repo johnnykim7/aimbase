@@ -516,4 +516,61 @@ class WorkflowValidatorTest {
         assertThatThrownBy(() -> validator.validate(List.of(step)))
                 .hasMessageContaining("config.max_items must be >= 1");
     }
+
+    // ═══════════════════════════════════════════════
+    // CR-193 code_check 저장 검증 (TC-ECK-014)
+    // ═══════════════════════════════════════════════
+
+    private static Map<String, Object> codeCheck() {
+        Map<String, Object> cc = new LinkedHashMap<>();
+        cc.put("skill", "lexflow-draft-checks");
+        cc.put("version", 1);
+        cc.put("script", "scripts/check_laws.py");
+        cc.put("timeout_seconds", 30);
+        cc.put("input", Map.of("case", "{{input.case}}"));
+        return cc;
+    }
+
+    @Test
+    @DisplayName("TC-ECK-014 code_check 맞는 설정과 칸 없는 설정은 통과")
+    void TC_ECK_014_valid_code_check_passes() {
+        Map<String, Object> step = validStep();
+        mutate(step, "config.code_check", codeCheck());
+        assertThatCode(() -> validator.validate(List.of(step))).doesNotThrowAnyException();
+
+        Map<String, Object> minimal = validStep();
+        mutate(minimal, "config.code_check", Map.of("skill", "s", "script", "scripts/a.py"));
+        assertThatCode(() -> validator.validate(List.of(minimal))).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("TC-ECK-014 code_check 칸 형식이 틀리면 400, 문구에 칸 이름")
+    void TC_ECK_014_bad_code_check_rejected() {
+        List<Object[]> cases = List.of(
+                new Object[]{null, "{\"skill\":\"s\"}", "code_check must be an object"},
+                new Object[]{"skill", "", "code_check.skill"},
+                new Object[]{"skill", 3, "code_check.skill"},
+                new Object[]{"script", null, "code_check.script"},
+                new Object[]{"version", 0, "code_check.version"},
+                new Object[]{"version", 1.5, "code_check.version"},
+                new Object[]{"timeout_seconds", 0, "code_check.timeout_seconds"},
+                new Object[]{"timeout_seconds", "30", "code_check.timeout_seconds"},
+                new Object[]{"input", List.of("a"), "code_check.input"});
+        for (Object[] c : cases) {
+            Map<String, Object> step = validStep();
+            if (c[0] == null) {
+                mutate(step, "config.code_check", c[1]);
+            } else {
+                Map<String, Object> cc = codeCheck();
+                if (c[1] == null) cc.remove((String) c[0]);
+                else cc.put((String) c[0], c[1]);
+                mutate(step, "config.code_check", cc);
+            }
+            assertThatThrownBy(() -> validator.validate(List.of(step)))
+                    .as("case %s=%s", c[0], c[1])
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasMessageContaining("step 'loop-1'")
+                    .hasMessageContaining((String) c[2]);
+        }
+    }
 }

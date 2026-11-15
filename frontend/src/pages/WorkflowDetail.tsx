@@ -120,6 +120,10 @@ function EvaluatorLoopDetail({ data }: { data: Record<string, unknown> }) {
             const genMs = it.generator_ms as number | undefined;
             const evalMs = it.evaluator_ms as number | undefined;
             const retried = it.evaluator_retried === true;
+            // CR-193: 코드 대조 결과. passed 가 null 이면 대조 스크립트가 실패한 회차다
+            const codeCheck = it.code_check as Record<string, unknown> | undefined;
+            const codeState = codeCheck == null ? null
+              : codeCheck.passed === true ? "pass" : codeCheck.passed === false ? "violation" : "error";
             const isOpen = openIter === i;
             return (
               <div key={i} className="border border-border rounded-md overflow-hidden">
@@ -146,6 +150,9 @@ function EvaluatorLoopDetail({ data }: { data: Record<string, unknown> }) {
                     {retried && (
                       <span className="text-[10px] text-warning">⚠ evaluator retried</span>
                     )}
+                    {codeState === "pass" && <Badge color="success">코드 대조 통과</Badge>}
+                    {codeState === "violation" && <Badge color="danger">코드 대조 위반</Badge>}
+                    {codeState === "error" && <Badge color="warning">코드 대조 오류</Badge>}
                   </div>
                   <div className="flex items-center gap-2 text-muted-foreground">
                     {genMs != null && <span className="font-mono text-[10px]">gen {genMs}ms</span>}
@@ -179,6 +186,44 @@ function EvaluatorLoopDetail({ data }: { data: Record<string, unknown> }) {
                         >
                           {JSON.stringify(verdict, null, 2)}
                         </pre>
+                      </div>
+                    )}
+                    {codeCheck && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">
+                          코드 대조
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          {codeCheck.feedback != null && (
+                            <div className="p-1.5 bg-background rounded border border-border whitespace-pre-wrap break-all">
+                              {String(codeCheck.feedback)}
+                            </div>
+                          )}
+                          {Array.isArray(codeCheck.issues) && codeCheck.issues.length > 0 && (
+                            <pre
+                              className="p-1.5 bg-background rounded border border-border whitespace-pre-wrap break-all"
+                              style={{ maxHeight: 200, overflow: "auto" }}
+                            >
+                              {JSON.stringify(codeCheck.issues, null, 2)}
+                            </pre>
+                          )}
+                          {codeCheck.error != null && (
+                            <div className="text-destructive text-[11px]">{String(codeCheck.error)}</div>
+                          )}
+                          {codeCheck.stderr != null && (
+                            <pre
+                              className="p-1.5 bg-background rounded border border-border whitespace-pre-wrap break-all text-[11px]"
+                              style={{ maxHeight: 200, overflow: "auto" }}
+                            >
+                              {String(codeCheck.stderr)}
+                            </pre>
+                          )}
+                          {codeCheck.duration_ms != null && (
+                            <div className="font-mono text-[10px] text-muted-foreground">
+                              {`${String(codeCheck.duration_ms)}ms`}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                     {(Boolean(it.generator_error) || Boolean(it.evaluator_error)) && (

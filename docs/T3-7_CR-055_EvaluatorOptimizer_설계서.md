@@ -684,7 +684,7 @@ except TransientException:
 | 작업 폴더 | run 작업장 |
 | 인자 | 입력 파일의 작업장 기준 상대 경로 하나. 파일은 `.code-check/` 아래 회차마다 새 이름으로 쓰고, 실행이 끝나면 지운다 |
 | 입력 파일 | UTF-8 JSON `{"step_id", "iteration", "output", "output_text", "input"}`. `iteration` 은 0 부터. `output` 은 작성 결과의 구조화 출력(없으면 null), `output_text` 는 작성 결과 글, `input` 은 16.2 의 `input` 을 푼 값(없으면 빈 객체) |
-| 출력 | stdout 전체가 JSON 객체 하나. `passed` boolean 필수. `passed` 가 false 면 `feedback` 이 비지 않은 글이어야 한다. `issues` 는 선택이며 있으면 배열 |
+| 출력 | stdout 전체가 JSON 객체 하나(뒤에 다른 글이 붙으면 규약 밖). `passed` boolean 필수. `feedback` 은 있으면 글이고, `passed` 가 false 면 비지 않은 글이어야 한다. `issues` 는 선택이며 있으면 배열 |
 | 종료 코드 | 0. 위반도 0 으로 끝내고 `passed: false` 로 알린다 |
 | 시간 | `timeout_seconds`. 넘으면 실행 컨테이너가 프로세스를 죽인다 |
 | 출력 상한 | stdout, stderr 각각 `skills.script-output-max-bytes`. 잘린 stdout 은 규약 밖 출력이다 |
@@ -706,7 +706,7 @@ except TransientException:
 }
 ```
 
-- 오류 회차는 `passed` 가 null, `error` 에 까닭(`exit code 1`, `timed out after 30s`, `stdout is not a JSON object`, `passed must be a boolean`, `feedback is required when passed is false`, `issues must be an array`, 실행 컨테이너 문구), `stderr` 에 실행 컨테이너가 돌려준 stderr 를 남긴다.
+- 오류 회차는 `passed` 가 null, `error` 에 까닭(`exit code 1`, `timed out after 30s`, `stdout is not a JSON object`, `passed must be a boolean`, `feedback must be a string`, `feedback is required when passed is false`, `issues must be an array`, 실행 컨테이너 문구), `stderr` 에 실행 컨테이너가 돌려준 stderr 를 남긴다.
 - 실행 컨테이너에 닿지 못한 오류는 `exit_code`, `timed_out`, `duration_ms` 가 없다.
 
 ### 16.6 실패 처리

@@ -51,6 +51,11 @@ import java.util.Map;
  *   <li>Evaluator JSON 파싱 실패: 재시도 불가 (동일 결과 예상), verdict=null로 기록.</li>
  *   <li>pass_criteria 설정 오류 (field 없음 등): 스텝 FAIL (사용자에게 드러내야 하는 오류).</li>
  * </ul>
+ *
+ * <h3>코드 대조 (CR-193, BIZ-195, 설계서 16절)</h3>
+ * config.code_check 가 있으면 작성이 성공한 회차마다 검사 LLM 앞에서 스킬 묶음의 대조 스크립트를 돌린다.
+ * 그 회차는 검사 결과가 통과 기준을 통과하고 대조가 passed true 일 때만 통과다. 다음 작성 지적은
+ * 대조 지적 다음 줄에 검사 지적을 잇는다. 대조가 실패한 회차는 통과가 아니고 단계는 계속된다.
  */
 @Component
 public class EvaluatorLoopStepExecutor implements StepExecutor {
@@ -67,11 +72,14 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
 
     private final LlmCallStepExecutor llmCallStepExecutor;
     private final com.platform.service.PromptTemplateService promptTemplateService;
+    private final CodeCheckRunner codeCheckRunner;
 
     public EvaluatorLoopStepExecutor(LlmCallStepExecutor llmCallStepExecutor,
-                                     com.platform.service.PromptTemplateService promptTemplateService) {
+                                     com.platform.service.PromptTemplateService promptTemplateService,
+                                     CodeCheckRunner codeCheckRunner) {
         this.llmCallStepExecutor = llmCallStepExecutor;
         this.promptTemplateService = promptTemplateService;
+        this.codeCheckRunner = codeCheckRunner;
     }
 
     @Override
@@ -93,6 +101,9 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
 
         // evaluator 프롬프트 템플릿 치환 (prompt_template_key 지정 시)
         evaluatorConfig = resolveEvaluatorPrompt(step.id(), evaluatorConfig);
+
+        // 설정이 틀린 코드 대조는 첫 작성 전에 단계를 실패시킨다(BIZ-195)
+        CodeCheckRunner.Prepared codeCheck = codeCheckRunner.prepare(step.id(), config, context);
 
         List<Map<String, Object>> iterations = new ArrayList<>();
         String prevOutput = null;
@@ -153,6 +164,12 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
             WorkflowStep evalStep = buildVirtualLlmStep(step.id() + ".eval." + i, evaluatorConfig);
             StepContext evalCtx = context.withLoopVars(evalLoopVars);
 
+            Map<String, Object> codeResult = null;
+            if (codeCheck != null) {
+                codeResult = codeCheckRunner.run(codeCheck, i, genResult.get("structured_data"), genOutput, evalCtx);
+                iterRecord.put("code_check", codeResult);
+            }
+
             Map<String, Object> evalResult = null;
             boolean retried = false;
             try {
@@ -190,7 +207,9 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
             finalIteration = i;
 
             // ─ 3) pass_criteria 평가 ──────────────────────────────
-            if (verdict != null && evaluatePassCriteria(step.id(), passCriteria, verdict)) {
+            boolean llmPassed = verdict != null && evaluatePassCriteria(step.id(), passCriteria, verdict);
+            boolean codePassed = codeResult == null || Boolean.TRUE.equals(codeResult.get("passed"));
+            if (llmPassed && codePassed) {
                 log.info("EVALUATOR_LOOP[{}] passed at iteration {}/{} (retried={})",
                         step.id(), i, maxIterations - 1, retried);
                 finalOutput = genOutput;
@@ -202,7 +221,7 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
 
             // 통과 못 함 → 다음 iteration 준비
             prevOutput = genOutput;
-            prevFeedback = verdict != null ? asString(verdict.get("feedback")) : null;
+            prevFeedback = joinFeedback(codeResult, verdict);
         }
 
         // 루프 소진 시 마지막 generator 출력을 최종 output으로 사용
@@ -243,6 +262,18 @@ public class EvaluatorLoopStepExecutor implements StepExecutor {
         result.put("total_input_tokens", totalInputTokens);
         result.put("total_output_tokens", totalOutputTokens);
         return result;
+    }
+
+    /** 대조 지적(위반일 때)과 검사 지적을 줄을 나눠 잇는다. 빈 쪽은 뺀다. 둘 다 없으면 null. */
+    static String joinFeedback(Map<String, Object> codeResult, Map<String, Object> verdict) {
+        List<String> parts = new ArrayList<>(2);
+        if (codeResult != null && Boolean.FALSE.equals(codeResult.get("passed"))) {
+            String code = asString(codeResult.get("feedback"));
+            if (code != null && !code.isBlank()) parts.add(code);
+        }
+        String llm = verdict != null ? asString(verdict.get("feedback")) : null;
+        if (llm != null && !llm.isBlank()) parts.add(llm);
+        return parts.isEmpty() ? null : String.join("\n", parts);
     }
 
     // ═══════════════════════════════════════════════

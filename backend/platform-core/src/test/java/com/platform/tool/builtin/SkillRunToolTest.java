@@ -55,7 +55,7 @@ class SkillRunToolTest {
         WorkspaceProperties props = new WorkspaceProperties();
         props.setWhitelistRoots(List.of(base.toString()));
         when(sandbox.run(any())).thenReturn(OK);
-        tool = new SkillRunTool(catalog, installer, sandbox, settings, props);
+        tool = new SkillRunTool(catalog, new SkillScriptRunner(installer, sandbox, settings), props);
     }
 
     private ToolContext ctx(String workspacePath, List<SkillRef> skillSet) {

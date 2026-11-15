@@ -29,12 +29,13 @@ class EvaluatorLoopStepExecutorTest {
 
     @Mock private LlmCallStepExecutor llmCallStepExecutor;
     @Mock private PromptTemplateService promptTemplateService;
+    @Mock private CodeCheckRunner codeCheckRunner;
 
     private EvaluatorLoopStepExecutor executor;
 
     @BeforeEach
     void setUp() {
-        executor = new EvaluatorLoopStepExecutor(llmCallStepExecutor, promptTemplateService);
+        executor = new EvaluatorLoopStepExecutor(llmCallStepExecutor, promptTemplateService, codeCheckRunner);
     }
 
     // ═══════════════════════════════════════════════

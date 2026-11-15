@@ -22,17 +22,13 @@ public class SkillRunTool implements EnhancedToolExecutor {
     public static final String NAME = "skill_run";
 
     private final SkillCatalog catalog;
-    private final SkillWorkspaceInstaller installer;
-    private final SkillSandboxClient sandbox;
-    private final SkillBundleSettings settings;
+    private final SkillScriptRunner scriptRunner;
     private final WorkspaceProperties workspaceProperties;
 
-    public SkillRunTool(SkillCatalog catalog, SkillWorkspaceInstaller installer, SkillSandboxClient sandbox,
-                        SkillBundleSettings settings, WorkspaceProperties workspaceProperties) {
+    public SkillRunTool(SkillCatalog catalog, SkillScriptRunner scriptRunner,
+                        WorkspaceProperties workspaceProperties) {
         this.catalog = catalog;
-        this.installer = installer;
-        this.sandbox = sandbox;
-        this.settings = settings;
+        this.scriptRunner = scriptRunner;
         this.workspaceProperties = workspaceProperties;
     }
 
@@ -97,33 +93,26 @@ public class SkillRunTool implements EnhancedToolExecutor {
         try {
             if (input.get("name") instanceof String name && !name.isBlank()) {
                 ResolvedSkill skill = catalog.resolveForCall(name.trim(), ctx.skillSet());
-                Path bundleDir = installer.install(skill, workspace);
-                scriptPath = bundleDir.resolve(script.trim()).normalize();
-                if (!scriptPath.startsWith(bundleDir)) {
-                    return ToolResult.error("BIZ-122: 스크립트 경로가 스킬 묶음 밖입니다: " + script);
-                }
+                scriptPath = scriptRunner.installBundleScript(skill, workspace, script);
             } else {
                 scriptPath = workspace.resolve(script.trim()).normalize();
                 if (!scriptPath.startsWith(workspace)) {
                     return ToolResult.error("BIZ-122: 스크립트 경로가 작업장 밖입니다: " + script);
                 }
             }
-        } catch (SkillNotFoundException | UncheckedIOException | IllegalStateException e) {
+        } catch (SkillNotFoundException | UncheckedIOException | IllegalStateException | IllegalArgumentException e) {
             return ToolResult.error(e.getMessage());
         }
 
-        int max = settings.scriptTimeoutMaxSeconds();
-        int timeout = requestedTimeout == null ? settings.scriptTimeoutSeconds() : requestedTimeout;
-        timeout = Math.max(1, Math.min(timeout, max));
+        int timeout = scriptRunner.timeoutSeconds(requestedTimeout);
 
         SkillSandboxClient.RunResult result;
         try {
-            result = sandbox.run(new SkillSandboxClient.RunRequest(workspace.toString(), scriptPath.toString(),
-                    args, timeout, settings.scriptOutputMaxBytes()));
+            result = scriptRunner.run(workspace, scriptPath, args, timeout);
         } catch (SkillSandboxException e) {
             return ToolResult.error(e.getMessage());
         }
-        return ToolResult.ok(format(result, settings.scriptOutputMaxBytes()),
+        return ToolResult.ok(format(result, scriptRunner.outputMaxBytes()),
                 "exit " + result.exitCode() + (result.timedOut() ? " (timed out after " + timeout + "s)" : ""));
     }
 

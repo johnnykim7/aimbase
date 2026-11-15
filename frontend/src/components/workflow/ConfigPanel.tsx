@@ -146,7 +146,8 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
   // CR-055: EVALUATOR_LOOP의 generator/evaluator/pass_criteria는 중첩 객체로 저장되어야 함
   // CR-120: LARGE_INPUT output_schema(JSON), FOREACH body(중첩 스텝)도 객체 보존
   // CR-147: skills 는 [{name, version, files}] 배열
-  const JSON_CONFIG_KEYS = ["response_schema", "input", "generator", "evaluator", "pass_criteria", "output_schema", "body", "skills"];
+  // CR-193: EVALUATOR_LOOP code_check 도 객체. 빠지면 열었다 저장할 때 글로 바뀌어 저장 검증에 걸린다
+  const JSON_CONFIG_KEYS = ["response_schema", "input", "generator", "evaluator", "pass_criteria", "output_schema", "body", "skills", "code_check"];
   // CR-120: 쉼표 구분 문자열 → 배열로 직렬화할 키
   const CSV_ARRAY_KEYS = ["focus_areas"];
 
@@ -172,6 +173,8 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
     });
     // CR-147: 빈 글로 남기면 서버가 배열이 아니라고 거부한다(BIZ-121)
     if (typeof parsed.skills === "string" && !parsed.skills.trim()) delete parsed.skills;
+    // CR-193: 코드 대조를 비우면 칸을 지운다(선택 설정)
+    if (typeof parsed.code_check === "string" && !parsed.code_check.trim()) delete parsed.code_check;
     // CR-161: 그룹이 있으면 연결은 그룹이 고르고(BIZ-127), 고르지 않은 그룹은 빈 글로 남기지 않는다
     if (parsed.connection_group_id) delete parsed.connection_id;
     else delete parsed.connection_group_id;
@@ -581,6 +584,13 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
           label: "통과 조건 (JSON)",
           placeholder:
             '{\n  "type": "SCORE_THRESHOLD",\n  "field": "score",\n  "threshold": 8.5,\n  "operator": "GTE"\n}',
+          multiline: true,
+        },
+        {
+          key: "code_check",
+          label: "코드 대조 (JSON, 선택)",
+          placeholder:
+            '{\n  "skill": "my-checks",\n  "script": "scripts/check.py",\n  "timeout_seconds": 30,\n  "input": { "case": "{{input.case}}" }\n}',
           multiline: true,
         },
       ];

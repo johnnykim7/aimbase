@@ -202,6 +202,35 @@ public class WorkflowValidator {
                 throw bad(location + ": pass_criteria.jsonpath is required for JSONPATH_MATCH");
             }
         }
+
+        validateCodeCheck(location, config.get("code_check"));
+    }
+
+    /**
+     * CR-193 코드 대조 설정의 칸 형식(설계서 T3-7 16.7). 스킬과 판이 있는지, 확장자가 실행 가능한지는
+     * 판이 저장 뒤에 올라올 수 있고 실행 가능한 확장자가 운영 설정이라 단계 시작 때 본다.
+     */
+    void validateCodeCheck(String location, Object value) {
+        if (value == null) return;
+        if (!(value instanceof Map<?, ?> codeCheck)) {
+            throw bad(location + ": code_check must be an object");
+        }
+        for (String key : List.of("skill", "script")) {
+            if (!(codeCheck.get(key) instanceof String s) || s.isBlank()) {
+                throw bad(location + ": code_check." + key + " is required");
+            }
+        }
+        for (String key : List.of("version", "timeout_seconds")) {
+            Object v = codeCheck.get(key);
+            if (v != null && (!(v instanceof Integer || v instanceof Long || v instanceof Short)
+                    || ((Number) v).longValue() < 1 || ((Number) v).longValue() > Integer.MAX_VALUE)) {
+                throw bad(location + ": code_check." + key + " must be an integer of 1 or more");
+            }
+        }
+        Object input = codeCheck.get("input");
+        if (input != null && !(input instanceof Map)) {
+            throw bad(location + ": code_check.input must be an object");
+        }
     }
 
     // ═══════════════════════════════════════════════
