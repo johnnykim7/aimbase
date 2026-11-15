@@ -61,6 +61,8 @@ public class ConnectionEntity {
     public Map<String, Object> getHealthConfig() { return healthConfig; }
     public void setHealthConfig(Map<String, Object> healthConfig) { this.healthConfig = healthConfig; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
+    /** CR-197: 연결 조회 응답용 사본(ConnectionSecretMasker)이 생성 시각을 그대로 옮긴다. */
+    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     /** CR-123: 어댑터 캐시 키가 updatedAt 을 쓰므로 테스트에서 버전을 명시할 수 있게 노출. */
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }

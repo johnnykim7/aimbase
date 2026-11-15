@@ -169,11 +169,17 @@ public class HttpRequestTool implements EnhancedToolExecutor {
                     .withDuration(System.currentTimeMillis() - start);
         }
 
+        Map<String, String> query = new LinkedHashMap<>(asStringMap(input.get("query")));
+        String authQueryName = apiKeyName(config, "query");
+        putAuthQuery(query, config, authQueryName);
+        // CR-197: 실제 호출 주소에는 키가 실리므로 기록과 오류 문구에는 키를 가린 주소만 쓴다.
+        String displayUri = buildUrl(baseUrl, path, maskQuery(query, authQueryName));
+
         URI uri;
         try {
-            uri = buildUri(baseUrl, path, asStringMap(input.get("query")));
+            uri = URI.create(buildUrl(baseUrl, path, query));
         } catch (IllegalArgumentException e) {
-            return ToolResult.error("Invalid URL: " + e.getMessage())
+            return ToolResult.error("Invalid URL: Malformed URL: " + displayUri)
                     .withDuration(System.currentTimeMillis() - start);
         }
 
@@ -192,7 +198,7 @@ public class HttpRequestTool implements EnhancedToolExecutor {
             }
         });
 
-        injectAuth(builder, uri, config, requestHeaders);
+        injectAuth(builder, displayUri, config, requestHeaders);
 
         String bodyString = null;
         Object body = input.get("body");
@@ -215,16 +221,21 @@ public class HttpRequestTool implements EnhancedToolExecutor {
         try {
             response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (java.net.http.HttpTimeoutException e) {
-            return httpFailure("timeout", e.getMessage(), uri, method, System.currentTimeMillis() - start);
+            return httpFailure("timeout", e.getMessage(), displayUri, method, System.currentTimeMillis() - start);
         } catch (java.io.IOException e) {
-            return httpFailure("io_error", e.getMessage(), uri, method, System.currentTimeMillis() - start);
+            return httpFailure("io_error", e.getMessage(), displayUri, method, System.currentTimeMillis() - start);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return httpFailure("interrupted", e.getMessage(), uri, method, System.currentTimeMillis() - start);
+            return httpFailure("interrupted", e.getMessage(), displayUri, method, System.currentTimeMillis() - start);
         }
 
         int status = response.statusCode();
-        Map<String, String> responseHeaders = flattenHeaders(response.headers().map());
+        // CR-197: 받는 쪽이 요청 주소를 응답에 되돌려 주면(법제처 상세 링크의 OC=<키>) 키가 단계 결과와
+        // 실행 조회 API 로 바깥에 나간다. 연결 인증값과 같은 글자는 응답 머리값, 본문, 감사 요약에서 가린다.
+        List<String> secrets = authSecrets(config);
+        String responseBody = redact(response.body(), secrets);
+        Map<String, String> responseHeaders = new LinkedHashMap<>();
+        flattenHeaders(response.headers().map()).forEach((k, v) -> responseHeaders.put(k, redact(v, secrets)));
         String contentType = responseHeaders.getOrDefault("content-type", responseHeaders.getOrDefault("Content-Type", ""));
         Object bodyObject;
         boolean bodyRaw;
@@ -232,15 +243,19 @@ public class HttpRequestTool implements EnhancedToolExecutor {
         if (contentType.toLowerCase(Locale.ROOT).contains("application/json")
                 || contentType.toLowerCase(Locale.ROOT).contains("+json")) {
             try {
+                // JSON 은 글자 이스케이프(\/ 등) 때문에 원문에서 바꾸면 놓칠 수 있어 읽은 뒤 값마다 가린다.
                 JsonNode node = objectMapper.readTree(response.body());
-                bodyObject = objectMapper.convertValue(node, Object.class);
+                bodyObject = redactTree(objectMapper.convertValue(node, Object.class), secrets);
                 bodyRaw = false;
+                if (!secrets.isEmpty()) {
+                    responseBody = objectMapper.writeValueAsString(bodyObject);
+                }
             } catch (Exception parseError) {
-                bodyObject = response.body();
+                bodyObject = responseBody;
                 bodyRaw = true;
             }
         } else {
-            bodyObject = response.body();
+            bodyObject = responseBody;
             bodyRaw = true;
         }
 
@@ -254,21 +269,21 @@ public class HttpRequestTool implements EnhancedToolExecutor {
 
         boolean success = status >= 200 && status < 400;
         String summary = String.format("%s %s -> %d (%dms)",
-                method, truncate(uri.toString(), 160), status, System.currentTimeMillis() - start);
+                method, truncate(displayUri, 160), status, System.currentTimeMillis() - start);
 
         Map<String, Object> auditPayload = new LinkedHashMap<>();
         auditPayload.put("method", method);
-        auditPayload.put("uri", uri.toString());
+        auditPayload.put("uri", displayUri);
         auditPayload.put("status", status);
-        auditPayload.put("requestHeaders", maskHeaders(requestHeaders, authHeaderName(config)));
+        auditPayload.put("requestHeaders", maskHeaders(requestHeaders, apiKeyName(config, "header")));
         auditPayload.put("requestBody", bodyString == null ? null : truncate(bodyString, AUDIT_BODY_SUMMARY_LIMIT));
-        auditPayload.put("responseSummary", truncate(response.body(), AUDIT_BODY_SUMMARY_LIMIT));
+        auditPayload.put("responseSummary", truncate(responseBody, AUDIT_BODY_SUMMARY_LIMIT));
 
         return new ToolResult(success, output, summary, List.of(), List.of(),
                 auditPayload, null, System.currentTimeMillis() - start);
     }
 
-    private URI buildUri(String baseUrl, String path, Map<String, String> query) {
+    private String buildUrl(String baseUrl, String path, Map<String, String> query) {
         String trimmedBase = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         String normalizedPath = path.startsWith("/") ? path : "/" + path;
         StringBuilder sb = new StringBuilder(trimmedBase).append(normalizedPath);
@@ -284,11 +299,34 @@ public class HttpRequestTool implements EnhancedToolExecutor {
                 first = false;
             }
         }
-        try {
-            return URI.create(sb.toString());
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Malformed URL: " + sb, e);
+        return sb.toString();
+    }
+
+    /**
+     * CR-197: 받는 쪽이 이름의 대소문자를 가리지 않을 수 있어, 입력 query 의 같은 이름은
+     * 대소문자와 상관없이 지운다. 워크플로우가 연결의 인증키를 덮어쓰지 못하게 하기 위해서다.
+     */
+    @SuppressWarnings("unchecked")
+    private void putAuthQuery(Map<String, String> query, Map<String, Object> config, String name) {
+        if (name == null) {
+            return;
         }
+        String value = resolveAuthValue((Map<String, Object>) config.get("auth"));
+        if (value == null || value.isBlank()) {
+            log.debug("Auth value missing for API_KEY in=query (value_env unset?)");
+            return;
+        }
+        query.keySet().removeIf(k -> k.equalsIgnoreCase(name));
+        query.put(name, value);
+    }
+
+    private Map<String, String> maskQuery(Map<String, String> query, String secretName) {
+        if (secretName == null) {
+            return query;
+        }
+        Map<String, String> masked = new LinkedHashMap<>();
+        query.forEach((k, v) -> masked.put(k, k.equalsIgnoreCase(secretName) ? "***" : v));
+        return masked;
     }
 
     private int resolveTimeout(Map<String, Object> input, Map<String, Object> config) {
@@ -304,7 +342,7 @@ public class HttpRequestTool implements EnhancedToolExecutor {
     }
 
     @SuppressWarnings("unchecked")
-    private void injectAuth(HttpRequest.Builder builder, URI uri, Map<String, Object> config,
+    private void injectAuth(HttpRequest.Builder builder, String displayUri, Map<String, Object> config,
                              Map<String, String> requestHeaders) {
         Object authRaw = config.get("auth");
         if (!(authRaw instanceof Map<?, ?> authMap)) {
@@ -325,11 +363,8 @@ public class HttpRequestTool implements EnhancedToolExecutor {
             case "API_KEY" -> {
                 String in = Optional.ofNullable(auth.get("in")).map(Object::toString).orElse("header").toLowerCase(Locale.ROOT);
                 String name = Optional.ofNullable(auth.get("name")).map(Object::toString).orElse("X-Api-Key");
-                if ("query".equals(in)) {
-                    // 이미 URI 생성 시 query에 포함되지 않았으므로 재구성 필요하지만,
-                    // 일반 FG 사용처는 header 기반이라 header만 지원. query 방식은 Connection query config에서 주도.
-                    log.warn("API_KEY in=query not supported inline; put it in Connection.config.defaultQuery instead.");
-                } else {
+                // CR-197: in=query 는 주소를 만들 때 이미 실었다(putAuthQuery).
+                if (!"query".equals(in)) {
                     builder.header(name, value);
                     requestHeaders.put(name, value);
                 }
@@ -344,8 +379,66 @@ public class HttpRequestTool implements EnhancedToolExecutor {
                 requestHeaders.put("Authorization", "Basic " + encoded);
             }
             case "NONE" -> { /* no-op */ }
-            default -> log.warn("Unknown auth type: {} on URI {}", authType, uri);
+            default -> log.warn("Unknown auth type: {} on URI {}", authType, displayUri);
         }
+    }
+
+    /**
+     * CR-197: 응답에서 찾을 연결 인증값. 주소에 실린 키는 URL 인코딩된 꼴로, BASIC 은 Base64 꼴로
+     * 되돌아올 수 있어 그 꼴도 넣는다. 긴 것부터 바꿔야 겹친 꼴이 반쯤 남지 않는다.
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> authSecrets(Map<String, Object> config) {
+        if (!(config.get("auth") instanceof Map<?, ?> authMap)) {
+            return List.of();
+        }
+        Map<String, Object> auth = (Map<String, Object>) authMap;
+        String authType = Optional.ofNullable(auth.get("type")).map(Object::toString).orElse("NONE").toUpperCase(Locale.ROOT);
+        if (!Set.of("API_KEY", "BEARER", "BASIC").contains(authType)) {
+            return List.of();
+        }
+        String value = resolveAuthValue(auth);
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        Set<String> forms = new java.util.LinkedHashSet<>();
+        forms.add(value);
+        forms.add(URLEncoder.encode(value, StandardCharsets.UTF_8));
+        if ("BASIC".equals(authType)) {
+            forms.add(java.util.Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8)));
+        }
+        return forms.stream()
+                .sorted(java.util.Comparator.comparingInt(String::length).reversed())
+                .toList();
+    }
+
+    private String redact(String text, List<String> secrets) {
+        if (text == null || secrets.isEmpty()) {
+            return text;
+        }
+        String out = text;
+        for (String secret : secrets) {
+            out = out.replace(secret, "***");
+        }
+        return out;
+    }
+
+    private Object redactTree(Object node, List<String> secrets) {
+        if (secrets.isEmpty()) {
+            return node;
+        }
+        if (node instanceof String s) {
+            return redact(s, secrets);
+        }
+        if (node instanceof Map<?, ?> map) {
+            Map<Object, Object> out = new LinkedHashMap<>();
+            map.forEach((k, v) -> out.put(k instanceof String ks ? redact(ks, secrets) : k, redactTree(v, secrets)));
+            return out;
+        }
+        if (node instanceof List<?> list) {
+            return list.stream().map(v -> redactTree(v, secrets)).collect(java.util.stream.Collectors.toList());
+        }
+        return node;
     }
 
     private String resolveAuthValue(Map<String, Object> auth) {
@@ -385,18 +478,18 @@ public class HttpRequestTool implements EnhancedToolExecutor {
     }
 
     /**
-     * CR-164 BIZ-132: 연결 auth 가 API_KEY 머리값이면 그 이름도 비밀이다.
-     * 값이 비어 주입하지 않았더라도 입력 headers 로 같은 이름을 실을 수 있으니 이름만으로 정한다.
+     * CR-164 BIZ-132, CR-197: 연결 auth 가 API_KEY 면 그 이름도 비밀이다(머리값이든 주소 값이든).
+     * 값이 비어 싣지 않았더라도 입력 headers, query 로 같은 이름을 실을 수 있으니 이름만으로 정한다.
      */
     @SuppressWarnings("unchecked")
-    private String authHeaderName(Map<String, Object> config) {
+    private String apiKeyName(Map<String, Object> config, String wantedIn) {
         if (!(config.get("auth") instanceof Map<?, ?> authMap)) {
             return null;
         }
         Map<String, Object> auth = (Map<String, Object>) authMap;
         String authType = Optional.ofNullable(auth.get("type")).map(Object::toString).orElse("NONE").toUpperCase(Locale.ROOT);
         String in = Optional.ofNullable(auth.get("in")).map(Object::toString).orElse("header").toLowerCase(Locale.ROOT);
-        if (!"API_KEY".equals(authType) || !"header".equals(in)) {
+        if (!"API_KEY".equals(authType) || !wantedIn.equals(in)) {
             return null;
         }
         return Optional.ofNullable(auth.get("name")).map(Object::toString).orElse("X-Api-Key");
@@ -435,7 +528,7 @@ public class HttpRequestTool implements EnhancedToolExecutor {
         return out;
     }
 
-    private ToolResult httpFailure(String kind, String message, URI uri, String method, long duration) {
+    private ToolResult httpFailure(String kind, String message, String displayUri, String method, long duration) {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("status", null);
         output.put("headers", Map.of());
@@ -443,9 +536,9 @@ public class HttpRequestTool implements EnhancedToolExecutor {
         output.put("bodyRaw", false);
         output.put("duration_ms", duration);
         output.put("error", Map.of("kind", kind, "message", message == null ? "" : message));
-        String summary = String.format("%s %s -> %s (%s)", method, truncate(uri.toString(), 160), kind, message);
+        String summary = String.format("%s %s -> %s (%s)", method, truncate(displayUri, 160), kind, message);
         return new ToolResult(false, output, summary, List.of(), List.of(),
-                Map.of("method", method, "uri", uri.toString(), "errorKind", kind),
+                Map.of("method", method, "uri", displayUri, "errorKind", kind),
                 null, duration);
     }
 
