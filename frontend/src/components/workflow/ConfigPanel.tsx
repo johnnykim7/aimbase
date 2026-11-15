@@ -28,12 +28,25 @@ interface SelectOption {
   label: string;
 }
 
+type ScalarType = "number" | "boolean";
+
+/** 빈 칸은 undefined(칸을 지워 기본값을 쓰게 한다). 형에 맞지 않는 글은 그대로 두어 저장 검증이 알리게 한다 */
+function restoreScalar(value: string, type: ScalarType): string | number | boolean | undefined {
+  const t = value.trim();
+  if (!t) return undefined;
+  if (type === "number") return Number.isFinite(Number(t)) ? Number(t) : value;
+  if (t === "true" || t === "false") return t === "true";
+  return value;
+}
+
 interface ConfigField {
   key: string;
   label: string;
   placeholder?: string;
   multiline?: boolean;
   type?: "text" | "select" | "multiselect" | "skills" | "connectionGroup";
+  // 칸은 글로 입력받으므로 저장할 때 숫자로 되돌릴 칸을 표시한다
+  valueType?: "number";
   options?: SelectOption[];
   fetchOptions?: string;
   onSelectFill?: (value: string, allData: unknown[]) => Record<string, string>;
@@ -62,6 +75,7 @@ const LLM_TAB_KEYS: Record<TabKey, string[]> = {
 export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelProps) {
   const [label, setLabel] = useState("");
   const [config, setConfig] = useState<Record<string, string>>({});
+  const [scalarTypes, setScalarTypes] = useState<Record<string, ScalarType>>({});
   const [activeTab, setActiveTab] = useState<TabKey>("basic");
   const [showSaved, setShowSaved] = useState(false);
 
@@ -127,14 +141,17 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
       setLabel((node.data.label as string) ?? "");
       const raw = (node.data.config as Record<string, unknown>) ?? {};
       const flat: Record<string, string> = {};
+      const types: Record<string, ScalarType> = {};
       Object.entries(raw).forEach(([k, v]) => {
         if (v != null && typeof v === "object") {
           flat[k] = JSON.stringify(v, null, 2);
         } else {
           flat[k] = String(v ?? "");
+          if (typeof v === "number" || typeof v === "boolean") types[k] = typeof v as ScalarType;
         }
       });
       setConfig(flat);
+      setScalarTypes(types);
       setActiveTab("basic");
     }
   }, [node?.id]);
@@ -161,6 +178,15 @@ export function ConfigPanel({ node, onUpdate, onClose, onDelete }: ConfigPanelPr
           try { parsed[key] = JSON.parse(val); } catch { /* keep as string */ }
         }
       }
+    });
+    // CR-193: 숫자 칸과 원래 숫자, 참거짓이던 값을 되돌린다. 글로 보내면 저장 검증(max_iterations, max_items 등)에 걸리거나 실행 때 숫자 변환에 실패한다
+    const numberKeys = new Set(configFields.filter((f) => f.valueType === "number").map((f) => f.key));
+    Object.entries(config).forEach(([key, val]) => {
+      const type = numberKeys.has(key) ? "number" : scalarTypes[key];
+      if (!type || typeof val !== "string") return;
+      const restored = restoreScalar(val, type);
+      if (restored === undefined) delete parsed[key];
+      else parsed[key] = restored;
     });
     // CR-120: 쉼표 구분 → 배열 (빈 값은 키 제거)
     CSV_ARRAY_KEYS.forEach((key) => {
@@ -494,7 +520,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
         { key: "prompt", label: "프롬프트", placeholder: "{{input}} 변수 사용 가능", multiline: true },
         { key: "system", label: "시스템 메시지", placeholder: "선택사항", multiline: true },
         { key: "skills", label: "스킬", type: "skills" },
-        { key: "temperature", label: "Temperature", placeholder: "0.7" },
+        { key: "temperature", label: "Temperature", placeholder: "0.7", valueType: "number" },
         { key: "tool_choice", label: "도구 선택 (CR-006)", placeholder: "auto | none | required | {tool_name}" },
         {
           key: "allowed_tools",
@@ -526,7 +552,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
         },
         { key: "input", label: "입력 매핑 (JSON)", placeholder: '{"expression": "{{step1.output}}"}', multiline: true },
         { key: "description", label: "스텝 설명", placeholder: "이 도구가 수행하는 작업 설명" },
-        { key: "timeoutMs", label: "타임아웃 (ms)", placeholder: "30000 (기본: 없음)" },
+        { key: "timeoutMs", label: "타임아웃 (ms)", placeholder: "30000 (기본: 없음)", valueType: "number" },
         { key: "onSuccess", label: "성공 시 다음 스텝 ID", placeholder: "예: step_3 (비우면 DAG 순서)" },
         { key: "onFailure", label: "실패 시 다음 스텝 ID", placeholder: "예: error_handler (비우면 워크플로우 중단)" },
         { key: "outputKey", label: "출력 변수 키", placeholder: "output (기본값)" },
@@ -541,7 +567,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
     case "PARALLEL":
     case "parallel":
       return [
-        { key: "maxConcurrency", label: "최대 동시 실행", placeholder: "3" },
+        { key: "maxConcurrency", label: "최대 동시 실행", placeholder: "3", valueType: "number" },
       ];
     case "HUMAN_INPUT":
     case "approval":
@@ -564,6 +590,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
           key: "max_iterations",
           label: "최대 반복 횟수 (1-10)",
           placeholder: "3 (기본)",
+          valueType: "number",
         },
         {
           key: "generator",
@@ -618,7 +645,7 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
             { value: "WORKTREE", label: "WORKTREE — Git worktree 격리" },
           ],
         },
-        { key: "timeout_ms", label: "타임아웃 (ms)", placeholder: "120000" },
+        { key: "timeout_ms", label: "타임아웃 (ms)", placeholder: "120000", valueType: "number" },
         { key: "skills", label: "스킬", type: "skills" },
         { key: "agents", label: "멀티에이전트 (JSON)", placeholder: '[{"description":"agent-1","prompt":"..."}]', multiline: true },
         {
@@ -667,8 +694,8 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
             { value: "parallel", label: "parallel — 병렬" },
           ],
         },
-        { key: "max_concurrency", label: "최대 동시 실행 (parallel)", placeholder: "5 (기본)" },
-        { key: "max_items", label: "처리 상한", placeholder: "100 (기본, 초과 시 FAIL)" },
+        { key: "max_concurrency", label: "최대 동시 실행 (parallel)", placeholder: "5 (기본)", valueType: "number" },
+        { key: "max_items", label: "처리 상한", placeholder: "100 (기본, 초과 시 FAIL)", valueType: "number" },
         {
           key: "on_item_error",
           label: "원소 실패 시",
@@ -721,8 +748,8 @@ function getConfigFields(type: string, ctx: FieldContext): ConfigField[] {
         { key: "reference_input", label: "비교 기준 (verify 전용)", placeholder: "verify 동작 시 필수 — 대조 기준", multiline: true },
         { key: "focus_areas", label: "집중 영역 (쉼표 구분)", placeholder: "가격, 납기, 위약금" },
         { key: "output_schema", label: "출력 스키마 (JSON)", placeholder: '{"type":"object","properties":{...}}', multiline: true },
-        { key: "max_parallel", label: "청크 병렬 상한", placeholder: "5 (기본)" },
-        { key: "item_retry_max", label: "청크 재시도 횟수", placeholder: "1 (기본)" },
+        { key: "max_parallel", label: "청크 병렬 상한", placeholder: "5 (기본)", valueType: "number" },
+        { key: "item_retry_max", label: "청크 재시도 횟수", placeholder: "1 (기본)", valueType: "number" },
         {
           key: "require_full_coverage",
           label: "전수 커버리지 강제",
