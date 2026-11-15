@@ -57,9 +57,9 @@ case "$TARGET" in
     TENANT="bp_wes"; APP="bp-wes"; LABEL="bp-wes 일반 화면"; TAG="CR-194"
     RUNNER="cli-runner-bp-wes-assist"; AGENT_SERVICE="aimbase-agent-wes-assist"; AGENT_ENV="agent-wes-assist.env"
     TOOL_MODE="NATIVE"; EXPOSED_TOOLS="bash get_current_time"
-    # 대화창 모델 목록. 적은 순서가 화면 순서다. 실행기 CLI 2.1.197 은 Opus 5.5 와 Fable 5.2 를 거절해 지금은 둘만 둔다(2026-11-16).
-    MODEL="claude-sonnet-5-5"
-    MODELS="claude-sonnet-5-5=Sonnet 5.5,claude-haiku-5-5=Haiku 5.5"
+    # 대화창 모델 목록. 적은 순서가 화면 순서다. 실행기 CLI 를 2.1.325 로 고정한 뒤 넷을 둔다(CR-195).
+    MODEL="claude-opus-5-5"
+    MODELS="claude-opus-5-5=Opus 5.5,claude-fable-5-2=Fable 5.2,claude-sonnet-5-5=Sonnet 5.5,claude-haiku-5-5=Haiku 5.5"
     WIDGET_ORIGIN="${WIDGET_ORIGIN:-https://admin.banpoom.co.kr}" ;;
   3plgw)
     # 품고 변경 수리 실행기(CR-174). CLI 가 레포를 고치고 PR 을 만들므로 HYBRID. 워크플로우 정의는 연결을 바꾸지 않는다.

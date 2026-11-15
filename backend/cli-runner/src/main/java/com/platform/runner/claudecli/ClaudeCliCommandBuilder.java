@@ -94,6 +94,7 @@ public final class ClaudeCliCommandBuilder {
     private String outputFormat;                    // stream-json 모드 시 자동, 그 외 명시
     private boolean verbose = false;
     private boolean includePartialMessages = false;  // stream-json 모드에서만 쓰인다
+    private String thinkingDisplay;                 // null 이면 붙이지 않는다. stream-json 모드에서만 쓰인다
     private Integer maxTurns;                       // null 이면 미지정 (모델 자율)
 
     // 모델/세션
@@ -181,6 +182,15 @@ public final class ClaudeCliCommandBuilder {
      */
     public ClaudeCliCommandBuilder includePartialMessages(boolean v) {
         this.includePartialMessages = v;
+        return this;
+    }
+
+    /**
+     * CR-195: 생각 내용을 응답에 어떻게 싣는지. CLI 2.1.325 는 이것을 주지 않으면 생각 내용을 빈 글로 보내
+     * 대화창에 생각 칸이 붙지 않는다. CLI 2.1.197 도 이 옵션을 받는다. stream-json 모드에서만 붙는다.
+     */
+    public ClaudeCliCommandBuilder thinkingDisplay(String v) {
+        this.thinkingDisplay = v;
         return this;
     }
 
@@ -280,6 +290,10 @@ public final class ClaudeCliCommandBuilder {
             cmd.add("--output-format");
             cmd.add("stream-json");
             if (includePartialMessages) cmd.add("--include-partial-messages");
+            if (thinkingDisplay != null && !thinkingDisplay.isBlank()) {
+                cmd.add("--thinking-display");
+                cmd.add(thinkingDisplay);
+            }
         } else if (outputFormat != null && !outputFormat.isBlank()) {
             cmd.add("--output-format");
             cmd.add(outputFormat);
