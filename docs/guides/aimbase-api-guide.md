@@ -3418,7 +3418,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 | 순번 | API | 묶음일 때 |
 |---|---|---|
-| 1 | `GET /api/v1/chat/widget-settings?connection_group_id=` | `models` 는 구성원 모두가 받는 모델(순서와 이름은 첫 연결), `default_model` 은 첫 연결의 기본값이 그 안에 있으면 그것 아니면 첫 모델. 깊게 생각하기, 그림 만들기, 첨부 칸은 첫 연결로 정한다 |
+| 1 | `GET /api/v1/chat/widget-settings?connection_group_id=` | `models` 는 구성원 모두가 받는 모델(순서와 이름은 첫 연결), `default_model` 은 첫 연결의 기본값이 그 안에 있으면 그것 아니면 첫 모델. 깊게 생각하기, 그림 만들기, 실행기 파일 고치기 칸은 첫 연결로 정한다 |
 | 2 | `POST /api/v1/chat/completions` 본문 `connection_group_id` | 모델 검사(400 `model_not_allowed`)를 구성원 모두로 본다. 실시간 답은 첫 이벤트를 보낸 뒤에는 다음 구성원으로 가지 않는다(§ 25) |
 | 3 | `POST /api/v1/chat/sessions/{session_id}/follow-ups` 본문 `connection_group_id` | 그 묶음으로 부르고 한도가 찬 구성원은 건너뛴다 |
 
@@ -3430,6 +3430,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 |---|---|---|
 | 404 | `connection_group_not_found` | 그 테넌트에 없는 묶음 |
 | 400 | `connection_group_empty` | 구성원이 없는 묶음 |
+| 400 | `connection_group_no_common_model` | 구성원 모두가 받는 모델이 없는 묶음(위젯 설정 조회) |
 
 ---
 
