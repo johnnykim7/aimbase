@@ -38,7 +38,7 @@ VERIFY_MODEL = os.environ.get("VERIFY_MODEL", "claude-haiku-5-5")
 # 받기 전에 그 모드를 끄고, 받은 글에서도 제어 문자를 걷어 토큰 모양만 골라낸다.
 ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 TOKEN = re.compile(re.escape(PREFIX) + r"[A-Za-z0-9_-]+")
-TOKEN_CHARS = re.compile(r"[A-Za-z0-9_-]+")
+STYLE = re.compile(r"\x1b\[[0-9;:]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)")
 TRIES = 3
 
 
@@ -94,38 +94,34 @@ def write(d, tok, issued, expires):
     os.chmod(path, 0o600)
 
 
-def verify(d):
-    """실행기와 같은 환경으로 짧은 질문 하나를 던져 본다."""
-    data = read_json(os.path.join(d, FILE_NAME)) or {}
+def verify(d, tok):
+    """실행기와 같은 환경으로 짧은 질문 하나를 던져 본다. (통과 여부, 마지막 줄)."""
     env = {k: v for k, v in os.environ.items() if k not in OVERRIDING_ENV and k != "CLAUDECODE"}
     env["CLAUDE_CONFIG_DIR"] = d
-    env["CLAUDE_CODE_OAUTH_TOKEN"] = data.get("token", "")
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
     try:
         r = subprocess.run(["claude", "-p", "ok 라고만 답하세요", "--model", VERIFY_MODEL],
                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
         out = (r.stdout.strip() or r.stderr.strip()).splitlines()
-        return (out[-1] if out else "(빈 답)")[:200]
+        return r.returncode == 0, (out[-1] if out else "(빈 답)")[:200]
     except (OSError, subprocess.TimeoutExpired) as e:
-        return "확인 못 함: " + type(e).__name__
+        return False, "확인 못 함: " + type(e).__name__
+
+
+def saved_token(d):
+    data = read_json(os.path.join(d, FILE_NAME)) or {}
+    return str(data.get("token", ""))
 
 
 def token_from_screen(text):
-    """setup-token 화면 출력에서 마지막에 찍힌 토큰을 골라낸다. 화면 폭에서 줄이 꺾였으면 빈 줄 전까지 잇는다."""
-    text = ESCAPES.sub("", text).replace("\r", "")
-    i = text.rfind(PREFIX)
-    if i < 0:
-        return ""
-    parts = []
-    for line in text[i:].split("\n"):
-        line = line.strip()
-        m = TOKEN_CHARS.match(line)
-        if not m:
-            break
-        parts.append(m.group(0))
-        if m.end() < len(line):
-            break
-    tok = "".join(parts)
-    return tok if TOKEN.fullmatch(tok) else ""
+    """setup-token 화면 출력에서 마지막에 찍힌 토큰을 골라낸다. 못 찾으면 빈 문자열.
+    CLI 화면은 빈칸을 쓰지 않고 커서만 옮겨 다음 글을 찍는다. 커서 이동을 지우기만 하면 토큰 뒤에 다음 줄
+    「Store」 가 붙어 들어갔다(2026-11-16 chaws wms work01). 글자 모양(색, 굵기, 링크)만 지우고 나머지 제어는
+    줄바꿈으로 보아 토큰을 한 줄 안에서만 잡는다. 화면 폭이 좁아 꺾였으면 확인에서 걸러져 붙여 넣기로 넘어간다."""
+    text = STYLE.sub("", text)
+    text = ESCAPES.sub("\n", text).replace("\r", "\n")
+    found = TOKEN.findall(text)
+    return found[-1] if found else ""
 
 
 def run_on_screen(argv, env):
@@ -221,34 +217,48 @@ def main():
     print("[token] 계정 폴더 " + d)
 
     expires_at = current(d)
-    if expires_at and ask("[token] 이미 토큰이 있습니다(기한 %s). 새 값으로 바꿀까요? [y/N] " % expires_at) != "y":
-        print("[token] 그대로 둡니다. 확인: " + verify(d))
-        return
+    if expires_at:
+        ok, said = verify(d, saved_token(d))
+        if not ok:
+            print("[token] 지금 토큰(기한 %s)으로 Claude 가 답하지 않습니다(%s). 새 값으로 바꿉니다" % (expires_at, said))
+        elif ask("[token] 이미 토큰이 있고 답도 합니다(기한 %s). 새 값으로 바꿀까요? [y/N] " % expires_at) != "y":
+            print("[token] 그대로 둡니다. 확인: " + said)
+            return
 
+    # 확인을 통과한 값만 파일에 적는다. 틀린 값으로 기존 토큰을 덮지 않는다.
     old = None if expires_at else adoptable(d)
     if old and ask("[token] 로그인 파일에 1년 토큰이 있습니다(기한 %s). 토큰 파일로 옮길까요? [Y/n] "
                    % old[1].date()) in ("", "y"):
         tok, expires = old
+        ok, said = verify(d, tok)
+        if not ok:
+            print("[token] 로그인 파일의 토큰으로 답하지 않아 옮기지 않았습니다: " + said)
+            sys.exit(1)
         write(d, tok, expires - timedelta(days=days), expires)
-        tok = ""
-        print("[token] 옮김. 기한 %s. 로그인 파일은 그대로 둡니다" % expires.date())
-    else:
-        tok = ""
-        if ask("[token] claude setup-token 을 지금 띄울까요? 이미 값을 받았으면 n [Y/n] ") in ("", "y"):
-            tok = setup_token()
-            if tok:
-                print("[token] 화면에 찍힌 값을 받았습니다. 붙여 넣지 않아도 됩니다")
-            else:
-                print("[token] 화면에서 값을 찾지 못했습니다. 찍힌 값을 붙여 넣어 주세요")
-        if not tok:
-            tok = read_token()
+        print("[token] 옮김. 기한 %s. 로그인 파일은 그대로 둡니다. 확인: %s" % (expires.date(), said))
+        return
+
+    tok = ""
+    if ask("[token] claude setup-token 을 지금 띄울까요? 이미 값을 받았으면 n [Y/n] ") in ("", "y"):
+        tok = setup_token()
+        if tok:
+            ok, said = verify(d, tok)
+            if not ok:
+                print("[token] 화면에서 받은 값으로 확인이 되지 않습니다(%s). 찍힌 값을 붙여 넣어 주세요" % said)
+                tok = ""
+        else:
+            print("[token] 화면에서 값을 찾지 못했습니다. 찍힌 값을 붙여 넣어 주세요")
+    if not tok:
+        tok = read_token()
         if not tok:
             print("[token] sk-ant-oat01- 값을 받지 못해 넣지 않았습니다")
             sys.exit(1)
-        write(d, tok, now, now + timedelta(days=days))
-        tok = ""
-        print("[token] 넣음. 기한 %s" % (now + timedelta(days=days)).date())
-    print("[token] 확인: " + verify(d))
+        ok, said = verify(d, tok)
+        if not ok:
+            print("[token] 이 값으로 Claude 가 답하지 않아 넣지 않았습니다: " + said)
+            sys.exit(1)
+    write(d, tok, now, now + timedelta(days=days))
+    print("[token] 넣음. 기한 %s. 확인: %s" % ((now + timedelta(days=days)).date(), said))
 
 
 if __name__ == "__main__":
