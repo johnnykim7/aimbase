@@ -30,6 +30,7 @@ interface Opts {
   convs?: Record<string, Msgs>;
   docks?: boolean;
   userRef?: string | null;
+  givenSessionId?: string | null;
 }
 
 function setup(opts: Opts) {
@@ -71,6 +72,7 @@ function setup(opts: Opts) {
   const ctx = {
     strings: (pack: { ko: unknown }) => pack.ko,
     sessionId: () => sessionId,
+    givenSessionId: () => opts.givenSessionId ?? null,
     isBusy: () => false,
     widgetSettings: () => opts.settings,
     screenKey: () => opts.screenKey ?? null,
@@ -252,8 +254,16 @@ describe("TC-CHT-151 위젯 속성(메뉴 화면)", () => {
     expect(narrow.leftHandle.open).not.toHaveBeenCalled();
   });
 
+  it("화면 키가 없고 붙이는 앱이 대화 번호를 주지 않았으면 지난 대화를 묻지 않는다(위젯이 지은 번호라 404 만 남는다)", async () => {
+    const w = setup({ settings: { history_enabled: true } });
+    w.emit("settingsLoaded");
+    await settle();
+    expect(w.calls("GET", "/api/v1/chat/sessions")).toEqual([]);
+    expect(w.opened).toEqual([]);
+  });
+
   it("아무 속성도 없으면 CR-178 그대로(그 대화 번호로 다시 보이기, screen_key 를 싣지 않음, 목록은 덮어 연다)", async () => {
-    const w = setup({ settings: { history_enabled: true }, convs: { "s-fresh": messages("s-fresh") } });
+    const w = setup({ settings: { history_enabled: true }, givenSessionId: "s-fresh", convs: { "s-fresh": messages("s-fresh") } });
     w.emit("settingsLoaded");
     await settle();
     expect(w.calls("GET", "/api/v1/chat/sessions?")).toEqual([]);

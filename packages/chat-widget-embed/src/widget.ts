@@ -33,6 +33,8 @@ import {
 import { Menu } from "./frame/menu";
 import { Panes } from "./frame/panes";
 import { FIRST_SEND_WAIT_MS, StartupGate } from "./frame/startup-gate";
+import { LatestLoad } from "./frame/latest-load";
+import { isolateHost } from "./frame/host-isolation";
 import { icon } from "./icons";
 import { createMarked, renderRichInto } from "./rich-render";
 import { CORE } from "./strings";
@@ -259,6 +261,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   host.setAttribute("data-display", display);
   if (theme === "dark") host.setAttribute("data-theme", "dark");
   if (theme === "light") host.setAttribute("data-theme", "light");
+  isolateHost(host);
 
   // CR-131: 리치 렌더(코드 하이라이트, mermaid) 테마 판별. auto 는 OS 설정 추종.
   function resolvedTheme(): "light" | "dark" {
@@ -318,6 +321,8 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   let relabelers: Array<() => void> = [];
   /** 위젯이 뜰 때 받는 것. 질문은 이것이 열린 뒤에 요청 칸을 모아 보낸다(CR-188) */
   const startup = new StartupGate();
+  /** CR-194: 위젯 설정 조회. 연결을 바꾸면 마지막 조회만 쓰고 질문은 그 조회를 기다린다 */
+  const settingsLoads = new LatestLoad();
   /** 위젯이 뜰 때 받는 것을 기다리는 질문을 멈춘다. 아직 보내지 않아 서버에 멈출 것이 없다 */
   let stopWaiting: (() => void) | null = null;
 
@@ -836,23 +841,30 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     return { connectionId: options.connectionId, connectionGroupId: options.connectionGroupId };
   }
 
-  async function loadSettings(): Promise<void> {
-    try {
-      applySettings(await api.settings(target(), locale));
-    } catch (e) {
-      // 설정을 못 읽어도 대화는 된다. 붙이는 앱이 준 모델(또는 auto)로 묻는다.
-      settings = null;
-      options.on?.onError?.(e as Error);
-    }
-    renderModelControls();
-    if (settings) events.emit("settingsLoaded", settings);
+  function loadSettings(): Promise<void> {
+    return settingsLoads.run(async (isLatest) => {
+      try {
+        const s = await api.settings(target(), locale);
+        if (!isLatest()) return;
+        applySettings(s);
+      } catch (e) {
+        if (!isLatest()) return;
+        // 설정을 못 읽어도 대화는 된다. 붙이는 앱이 준 모델(또는 auto)로 묻는다. 앞 연결에서 고른 모델은 이 연결이 받지 않을 수 있다.
+        settings = null;
+        selectedModel = options.model;
+        options.on?.onError?.(e as Error);
+      }
+      renderModelControls();
+      if (settings) events.emit("settingsLoaded", settings);
+    });
   }
 
   /** 화면 언어를 바꾸면 평가 이유 이름만 그 언어로 다시 받는다. 못 받으면 앞 이름을 그대로 쓴다. */
   async function reloadSettingsFor(asked: Locale): Promise<void> {
+    const sameTarget = settingsLoads.mark();
     try {
       const s = await api.settings(target(), asked);
-      if (asked !== locale) return;
+      if (asked !== locale || !sameTarget()) return;
       if (settings) settings.feedback_reasons = s.feedback_reasons;
       else applySettings(s);
       renderModelControls();
@@ -1218,7 +1230,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   }
 
   async function copyAnswer(text: string): Promise<void> {
-    if (await copyText(text)) {
+    if (await copyText(text, shadow)) {
       showToast(T.copied);
       return;
     }
@@ -1489,10 +1501,14 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     setBusy(true);
     renderAnswer(turn);
     scrollToBottom();
-    if (!startup.isOpen()) {
+    if (!startup.isOpen() || settingsLoads.busy()) {
       await new Promise<void>((resolve) => {
         stopWaiting = resolve;
-        void startup.wait(FIRST_SEND_WAIT_MS).then(resolve);
+        // CR-194: 연결을 바꾼 뒤 그 연결 설정을 받기 전에 물으면 앞 연결의 모델이 실려 거절된다
+        void startup
+          .wait(FIRST_SEND_WAIT_MS)
+          .then(() => settingsLoads.settled(FIRST_SEND_WAIT_MS))
+          .then(resolve);
       });
       stopWaiting = null;
       // 기다리는 동안 새 대화나 지난 대화로 옮겼으면 이 질문이 있던 대화는 이미 지워졌다
@@ -2354,6 +2370,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     text: (value) => pickText(value, locale),
     list: (value) => pickList(value, locale),
     sessionId: () => sessionId,
+    givenSessionId: () => options.sessionId ?? null,
     isBusy: () => busy,
     isRecording: () => recState !== "idle",
     widgetSettings: () => settings,

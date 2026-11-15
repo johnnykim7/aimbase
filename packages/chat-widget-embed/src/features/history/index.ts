@@ -328,6 +328,8 @@ class History {
 
   /** 위젯이 뜰 때 붙이는 앱이 준 대화가 요청자의 것으로 있으면 보인다(4.2 13번). 없으면 첫 화면 그대로다. */
   private async restore(): Promise<void> {
+    // 붙이는 앱이 번호를 주지 않았으면 위젯이 지은 번호라 서버에 있을 수 없다. 물으면 404 만 남는다(CR-194, 화면을 옮길 때마다 다시 붙는다).
+    if (this.ctx.givenSessionId() === null) return;
     if (this.answered || this.ctx.isBusy()) return;
     const id = this.ctx.sessionId();
     let r: MessagesResponse;

@@ -523,6 +523,8 @@ interface WidgetContext {
     text(value: LocalizedText | undefined): string | undefined;
     list(value: LocalizedList | undefined): string[];
     sessionId(): string;
+    /** 붙이는 앱이 준 대화 번호(session-id). 주지 않았으면 null */
+    givenSessionId(): string | null;
     isBusy(): boolean;
     isRecording(): boolean;
     widgetSettings(): WidgetSettings | null;
