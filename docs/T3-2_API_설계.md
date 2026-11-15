@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.25 | 최종 수정: 2026-11-14 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191
+> 설계 버전: 7.26 | 최종 수정: 2026-11-15 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -3319,6 +3319,47 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 
 `/api/v1/conversations/**` 를 위젯 토큰으로 부르면 403 `widget_forbidden`. 관리 화면의 로그인 호출은 바뀌지 않는다.
 
+
+## 위젯 화면별 대화와 함께 보는 대화 [v7.26, CR-194]
+
+설계 상세: [CR-194_대화창_화면별_지난_대화_불러오기.md](CR-194_대화창_화면별_지난_대화_불러오기.md) 3절. 저장소 간 계약 bp-wes CR-WES-372.
+
+### 위젯 토큰 발급 칸 [PRD-637]
+
+`POST /api/v1/sessions/issue-widget-token` 요청에 칸 둘을 더한다. 모르는 칸은 무시한다. 응답은 지금과 같고 토큰에 두 칸이 실린다.
+
+| 칸 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| user_name | string | 선택 | 묻는 사람 이름. 100자 이하 |
+| share_key | string | 선택 | 함께 보기 키(BIZ-277). 주면 `user_ref` 도 있어야 한다 |
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `widget_token_invalid:share_key` | 글자 규칙에 맞지 않음 |
+| 400 | `widget_token_invalid:user_ref` | share_key 를 주었는데 user_ref 가 없음 |
+| 400 | `widget_token_invalid:user_name` | 100자 초과 |
+
+### 대화 접근 확인 [PRD-636]
+
+대화 번호를 받는 위젯 창구는 모두 BIZ-275 확인을 거친다. 접근할 수 없으면 404 `session_not_found`. 대화 요청은 응답을 시작하기 전에 확인하고 아직 없는 대화 번호는 통과한다.
+
+### 함께 보는 대화 열기 [PRD-632]
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | /api/v1/chat/sessions/shared | 본문 없음. 토큰의 함께 보기 키의 대화 번호를 돌려준다. 없으면 메시지 없는 대화를 만든다(BIZ-276) |
+
+응답 `{"session_id": "...", "created": false}`. 토큰에 함께 보기 키가 없으면 400 `share_key_required`.
+
+### 기존 API 에 더하는 칸 [PRD-630, PRD-631, PRD-633]
+
+| 메서드 | 경로 | 더하는 것 |
+|---|---|---|
+| GET | /api/v1/chat/widget-settings | 응답 `shared_available`(토큰에 함께 보기 키가 있는지), `user_name`(토큰의 묻는 사람 이름, 없으면 null) |
+| GET | /api/v1/chat/sessions?screen_key= | 그 화면 키의 대화만. 함께 보는 대화는 주인이 비어 나오지 않는다 |
+| GET | /api/v1/chat/sessions/{session_id}/messages | 응답 맨 위 `shared`, 질문마다 `question.asker {user_ref, user_name}`(없을 수 있다) |
+| POST | /api/v1/chat/completions | 요청 `screen_key`(선택, 대화를 처음 저장할 때만 남긴다). 400 `session_invalid:screen_key`. 함께 보는 대화에서 마지막 질문이 아니거나 그 질문을 한 사람이 아닌 되감기는 409 `rewind_rejected:shared`(BIZ-280) |
+| PATCH, DELETE | /api/v1/chat/sessions/{session_id} | 함께 보는 대화면 404 `session_not_found`(BIZ-280) |
 
 ## 위젯 옆 창 문서를 대화로 고치기 [v7.13, CR-181]
 

@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.40.3** | 2026-11-14 | Aimbase v8.18.0 기준
+> **v3.41.0** | 2026-11-15 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1478,6 +1478,8 @@ curl -X POST $AIMBASE/api/v1/sessions/issue-widget-token \
 - `TenantContext` 가 설정되지 않은 호출은 401
 
 **JWT claims**: `sub=user_ref`, `tenant_id`, `project_id`, `user_ref`, `scopes[]`, `origin`, `type: "widget"`, `exp`.
+
+**묻는 사람 이름과 함께 보기 키** [CR-194]: 요청에 `user_name`(100자 이하), `share_key`(함께 보기 키)를 더할 수 있고 토큰에 실린다. 모르는 칸은 무시한다. 쓰는 법은 § 38.
 
 ### 17-3. 위젯 토큰으로 Aimbase API 호출
 
@@ -3364,10 +3366,55 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 - 두 사람이 함께 누르면 먼저 닿은 하나만 지나고 나머지는 409 `approval_closed`, `data.status` 에 지금 상태
 - 관리자 승인 API `POST /api/v1/admin/approvals/{id}/approve`, `/reject` 도 대화 승인을 정하고, 이미 정해졌으면 409 `approval_closed`
 
+## 38. 위젯 화면별 대화와 함께 보는 대화 [CR-194]
+
+설계 상세: `docs/CR-194_대화창_화면별_지난_대화_불러오기.md`. 위젯 토큰은 `user_ref` 가 있어야 한다(§ 34).
+
+### 38-1. 화면 키로 대화 나누기
+
+위젯 속성 `screen-key` 에 화면 키를 주면 그 화면에서 나눈 내 대화만 목록에 보이고, 새 대화의 첫 질문에 화면 키가 남는다. 키는 128자 이하, 영문, 숫자, `:`, `/`, `-`, `_`, `.`, `[`, `]` 만 쓴다. aimbase 는 뜻을 해석하지 않는다.
+
+```html
+<aimbase-chat screen-key="bo2:menu:/oms/orders"></aimbase-chat>
+```
+
+- 위젯 요소 하나를 두고 화면을 옮길 때 속성만 바꾼다. `screen-key` 는 다른 속성을 바꾼 뒤 맨 마지막에 바꾼다. 위젯이 토큰을 다시 받고(authResolver 를 다시 부른다) 그 화면의 대화로 바꾼다
+- `history-list="off"` 를 주면 왼쪽 대화 목록과 목록 단추를 숨긴다
+- 서버 API 로 직접 쓰면 `GET /api/v1/chat/sessions?screen_key=` 로 거르고, `POST /api/v1/chat/completions` 요청 `screen_key` 로 남긴다(대화를 처음 저장할 때만)
+
+### 38-2. 함께 보는 대화
+
+한 건을 여는 사람 모두가 같은 대화를 보게 하려면 소비앱 서버가 그 사람의 건 권한을 확인한 뒤 토큰 발급 요청에 `share_key` 를 싣는다. 브라우저가 정한 키를 그대로 실으면 키만 바꿔 남의 건 대화를 볼 수 있으니 서버에서 정한다.
+
+```json
+{"user_ref": "123", "user_name": "kim01", "share_key": "bo2:case:/wes/cs/[id]:3311", "scopes": ["chat:stream"], "origin": "https://bo.company.com"}
+```
+
+- 위젯은 설정 `shared_available` 이 참이면 `POST /api/v1/chat/sessions/shared` 로 그 키의 대화 번호를 받아 연다. 없으면 서버가 만든다. 같은 키에는 언제나 대화 하나다
+- 함께 보는 대화는 목록, 새 대화, 삭제, 이름 바꾸기, 프로젝트로 옮기기가 없다. 다시 생성과 질문 수정은 마지막 질문을 한 사람만 한다(409 `rewind_rejected:shared`)
+- 이어보기 응답에 `shared` 와 질문마다 `question.asker {user_ref, user_name}` 가 실린다
+
+### 38-3. 대화 접근
+
+대화 번호를 받는 위젯 API 는 모두 같은 확인을 거친다. 함께 보기 키가 있는 대화는 같은 키의 토큰만, 없는 대화는 주인만 쓴다. 접근할 수 없으면 404 `session_not_found` 다. 대화 요청도 응답을 시작하기 전에 같은 확인을 한다.
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `widget_token_invalid:share_key` | 함께 보기 키 글자 규칙 위반 |
+| 400 | `widget_token_invalid:user_ref` | share_key 를 주었는데 user_ref 가 없음 |
+| 400 | `widget_token_invalid:user_name` | 이름 100자 초과 |
+| 400 | `share_key_required` | 함께 보기 키 없는 토큰으로 함께 보는 대화 열기 |
+| 400 | `session_invalid:screen_key` | 화면 키 글자 규칙 위반 |
+| 404 | `session_not_found` | 접근할 수 없는 대화 |
+| 409 | `rewind_rejected:shared` | 함께 보는 대화에서 마지막 질문이 아니거나 남의 질문을 되감음 |
+
+---
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.41.0 | 2026-11-15 | **CR-194 위젯 화면별 대화와 함께 보는 대화** (§ 17-2, § 38). 토큰 발급 `user_name`, `share_key`, 모르는 칸 무시. `POST /api/v1/chat/sessions/shared` 추가. 대화 목록 `screen_key`, 대화 요청 `screen_key`, 이어보기 `shared` 와 `question.asker`, 위젯 설정 `shared_available` 과 `user_name`. 대화 번호를 받는 위젯 API 의 접근 확인을 하나로 모아 대화 요청에도 건다 |
 | v3.40.3 | 2026-11-14 | **CR-185 승인 대기 런 구독** (§ 17-6, § 37-4). 승인 대기에 들어간 뒤 구독해도 `workflow.snapshot` 다음에 `workflow.approval` 을 다시 보낸다. 이벤트에 `approval_id` 추가. `workflow:approve` 는 플랫폼 런타임 설정(모든 테넌트 공통)에 넣는다고 보정 |
 | v3.40.2 | 2026-11-13 | **CR-182 파일 만들기 CLI 경로 보정** (§ 31-1). CLI 연결의 `create_file` 은 허용 도구 목록이 아니라 실행기가 붙이는 계산 도구 통로(`/mcp-data`)로 부른다. 내장 도구만 쓰는 방식(NATIVE)도 같다 |
 | v3.40.1 | 2026-11-13 | **CR-186** (§ 35-4) ready 가 받아쓰기 서버 준비를 기다리는 것과 1011 경우 보정, 운용 가이드 절 번호 § 2-20 으로 바로잡음 |
