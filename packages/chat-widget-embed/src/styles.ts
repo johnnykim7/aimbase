@@ -84,6 +84,25 @@ button { font: inherit; color: inherit; }
 .backdrop { display: none; position: fixed; inset: 0; background: rgba(24,24,27,.32); z-index: 9999; }
 .backdrop.on { display: block; }
 
+/* 대화창 옮기기와 크기 바꾸기(CR-198). 잡는 자리는 판 바깥 가장자리에 보이지 않게 둔다. 판 안에 두면 판의 overflow 에 잘리고 대화 칸 스크롤 막대를 가린다 */
+.panel.movable .hd { cursor: move; touch-action: none; }
+.win-frame { position: fixed; pointer-events: none; z-index: 9999; }
+.win-frame.side { top: 0; right: 0; bottom: 0; }
+.rz { position: absolute; pointer-events: auto; touch-action: none; }
+.rz-n, .rz-s { left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.rz-n { top: -6px; }
+.rz-s { bottom: -6px; }
+.rz-e, .rz-w { top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.rz-e { right: -6px; }
+.rz-w { left: -6px; }
+.win-frame.side .rz-w { top: 0; bottom: 0; }
+.rz-nw, .rz-ne, .rz-sw, .rz-se { width: 14px; height: 14px; }
+.rz-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.rz-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.rz-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.rz-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.win-dragging, .win-dragging * { user-select: none !important; -webkit-user-select: none !important; }
+
 /* 위젯 틀(CR-177): 판은 [왼쪽 칸][대화][옆 창] 가로 배치다 */
 [hidden] { display: none !important; }
 .main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
