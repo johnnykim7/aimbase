@@ -3365,7 +3365,7 @@ data: {"done": true, "turn_id": "0b6f2c1e-...", "turn_seq": 4, "model": "claude-
 
 | 메서드 | 경로 | 더하는 것 |
 |---|---|---|
-| GET | /api/v1/chat/widget-settings | 질의 `connection_group_id`. 주면 `models` 는 구성원 모두가 받는 모델(순서와 이름은 첫 연결), `default_model` 은 첫 연결의 기본값이 그 안에 있으면 그것 아니면 첫 모델, `thinking_supported`, `thinking_default`, `image_generation`, `attachments` 는 첫 연결로 정한다. 없는 묶음 404 `connection_group_not_found`, 구성원 없음 400 `connection_group_empty` |
+| GET | /api/v1/chat/widget-settings | 질의 `connection_group_id`. 주면 `models` 는 구성원 모두가 받는 모델(순서와 이름은 첫 연결), `default_model` 은 첫 연결의 기본값이 그 안에 있으면 그것 아니면 첫 모델, `thinking_supported`, `thinking_default`, `image_generation`, `document_binary_edit_supported` 는 첫 연결로 정한다. 없는 묶음 404 `connection_group_not_found`, 구성원 없음 400 `connection_group_empty`, 구성원 모두가 받는 모델 없음 400 `connection_group_no_common_model` |
 | POST | /api/v1/chat/sessions/{session_id}/follow-ups | 본문 `connection_group_id`. 주면 그 묶음으로 부르고 한도가 찬 구성원은 건너뛴다(CR-161) |
 | POST | /api/v1/chat/completions | 이미 받는 `connection_group_id`(CR-161)에서 모델 검사(400 `model_not_allowed`)를 구성원 모두로 본다. 깊게 생각하기 검사, 첨부 처리, 그림 만들기는 첫 연결로 본다 |
 
