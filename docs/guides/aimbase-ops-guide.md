@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.43.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.44.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -507,7 +507,7 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh token wms
 - 로그인 파일(`.credentials.json`)에 CR-194 단계로 넣은 1년 토큰이 있으면 다시 받지 않고 토큰 파일로 옮길지 묻습니다. 로그인 파일은 고치지 않습니다
 - 이 단계가 쓰는 `build/cli-token.py` 는 chaws 는 `./deploy.sh chaws-bootstrap`, 59 는 `./deploy.sh be` 가 `chaws-bootstrap.sh` 와 같이 올립니다
 - CR-196 실행기로 올리기 전에 그 실행기가 쓰는 계정마다 토큰을 먼저 넣습니다. 새 실행기는 토큰이 없는 계정을 바로 막습니다
-- 기한이 다가오면 같은 명령으로 새 값을 넣습니다
+- 기한이 다가오면 같은 명령으로 새 값을 넣습니다. 플랫폼 메뉴 「실행기 계정 토큰」(§ 2-22)에서도 넣을 수 있습니다
 
 **계정 늘리기**: 새 계정(예: `work04`)은 `token` 단계로 토큰을 넣고(폴더가 없으면 만듭니다) `bootstrap connections` 를 한 번 돌립니다. 커넥션을 더하고 묶음 구성원을 토큰을 넣은 계정으로 맞춥니다. api 와 실행기는 계정 폴더의 부모를 통째로 붙여 두어 다시 만들지 않습니다. 실행기의 동시 CLI 는 계정 수와 상관없이 3개입니다.
 ```bash
@@ -1024,6 +1024,29 @@ location = /api/v1/chat/voice/stream {
 | CLI 연결에서 「file not found」 | 실행기가 세션 머리글을 싣지 않는 옛 판 | 실행기를 새 판으로 바꾼다 |
 | 그래프 대신 코드 블록과 「그래프를 그리지 못했습니다」 | 모델이 쓴 블록 형식이 틀렸다(계열 7개 이상, 항목 수와 값 수가 다름 등) | `widget.render.chart` 틀의 형식 안내를 확인한다 |
 
+### 2-22. 실행기 계정 토큰과 만료 알림 [CR-196]
+
+플랫폼 메뉴 「실행기 계정 토큰」 은 모든 테넌트의 서버 실행기 계정 폴더와 1년 토큰 상태를 한 목록으로 보여 줍니다.
+
+- 칸은 테넌트, 실행기, 계정 폴더, 연결(그 폴더를 쓰는 연결 수), 관리(테넌트, Aimbase), 1년 토큰, 기한입니다.
+- 이 목록은 실행기에 묻지 않고 마지막으로 확인해 둔 값을 보여 줍니다. 그 값은 테넌트가 연결 관리를 열 때, 토큰을 넣을 때, 매일 만료 점검 때 바뀝니다. 1년 토큰 칸 아래에 확인한 시각이 붙고, 실행기가 답하지 않았던 줄은 「실행기가 꺼져 있어 (시각) 에 마지막으로 확인한 값입니다.」 가 보입니다.
+- 상태 칩은 모든 줄을 토큰 상태로 가르고, 「Aimbase 관리」 는 그 위에 겹쳐 거르는 칩입니다. Aimbase 가 빌려준 계정의 기한 지남도 「토큰 기한 지남」 에 잡힙니다.
+- 줄을 누르면 「1년 토큰」 창이 뜹니다. Aimbase 관리 계정도 여기서 넣습니다. 넣기는 그 테넌트로 임퍼소네이션(CR-096)해 부르고, 감사 기록에는 플랫폼 관리자가 남습니다. 관리자 로그인은 그대로입니다.
+- Aimbase 관리 계정의 만료 알림 수신자는 목록 위 카드에서 고칩니다. 런타임 설정 `runner.token_expiry.emails`, `runner.token_expiry.phones` 를 바꿉니다.
+
+**만료 알림**:
+
+| 런타임 설정(분류 runner) | 기본값 | 뜻 |
+|---|---|---|
+| `runner.token_expiry.notify_days` | `30,7,1,0` | 만료 며칠 전에 알릴지. 0 은 만료 당일과 그 뒤 |
+| `runner.token_expiry.emails`, `runner.token_expiry.phones` | 빈 값 | Aimbase 관리 계정의 수신자(쉼표) |
+| `runner.token_expiry.email_template`, `runner.token_expiry.sms_template` | `AIMBASE_CLI_TOKEN_EXPIRY_EMAIL`, `AIMBASE_CLI_TOKEN_EXPIRY_SMS` | bp-notification 양식 코드 |
+
+- 매일 09:00(Asia/Seoul, `aimbase.runner.token-expiry.cron`)에 모든 테넌트의 실행기에 토큰 상태를 묻습니다. 남은 날이 문턱 이하인 문턱 가운데 가장 작은 것 하나를 고르고, 같은 토큰 기한에 그 문턱으로 보낸 적이 없으면 보냅니다. 토큰을 새로 넣으면 기한이 바뀌어 다시 셉니다.
+- 수신자는 계정 폴더의 관리 주체로 가릅니다. 테넌트가 넣은 계정은 그 테넌트의 수신자(§ 3-1), Aimbase 관리 계정은 위 런타임 설정입니다.
+- 발송은 bp-notification 입니다(`notification.base-url`, `notification.api-key`, 시간 제한 `aimbase.runner.token-expiry.send-timeout` 기본 10초). 키가 없거나 발송이 하나라도 실패하면 보낸 기록을 남기지 않아 다음 날 다시 보냅니다.
+- bp-notification 에 Aimbase 솔루션 키와 양식 둘(변수 `runner`, `account`, `expiresOn`, `daysLeft`)이 등록돼 있어야 합니다.
+
 ---
 
 ## 3. 테넌트 관리 (ADMIN)
@@ -1115,6 +1138,18 @@ LLM 프로바이더(Anthropic, OpenAI, Ollama 등) 및 외부 어댑터(HTTP, SE
 1. `healthPath` 지정 후 Connection 생성 → `POST /connections/{id}/test`로 연결 확인
 2. 허용할 외부 도메인(host)을 `DomainFilterPolicy`에 등록 (초기 deny-all 권장)
 3. 시크릿 회전 시 Connection `config.auth.value_env` 참조만 유지하고 환경변수 재배포
+
+#### 연결 목록과 1년 토큰 [CR-196]
+
+연결 관리는 카드 대신 검색되는 목록입니다. 칸은 이름, 어댑터, 상태, 실행기, 계정 폴더, 1년 토큰, 기한입니다.
+
+- 상태 칩(토큰 기한 지남, 토큰 없음, 토큰 30일 이내, 토큰 있음, Aimbase 관리, CLI 아님)으로 거릅니다. 기한 지남과 토큰 없음이 위에 옵니다.
+- 줄을 누르면 「연결 수정」 창이 뜹니다. 서버 실행기를 쓰는 Claude CLI 연결이면 Config Dir 아래에 「1년 토큰」 칸이 있습니다.
+- 그 Claude 계정으로 터미널에서 `claude setup-token` 을 치고 받은 `sk-ant-oat01-` 값을 붙여 넣은 뒤 「토큰 넣기」(이미 있으면 「바꾸기」)를 누릅니다. 실행기가 그 값으로 짧은 질문을 던져 답이 와야 넣습니다. 창의 「수정」 은 누르지 않아도 됩니다.
+- 같은 계정 폴더를 쓰는 연결은 그 토큰을 함께 씁니다.
+- Aimbase 가 빌려준 계정(Aimbase 관리)은 입력 칸이 없습니다. Aimbase 담당에게 요청합니다.
+- 사용자 PC 실행기 연결은 그 PC 에서 넣습니다(시나리오 P).
+- 목록 위 「만료 알림 수신자」 카드의 「수신자 고치기」 에서 이메일과 휴대폰 번호를 쉼표로 적습니다. 이 테넌트가 넣은 토큰의 기한이 알림 문턱(§ 2-22)에 닿으면 문턱마다 한 번 이메일과 문자가 갑니다. 수신자가 없으면 알림이 가지 않습니다.
 
 ### 3-2. 정책 (Policy) 관리
 
@@ -2294,6 +2329,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.44.0 | 2026-11-16 | **CR-196 1년 토큰 화면과 만료 알림** (§ 2-10, § 2-22, § 3-1). 연결 관리가 검색되는 목록이 되고 연결 수정 창에서 1년 토큰을 넣는다. 플랫폼 메뉴 「실행기 계정 토큰」 에서 모든 테넌트 계정 폴더를 보고 Aimbase 관리 계정 토큰을 넣는다. 매일 09:00 만료 문턱(30, 7, 1, 0일 전)에 bp-notification 으로 이메일과 문자를 보낸다 |
 | v3.43.0 | 2026-11-16 | **CR-196 계정 1년 토큰** (§ 2-10, § 2-13, 시나리오 H, P). 실행기는 계정 폴더의 `oauth-token.json` 으로만 CLI 를 띄우고(`CLAUDE_CODE_OAUTH_TOKEN`), 없거나 기한이 지난 계정은 막는다. `token` 단계가 이 파일을 쓰고 로그인 파일의 1년 토큰을 옮긴다. 계정 로그인 절차와 CR-194 인증 파일 끼워 넣기를 걷어냄. PC 는 `scripts/cli-token.py` 또는 손으로 만든 파일 |
 | v3.42.0 | 2026-11-16 | **CR-194 계정 1년 인증** (§ 2-10). 기동 스크립트 `token <대상> <계정>` 단계가 `claude setup-token` 인증을 계정 폴더에 넣는다. 넣은 뒤 실행기 재시작 |
 | v3.41.0 | 2026-11-16 | **CR-194 일반 화면 실행기 계정 묶음** (§ 2-10). 계정 하나짜리 위젯 연결 대신 계정마다 연결과 묶음 `cli-runner-bp-wes-assist-rr`. 로그인 계정 work01, work02, work03 |
