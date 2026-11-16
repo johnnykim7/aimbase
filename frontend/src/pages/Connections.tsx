@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Badge } from "../components/common/Badge";
@@ -26,19 +26,12 @@ import {
   useUpdateTokenRecipients,
 } from "../hooks/useCliAccountTokens";
 import type { Connection, ConnectionRequest } from "../types/connection";
-import type { AccountTokenRow } from "../types/cliAccountToken";
 import { AccountTokenField } from "../components/connections/AccountTokenField";
 import { TokenRecipientsCard } from "../components/connections/TokenRecipientsCard";
 import { TokenStateChips, type ChipFilter } from "../components/connections/TokenStateChips";
-import {
-  TokenBadge,
-  dateOf,
-  folderName,
-  stateRank,
-  tenantTokenState,
-  type ChipState,
-  type TokenState,
-} from "../components/connections/accountTokenState";
+import { TokenBadge, dateOf, folderName, type ChipState } from "../components/connections/accountTokenState";
+import { displayAdapter, isServerRunner } from "../components/connections/adapterName";
+import { useConnectionTokenList, type ConnectionRow } from "../hooks/useConnectionTokenList";
 import {
   WidgetModelsField,
   hasWidgetModelsErrors,
@@ -63,20 +56,7 @@ function statusColor(s?: string): "success" | "warning" | "danger" | "muted" {
   return "muted";
 }
 
-// CR-196: 1년 토큰 칸과 상태 칩을 두는 연결. 서버 CliAccountTokenService 와 같이 Claude CLI 이고 실행기 이름이 있는 연결이다.
-function isServerRunner(conn: Connection): boolean {
-  const agent = conn.config?.agent_name;
-  return displayAdapter(conn.type ?? "llm", conn.adapter ?? "") === "Claude CLI" && typeof agent === "string" && agent.trim() !== "";
-}
-
 const TENANT_CHIPS: ChipState[] = ["expired", "missing", "soon", "ok", "platform", "not_cli"];
-
-interface ConnectionRow {
-  conn: Connection;
-  token: AccountTokenRow | undefined;
-  state: TokenState;
-  kind: string;
-}
 
 const CONNECTION_TYPES = [
   { id: "database", icon: "🗄️", label: "Database" },
@@ -91,24 +71,6 @@ const ADAPTERS: Record<string, string[]> = {
   llm: ["Claude (Anthropic)", "Claude CLI", "OpenAI", "Ollama", "OpenAI Compatible", "AWS Bedrock", "Vertex AI"],
   realtime: ["WebSocket", "SSE"],
 };
-
-const CLI_ADAPTER_VALUES = ["anthropic-cli", "claude-cli", "claude cli", "anthropic cli", "claude-max", "claude-pro"];
-const OPENAI_COMPATIBLE_HINTS = ["deepseek", "groq", "mistral", "openrouter", "together", "fireworks", "lm studio", "localai", "vllm"];
-
-// 저장된 어댑터 값은 서버 이름(anthropic-cli 등)이고 수정 창은 표시명으로 전용 칸을 고른다.
-// 서버 ConnectionAdapterFactory.normalizeAdapterType 과 같은 순서로 표시명을 찾고, 못 찾으면 저장값을 그대로 쓴다.
-function displayAdapter(type: string, stored: string): string {
-  if (type !== "llm") return stored;
-  const s = stored.toLowerCase();
-  if (CLI_ADAPTER_VALUES.includes(s)) return "Claude CLI";
-  if (s.includes("anthropic") || s.includes("claude")) return "Claude (Anthropic)";
-  if (s === "openai_compatible" || s === "openai compatible" || OPENAI_COMPATIBLE_HINTS.some((h) => s.includes(h))) return "OpenAI Compatible";
-  if (s.includes("openai") || s.includes("gpt")) return "OpenAI";
-  if (s.includes("ollama")) return "Ollama";
-  if (s.includes("bedrock") || s.includes("aws")) return "AWS Bedrock";
-  if (s.includes("vertex") || s.includes("google") || s.includes("gemini")) return "Vertex AI";
-  return stored;
-}
 
 const DB_FIELDS = ["연결 ID", "이름", "호스트", "포트", "데이터베이스", "사용자", "비밀번호"];
 
@@ -140,45 +102,7 @@ export default function Connections() {
   const editingServerRunner = !!editingConn && isServerRunner(editingConn);
   const editingToken = useConnectionAccountToken(showModal && editingServerRunner ? editingConn.id : null);
 
-  const rows: ConnectionRow[] = useMemo(() => {
-    const byConnection = new Map<string, AccountTokenRow>();
-    for (const t of tokens.data ?? []) for (const id of t.connection_ids) byConnection.set(id, t);
-    return connections.map((conn: Connection) => {
-      const token = byConnection.get(conn.id);
-      return {
-        conn,
-        token,
-        state: tenantTokenState(token, isServerRunner(conn)),
-        kind: displayAdapter(conn.type ?? "llm", conn.adapter ?? ""),
-      };
-    });
-  }, [connections, tokens.data]);
-
-  const searched = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.conn.name, r.conn.id, r.kind, r.token?.agent_name, r.token?.config_dir]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [rows, query]);
-
-  const counts = useMemo(() => {
-    const c: Partial<Record<ChipState, number>> = {};
-    for (const r of searched) if (r.state !== "unknown") c[r.state] = (c[r.state] ?? 0) + 1;
-    return c;
-  }, [searched]);
-
-  const shown = useMemo(
-    () =>
-      searched
-        .filter((r) => chip === "all" || r.state === chip)
-        .sort((a, b) => stateRank(a.state) - stateRank(b.state) || (a.conn.name || a.conn.id).localeCompare(b.conn.name || b.conn.id)),
-    [searched, chip],
-  );
+  const { searched, counts, shown } = useConnectionTokenList(connections, tokens.data, query, chip);
 
   const closeModal = () => {
     setShowModal(false);
