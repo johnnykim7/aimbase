@@ -25,7 +25,7 @@ class RunnerControllerCliFailureTest {
         props.setApiKey("secret-test-key");
         String limited = "cli_account_limited:resets_at=1793082000:type=five_hour:CLI result reported is_error=true";
         when(service.chat(any(), any(), any(), any(), any(), anyBoolean(), any())).thenThrow(new ClaudeCliException(limited));
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new RunnerController(service, props)).build();
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new RunnerController(service, props, mock(RunnerAccountTokenService.class))).build();
 
         mvc.perform(post("/v1/chat")
                         .header(RunnerController.RUNNER_API_KEY_HEADER, "secret-test-key")

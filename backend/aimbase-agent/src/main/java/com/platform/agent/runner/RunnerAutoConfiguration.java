@@ -87,7 +87,13 @@ public class RunnerAutoConfiguration {
     }
 
     @Bean
-    public RunnerController runnerController(RunnerService service, RunnerProperties props) {
-        return new RunnerController(service, props);
+    public RunnerAccountTokenService runnerAccountTokenService(RunnerProperties props) {
+        return new RunnerAccountTokenService(props, Clock.systemUTC());
+    }
+
+    @Bean
+    public RunnerController runnerController(RunnerService service, RunnerProperties props,
+                                             RunnerAccountTokenService accountTokens) {
+        return new RunnerController(service, props, accountTokens);
     }
 }

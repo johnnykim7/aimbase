@@ -46,7 +46,7 @@ class RunnerControllerTest {
         props.setApiKey("secret-test-key");
         props.setDefaultModel("claude-sonnet-4-5");
         props.setMaxWorkers(5);
-        controller = new RunnerController(service, props);
+        controller = new RunnerController(service, props, mock(RunnerAccountTokenService.class));
     }
 
     private static RunnerChatRequest sampleRequest() {

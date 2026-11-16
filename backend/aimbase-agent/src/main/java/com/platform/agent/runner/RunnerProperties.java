@@ -81,6 +81,30 @@ public class RunnerProperties {
     /** CR-121: idle 임계(초) — 마지막 turn 활동 후 이 시간 넘게 놀고 있는 워커를 회수. 기본 900s(15분). */
     private int reaperIdleThresholdSeconds = 900;
 
+    /**
+     * CR-196 BIZ-289: 이 실행기 계정 폴더의 토큰을 누가 넣는가. platform 이면 Aimbase 가 빌려준 계정이라
+     * 테넌트 관리자의 넣기를 막는다. 서버에서 실행기 여럿이 한 폴더를 같이 붙이면 api 는 그 겹침을 모른다.
+     */
+    private String tokenManagedBy = "tenant";
+
+    /** CR-196: 화면에서 넣은 토큰을 확인하는 짧은 질문의 모델. */
+    private String tokenVerifyModel = "claude-haiku-5-5";
+
+    /** CR-196: 확인 질문을 기다리는 상한(초). */
+    private int tokenVerifyTimeoutSeconds = 120;
+
+    /** CR-196: 화면에서 넣은 토큰의 기한(일). setup-token 이 주는 기한과 같게 둔다. */
+    private int tokenDays = 365;
+
+    public String getTokenManagedBy() { return tokenManagedBy; }
+    public void setTokenManagedBy(String tokenManagedBy) { this.tokenManagedBy = tokenManagedBy; }
+    public String getTokenVerifyModel() { return tokenVerifyModel; }
+    public void setTokenVerifyModel(String tokenVerifyModel) { this.tokenVerifyModel = tokenVerifyModel; }
+    public int getTokenVerifyTimeoutSeconds() { return tokenVerifyTimeoutSeconds; }
+    public void setTokenVerifyTimeoutSeconds(int tokenVerifyTimeoutSeconds) { this.tokenVerifyTimeoutSeconds = tokenVerifyTimeoutSeconds; }
+    public int getTokenDays() { return tokenDays; }
+    public void setTokenDays(int tokenDays) { this.tokenDays = tokenDays; }
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getApiKey() { return apiKey; }

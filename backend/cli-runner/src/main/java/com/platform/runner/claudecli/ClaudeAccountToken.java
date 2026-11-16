@@ -4,12 +4,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * CR-196 BIZ-283: 실행기 계정의 1년 토큰(claude setup-token).
@@ -60,29 +66,82 @@ public record ClaudeAccountToken(String token, OffsetDateTime issuedAt, OffsetDa
     }
 
     public static ClaudeAccountToken load(Path accountDir, Clock clock) {
-        Path file = accountDir.resolve(FILE_NAME);
+        ClaudeAccountToken found = read(accountDir);
+        if (found == null) {
+            throw new ClaudeCliException(MISSING_PREFIX + accountDir);
+        }
+        if (!found.expiresAt().toInstant().isAfter(clock.instant())) {
+            throw new ClaudeCliException(EXPIRED_PREFIX + accountDir + ":expires_at=" + found.expiresAt());
+        }
+        return found;
+    }
+
+    /** 파일이 없거나 모양이 틀리면 null. 기한은 보지 않는다. */
+    static ClaudeAccountToken read(Path accountDir) {
         JsonNode node;
         try {
-            node = MAPPER.readTree(Files.readString(file));
+            node = MAPPER.readTree(Files.readString(accountDir.resolve(FILE_NAME)));
         } catch (IOException e) {
-            throw new ClaudeCliException(MISSING_PREFIX + accountDir);
+            return null;
         }
         String token = text(node, "token");
-        if (token == null || !token.startsWith(TOKEN_PREFIX) || token.length() == TOKEN_PREFIX.length()) {
-            throw new ClaudeCliException(MISSING_PREFIX + accountDir);
-        }
-        OffsetDateTime issuedAt;
-        OffsetDateTime expiresAt;
+        if (!looksLikeToken(token)) return null;
         try {
-            issuedAt = OffsetDateTime.parse(text(node, "issued_at"));
-            expiresAt = OffsetDateTime.parse(text(node, "expires_at"));
+            return new ClaudeAccountToken(token,
+                    OffsetDateTime.parse(text(node, "issued_at")),
+                    OffsetDateTime.parse(text(node, "expires_at")));
         } catch (NullPointerException | DateTimeParseException e) {
-            throw new ClaudeCliException(MISSING_PREFIX + accountDir);
+            return null;
         }
-        if (!expiresAt.toInstant().isAfter(clock.instant())) {
-            throw new ClaudeCliException(EXPIRED_PREFIX + accountDir + ":expires_at=" + expiresAt);
+    }
+
+    public static boolean looksLikeToken(String token) {
+        return token != null && token.startsWith(TOKEN_PREFIX) && token.length() > TOKEN_PREFIX.length()
+                && token.chars().noneMatch(Character::isWhitespace);
+    }
+
+    /**
+     * CR-196 PRD-646: 화면과 만료 확인에 보여 줄 상태. 토큰 값은 싣지 않고, 기한이 지난 파일도 present 로 본다.
+     * 남은 날은 받는 쪽이 자기 시계로 센다.
+     */
+    public static Map<String, Object> describe(Path accountDir) {
+        ClaudeAccountToken found = read(accountDir);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("config_dir", accountDir.toString());
+        out.put("present", found != null);
+        out.put("issued_at", found != null ? found.issuedAt().toString() : null);
+        out.put("expires_at", found != null ? found.expiresAt().toString() : null);
+        return out;
+    }
+
+    /**
+     * 같은 폴더의 임시 파일에 600 으로 쓰고 이름을 바꿔 갈아 끼운다. 도중에 멈춰도 쓰던 토큰 파일은 남는다.
+     * 실행기가 막 띄우는 워커는 앞 파일이나 새 파일 중 하나를 온전히 읽는다.
+     */
+    public static void write(Path accountDir, String token, OffsetDateTime issuedAt, OffsetDateTime expiresAt)
+            throws IOException {
+        if (!looksLikeToken(token)) throw new IllegalArgumentException("token shape");
+        Files.createDirectories(accountDir);
+        Map<String, String> body = new LinkedHashMap<>();
+        body.put("token", token);
+        body.put("issued_at", issuedAt.toString());
+        body.put("expires_at", expiresAt.toString());
+        Path tmp = accountDir.resolve(FILE_NAME + ".new");
+        Files.deleteIfExists(tmp);
+        try {
+            Files.createFile(tmp, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+        } catch (UnsupportedOperationException e) {
+            Files.createFile(tmp);
+        } catch (FileAlreadyExistsException e) {
+            throw new IOException("token file is being written", e);
         }
-        return new ClaudeAccountToken(token, issuedAt, expiresAt);
+        Files.writeString(tmp, MAPPER.writeValueAsString(body) + "\n");
+        try {
+            Files.move(tmp, accountDir.resolve(FILE_NAME),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tmp, accountDir.resolve(FILE_NAME), StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private static String text(JsonNode node, String field) {

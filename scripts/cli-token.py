@@ -202,11 +202,22 @@ def read_token():
     return ""
 
 
+# 한글 입력 상태에서 y, n 자리를 치면 들어오는 자모
+HANGUL_KEYS = {"ㅛ": "y", "ㅜ": "n"}
+
+
 def ask(prompt):
-    try:
-        return input(prompt).strip().lower()
-    except EOFError:
-        return ""
+    """한글 입력 상태로 답하면 조합 중이던 바이트가 깨져 들어와 읽기가 UnicodeDecodeError 로 죽었다
+    (2026-11-16 chaws wms work01). 바이트로 읽어 깨진 글자는 버리고, y, n 자리의 자모는 영문으로 본다."""
+    while True:
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+        raw = sys.stdin.buffer.readline()
+        text = raw.decode("utf-8", "ignore").strip().lower()
+        if raw.strip() and not text:
+            # 깨진 글자만 들어왔으면 기본값으로 넘기지 않고 다시 묻는다
+            continue
+        return "".join(HANGUL_KEYS.get(c, c) for c in text)
 
 
 def main():
