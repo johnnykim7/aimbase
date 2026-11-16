@@ -73,6 +73,7 @@ export class AimbaseChatElement extends HTMLElement {
       "rag-source-id",
       "session-id",
       "connection-id",
+      "connection-group-id",
       "actions-enabled",
       "model",
       "suggestions",
@@ -81,10 +82,45 @@ export class AimbaseChatElement extends HTMLElement {
       "font-size",
       "locale",
       "allow-approval",
+      "screen-key",
+      "history-list",
     ];
   }
 
+  /**
+   * CR-194 계약 6-1: 붙이는 앱은 화면을 옮겨도 위젯 요소 하나를 그대로 두고 속성만 바꾼다. 화면 키가 바뀌면 그 화면의
+   * 토큰과 대화로 위젯을 다시 띄운다(응답 멈춤, 토큰 다시 받기, 위젯 설정 다시 읽기). 열려 있던 창은 연 채로 둔다.
+   * 연결, 계정 묶음, 대화 목록 끄기, 첫 화면 안내 줄은 그 자리에서 바꾼다. 그 밖의 속성은 지금처럼 붙을 때만 읽는다.
+   */
+  attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
+    if (!this.handle || oldValue === newValue) return;
+    switch (name) {
+      case "screen-key": {
+        const wasOpen = this.handle.isOpen();
+        this.handle.destroy();
+        this.handle = null;
+        this.connectedCallback();
+        const next = this.handle as WidgetHandle | null;
+        if (wasOpen) next?.open();
+        break;
+      }
+      case "connection-id":
+        this.handle.update({ connectionId: newValue });
+        break;
+      case "connection-group-id":
+        this.handle.update({ connectionGroupId: newValue });
+        break;
+      case "history-list":
+        this.handle.update({ historyList: newValue !== "off" });
+        break;
+      case "empty-subtitle":
+        this.handle.update({ emptySubtitle: parseLocalizedText(newValue) ?? null });
+        break;
+    }
+  }
+
   connectedCallback(): void {
+    if (this.handle) return;
     const baseUrl = this.getAttribute("base-url");
     if (!baseUrl) {
       console.error("[aimbase-chat] base-url attribute is required");
@@ -127,6 +163,7 @@ export class AimbaseChatElement extends HTMLElement {
       sessionId: this.getAttribute("session-id") ?? undefined,
       ragSourceId: this.ragSourceId ?? this.getAttribute("rag-source-id") ?? undefined,
       connectionId: this.getAttribute("connection-id") ?? undefined,
+      connectionGroupId: this.getAttribute("connection-group-id") || undefined,
       actionsEnabled: actionsAttr === "true" || actionsAttr === "" ? true : undefined,
       model: this.getAttribute("model") ?? undefined,
       target: displayAttr === "inline" ? (this as HTMLElement) : undefined,
@@ -138,6 +175,8 @@ export class AimbaseChatElement extends HTMLElement {
       locale: this.getAttribute("locale") ?? undefined,
       allowApproval: this.getAttribute("allow-approval") === "false" ? false : undefined,
       fontSize: fontSizeAttr && FONT_SIZES.includes(fontSizeAttr) ? fontSizeAttr : undefined,
+      screenKey: this.getAttribute("screen-key") || undefined,
+      historyList: this.getAttribute("history-list") === "off" ? false : undefined,
       on: {
         // 붙이는 앱이 새 대화 번호를 따라가도록 엘리먼트 이벤트로 알린다.
         onNewConversation: (detail) =>

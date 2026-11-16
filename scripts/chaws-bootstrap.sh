@@ -6,6 +6,8 @@
 #   wms     테넌트 bp_wms, 실행기 aimbase-agent(cli-runner-bp-wms), 비밀값 agent.env, 소비앱 키 secrets/bp-wms-api-key
 #   wes-cs  테넌트 bp_wes, 실행기 aimbase-agent-wes-cs(cli-runner-bp-wes-cs), 비밀값 agent-wes-cs.env,
 #           소비앱 키 secrets/bp-wes-api-key. CS 상세 AI 대화(위젯)용 연결 -001 을 더 둔다
+#   wes-assist  테넌트 bp_wes, 실행기 aimbase-agent-wes-assist(cli-runner-bp-wes-assist), 비밀값 agent-wes-assist.env.
+#           BO2 일반 화면 AI 대화(위젯). 위젯이 계정 묶음을 받으므로 CS 와 같이 계정별 연결과 묶음을 둔다(CR-194 3.9)
 #   3plgw   테넌트 bp_3plgw, 실행기 aimbase-agent-3plgw(cli-runner-bp-3plgw), 비밀값 agent-3plgw.env,
 #           소비앱 키 secrets/bp-3plgw-api-key. 품고 변경 수리(CR-174). HTTP 연결은 http 단계
 # 59 도 같은 스크립트로 세운다. ./deploy.sh be 가 build/ 에 올리고 서버 폴더(/home/therecommerce/aimbase)에서 돌린다.
@@ -31,6 +33,9 @@ API="http://127.0.0.1:8280/api/v1"
 ADMIN_EMAIL="platform-admin@aimbase.local"
 ACCOUNTS="${ACCOUNTS:-}"
 WIDGET_CONNECTION=""
+# 연결 기본 모델과 위젯에서 고를 수 있는 모델(config.models, 「id=이름」 을 쉼표로). 대상이 정하지 않으면 지금 값이다.
+MODEL="claude-sonnet-4-5"
+MODELS=""
 WORKFLOW_STEP_CONNECTION="opinion"
 case "$TARGET" in
   wms)
@@ -43,8 +48,18 @@ case "$TARGET" in
     TENANT="bp_wes"; APP="bp-wes"; LABEL="bp-wes CS"; TAG="CR-173"
     RUNNER="cli-runner-bp-wes-cs"; AGENT_SERVICE="aimbase-agent-wes-cs"; AGENT_ENV="agent-wes-cs.env"
     TOOL_MODE="NATIVE"; EXPOSED_TOOLS="bash get_current_time"
-    # 위젯은 연결 묶음을 보내지 못해 연결 하나로 간다(bp-wes WES_CS_AIMBASE_WIDGET_CONNECTION_ID).
+    # CS 상세 위젯은 연결 하나로 간다(bp-wes WES_CS_AIMBASE_WIDGET_CONNECTION_ID). 위젯은 CR-194 부터 묶음 번호도 받는다.
     WIDGET_CONNECTION="$RUNNER-001"
+    WIDGET_ORIGIN="${WIDGET_ORIGIN:-https://admin.banpoom.co.kr}" ;;
+  wes-assist)
+    # BO2 일반 화면 AI 대화(CR-194, CR-WES-372 계약 5절). CS 와 같은 틀에 조회 계정만 wes_assist_ai 다.
+    # 시스템 지시 대체값을 두지 않는다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않는다.
+    TENANT="bp_wes"; APP="bp-wes"; LABEL="bp-wes 일반 화면"; TAG="CR-194"
+    RUNNER="cli-runner-bp-wes-assist"; AGENT_SERVICE="aimbase-agent-wes-assist"; AGENT_ENV="agent-wes-assist.env"
+    TOOL_MODE="NATIVE"; EXPOSED_TOOLS="bash get_current_time"
+    # 대화창 모델 목록. 적은 순서가 화면 순서다. 실행기 CLI 를 2.1.325 로 고정한 뒤 넷을 둔다(CR-195).
+    MODEL="claude-opus-5-5"
+    MODELS="claude-opus-5-5=Opus 5.5,claude-fable-5-2=Fable 5.2,claude-sonnet-5-5=Sonnet 5.5,claude-haiku-5-5=Haiku 5.5"
     WIDGET_ORIGIN="${WIDGET_ORIGIN:-https://admin.banpoom.co.kr}" ;;
   3plgw)
     # 품고 변경 수리 실행기(CR-174). CLI 가 레포를 고치고 PR 을 만들므로 HYBRID. 워크플로우 정의는 연결을 바꾸지 않는다.
@@ -53,7 +68,7 @@ case "$TARGET" in
     TOOL_MODE="HYBRID"; EXPOSED_TOOLS="get_current_time"
     WORKFLOW_STEP_CONNECTION=""
     WIDGET_ORIGIN="${WIDGET_ORIGIN:-}" ;;
-  *) echo "대상: wms | wes-cs | 3plgw"; exit 1 ;;
+  *) echo "대상: wms | wes-cs | wes-assist | 3plgw"; exit 1 ;;
 esac
 # 비밀값 배치. chaws 는 실행기마다 env 파일에 호출 키(AIMBASE_RUNNER_API_KEY)를 둔다.
 # 59 는 compose 가 .env 의 RUNNER_API_KEY(실행기 공유)와 실행기 전용 키 변수를 실행기 환경에 넣는다(docker-compose.prod.yml).
@@ -213,16 +228,35 @@ logged_in_accounts() {
 }
 
 # 연결 하나를 없으면 만든다. 인자는 연결 ID, 계정 폴더 이름, 연결 이름.
-ensure_connection() {
-  if [ "$(status "$API/connections/$1")" = 200 ]; then echo "[connections] $1 있음"; return; fi
-  code=$(python3 - "$1" "$2" "$3" "$RUNNER" "$RUNNER_KEY_FILE" "$RUNNER_KEY_VAR" "$TOOL_MODE" $EXPOSED_TOOLS <<'PY' | call -X POST -d @- "$API/connections"
+# 이미 있는 연결은 기본 모델과 모델 목록만 이 스크립트 값으로 맞춘다. 다른 설정과 실행기 열쇠는 그대로 둔다(CR-195).
+align_models() {
+  [ -n "$MODELS" ] || { echo "[connections] $1 있음"; return; }
+  local code
+  code=$(curl -fsS -H @"$HDR" -H "X-Tenant-Id: $TENANT" "$API/connections/$1" \
+    | python3 -c '
 import json, sys
-cid, acct, name, runner, env_file, key_var, tool_mode = sys.argv[1:8]
+c = json.load(sys.stdin)["data"]
+model, models = sys.argv[1], sys.argv[2]
+cfg = dict(c.get("config") or {})
+cfg["model"] = model
+cfg["models"] = [{"id": i.strip(), "label": l.strip()} for i, l in (m.split("=", 1) for m in models.split(","))]
+print(json.dumps({"name": c["name"], "adapter": c["adapter"], "type": c["type"], "config": cfg}))' "$MODEL" "$MODELS" \
+    | call -X PUT -d @- "$API/connections/$1")
+  echo "[connections] $1 있음, 모델을 맞춤 응답 $code"
+}
+
+ensure_connection() {
+  if [ "$(status "$API/connections/$1")" = 200 ]; then align_models "$1"; return; fi
+  code=$(python3 - "$1" "$2" "$3" "$RUNNER" "$RUNNER_KEY_FILE" "$RUNNER_KEY_VAR" "$TOOL_MODE" "$MODEL" "$MODELS" $EXPOSED_TOOLS <<'PY' | call -X POST -d @- "$API/connections"
+import json, sys
+cid, acct, name, runner, env_file, key_var, tool_mode, model, models = sys.argv[1:10]
 key = [l.split("=", 1)[1].strip() for l in open(env_file) if l.startswith(key_var + "=")][0]
-print(json.dumps({"id": cid, "name": name, "adapter": "anthropic-cli", "type": "llm",
-                  "config": {"model": "claude-sonnet-4-5", "tool_mode": tool_mode, "agent_name": runner,
-                             "config_dir": f"/home/appuser/.claude-accounts/{acct}",
-                             "exposed_tools": sys.argv[8:], "runner_api_key": key}}))
+config = {"model": model, "tool_mode": tool_mode, "agent_name": runner,
+          "config_dir": f"/home/appuser/.claude-accounts/{acct}",
+          "exposed_tools": sys.argv[10:], "runner_api_key": key}
+if models:
+    config["models"] = [{"id": i.strip(), "label": l.strip()} for i, l in (m.split("=", 1) for m in models.split(","))]
+print(json.dumps({"id": cid, "name": name, "adapter": "anthropic-cli", "type": "llm", "config": config}))
 PY
 )
   echo "[connections] $1 만들기 응답 $code"
@@ -355,16 +389,27 @@ print("[smoke] 결과", json.dumps(o.get("structured_data") or o.get("error") or
   rm -f secrets/.smoke.json secrets/.smoke-run.json
 }
 
-# 실행기의 DB 계정을 보고, bp-wes 가 부르는 길(묶음, stream=false)로 CLI 가 그 계정으로 psql 을 부르게 한다.
-smoke_wes_cs() {
+# 실행기의 DB 계정을 보고, bp-wes 가 부르는 길(stream=false)로 CLI 가 그 계정으로 psql 을 부르게 한다.
+# 인자는 부르는 길(connection_group_id 또는 connection_id), 그 값, 모델(없으면 연결 기본)이다.
+smoke_runner_db() {
   echo "[smoke] 실행기 DB 계정: $(docker compose exec -T "$AGENT_SERVICE" psql -tAc 'select current_user' 2>&1 | head -c 300)"
-  python3 - "$GROUP" <<'PY' > secrets/.smoke.json
-import json, sys
-print(json.dumps({"connection_group_id": sys.argv[1], "stream": False,
-                  "messages": [{"role": "user", "content": "Bash 도구로 psql -tAc 'select current_user' 를 실행하고 출력 한 줄만 답하세요."}]},
-                 ensure_ascii=False))
+  # 같은 질문은 답 저장분에서 나와 실행기에 닿지 않으므로 질문마다 시험 번호를 붙인다.
+  python3 - "$1" "$2" "${3:-}" <<'PY' > secrets/.smoke.json
+import json, sys, time
+body = {sys.argv[1]: sys.argv[2], "stream": False,
+        "messages": [{"role": "user", "content": "시험 %d. Bash 도구로 psql -tAc 'select current_user' 를 실행하고 출력 한 줄만 답하세요." % time.time_ns()}]}
+if sys.argv[3]:
+    body["model"] = sys.argv[3]
+print(json.dumps(body, ensure_ascii=False))
 PY
-  app --max-time 330 -w '\n%{http_code}' -X POST -d @/s/.smoke.json http://aimbase-api:8080/api/v1/chat/completions > secrets/.smoke-run.txt
+  if [ "$LAYOUT" = dotenv ]; then
+    # 59 에는 소비앱 키와 aimbase-apps 망이 없다. 관리자가 테넌트로 대리 로그인해 같은 API 를 부른다.
+    login_tenant
+    curl -sS --max-time 330 -w '\n%{http_code}' -H @"$HDR" -H 'Content-Type: application/json' -H "X-Tenant-Id: $TENANT" \
+      -X POST -d @secrets/.smoke.json "$API/chat/completions" > secrets/.smoke-run.txt
+  else
+    app --max-time 330 -w '\n%{http_code}' -X POST -d @/s/.smoke.json http://aimbase-api:8080/api/v1/chat/completions > secrets/.smoke-run.txt
+  fi
   python3 -c '
 import json
 body, _, code = open("secrets/.smoke-run.txt").read().rpartition("\n")
@@ -390,7 +435,8 @@ smoke_3plgw() {
 step_smoke() {
   case "$TARGET" in
     wms) smoke_wms ;;
-    wes-cs) smoke_wes_cs ;;
+    wes-cs) smoke_runner_db connection_group_id "$GROUP" ;;
+    wes-assist) smoke_runner_db connection_group_id "$GROUP" "$MODEL" ;;
     3plgw) smoke_3plgw ;;
   esac
 }

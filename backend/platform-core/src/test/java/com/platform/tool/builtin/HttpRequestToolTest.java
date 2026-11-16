@@ -2,6 +2,7 @@ package com.platform.tool.builtin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import com.platform.domain.ConnectionEntity;
 import com.platform.repository.ConnectionRepository;
 import com.platform.tool.ToolContext;
@@ -407,6 +408,241 @@ class HttpRequestToolTest {
         Map<?, ?> reqHeaders = (Map<?, ?>) result.auditPayload().get("requestHeaders");
         assertThat(reqHeaders.get("Authorization")).isEqualTo("***");
         assertThat(reqHeaders.get("X-Request-Id")).isEqualTo("req-1");
+    }
+
+    private ConnectionEntity queryAuthConnection(String id, Map<String, Object> auth) {
+        return buildConnection(id, "HTTP", Map.of("baseUrl", baseUrl, "auth", auth));
+    }
+
+    private static Map<String, Object> queryAuth(String value) {
+        return Map.of("type", "API_KEY", "in", "query", "name", "OC", "value", value);
+    }
+
+    private LoggedRequest onlyRequest(String path) {
+        List<LoggedRequest> requests = wireMock.findAll(getRequestedFor(urlPathEqualTo(path)));
+        assertThat(requests).hasSize(1);
+        return requests.get(0);
+    }
+
+    // ── CR-197: API_KEY in=query 면 연결 키를 주소 값으로 싣고 URL 인코딩한다 ──
+    @Test
+    void api_key_query_is_injected_url_encoded() {
+        stubConnection(queryAuthConnection("law", queryAuth("k&ey=1/가")));
+        wireMock.stubFor(get(urlPathEqualTo("/law"))
+                .withQueryParam("OC", equalTo("k&ey=1/가"))
+                .withQueryParam("target", equalTo("law"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{}")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "law",
+                "method", "GET",
+                "path", "/law",
+                "query", Map.of("target", "law")
+        ), ToolContext.minimal(null, null));
+
+        assertThat(result.success()).isTrue();
+        LoggedRequest req = onlyRequest("/law");
+        assertThat(req.getUrl()).contains("OC=k%26ey%3D1%2F%EA%B0%80");
+        assertThat(req.containsHeader("OC")).isFalse();
+        assertThat(req.containsHeader("X-Api-Key")).isFalse();
+    }
+
+    // ── CR-197: 입력 query 의 같은 이름(대소문자 무관)은 연결 키에 진다 ──
+    @Test
+    void api_key_query_cannot_be_overridden_by_input_query() {
+        stubConnection(queryAuthConnection("law", queryAuth("conn-key")));
+        wireMock.stubFor(get(urlPathEqualTo("/law"))
+                .willReturn(aResponse().withStatus(200).withBody("ok")));
+
+        Map<String, Object> query = new LinkedHashMap<>();
+        query.put("OC", "workflow-key");
+        query.put("oc", "workflow-key-2");
+        query.put("target", "law");
+        tool.execute(Map.of(
+                "connection_id", "law",
+                "method", "GET",
+                "path", "/law",
+                "query", query
+        ), ToolContext.minimal(null, null));
+
+        String url = onlyRequest("/law").getUrl();
+        assertThat(url).doesNotContain("workflow-key");
+        assertThat(url.toLowerCase().split("oc=", -1)).hasSize(2);
+        assertThat(url).contains("OC=conn-key").contains("target=law");
+    }
+
+    // ── CR-197: 감사 기록 주소, 결과 요약, 결과 본문에 키가 남지 않는다 ──
+    @Test
+    void api_key_query_is_masked_in_audit_and_summary() {
+        stubConnection(queryAuthConnection("law", queryAuth("secret-oc")));
+        wireMock.stubFor(get(urlPathEqualTo("/law"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{}")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "law",
+                "method", "GET",
+                "path", "/law",
+                "query", Map.of("target", "law")
+        ), ToolContext.minimal(null, null));
+
+        String auditUri = (String) result.auditPayload().get("uri");
+        assertThat(auditUri).contains("OC=***").contains("target=law").doesNotContain("secret-oc");
+        assertThat(result.summary()).contains("OC=***").doesNotContain("secret-oc");
+        assertThat(String.valueOf(result.output())).doesNotContain("secret-oc");
+        assertThat(String.valueOf(result.auditPayload())).doesNotContain("secret-oc");
+    }
+
+    // ── CR-197: 호출이 실패해도 기록에 키가 남지 않는다 ──
+    @Test
+    void api_key_query_is_masked_on_timeout() {
+        stubConnection(queryAuthConnection("law", queryAuth("secret-oc")));
+        wireMock.stubFor(get(urlPathEqualTo("/slow"))
+                .willReturn(aResponse().withFixedDelay(2000).withStatus(200).withBody("ok")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "law",
+                "method", "GET",
+                "path", "/slow",
+                "timeout_ms", 200
+        ), ToolContext.minimal(null, null));
+
+        assertThat(result.success()).isFalse();
+        assertThat((String) result.auditPayload().get("uri")).contains("OC=***").doesNotContain("secret-oc");
+        assertThat(result.summary()).doesNotContain("secret-oc");
+    }
+
+    // ── CR-197: 주소가 잘못됐다는 오류 문구에도 키가 남지 않는다 ──
+    @Test
+    void api_key_query_is_masked_in_malformed_url_error() {
+        stubConnection(queryAuthConnection("law", queryAuth("secret-oc")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "law",
+                "method", "GET",
+                "path", "/bad path"
+        ), ToolContext.minimal(null, null));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.summary()).contains("Malformed URL").contains("OC=***").doesNotContain("secret-oc");
+    }
+
+    // ── CR-197: 연결 값이 비면 싣지 않고, 입력의 같은 이름 값은 기록에서 가린다 ──
+    @Test
+    void api_key_query_without_value_passes_input_but_masks_it() {
+        stubConnection(queryAuthConnection("law", Map.of(
+                "type", "API_KEY", "in", "query", "name", "OC",
+                "value_env", "CR197_UNSET_ENV_FOR_TEST")));
+        wireMock.stubFor(get(urlPathEqualTo("/law"))
+                .willReturn(aResponse().withStatus(200).withBody("ok")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "law",
+                "method", "GET",
+                "path", "/law",
+                "query", Map.of("oc", "typed-key")
+        ), ToolContext.minimal(null, null));
+
+        assertThat(onlyRequest("/law").getUrl()).isEqualTo("/law?oc=typed-key");
+        assertThat((String) result.auditPayload().get("uri")).contains("oc=***").doesNotContain("typed-key");
+        assertThat(result.summary()).doesNotContain("typed-key");
+    }
+
+    // ── CR-197 회귀: 머리값 방식은 주소에 키를 싣지 않는다 ──
+    @Test
+    void api_key_header_mode_keeps_key_out_of_url() {
+        stubConnection(buildConnection("hdr", "HTTP", Map.of(
+                "baseUrl", baseUrl,
+                "auth", Map.of("type", "API_KEY", "in", "header", "name", "OC", "value", "hdr-key")
+        )));
+        wireMock.stubFor(get(urlPathEqualTo("/law"))
+                .withHeader("OC", equalTo("hdr-key"))
+                .willReturn(aResponse().withStatus(200).withBody("ok")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "hdr",
+                "method", "GET",
+                "path", "/law",
+                "query", Map.of("target", "law")
+        ), ToolContext.minimal(null, null));
+
+        assertThat(result.success()).isTrue();
+        assertThat(onlyRequest("/law").getUrl()).isEqualTo("/law?target=law");
+        Map<?, ?> reqHeaders = (Map<?, ?>) result.auditPayload().get("requestHeaders");
+        assertThat(reqHeaders.get("OC")).isEqualTo("***");
+    }
+
+    // ── CR-197: 응답 본문(JSON)과 머리값이 키를 되돌려 줘도 결과와 감사 요약에서 가린다 ──
+    @Test
+    @SuppressWarnings("unchecked")
+    void echoed_key_in_json_body_and_headers_is_masked() {
+        stubConnection(queryAuthConnection("law", queryAuth("sec/ret-oc")));
+        wireMock.stubFor(get(urlPathEqualTo("/law"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withHeader("X-Echo", "OC=sec/ret-oc")
+                        .withBody("{\"PrecSearch\":{\"prec\":[{\"판례상세링크\":"
+                                + "\"/DRF/lawService.do?OC=sec\\/ret-oc&target=prec&ID=1\"}]}}")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "law",
+                "method", "GET",
+                "path", "/law"
+        ), ToolContext.minimal(null, null));
+
+        Map<String, Object> out = (Map<String, Object>) result.output();
+        Map<String, Object> search = (Map<String, Object>) ((Map<String, Object>) out.get("body")).get("PrecSearch");
+        Map<String, Object> first = ((List<Map<String, Object>>) search.get("prec")).get(0);
+        assertThat(first.get("판례상세링크")).isEqualTo("/DRF/lawService.do?OC=***&target=prec&ID=1");
+        assertThat(((Map<String, String>) out.get("headers")).get("x-echo")).isEqualTo("OC=***");
+        assertThat(String.valueOf(out)).doesNotContain("ret-oc");
+        assertThat(String.valueOf(result.auditPayload())).doesNotContain("ret-oc");
+    }
+
+    // ── CR-197: 글 본문에 URL 인코딩된 꼴로 되돌아온 키도 가린다 ──
+    @Test
+    void echoed_url_encoded_key_in_text_body_is_masked() {
+        stubConnection(queryAuthConnection("law", queryAuth("k&ey=1")));
+        wireMock.stubFor(get(urlPathEqualTo("/law"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "text/xml")
+                        .withBody("<link>/DRF/lawService.do?OC=k%26ey%3D1&amp;ID=1</link><raw>k&ey=1</raw>")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "law",
+                "method", "GET",
+                "path", "/law"
+        ), ToolContext.minimal(null, null));
+
+        Object body = ((Map<?, ?>) result.output()).get("body");
+        assertThat(body).isEqualTo("<link>/DRF/lawService.do?OC=***&amp;ID=1</link><raw>***</raw>");
+        assertThat((String) result.auditPayload().get("responseSummary")).doesNotContain("k%26ey").doesNotContain("k&ey");
+    }
+
+    // ── CR-197: 머리값 방식, BEARER 의 값이 응답에 되돌아와도 가린다 ──
+    @Test
+    void echoed_bearer_token_in_body_is_masked() {
+        stubConnection(buildConnection("bearer-echo", "HTTP", Map.of(
+                "baseUrl", baseUrl,
+                "auth", Map.of("type", "BEARER", "value", "tok-xyz")
+        )));
+        wireMock.stubFor(get(urlEqualTo("/me"))
+                .withHeader("Authorization", equalTo("Bearer tok-xyz"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"authorization\":\"Bearer tok-xyz\"}")));
+
+        ToolResult result = tool.execute(Map.of(
+                "connection_id", "bearer-echo",
+                "method", "GET",
+                "path", "/me"
+        ), ToolContext.minimal(null, null));
+
+        assertThat(result.success()).isTrue();
+        assertThat(String.valueOf(((Map<?, ?>) result.output()).get("body"))).contains("Bearer ***").doesNotContain("tok-xyz");
     }
 
     // ── T12: 입력 검증 — connection_id 누락 ──

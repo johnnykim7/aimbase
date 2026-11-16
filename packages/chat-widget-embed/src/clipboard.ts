@@ -3,7 +3,7 @@
  * 브라우저 클립보드 기능은 https 와 localhost 에서만 열려 있다. 붙이는 앱이 http 로 뜨면
  * 숨긴 입력칸에 글을 담아 복사 명령으로 넣는다(CR-175, 개발기 백오피스가 http).
  */
-export async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string, near?: Node): Promise<boolean> {
   if (window.isSecureContext && navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text);
@@ -12,16 +12,18 @@ export async function copyText(text: string): Promise<boolean> {
       // 권한을 막은 브라우저도 복사 명령은 받는 경우가 있어 한 번 더 해 본다
     }
   }
-  return copyWithCommand(text);
+  return copyWithCommand(text, near);
 }
 
-function copyWithCommand(text: string): boolean {
+function copyWithCommand(text: string, near?: Node): boolean {
   const focused = deepActiveElement();
   const ta = document.createElement("textarea");
   ta.value = text;
   ta.setAttribute("readonly", "");
   ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;";
-  document.body.appendChild(ta);
+  // CR-194: 붙이는 앱의 건 창(모달)은 위젯 자리 밖으로 간 초점을 되찾아 선택이 풀린다. 숨긴 칸을 누른 단추가 있는 위젯 그림자 영역 안에 둔다.
+  const root = (near ?? focused)?.getRootNode();
+  (root instanceof ShadowRoot ? root : document.body).appendChild(ta);
   ta.select();
   let ok = false;
   try {

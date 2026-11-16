@@ -3,6 +3,7 @@ package com.platform.api;
 import com.platform.session.ChatHistoryService;
 import com.platform.session.ChatOwner;
 import com.platform.session.ChatRejectedException;
+import com.platform.session.SharedConversationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,9 +32,11 @@ import java.util.Map;
 public class ChatHistoryController {
 
     private final ChatHistoryService historyService;
+    private final SharedConversationService sharedConversations;
 
-    public ChatHistoryController(ChatHistoryService historyService) {
+    public ChatHistoryController(ChatHistoryService historyService, SharedConversationService sharedConversations) {
         this.historyService = historyService;
+        this.sharedConversations = sharedConversations;
     }
 
     @GetMapping
@@ -41,9 +45,22 @@ public class ChatHistoryController {
     public ApiResponse<List<Map<String, Object>>> list(
             @RequestParam(name = "chat_project_id", required = false) String chatProjectId,
             @RequestParam(required = false) String query,
+            @RequestParam(name = "screen_key", required = false) String screenKey,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(required = false) Integer size) {
-        return ApiResponse.page(historyService.list(requireOwner(), chatProjectId, query, page, size));
+        return ApiResponse.page(historyService.list(requireOwner(), chatProjectId, query, screenKey, page, size));
+    }
+
+    @PostMapping("/shared")
+    @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
+    @Operation(summary = "함께 보는 대화 열기", description = "토큰의 함께 보기 키로 그 건의 대화를 찾고, 없으면 만든다(CR-194).")
+    public ApiResponse<Map<String, Object>> openShared() {
+        requireOwner();
+        SharedConversationService.Opened opened = sharedConversations.open(ChatOwner.currentShareKey());
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("session_id", opened.sessionId());
+        body.put("created", opened.created());
+        return ApiResponse.ok(body);
     }
 
     @GetMapping("/{sessionId}/messages")

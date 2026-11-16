@@ -40,17 +40,45 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
      * SessionStore.persistToDb 비동기 VT 가 같은 session_id 로 동시 INSERT 하다 UNIQUE 위반.
      * Hibernate save() retry 로는 트랜잭션 경계 race 를 못 잡는 경우가 있어 native ON CONFLICT 로 정공.
      * id 는 신규 row 일 때만 사용; 이미 row 있으면 message_count / updated_at 만 갱신.
+     *
+     * <p>CR-194: 함께 보는 대화는 주인을 적지 않는다(BIZ-276). 화면 키는 메시지가 없는 대화에만 적고 바꾸지 않는다
+     * (BIZ-277). 작업 폴더를 먼저 정한 대화처럼 첫 질문 전에 행이 생긴 경우가 있어 메시지 수로 본다.
      */
     @Modifying
     @Transactional
-    @Query(value = "INSERT INTO conversation_sessions (id, session_id, title, message_count, scope_type, user_id, created_at, updated_at) "
-            + "VALUES (:id, :sessionId, :title, :messageCount, COALESCE(:scopeType, 'chat'), :userId, NOW(), NOW()) "
+    @Query(value = "INSERT INTO conversation_sessions (id, session_id, title, message_count, scope_type, user_id, screen_key, created_at, updated_at) "
+            + "VALUES (:id, :sessionId, :title, :messageCount, COALESCE(:scopeType, 'chat'), :userId, :screenKey, NOW(), NOW()) "
             + "ON CONFLICT (session_id) DO UPDATE SET "
             + "  message_count = EXCLUDED.message_count, "
-            + "  user_id = COALESCE(conversation_sessions.user_id, EXCLUDED.user_id), "
+            + "  user_id = COALESCE(conversation_sessions.user_id, "
+            + "      CASE WHEN conversation_sessions.share_key IS NULL THEN EXCLUDED.user_id END), "
+            + "  screen_key = COALESCE(conversation_sessions.screen_key, "
+            + "      CASE WHEN conversation_sessions.message_count = 0 THEN EXCLUDED.screen_key END), "
             + "  updated_at = NOW()",
             nativeQuery = true)
-    void upsertSession(UUID id, String sessionId, String title, int messageCount, String scopeType, String userId);
+    void upsertSession(@Param("id") UUID id, @Param("sessionId") String sessionId, @Param("title") String title,
+                       @Param("messageCount") int messageCount, @Param("scopeType") String scopeType,
+                       @Param("userId") String userId, @Param("screenKey") String screenKey);
+
+    /** CR-194: 그 함께 보기 키의 지우지 않은 대화(BIZ-276 으로 많아야 하나). */
+    @Query(value = "SELECT * FROM conversation_sessions WHERE share_key = :shareKey AND deleted_at IS NULL",
+            nativeQuery = true)
+    Optional<ConversationSessionEntity> findLiveByShareKey(@Param("shareKey") String shareKey);
+
+    /**
+     * CR-194: 메시지 없는 함께 보는 대화 행을 만든다. 같은 키의 대화가 이미 있으면 아무것도 하지 않는다(부분 고유 색인,
+     * BIZ-276). 주인은 비우고 화면 키는 함께 보기 키와 같다(BIZ-277).
+     *
+     * @return 만들었으면 1
+     */
+    @Modifying
+    @Transactional
+    @Query(value = "INSERT INTO conversation_sessions (id, session_id, message_count, scope_type, screen_key, share_key, created_at, updated_at) "
+            + "VALUES (:id, :sessionId, 0, 'chat', :shareKey, :shareKey, NOW(), NOW()) "
+            + "ON CONFLICT (share_key) WHERE share_key IS NOT NULL AND deleted_at IS NULL DO NOTHING",
+            nativeQuery = true)
+    int insertSharedIfAbsent(@Param("id") UUID id, @Param("sessionId") String sessionId,
+                             @Param("shareKey") String shareKey);
 
     /**
      * CR-178: 첫 질문으로 만든 세션을 위젯 프로젝트에 넣는다. 이미 프로젝트가 있으면 두지 않는다
@@ -68,6 +96,7 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
      *
      * @param projectFilter 0 이면 전부, 1 이면 그 프로젝트만, 2 이면 프로젝트에 없는 대화만
      * @param titlePattern  null 이면 제목을 보지 않는다. 주면 ILIKE 패턴(% 와 _ 는 호출자가 막는다)
+     * @param screenKey     CR-194: null 이면 화면 키를 보지 않는다. 함께 보는 대화는 주인이 비어 나오지 않는다
      */
     @Query(value = "SELECT * FROM conversation_sessions s "
             + "WHERE s.user_id = :ownerRef AND s.deleted_at IS NULL AND s.scope_type = 'chat' AND s.message_count > 0 "
@@ -75,18 +104,21 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
             + "     OR (:projectFilter = 1 AND s.chat_project_id = CAST(:chatProjectId AS UUID)) "
             + "     OR (:projectFilter = 2 AND s.chat_project_id IS NULL)) "
             + "AND (CAST(:titlePattern AS TEXT) IS NULL OR s.title ILIKE CAST(:titlePattern AS TEXT) ESCAPE '\\') "
+            + "AND (CAST(:screenKey AS TEXT) IS NULL OR s.screen_key = CAST(:screenKey AS TEXT)) "
             + "ORDER BY s.updated_at DESC",
             countQuery = "SELECT COUNT(*) FROM conversation_sessions s "
             + "WHERE s.user_id = :ownerRef AND s.deleted_at IS NULL AND s.scope_type = 'chat' AND s.message_count > 0 "
             + "AND (:projectFilter = 0 "
             + "     OR (:projectFilter = 1 AND s.chat_project_id = CAST(:chatProjectId AS UUID)) "
             + "     OR (:projectFilter = 2 AND s.chat_project_id IS NULL)) "
-            + "AND (CAST(:titlePattern AS TEXT) IS NULL OR s.title ILIKE CAST(:titlePattern AS TEXT) ESCAPE '\\')",
+            + "AND (CAST(:titlePattern AS TEXT) IS NULL OR s.title ILIKE CAST(:titlePattern AS TEXT) ESCAPE '\\') "
+            + "AND (CAST(:screenKey AS TEXT) IS NULL OR s.screen_key = CAST(:screenKey AS TEXT))",
             nativeQuery = true)
     Page<ConversationSessionEntity> findWidgetHistory(@Param("ownerRef") String ownerRef,
                                                       @Param("projectFilter") int projectFilter,
                                                       @Param("chatProjectId") String chatProjectId,
                                                       @Param("titlePattern") String titlePattern,
+                                                      @Param("screenKey") String screenKey,
                                                       Pageable pageable);
 
     /** CR-178: 프로젝트 목록 행의 대화 수와 마지막 활동 시각. [chat_project_id, count, max(updated_at)] */

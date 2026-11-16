@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.39.0** | 2026-11-15 | Aimbase v8.18.0 기준
+> **v3.43.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -552,6 +552,22 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && docker compose exec -e CLAUDE_CONFIG_DI
 
 59 의 같은 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-cs` 를 씁니다. api 와 다른 실행기는 다시 만들지 않습니다.
 
+**bp-wes 일반 화면 실행기 [CR-194]**: BO2 의 메뉴 화면과 건 화면 AI 대화(위젯)는 실행기 `aimbase-agent-wes-assist`(이름 `cli-runner-bp-wes-assist`)로 갑니다. CS 실행기와 같은 틀이고 조회 계정만 `wes_assist_ai` 입니다(개인정보 칸과 바깥 사람이 쓴 글 칸을 뺀 계정, bp-wes 가 만든다). 접속 계정이 달라 계정 폴더와 작업 폴더를 `claude-accounts-wes-assist`, `workspace-wes-assist` 로 나눕니다. 연결은 CS 와 같이 로그인된 계정마다 `cli-runner-bp-wes-assist-<계정>` 과 묶음 `cli-runner-bp-wes-assist-rr`(`ROUND_ROBIN`)이고(`tool_mode=NATIVE`, 도구 `bash`, `get_current_time`, 기본 모델 Sonnet 5.5, 대화창 모델 목록 Sonnet 5.5, Haiku 5.5. 실행기 CLI 2.1.197 은 Opus 5.5, Fable 5.2 를 거절한다), 시스템 지시 대체값을 두지 않습니다. 두면 위젯이 보내는 화면 맥락이 모델에 닿지 않습니다. bp-wes 는 묶음 번호를 위젯 속성 `connection-group-id` 로 줍니다. 한 계정의 사용 한도가 차면 다음 계정이 답합니다(API 가이드 § 38-4). 처음 세운 계정 하나짜리 연결 `cli-runner-bp-wes-assist-001` 은 bp-wes 가 묶음 번호로 바꾼 뒤 지웁니다.
+
+| 순번 | 59 | 운영 chaws |
+|---|---|---|
+| 1 | `.env.runner-wes-assist` 에 `PGPASSWORD=<wes_assist_ai 비밀번호>` | `./deploy.sh chaws-init`(폴더), `bootstrap tenant wes-assist`(`agent-wes-assist.env`), `agent-wes-assist-db.env` 에 `PGPASSWORD` |
+| 2 | `./deploy.sh agent-wes-assist`: 폴더를 실행 계정 소유로 만들고 실행기만 올린다 | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-agent-wes-assist` |
+| 3 | `./deploy.sh be`: api 가 `workspace-wes-assist` 를 붙이고 `AIMBASE_WORKSPACE_RUNNER_BASES` 에 이 실행기가 더해진다 | `CHAWS_COMMIT=<커밋> ./deploy.sh chaws-be`(같은 이유) |
+| 4 | 계정 로그인 `work01`, `work02`, `work03`(사람이 한다. 아래 명령에서 계정 폴더만 바꾼다) | 같다 |
+| 5 | `bash build/chaws-bootstrap.sh connections wes-assist`(서버 폴더에서) | `bootstrap connections wes-assist` |
+
+```bash
+ssh -t therecommerce@59.8.160.12 'cd /home/therecommerce/aimbase && docker compose exec -e CLAUDE_CONFIG_DIR=/home/appuser/.claude-accounts/work01 aimbase-agent-wes-assist claude'
+```
+
+로그인 파일을 다른 실행기 폴더에서 복사하지 않습니다. 같은 계정 토큰을 두 폴더가 갱신하면 한쪽이 끊깁니다. 실행기만 다시 올릴 때는 `./deploy.sh agent-wes-assist` 를 씁니다.
+
 **위젯 공개 주소**: 운영 BO2 CS 상세의 AI 대화는 브라우저가 `https://ai.banpoom.co.kr` 로 직접 붙습니다(`aimbase.banpoom.co.kr` 은 개발기 관리 화면 주소). 서버 nginx 사이트 설정은 `/etc/nginx/sites-available/ai.banpoom.co.kr.conf`, 인증서는 Let's Encrypt(webroot) 이고 기존 certbot 타이머가 갱신합니다. 위젯이 쓰는 두 경로만 통과시키고 나머지는 모두 막습니다.
 
 | 순번 | 통과 경로 | 쓰는 것 |
@@ -1085,8 +1101,10 @@ LLM 프로바이더(Anthropic, OpenAI, Ollama 등) 및 외부 어댑터(HTTP, SE
 ```
 
 - **인증 타입**: `API_KEY`(header 권장), `BEARER`, `BASIC`, `NONE`
+- **주소 값 인증**(CR-197): 받는 쪽이 인증키를 요청 주소 값으로만 받으면 `"in": "query"` 로 둔다. `name=값` 이 주소에 붙고, 워크플로우가 같은 이름(대소문자 무관)을 `query` 로 보내도 연결 값이 이긴다. 예: 법제처 Open API `{"type": "API_KEY", "in": "query", "name": "OC", "value_env": "<환경변수 이름>"}`
 - **시크릿 저장**: 운영환경은 반드시 `value_env`(환경변수 참조). 평문 `value`는 개발환경 전용
 - **감사**: 실행 시 `Authorization`/`X-Api-Key`/`Cookie` 헤더는 `***`로 마스킹되어 `tool_executions`에 기록
+- **가림**(CR-197): 주소 값 인증키는 감사 기록 주소와 도구 결과 요약에서 `***` 로 바뀐다. 응답 본문, 응답 머리값, 감사 응답 요약에 연결 인증값(그대로, URL 인코딩 꼴, BASIC 은 Base64 꼴)이 되돌아오면 그 글자도 `***` 로 바뀐다. 연결 조회 API 응답의 `config.auth.value` 는 `***` 이고, 수정 때 `***` 를 그대로 보내면 저장된 값이 유지된다
 - **정책 연계**: 외부 호출 범위는 `DomainFilterPolicy`(CR-035)로 통제 — 허용 host 화이트리스트 기반으로 운영
 
 **운영 체크리스트**:
@@ -2261,6 +2279,9 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.43.0 | 2026-11-16 | **CR-194 일반 화면 실행기 계정 묶음** (§ 2-10). 계정 하나짜리 위젯 연결 대신 계정마다 연결과 묶음 `cli-runner-bp-wes-assist-rr`. 로그인 계정 work01, work02, work03 |
+| v3.42.0 | 2026-11-16 | **CR-194 bp-wes 일반 화면 실행기** (§ 2-10). 실행기 `aimbase-agent-wes-assist`, 조회 계정 `wes_assist_ai`, 위젯 연결 `cli-runner-bp-wes-assist-001` 을 59 와 운영에 세우는 차례. `./deploy.sh agent-wes-assist`, `chaws-agent-wes-assist`, `chaws-bootstrap.sh connections wes-assist` |
+| v3.40.0 | 2026-11-16 | **CR-197 HTTP 연결 주소 값 인증** (§ 3-1). `auth.in=query` 로 인증키를 요청 주소 값에 싣는다. 기록, 도구 결과, 응답에 되돌아온 인증값과 연결 조회 응답의 `auth.value` 를 가린다 |
 | v3.39.0 | 2026-11-15 | **CR-193 검사 반복 코드 대조** (§ 3-5). 검사 반복 config `code_check` 로 회차마다 스킬 스크립트를 돌려 판정과 다음 작성 지적에 더한다. 스크립트 입출력 규약과 실패 처리 |
 | v3.38.0 | 2026-11-14 | **CR-191 플랜별 분당 요청 한도** (§ 2-2). 테넌트 생성과 플랜 변경 때 그 플랜의 기본 한도를 넣는다. 플랜 목록 API, 운영 설정 「플랜」 카드 |
 | v3.37.1 | 2026-11-14 | **CR-187 파일 위치 안내** (§ 2-10, § 2-21). 테넌트 프롬프트 틀 `widget.artifact-out`(테넌트 V90). 실행기 연결 대화에 질문마다 붙는다 |

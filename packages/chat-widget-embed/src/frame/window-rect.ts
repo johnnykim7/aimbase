@@ -20,9 +20,9 @@ export type Edge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 export const EDGES: readonly Edge[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 
-/** 창과 화면 가장자리 사이에 늘 남기는 틈(BIZ-275). */
+/** 창과 화면 가장자리 사이에 늘 남기는 틈(BIZ-286). */
 export const EDGE_GAP_PX = 8;
-/** BIZ-276 */
+/** BIZ-287 */
 export const FLOAT_MIN_WIDTH_PX = 320;
 export const FLOAT_MIN_HEIGHT_PX = 400;
 export const SIDE_MIN_WIDTH_PX = 320;
@@ -62,11 +62,14 @@ export function defaultFloatingRect(vp: Viewport): Rect {
   };
 }
 
-/** 창 전체를 화면 가장자리 틈 안쪽에 넣는다. 화면이 창보다 작으면 줄인다(BIZ-275, BIZ-276). */
-export function fitFloating(r: Rect, vp: Viewport): Rect {
+/**
+ * 창 전체를 화면 가장자리 틈 안쪽에 넣는다. 화면이 창보다 작으면 줄인다(BIZ-286, BIZ-287).
+ * minWidth 는 왼쪽 칸을 붙여 넓힌 창에서 그 칸 폭을 더한 최소 폭이다.
+ */
+export function fitFloating(r: Rect, vp: Viewport, minWidth = FLOAT_MIN_WIDTH_PX): Rect {
   const maxW = maxWidth(vp);
   const maxH = maxHeight(vp);
-  const width = clamp(r.width, Math.min(FLOAT_MIN_WIDTH_PX, maxW), maxW);
+  const width = clamp(r.width, Math.min(minWidth, maxW), maxW);
   const height = clamp(r.height, Math.min(FLOAT_MIN_HEIGHT_PX, maxH), maxH);
   return {
     left: clamp(r.left, EDGE_GAP_PX, vp.width - EDGE_GAP_PX - width),
@@ -76,13 +79,20 @@ export function fitFloating(r: Rect, vp: Viewport): Rect {
   };
 }
 
-export function moveFloating(start: Rect, dx: number, dy: number, vp: Viewport): Rect {
-  return fitFloating({ ...start, left: start.left + dx, top: start.top + dy }, vp);
+export function moveFloating(start: Rect, dx: number, dy: number, vp: Viewport, minWidth = FLOAT_MIN_WIDTH_PX): Rect {
+  return fitFloating({ ...start, left: start.left + dx, top: start.top + dy }, vp, minWidth);
 }
 
 /** 끄는 변만 움직이고 반대쪽 변은 그대로 둔다. */
-export function resizeFloating(start: Rect, edge: Edge, dx: number, dy: number, vp: Viewport): Rect {
-  const minW = Math.min(FLOAT_MIN_WIDTH_PX, maxWidth(vp));
+export function resizeFloating(
+  start: Rect,
+  edge: Edge,
+  dx: number,
+  dy: number,
+  vp: Viewport,
+  minWidth = FLOAT_MIN_WIDTH_PX,
+): Rect {
+  const minW = Math.min(minWidth, maxWidth(vp));
   const minH = Math.min(FLOAT_MIN_HEIGHT_PX, maxHeight(vp));
   let { left, top, width, height } = start;
   const right = left + width;
@@ -101,10 +111,20 @@ export function resizeFloating(start: Rect, edge: Edge, dx: number, dy: number, 
     top = clamp(top + dy, EDGE_GAP_PX, bottom - minH);
     height = bottom - top;
   }
-  return fitFloating({ left, top, width, height }, vp);
+  return fitFloating({ left, top, width, height }, vp, minWidth);
 }
 
-/** 옆 칸 위젯 폭. 오른쪽은 화면에 붙어 있어 왼쪽 틈만 남긴다(BIZ-276). */
+/** 왼쪽 칸을 붙인 창. 오른쪽 변은 그대로 두고 왼쪽으로 칸 폭만큼 넓힌다(CR-194 판 넓히기). */
+export function widenForDock(r: Rect, paneWidth: number): Rect {
+  return { ...r, left: r.left - paneWidth, width: r.width + paneWidth };
+}
+
+/** 넓힌 창에서 칸 폭을 뺀 대화 창. 기억하는 것은 이 값이다. */
+export function narrowFromDock(r: Rect, paneWidth: number): Rect {
+  return { ...r, left: r.left + paneWidth, width: r.width - paneWidth };
+}
+
+/** 옆 칸 위젯 폭. 오른쪽은 화면에 붙어 있어 왼쪽 틈만 남긴다(BIZ-287). */
 export function fitSideWidth(width: number, vp: Viewport): number {
   const maxW = Math.max(0, vp.width - EDGE_GAP_PX);
   return clamp(width, Math.min(SIDE_MIN_WIDTH_PX, maxW), maxW);
@@ -124,7 +144,7 @@ function isLength(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n);
 }
 
-/** 기억한 값이 없거나 깨졌으면 null. 저장소가 막혀 있어도 null(BIZ-277). */
+/** 기억한 값이 없거나 깨졌으면 null. 저장소가 막혀 있어도 null(BIZ-288). */
 export function readFloatingRect(store: StorageLike | null): Rect | null {
   try {
     const raw = store?.getItem(FLOAT_RECT_STORAGE_KEY);

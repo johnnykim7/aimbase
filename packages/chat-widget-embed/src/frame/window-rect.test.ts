@@ -6,12 +6,14 @@ import {
   fitFloating,
   fitSideWidth,
   moveFloating,
+  narrowFromDock,
   readFloatingRect,
   readSideWidth,
   resizeFloating,
   resizeSide,
   storeFloatingRect,
   storeSideWidth,
+  widenForDock,
   type StorageLike,
 } from "./window-rect";
 
@@ -38,7 +40,7 @@ const blockedStore: StorageLike = {
   },
 };
 
-describe("TC-CHT-145 화면 안으로 맞추기", () => {
+describe("TC-CHT-156 화면 안으로 맞추기", () => {
   it("오른쪽 아래로 나간 창은 크기 그대로 8px 안쪽으로 옮긴다", () => {
     expect(fitFloating({ left: 1200, top: 700, width: 400, height: 600 }, DESK))
       .toEqual({ left: 872, top: 192, width: 400, height: 600 });
@@ -67,7 +69,7 @@ describe("TC-CHT-145 화면 안으로 맞추기", () => {
   });
 });
 
-describe("TC-CHT-146 끌기와 크기 바꾸기", () => {
+describe("TC-CHT-157 끌기와 크기 바꾸기", () => {
   const start = { left: 400, top: 100, width: 400, height: 600 };
 
   it("머리줄을 화면 밖까지 끌면 크기 그대로 가장자리 8px 에서 멈춘다", () => {
@@ -98,6 +100,19 @@ describe("TC-CHT-146 끌기와 크기 바꾸기", () => {
     expect(resizeFloating(start, "se", 5000, 5000, DESK)).toEqual({ left: 400, top: 100, width: 872, height: 692 });
   });
 
+  it("왼쪽 칸을 붙이면 오른쪽 변은 그대로 두고 왼쪽으로 240px 넓히며, 떼면 대화 창으로 돌아온다", () => {
+    const desk = fitFloating(defaultFloatingRect(DESK), DESK);
+    const docked = fitFloating(widenForDock(desk, 240), DESK, 560);
+    expect(docked).toEqual({ left: 620, top: 110, width: 640, height: 600 });
+    expect(narrowFromDock(docked, 240)).toEqual(desk);
+  });
+
+  it("칸을 붙인 창은 대화 최소 폭에 칸 폭을 더한 560px 아래로 줄지 않는다", () => {
+    const docked = { left: 160, top: 100, width: 640, height: 600 };
+    expect(resizeFloating(docked, "se", -1000, 0, DESK, 560).width).toBe(560);
+    expect(resizeFloating(docked, "w", 1000, 0, DESK, 560)).toEqual({ left: 240, top: 100, width: 560, height: 600 });
+  });
+
   it("옆 칸 폭은 320px 아래로 줄지 않고 화면 폭에서 8px 뺀 값을 넘지 않는다", () => {
     expect(resizeSide(420, -200, DESK)).toBe(620);
     expect(resizeSide(420, 1000, DESK)).toBe(320);
@@ -106,7 +121,7 @@ describe("TC-CHT-146 끌기와 크기 바꾸기", () => {
   });
 });
 
-describe("TC-CHT-147 기억 읽고 쓰기", () => {
+describe("TC-CHT-158 기억 읽고 쓰기", () => {
   it("저장한 자리와 크기, 폭을 그대로 읽는다", () => {
     const store = memoryStore();
     storeFloatingRect(store, { left: 10.4, top: 20.6, width: 500, height: 450 });

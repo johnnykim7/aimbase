@@ -47,9 +47,11 @@ public class ConnectionController {
     ) {
         var pageable = PageRequest.of(page, size);
         if (type != null) {
-            return ApiResponse.ok(connectionRepository.findByType(type));
+            return ApiResponse.ok(connectionRepository.findByType(type).stream()
+                    .map(ConnectionSecretMasker::masked)
+                    .toList());
         }
-        return ApiResponse.page(connectionRepository.findAll(pageable));
+        return ApiResponse.page(connectionRepository.findAll(pageable).map(ConnectionSecretMasker::masked));
     }
 
     @PostMapping
@@ -66,13 +68,14 @@ public class ConnectionController {
         entity.setType(request.type());
         entity.setConfig(request.config());
         entity.setStatus("disconnected");
-        return ApiResponse.ok(connectionRepository.save(entity));
+        return ApiResponse.ok(ConnectionSecretMasker.masked(connectionRepository.save(entity)));
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "연결 상세 조회")
     public ApiResponse<ConnectionEntity> get(@PathVariable String id) {
         return connectionRepository.findById(id)
+                .map(ConnectionSecretMasker::masked)
                 .map(ApiResponse::ok)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Connection not found: " + id));
     }
@@ -85,9 +88,9 @@ public class ConnectionController {
         ConnectionEntity entity = connectionRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Connection not found: " + id));
         entity.setName(request.name());
-        entity.setConfig(request.config());
+        entity.setConfig(ConnectionSecretMasker.keepStoredAuthValue(request.config(), entity.getConfig()));
         connectionAdapterFactory.evict(id);  // API Key 변경 시 캐시 무효화
-        return ApiResponse.ok(connectionRepository.save(entity));
+        return ApiResponse.ok(ConnectionSecretMasker.masked(connectionRepository.save(entity)));
     }
 
     @DeleteMapping("/{id}")

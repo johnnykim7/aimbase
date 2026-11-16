@@ -158,7 +158,7 @@ public class SessionStore {
             messages.addAll(newMessages);
             saveToRedisLocked(sessionId, messages);
             try {
-                upsertSessionWithRetry(sessionId, messages, ownerRef);
+                upsertSessionWithRetry(sessionId, messages, ownerRef, turnExtras.screenKey());
                 if (turnExtras.chatProjectId() != null) {
                     sessionRepository.assignChatProjectIfAbsent(sessionId, turnExtras.chatProjectId());
                 }
@@ -327,11 +327,12 @@ public class SessionStore {
         return blocks;
     }
 
-    private void upsertSessionWithRetry(String sessionId, List<UnifiedMessage> messages, String ownerRef) {
+    private void upsertSessionWithRetry(String sessionId, List<UnifiedMessage> messages, String ownerRef,
+                                        String screenKey) {
         int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                upsertSession(sessionId, messages, ownerRef);
+                upsertSession(sessionId, messages, ownerRef, screenKey);
                 return;
             } catch (org.springframework.dao.DataIntegrityViolationException e) {
                 if (attempt == maxAttempts) {
@@ -345,7 +346,7 @@ public class SessionStore {
         }
     }
 
-    private void upsertSession(String sessionId, List<UnifiedMessage> messages, String ownerRef) {
+    private void upsertSession(String sessionId, List<UnifiedMessage> messages, String ownerRef, String screenKey) {
         // CR-083: native ON CONFLICT(session_id) DO UPDATE 그대로 유지 (CR-077 이전 구현).
         String title = messages.stream()
                 .filter(m -> m.role() == UnifiedMessage.Role.USER)
@@ -360,7 +361,8 @@ public class SessionStore {
                     title,
                     messages.size(),
                     "chat",
-                    ownerRef);
+                    ownerRef,
+                    screenKey);
         });
     }
 

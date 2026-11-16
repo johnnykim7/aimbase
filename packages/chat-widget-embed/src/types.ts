@@ -106,6 +106,11 @@ export interface WidgetOptions {
   ragSourceId?: string;
   /** 사용할 Connection ID — chat request 의 connection_id 로 전달. 미지정 시 테넌트 default. */
   connectionId?: string;
+  /**
+   * CR-194: 계정 묶음 번호. 주면 대화, 위젯 설정, 다음 질문 제안이 그 묶음으로 가고 한 계정의 사용 한도가 차면
+   * 다음 계정이 답한다. connectionId 와 같이 주면 묶음을 쓰고 요청에 connection_id 를 싣지 않는다(BIZ-281).
+   */
+  connectionGroupId?: string;
   /** MCP 도구 자동 호출 활성화 — chat request 의 actions_enabled=true 로 전달. 기본 false. */
   actionsEnabled?: boolean;
   /** 모델 명시 지정 — chat request 의 model 로 전달. 미지정 시 "auto". */
@@ -120,6 +125,13 @@ export interface WidgetOptions {
   locale?: string;
   /** CR-175: 글자 크기 기본값. 사용자가 더보기에서 바꾸면 그 브라우저에서는 그 값을 따른다. */
   fontSize?: FontSize;
+  /**
+   * CR-194: 화면 키(BIZ-277). 주면 대화 목록을 이 화면의 대화로 거르고, 위젯이 뜰 때 이 탭이 이 화면에서 보던 대화나
+   * 가장 최근 대화를 연다. 새 대화는 첫 질문에 이 키를 남긴다
+   */
+  screenKey?: string;
+  /** CR-194: false 면 대화 목록과 목록 단추를 숨긴다. 기본 true */
+  historyList?: boolean;
   /** 위젯 안에서 승인과 거절 단추를 둘지. 기본 true(CR-185). false 면 붙이는 앱이 onApprovalRequired 로 자기 결재 화면을 쓴다 */
   allowApproval?: boolean;
   theme?: {
@@ -155,9 +167,21 @@ export interface WidgetSettings {
   attachments?: { accept: string[]; max_bytes: Partial<Record<"image" | "pdf" | "data" | "text", number>> };
 }
 
+/** CR-194: 위젯 요소를 다시 만들지 않고 바꾸는 옵션. 준 칸만 바꾼다 */
+export interface WidgetUpdate {
+  connectionId?: string | null;
+  connectionGroupId?: string | null;
+  historyList?: boolean;
+  emptySubtitle?: LocalizedText | null;
+}
+
 export interface WidgetHandle {
   open(): void;
   close(): void;
+  /** CR-194 */
+  isOpen(): boolean;
+  /** CR-194: 다음 질문부터 바뀐 옵션을 쓴다 */
+  update(patch: WidgetUpdate): void;
   sendMessage(text: string): Promise<void>;
   abort(): Promise<void>;
   subscribeWorkflow(runId: string): () => void; // unsubscribe fn

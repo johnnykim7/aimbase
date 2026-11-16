@@ -93,6 +93,13 @@ public class ConversationSessionEntity {
     @Column(name = "chat_project_id", columnDefinition = "uuid")
     private UUID chatProjectId;
 
+    // CR-194: 붙이는 앱이 준 화면 키와 함께 보기 키. 글자 그대로 두고 뜻은 해석하지 않는다(BIZ-277).
+    @Column(name = "screen_key", length = 128)
+    private String screenKey;
+
+    @Column(name = "share_key", length = 128)
+    private String shareKey;
+
     @PreUpdate
     protected void onUpdate() {
         updatedAt = OffsetDateTime.now();
@@ -147,4 +154,10 @@ public class ConversationSessionEntity {
     public void setDeletedAt(OffsetDateTime deletedAt) { this.deletedAt = deletedAt; }
     public UUID getChatProjectId() { return chatProjectId; }
     public void setChatProjectId(UUID chatProjectId) { this.chatProjectId = chatProjectId; }
+    public String getScreenKey() { return screenKey; }
+    public void setScreenKey(String screenKey) { this.screenKey = screenKey; }
+    public String getShareKey() { return shareKey; }
+    public void setShareKey(String shareKey) { this.shareKey = shareKey; }
+    /** CR-194: 함께 보는 대화인지. 주인 한 사람이 아니라 같은 함께 보기 키를 받은 사람 모두가 쓴다(BIZ-275). */
+    public boolean isShared() { return shareKey != null; }
 }

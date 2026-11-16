@@ -41,15 +41,25 @@ public class ChatDocumentController {
     private final ChatDocumentService documents;
     private final DocumentEditService documentEditService;
 
-    public ChatDocumentController(ChatDocumentService documents, DocumentEditService documentEditService) {
+    private final com.platform.session.ChatSessionOwnership sessionAccess;
+
+    public ChatDocumentController(ChatDocumentService documents, DocumentEditService documentEditService,
+                                  com.platform.session.ChatSessionOwnership sessionAccess) {
         this.documents = documents;
         this.documentEditService = documentEditService;
+        this.sessionAccess = sessionAccess;
+    }
+
+    /** CR-194 BIZ-275: 문서가 든 대화에 들어갈 수 있어야 한다. 없는 문서는 아래에서 지금처럼 404 다. */
+    private void requireDocumentSession(UUID documentId) {
+        documents.find(documentId).ifPresent(d -> sessionAccess.requireIfExists(d.getSessionId()));
     }
 
     @GetMapping
     @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     @Operation(summary = "세션의 문서와 판 목록", description = "지운 판은 빼고 준다.")
     public ApiResponse<List<Map<String, Object>>> list(@RequestParam("session_id") String sessionId) {
+        sessionAccess.requireIfExists(sessionId);
         return ApiResponse.ok(documents.listForSession(sessionId));
     }
 
@@ -57,7 +67,9 @@ public class ChatDocumentController {
     @PreAuthorize("hasAuthority('SCOPE_chat:stream') or isAuthenticated()")
     @Operation(summary = "앞 판으로 되돌리기", description = "그 판 내용을 마지막 판 다음 번호로 복사한다. 마지막 판과 같으면 UNCHANGED.")
     public ApiResponse<Map<String, Object>> restore(@PathVariable String documentId, @PathVariable int version) {
-        return ApiResponse.ok(documentEditService.restore(parseId(documentId), version, currentUserId()).toMap());
+        UUID id = parseId(documentId);
+        requireDocumentSession(id);
+        return ApiResponse.ok(documentEditService.restore(id, version, currentUserId()).toMap());
     }
 
     @GetMapping("/{documentId}/versions/{version}")
@@ -66,6 +78,7 @@ public class ChatDocumentController {
     public ResponseEntity<?> version(@PathVariable String documentId, @PathVariable int version) {
         UUID id = parseId(documentId);
         ChatDocumentEntity doc = documents.find(id).orElseThrow(ChatDocumentController::notFound);
+        sessionAccess.requireIfExists(doc.getSessionId());
         ChatDocumentVersionEntity v = documents.liveVersion(id, version).orElseThrow(ChatDocumentController::notFound);
 
         if (doc.getKind() == ChatDocumentEntity.Kind.BLOCK) {

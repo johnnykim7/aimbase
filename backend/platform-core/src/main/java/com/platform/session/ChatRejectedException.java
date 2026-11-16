@@ -15,6 +15,12 @@ public class ChatRejectedException extends RuntimeException {
         this.status = status;
     }
 
+    /** 원인을 남긴다. 연결 묶음은 원인 사슬을 보고 다음 구성원으로 갈지 정한다(CR-161). */
+    public ChatRejectedException(HttpStatus status, String code, Throwable cause) {
+        super(code, cause);
+        this.status = status;
+    }
+
     public HttpStatus getStatus() {
         return status;
     }

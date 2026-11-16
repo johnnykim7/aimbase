@@ -50,6 +50,9 @@ export const S = defineStrings({
     nameRequired: "이름을 입력해 주세요.",
     nameTooLong: "이름이 너무 깁니다.",
     instructionsTooLong: (n: number) => `지시문은 ${n}자까지 입력할 수 있습니다.`,
+    sharedNotice: "이 건을 여는 사람 모두가 함께 보는 대화입니다",
+    askerMe: (name: string) => `${name} (나)`,
+    rewindRejected: "그 사이에 다른 사람이 질문해 대화를 다시 불러왔습니다",
   },
   en: {
     paneLabel: "Conversations",
@@ -99,6 +102,9 @@ export const S = defineStrings({
     nameRequired: "Enter a name.",
     nameTooLong: "The name is too long.",
     instructionsTooLong: (n: number) => `Instructions can be up to ${n} characters.`,
+    sharedNotice: "Everyone who opens this case shares this conversation",
+    askerMe: (name: string) => `${name} (you)`,
+    rewindRejected: "Someone else asked in the meantime, so the conversation was reloaded",
   },
 });
 

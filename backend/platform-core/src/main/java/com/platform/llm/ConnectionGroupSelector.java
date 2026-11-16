@@ -161,8 +161,17 @@ public class ConnectionGroupSelector {
 
     /** 그룹의 멤버 커넥션 id. 어느 멤버가 돌지 미리 모르는 곳(강제 취소용 실행기 정리 등록)이 쓴다. */
     public List<String> memberConnectionIds(String groupId) {
+        return memberIds(loadGroup(groupId));
+    }
+
+    /** CR-194: 그룹이 없으면 빈 값. 없는 그룹을 자기 거절 코드로 돌려주는 위젯 창구가 쓴다. 순서는 저장된 구성원 순서다. */
+    public Optional<List<String>> findMemberConnectionIds(String groupId) {
+        return groupRepository.findById(groupId).map(ConnectionGroupSelector::memberIds);
+    }
+
+    private static List<String> memberIds(ConnectionGroupEntity group) {
         List<String> ids = new ArrayList<>();
-        for (Map<String, Object> m : loadGroup(groupId).getMembers()) {
+        for (Map<String, Object> m : group.getMembers()) {
             Object id = m.get("connection_id");
             if (id instanceof String s && !s.isBlank()) ids.add(s);
         }

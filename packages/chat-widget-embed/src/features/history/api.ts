@@ -44,6 +44,8 @@ export interface TurnDto {
     text: string;
     created_at: string | null;
     attachments: Array<{ attachment_id: string | null; filename: string; media_type: string; available: boolean }>;
+    /** CR-194 BIZ-278: 묻는 사람. 이 CR 전 질문이나 user_ref 없는 토큰의 질문이면 없다 */
+    asker?: { user_ref: string; user_name: string | null };
   };
   answer: {
     text: string;
@@ -61,6 +63,8 @@ export interface MessagesResponse {
   title: string | null;
   chat_project_id: string | null;
   truncated: boolean;
+  /** CR-194: 함께 보는 대화 */
+  shared?: boolean;
   turns: TurnDto[];
 }
 
@@ -69,6 +73,10 @@ export interface HistorySettings {
   history_enabled?: boolean;
   project_instructions_max_chars?: number;
   project_files_max_count?: number;
+  /** CR-194: 토큰에 함께 보기 키가 있다. 참이면 함께 보는 대화를 연다 */
+  shared_available?: boolean;
+  /** CR-194: 토큰의 묻는 사람 이름 */
+  user_name?: string | null;
 }
 
 /** 서버 목록 응답은 쪽 정보를 data 밖에 두므로, 쪽 크기를 정해 부르고 꽉 찬 쪽이면 다음 쪽이 있다고 본다. */
@@ -86,11 +94,17 @@ export function historySettings(ctx: WidgetContext): HistorySettings | null {
 export class HistoryApi {
   constructor(private readonly ctx: WidgetContext) {}
 
-  sessions(args: { projectId?: string; query?: string; page: number }): Promise<SessionRow[]> {
-    const q = new URLSearchParams({ page: String(args.page), size: String(PAGE_SIZE) });
+  sessions(args: { projectId?: string; query?: string; screenKey?: string; page: number; size?: number }): Promise<SessionRow[]> {
+    const q = new URLSearchParams({ page: String(args.page), size: String(args.size ?? PAGE_SIZE) });
     if (args.query) q.set("query", args.query);
     else if (args.projectId) q.set("chat_project_id", args.projectId);
+    if (args.screenKey) q.set("screen_key", args.screenKey);
     return this.ctx.api.request<SessionRow[]>("GET", `/api/v1/chat/sessions?${q.toString()}`).then((r) => r ?? []);
+  }
+
+  /** CR-194 PRD-632: 토큰의 함께 보기 키로 그 건의 대화를 찾거나 만든다 */
+  openShared(): Promise<{ session_id: string; created: boolean }> {
+    return this.ctx.api.request("POST", "/api/v1/chat/sessions/shared");
   }
 
   messages(sessionId: string): Promise<MessagesResponse> {

@@ -1,16 +1,20 @@
+import { DOCK_PANE_WIDTH_PX } from "./panes";
 import {
   EDGES,
+  FLOAT_MIN_WIDTH_PX,
   SIDE_DEFAULT_WIDTH_PX,
   defaultFloatingRect,
   fitFloating,
   fitSideWidth,
   moveFloating,
+  narrowFromDock,
   readFloatingRect,
   readSideWidth,
   resizeFloating,
   resizeSide,
   storeFloatingRect,
   storeSideWidth,
+  widenForDock,
   type Edge,
   type Rect,
   type StorageLike,
@@ -61,6 +65,8 @@ export class WindowDrag {
   private shownSide = 0;
   private open = false;
   private expanded = false;
+  /** 왼쪽 칸을 붙여 창이 그 폭만큼 넓어져 있다(CR-194). 기억하는 자리와 크기는 칸을 뺀 대화 창이다 */
+  private docked = false;
   private dragging = false;
   private readonly onViewport = () => this.apply();
 
@@ -97,12 +103,19 @@ export class WindowDrag {
     this.apply();
   }
 
+  /** 끄는 중이면 손을 뗄 때 맞춘다. 끄는 동안 창이 튀지 않게 한다 */
+  setDocked(v: boolean): void {
+    if (this.docked === v) return;
+    this.docked = v;
+    if (!this.dragging) this.apply();
+  }
+
   destroy(): void {
     window.removeEventListener("resize", this.onViewport);
     this.frame.remove();
   }
 
-  /** 기억한 값을 지금 화면에 맞춰 보인다. 맞춘 값은 저장하지 않는다(BIZ-277). */
+  /** 기억한 값을 지금 화면에 맞춰 보인다. 맞춘 값은 저장하지 않는다(BIZ-288). */
   private apply(): void {
     const active = this.open && !this.expanded;
     this.frame.hidden = !active;
@@ -113,7 +126,8 @@ export class WindowDrag {
     }
     const vp = viewport();
     if (this.host.mode === "floating") {
-      this.show(fitFloating(this.floating ?? defaultFloatingRect(vp), vp));
+      const base = this.floating ?? defaultFloatingRect(vp);
+      this.show(fitFloating(this.docked ? widenForDock(base, DOCK_PANE_WIDTH_PX) : base, vp, this.minWidth()));
     } else {
       this.showSide(fitSideWidth(this.sideWidth ?? SIDE_DEFAULT_WIDTH_PX, vp));
     }
@@ -139,6 +153,10 @@ export class WindowDrag {
     this.frame.style.width = `${width}px`;
   }
 
+  private minWidth(): number {
+    return FLOAT_MIN_WIDTH_PX + (this.docked ? DOCK_PANE_WIDTH_PX : 0);
+  }
+
   private canStart(e: PointerEvent): boolean {
     if (!this.open || this.expanded || this.dragging || !e.isPrimary) return false;
     return e.pointerType !== "mouse" || e.button === 0;
@@ -151,7 +169,7 @@ export class WindowDrag {
     const start = this.shown;
     if (!start) return;
     this.track(e, this.host.header, false,
-      (dx, dy) => this.show(moveFloating(start, dx, dy, viewport())),
+      (dx, dy) => this.show(moveFloating(start, dx, dy, viewport(), this.minWidth())),
       () => this.commitFloating());
   }
 
@@ -161,7 +179,7 @@ export class WindowDrag {
       const start = this.shown;
       if (!start) return;
       this.track(e, handle, true,
-        (dx, dy) => this.show(resizeFloating(start, edge, dx, dy, viewport())),
+        (dx, dy) => this.show(resizeFloating(start, edge, dx, dy, viewport(), this.minWidth())),
         () => this.commitFloating());
     } else {
       const start = this.shownSide;
@@ -222,6 +240,8 @@ export class WindowDrag {
       this.dragging = false;
       this.host.root.classList.remove("win-dragging");
       if (started && !this.expanded) commit();
+      // 끄는 동안 칸이 붙거나 떨어졌으면 여기서 맞춘다.
+      this.apply();
     };
     target.addEventListener("pointermove", onMove);
     target.addEventListener("pointerup", end);
@@ -231,8 +251,9 @@ export class WindowDrag {
 
   private commitFloating(): void {
     if (!this.shown) return;
-    this.floating = this.shown;
-    storeFloatingRect(this.store, this.shown);
+    const r = this.docked ? narrowFromDock(this.shown, DOCK_PANE_WIDTH_PX) : this.shown;
+    this.floating = r;
+    storeFloatingRect(this.store, r);
   }
 
   private commitSide(): void {

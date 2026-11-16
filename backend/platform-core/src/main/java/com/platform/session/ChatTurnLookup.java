@@ -13,7 +13,7 @@ import java.util.UUID;
 /**
  * CR-175: 답 평가와 후속 질문이 가리키는 답(대화 요청 한 번)을 찾는다.
  *
- * <p>답이 그 세션 것이 아니거나, 세션 주인이 적혀 있는데 요청한 사람이 아니면 404 다(BIZ-149).
+ * <p>답이 그 세션 것이 아니거나, 요청한 사람이 그 대화에 들어갈 수 없으면 404 다(BIZ-149, CR-194 BIZ-275).
  * 세션 주인은 위젯 대화를 처음 저장할 때 토큰의 user_ref 로 적힌다.
  */
 @Component
@@ -34,7 +34,7 @@ public class ChatTurnLookup {
             throw notFound();
         }
         ConversationSessionEntity session = sessionRepository.findBySessionId(sessionId).orElseThrow(ChatTurnLookup::notFound);
-        if (session.getUserId() != null && !session.getUserId().equals(requesterRef)) {
+        if (!ChatSessionOwnership.allows(session, requesterRef, ChatOwner.currentShareKey())) {
             throw notFound();
         }
         List<ConversationMessageEntity> messages = messageRepository.findBySessionIdAndTurnId(sessionId, turnId);

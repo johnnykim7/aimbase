@@ -182,7 +182,7 @@ function enhanceTables(container: HTMLElement, labels: RichStrings): void {
     const copyBtn = mkBtn(labels.copy, labels.copyTableTitle);
     copyBtn.addEventListener("click", async () => {
       const tsv = rows.map((r) => r.join("\t")).join("\n");
-      if (await copyText(tsv)) flashCopied(copyBtn, labels.copy);
+      if (await copyText(tsv, copyBtn)) flashCopied(copyBtn, labels.copy);
     });
 
     toolbar.appendChild(csvBtn);
@@ -221,7 +221,7 @@ async function enhanceCodeBlocks(container: HTMLElement, theme: "light" | "dark"
     copyBtn.textContent = labels.copy;
     copyBtn.title = labels.copyCodeTitle;
     copyBtn.addEventListener("click", async () => {
-      if (await copyText(code.textContent ?? "")) flashCopied(copyBtn, labels.copy);
+      if (await copyText(code.textContent ?? "", copyBtn)) flashCopied(copyBtn, labels.copy);
     });
     pre.appendChild(copyBtn);
   }

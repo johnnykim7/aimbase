@@ -1,3 +1,5 @@
+import { DOCK_PANE_WIDTH_PX } from "./frame/panes";
+
 /** Shadow DOM 내부 스타일. CSS 변수로 테마 커스터마이징 가능. */
 export const WIDGET_CSS = `
 :host {
@@ -109,6 +111,11 @@ button { font: inherit; color: inherit; }
 .lp { width: 228px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--aimbase-border); background: var(--aimbase-assistant-bg); }
 .lp-body { flex: 1; min-height: 0; overflow-y: auto; }
 .lp.overlay { position: absolute; top: 0; bottom: 0; left: 0; width: 280px; max-width: 85%; z-index: 50; background: var(--aimbase-bg); box-shadow: 4px 0 16px rgba(0,0,0,.12); }
+/* CR-194: 메뉴 화면은 떠 있는 창에서 대화 목록을 대화 옆에 붙인다. 판을 목록 폭만큼 넓히는 일은 window-drag.ts 가 한다(CR-198) */
+.panel.dock .lp { width: ${DOCK_PANE_WIDTH_PX}px; }
+/* CR-194: 머리줄 아래 회색 띠 한 줄 */
+.hd-note { flex-shrink: 0; padding: 6px 14px; font-size: .85em; color: var(--aimbase-muted); background: var(--aimbase-assistant-bg); border-bottom: 1px solid var(--aimbase-border); }
+.notice .notice-act { margin-left: 8px; }
 .lp-scrim { display: none; position: absolute; inset: 0; background: rgba(24,24,27,.24); z-index: 45; }
 .lp-scrim.on { display: block; }
 .spane { width: 56%; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--aimbase-border); background: var(--aimbase-bg); }

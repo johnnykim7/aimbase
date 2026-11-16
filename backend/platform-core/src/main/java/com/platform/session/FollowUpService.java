@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.domain.ConversationSessionEntity;
 import com.platform.domain.UsageLogEntity;
 import com.platform.llm.ConnectionAdapterFactory;
+import com.platform.llm.ConnectionGroupSelector;
 import com.platform.llm.LLMAdapterRegistry;
 import com.platform.llm.adapter.LLMAdapter;
 import com.platform.llm.adapter.RequestContext;
@@ -54,6 +55,7 @@ public class FollowUpService {
     private final ConversationSessionRepository sessionRepository;
     private final UsageLogRepository usageLogRepository;
     private final ObjectMapper objectMapper;
+    private final ConnectionGroupSelector groupSelector;
 
     public FollowUpService(ChatWidgetSettingsService widgetSettings,
                            ChatTurnLookup turnLookup,
@@ -63,7 +65,8 @@ public class FollowUpService {
                            ConversationMessageRepository messageRepository,
                            ConversationSessionRepository sessionRepository,
                            UsageLogRepository usageLogRepository,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           ConnectionGroupSelector groupSelector) {
         this.widgetSettings = widgetSettings;
         this.turnLookup = turnLookup;
         this.promptTemplateService = promptTemplateService;
@@ -73,9 +76,11 @@ public class FollowUpService {
         this.sessionRepository = sessionRepository;
         this.usageLogRepository = usageLogRepository;
         this.objectMapper = objectMapper;
+        this.groupSelector = groupSelector;
     }
 
-    public Map<String, Object> generate(String requesterRef, String sessionId, String turnIdText, String connectionId) {
+    public Map<String, Object> generate(String requesterRef, String sessionId, String turnIdText,
+                                        String connectionId, String connectionGroupId) {
         if (!widgetSettings.followUpsEnabled()) {
             throw new ChatRejectedException(HttpStatus.CONFLICT, "follow_ups_disabled");
         }
@@ -98,18 +103,19 @@ public class FollowUpService {
             throw failed();
         }
 
-        String connId = connectionId != null && !connectionId.isBlank()
-                ? connectionId : connectionAdapterFactory.findDefaultCliConnectionForCurrentTenant();
-        String model = widgetSettings.followUpsModel();
-        if (model == null) {
-            model = connId != null ? connectionAdapterFactory.defaultModel(connId)
-                    : connectionAdapterFactory.platformDefaultModel();
-        }
         String callSessionId = sessionId + ":follow-ups:" + turn.turnId();
-        LLMResponse response = call(connId, model, prompt, callSessionId);
-        saveUsage(requesterRef, sessionId, model, response);
+        Answer answer;
+        if (connectionGroupId != null && !connectionGroupId.isBlank()) {
+            answer = callGroup(connectionGroupId, prompt, callSessionId);
+        } else {
+            String connId = connectionId != null && !connectionId.isBlank()
+                    ? connectionId : connectionAdapterFactory.findDefaultCliConnectionForCurrentTenant();
+            String model = modelFor(connId);
+            answer = new Answer(model, call(connId, model, prompt, callSessionId));
+        }
+        saveUsage(requesterRef, sessionId, answer.model(), answer.response());
 
-        Parsed parsed = parse(response.textContent(), count);
+        Parsed parsed = parse(answer.response().textContent(), count);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("follow_ups", parsed.followUps());
         if (needTitle && !parsed.title().isBlank()) {
@@ -121,13 +127,41 @@ public class FollowUpService {
         return body;
     }
 
+    /** 모델은 설정값, 없으면 부를 연결의 기본 모델이다. */
+    private String modelFor(String connId) {
+        String model = widgetSettings.followUpsModel();
+        if (model != null) return model;
+        return connId != null ? connectionAdapterFactory.defaultModel(connId)
+                : connectionAdapterFactory.platformDefaultModel();
+    }
+
+    /**
+     * CR-194 BIZ-281: 계정 묶음으로 부른다. 한도가 찬 구성원은 건너뛰고 다음 구성원이 답한다(CR-161).
+     * 모든 구성원이 쉬고 있으면 다른 실패와 같이 502 다.
+     */
+    private Answer callGroup(String connectionGroupId, String prompt, String callSessionId) {
+        widgetSettings.groupMembers(connectionGroupId);
+        try {
+            return groupSelector.execute(connectionGroupId, null, connId -> {
+                String model = modelFor(connId);
+                return new Answer(model, call(connId, model, prompt, callSessionId));
+            });
+        } catch (IllegalStateException e) {
+            if (e.getMessage() == null || !e.getMessage().startsWith(ConnectionGroupSelector.GROUP_UNAVAILABLE_PREFIX)) {
+                throw e;
+            }
+            log.warn("Follow-ups group {} has no available member: {}", connectionGroupId, e.getMessage());
+            throw failed(e);
+        }
+    }
+
     private LLMResponse call(String connId, String model, String prompt, String callSessionId) {
         LLMAdapter adapter;
         try {
             adapter = connId != null ? connectionAdapterFactory.getAdapter(connId) : adapterRegistry.getAdapter(model);
         } catch (RuntimeException e) {
             log.warn("Follow-ups adapter unavailable (connection={}, model={}): {}", connId, model, e.getMessage());
-            throw failed();
+            throw failed(e);
         }
         // 생각은 끈다. 연결 기본값이 켬이면 생각부터 해서 짧은 JSON 하나에 시간 한도를 넘긴다
         // (개발기 CLI 연결에서 켬 11초, 끔 4초).
@@ -155,13 +189,13 @@ public class FollowUpService {
         } catch (TimeoutException e) {
             future.cancel(true);
             log.warn("Follow-ups call timed out after {} ms (session={})", widgetSettings.followUpsTimeoutMs(), callSessionId);
-            throw failed();
+            throw failed(e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw failed();
+            throw failed(e);
         } catch (Exception e) {
             log.warn("Follow-ups call failed (session={}): {}", callSessionId, e.getMessage());
-            throw failed();
+            throw failed(e);
         } finally {
             try {
                 adapter.cleanupSession(callSessionId);
@@ -223,5 +257,11 @@ public class FollowUpService {
         return new ChatRejectedException(HttpStatus.BAD_GATEWAY, "follow_ups_failed");
     }
 
+    private static ChatRejectedException failed(Throwable cause) {
+        return new ChatRejectedException(HttpStatus.BAD_GATEWAY, "follow_ups_failed", cause);
+    }
+
     record Parsed(List<String> followUps, String title) {}
+
+    private record Answer(String model, LLMResponse response) {}
 }

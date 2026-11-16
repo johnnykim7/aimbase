@@ -223,7 +223,7 @@ class SessionStoreCr083Test {
                 anyString(), anyString(), anyString(), anyInt(), eq("claude-sonnet-5-5"), any(OffsetDateTime.class),
                 eq(turnId.toString()));
         verify(sessionRepository).upsertSession(any(UUID.class), eq(sessionId), any(), eq(2),
-                any(), eq("user-7"));
+                any(), eq("user-7"), any());
     }
 
     @Test

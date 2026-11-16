@@ -47,6 +47,8 @@ class ChatWidgetAccessTest {
     @Mock private ChatProjectService chatProjectService;
     @Mock private com.platform.repository.ConversationSessionRepository sessionRepository;
 
+    @Mock private com.platform.session.ChatSessionOwnership sessionAccess;
+    @Mock private com.platform.session.SharedConversationService sharedConversations;
     @InjectMocks private ChatController chatController;
 
     @AfterEach

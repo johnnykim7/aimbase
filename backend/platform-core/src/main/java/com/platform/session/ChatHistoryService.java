@@ -80,6 +80,12 @@ public class ChatHistoryService {
     }
 
     public Page<Map<String, Object>> list(String owner, String chatProjectId, String query, int page, Integer size) {
+        return list(owner, chatProjectId, query, null, page, size);
+    }
+
+    /** CR-194: 화면 키를 주면 그 화면 키의 대화만 본다(PRD-631). 다른 조건과 함께 쓴다. */
+    public Page<Map<String, Object>> list(String owner, String chatProjectId, String query, String screenKey,
+                                          int page, Integer size) {
         int pageSize = size != null ? size : settings.getInt("widget.history-page-size", DEFAULT_PAGE_SIZE);
         pageSize = Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE));
         PageRequest pageable = PageRequest.of(Math.max(0, page), pageSize);
@@ -96,13 +102,14 @@ public class ChatHistoryService {
             projectFilter = 1;
             projectParam = projectService.requireOwned(owner, chatProjectId).getId().toString();
         }
-        return sessionRepository.findWidgetHistory(owner, projectFilter, projectParam, titlePattern, pageable)
+        String screenFilter = screenKey != null && !screenKey.isBlank() ? screenKey : null;
+        return sessionRepository.findWidgetHistory(owner, projectFilter, projectParam, titlePattern, screenFilter, pageable)
                 .map(ChatHistoryService::listRow);
     }
 
     /** 이어보기. 질문 하나부터 다음 질문 앞까지가 한 묶음이다(BIZ-174). */
     public Map<String, Object> messages(String owner, String sessionId) {
-        ConversationSessionEntity session = requireOwned(owner, sessionId);
+        ConversationSessionEntity session = requireOwned(owner, sessionId, true);
         List<ConversationMessageEntity> rows = messageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
 
         // 답 번호의 첫 순번. 화면 맥락까지 한 묶음으로 되감기 위해서다(CR-175 BIZ-148)
@@ -151,6 +158,7 @@ public class ChatHistoryService {
         result.put("session_id", session.getSessionId());
         result.put("title", session.getTitle());
         result.put("chat_project_id", session.getChatProjectId() != null ? session.getChatProjectId().toString() : null);
+        result.put("shared", session.isShared());
         result.put("truncated", truncated);
         result.put("turns", turnBodies);
         return result;
@@ -159,7 +167,7 @@ public class ChatHistoryService {
     /** 준 칸만 바꾼다. 제목을 바꾸면 자동 제목이 덮지 않게 USER 로 적는다(CR-175 BIZ-151). */
     @Transactional
     public Map<String, Object> update(String owner, String sessionId, Map<String, Object> request) {
-        ConversationSessionEntity session = requireOwned(owner, sessionId);
+        ConversationSessionEntity session = requireOwned(owner, sessionId, false);
         Map<String, Object> body = request != null ? request : Map.of();
         if (body.containsKey("title")) {
             String title = body.get("title") instanceof String s ? s.trim() : "";
@@ -180,7 +188,7 @@ public class ChatHistoryService {
 
     @Transactional
     public void delete(String owner, String sessionId) {
-        deleteSession(requireOwned(owner, sessionId));
+        deleteSession(requireOwned(owner, sessionId, false));
     }
 
     /**
@@ -202,10 +210,17 @@ public class ChatHistoryService {
         sessionStore.clearSession(sessionId);
     }
 
-    private ConversationSessionEntity requireOwned(String owner, String sessionId) {
+    /**
+     * 내 대화이거나, 같은 함께 보기 키를 실은 토큰이 여는 함께 보는 대화(CR-194 BIZ-275). 함께 보는 대화는 이어보기만 하고
+     * 이름 바꾸기, 옮기기, 삭제는 없는 대화처럼 404 다(BIZ-280).
+     */
+    private ConversationSessionEntity requireOwned(String owner, String sessionId, boolean allowShared) {
         if (owner == null || sessionId == null || sessionId.isBlank()) throw sessionNotFound();
+        String shareKey = ChatOwner.currentShareKey();
         return sessionRepository.findBySessionId(sessionId)
-                .filter(s -> owner.equals(s.getUserId()))
+                .filter(s -> s.isShared()
+                        ? allowShared && ChatSessionOwnership.allows(s, owner, shareKey)
+                        : owner.equals(s.getUserId()))
                 .orElseThrow(ChatHistoryService::sessionNotFound);
     }
 
@@ -259,7 +274,20 @@ public class ChatHistoryService {
         body.put("text", text);
         body.put("created_at", q.getCreatedAt());
         body.put("attachments", attachmentBodies);
+        // CR-194 BIZ-278: 질문 당시 남긴 묻는 사람. 남기지 않은 질문에는 칸이 없다
+        Map<String, Object> asker = askerBody(display);
+        if (asker != null) body.put("asker", asker);
         return body;
+    }
+
+    private static Map<String, Object> askerBody(Map<String, Object> display) {
+        String ref = SharedConversationService.askerRef(display);
+        if (ref == null) return null;
+        Map<?, ?> stored = (Map<?, ?>) display.get(SharedConversationService.AskerKeys.ASKER);
+        Map<String, Object> asker = new LinkedHashMap<>();
+        asker.put("user_ref", ref);
+        asker.put("user_name", stored.get(SharedConversationService.AskerKeys.USER_NAME) instanceof String n ? n : null);
+        return asker;
     }
 
     private static Map<String, Object> answerBody(List<ConversationMessageEntity> answers) {

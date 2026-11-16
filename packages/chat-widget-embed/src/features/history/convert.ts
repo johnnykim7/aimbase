@@ -24,6 +24,9 @@ export function toView(r: MessagesResponse, truncatedNotice: string): Conversati
           mediaType: a.media_type,
           available: a.available,
         })),
+        asker: t.question.asker
+          ? { userRef: t.question.asker.user_ref, userName: t.question.asker.user_name ?? undefined }
+          : undefined,
       },
       // 답이 저장되지 않은 질문(응답 도중 끊김)은 빈 답으로 그린다.
       answer: t.answer
