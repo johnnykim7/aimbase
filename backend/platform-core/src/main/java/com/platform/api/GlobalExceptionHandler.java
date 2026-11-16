@@ -83,6 +83,13 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    /** CR-196: 1년 토큰 API 의 거절. 실행기 오류 코드를 그대로 싣는다(T3-2). */
+    @ExceptionHandler(com.platform.clitoken.CliTokenApiException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCliTokenApi(com.platform.clitoken.CliTokenApiException ex) {
+        log.warn("CLI token API rejected: {} {}", ex.getStatus().value(), ex.getMessage());
+        return ResponseEntity.status(ex.getStatus()).body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("IllegalArgumentException: {}", ex.getMessage());

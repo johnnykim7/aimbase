@@ -280,7 +280,7 @@ public class ClaudeCliAdapter implements LLMAdapter {
      * CR-082: runner 호출 실패의 원인을 진단 로그/에러 메시지에 식별 가능한 사유 코드로 분류.
      * 정확한 사유보다 "어디서 끊겼는지" 단서 하나가 운영 진단을 빠르게 한다.
      */
-    private static String classifyRunnerFailure(Throwable t) {
+    public static String classifyRunnerFailure(Throwable t) {
         Throwable cur = t;
         for (int i = 0; i < 5 && cur != null; i++) {
             String msg = cur.getMessage();

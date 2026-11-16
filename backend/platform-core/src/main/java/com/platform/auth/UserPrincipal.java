@@ -19,13 +19,21 @@ public class UserPrincipal implements UserDetails {
     private final String tenantId;
     private final String role;
     private final Map<String, Object> permissions;
+    /** CR-196: 플랫폼 관리자가 임퍼소네이션(CR-096) 토큰으로 들어왔는가. 1년 토큰을 누가 넣었는지 가른다(BIZ-289). */
+    private final boolean impersonating;
 
     public UserPrincipal(String id, String email, String tenantId, String role, Map<String, Object> permissions) {
+        this(id, email, tenantId, role, permissions, false);
+    }
+
+    public UserPrincipal(String id, String email, String tenantId, String role, Map<String, Object> permissions,
+                         boolean impersonating) {
         this.id = id;
         this.email = email;
         this.tenantId = tenantId;
         this.role = role;
         this.permissions = permissions != null ? permissions : Map.of();
+        this.impersonating = impersonating;
     }
 
     public String getId() { return id; }
@@ -33,6 +41,7 @@ public class UserPrincipal implements UserDetails {
     public String getTenantId() { return tenantId; }
     public String getRole() { return role; }
     public Map<String, Object> getPermissions() { return permissions; }
+    public boolean isImpersonating() { return impersonating; }
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
