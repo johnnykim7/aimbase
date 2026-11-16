@@ -96,6 +96,9 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/apps/**").authenticated()
                 .requestMatchers("/api/v1/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 // 그 외 API — 인증 필요
+                // CR-196: 1년 토큰과 만료 알림 수신자는 테넌트 관리자만 (PRD-646)
+                .requestMatchers("/api/v1/cli-account-tokens", "/api/v1/cli-token-recipients",
+                        "/api/v1/connections/*/account-token").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/**").authenticated()
                 .anyRequest().permitAll()
             )

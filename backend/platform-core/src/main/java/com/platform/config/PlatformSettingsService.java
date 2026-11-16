@@ -26,7 +26,8 @@ public class PlatformSettingsService {
 
     // CR-147: skills 는 스킬 묶음 상한과 스킬 도구 한도(T3-17 3.11). 여기 없으면 런타임 설정 화면에 안 나온다.
     // CR-191: plan 은 플랜 목록과 플랜별 분당 요청 한도(BIZ-153).
-    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget", "llm", "skills", "chat", "plan");
+    // CR-196: runner 는 실행기 계정 1년 토큰 만료 알림의 문턱, 수신자, 양식 코드(BIZ-284).
+    private static final Set<String> CATEGORIES = Set.of("orchestrator", "session", "compaction", "widget", "llm", "skills", "chat", "plan", "runner");
 
     private final GlobalConfigRepository configRepository;
     private final AuditLogger auditLogger;
@@ -248,6 +249,7 @@ public class PlatformSettingsService {
             "chat.approval-timeout-seconds", new int[]{10, 240});
 
     private void validateValue(String key, String value) {
+        validateRunnerValue(key, value);
         int[] range = INT_RANGES.get(key);
         if (range != null) {
             int num;
@@ -272,6 +274,24 @@ public class PlatformSettingsService {
             if (num <= 0) {
                 throw new IllegalArgumentException("Value must be positive: " + key + "=" + value);
             }
+        }
+    }
+
+    /** CR-196: 만료 알림 수신자는 테넌트 수신자와 같은 모양 검사를 쓰고, 문턱은 0 이상 정수만 받는다. */
+    private static void validateRunnerValue(String key, String value) {
+        switch (key) {
+            case "runner.token_expiry.emails" -> com.platform.clitoken.CliTokenRecipientService
+                    .normalizeEmails(com.platform.clitoken.CliTokenRecipientService.splitSetting(value));
+            case "runner.token_expiry.phones" -> com.platform.clitoken.CliTokenRecipientService
+                    .normalizePhones(com.platform.clitoken.CliTokenRecipientService.splitSetting(value));
+            case "runner.token_expiry.notify_days" -> {
+                for (String s : com.platform.clitoken.CliTokenRecipientService.splitSetting(value)) {
+                    if (!s.matches("\\d+")) {
+                        throw new IllegalArgumentException("Notify days must be integers of 0 or greater: " + key + "=" + value);
+                    }
+                }
+            }
+            default -> { }
         }
     }
 
