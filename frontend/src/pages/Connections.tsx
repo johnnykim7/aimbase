@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Badge } from "../components/common/Badge";
 import { ActionButton } from "../components/common/ActionButton";
@@ -6,6 +7,8 @@ import { Modal } from "../components/common/Modal";
 import { FormField, inputStyle } from "../components/common/FormField";
 import { EmptyState } from "../components/common/EmptyState";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
+import { DataTable, type Column } from "../components/common/DataTable";
+import { Input } from "../components/ui/input";
 import { Page } from "../components/layout/Page";
 import { PlugZap } from "lucide-react";
 import {
@@ -15,7 +18,27 @@ import {
   useDeleteConnection,
   useTestConnection,
 } from "../hooks/useConnections";
+import {
+  useCliAccountTokens,
+  useConnectionAccountToken,
+  usePutConnectionAccountToken,
+  useTokenRecipients,
+  useUpdateTokenRecipients,
+} from "../hooks/useCliAccountTokens";
 import type { Connection, ConnectionRequest } from "../types/connection";
+import type { AccountTokenRow } from "../types/cliAccountToken";
+import { AccountTokenField } from "../components/connections/AccountTokenField";
+import { TokenRecipientsCard } from "../components/connections/TokenRecipientsCard";
+import { TokenStateChips, type ChipFilter } from "../components/connections/TokenStateChips";
+import {
+  TokenBadge,
+  dateOf,
+  folderName,
+  stateRank,
+  tenantTokenState,
+  type ChipState,
+  type TokenState,
+} from "../components/connections/accountTokenState";
 import {
   WidgetModelsField,
   hasWidgetModelsErrors,
@@ -33,33 +56,26 @@ import {
   type ImageGenerationValues,
 } from "../components/connections/ImageGenerationFields";
 
-const TYPE_ICONS: Record<string, string> = {
-  database: "🗄️",
-  messaging: "💬",
-  llm: "🤖",
-  realtime: "🔌",
-  postgresql: "🐘",
-  mysql: "🐬",
-  slack: "💬",
-  kakao: "💛",
-  claude: "🤖",
-  openai: "🧠",
-  websocket: "🔌",
-};
-
-function getIcon(conn: Connection) {
-  return (
-    TYPE_ICONS[conn.adapter?.toLowerCase() ?? ""] ??
-    TYPE_ICONS[conn.type?.toLowerCase() ?? ""] ??
-    "🔗"
-  );
-}
-
 function statusColor(s?: string): "success" | "warning" | "danger" | "muted" {
   if (s === "connected") return "success";
   if (s === "warning") return "warning";
   if (s === "error" || s === "disconnected") return "danger";
   return "muted";
+}
+
+// CR-196: 1년 토큰 칸과 상태 칩을 두는 연결. 서버 CliAccountTokenService 와 같이 Claude CLI 이고 실행기 이름이 있는 연결이다.
+function isServerRunner(conn: Connection): boolean {
+  const agent = conn.config?.agent_name;
+  return displayAdapter(conn.type ?? "llm", conn.adapter ?? "") === "Claude CLI" && typeof agent === "string" && agent.trim() !== "";
+}
+
+const TENANT_CHIPS: ChipState[] = ["expired", "missing", "soon", "ok", "platform", "not_cli"];
+
+interface ConnectionRow {
+  conn: Connection;
+  token: AccountTokenRow | undefined;
+  state: TokenState;
+  kind: string;
 }
 
 const CONNECTION_TYPES = [
@@ -113,10 +129,132 @@ export default function Connections() {
   const [widgetModelsErrors, setWidgetModelsErrors] = useState<WidgetModelsErrors | undefined>();
   const [imageGen, setImageGen] = useState<ImageGenerationValues>(() => parseImageGeneration({}));
 
+  // CR-196: 1년 토큰 목록과 수신자
+  const qc = useQueryClient();
+  const tokens = useCliAccountTokens();
+  const recipients = useTokenRecipients();
+  const updateRecipients = useUpdateTokenRecipients();
+  const putToken = usePutConnectionAccountToken();
+  const [query, setQuery] = useState("");
+  const [chip, setChip] = useState<ChipFilter>("all");
+  const editingServerRunner = !!editingConn && isServerRunner(editingConn);
+  const editingToken = useConnectionAccountToken(showModal && editingServerRunner ? editingConn.id : null);
+
+  const rows: ConnectionRow[] = useMemo(() => {
+    const byConnection = new Map<string, AccountTokenRow>();
+    for (const t of tokens.data ?? []) for (const id of t.connection_ids) byConnection.set(id, t);
+    return connections.map((conn: Connection) => {
+      const token = byConnection.get(conn.id);
+      return {
+        conn,
+        token,
+        state: tenantTokenState(token, isServerRunner(conn)),
+        kind: displayAdapter(conn.type ?? "llm", conn.adapter ?? ""),
+      };
+    });
+  }, [connections, tokens.data]);
+
+  const searched = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      [r.conn.name, r.conn.id, r.kind, r.token?.agent_name, r.token?.config_dir]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [rows, query]);
+
+  const counts = useMemo(() => {
+    const c: Partial<Record<ChipState, number>> = {};
+    for (const r of searched) if (r.state !== "unknown") c[r.state] = (c[r.state] ?? 0) + 1;
+    return c;
+  }, [searched]);
+
+  const shown = useMemo(
+    () =>
+      searched
+        .filter((r) => chip === "all" || r.state === chip)
+        .sort((a, b) => stateRank(a.state) - stateRank(b.state) || (a.conn.name || a.conn.id).localeCompare(b.conn.name || b.conn.id)),
+    [searched, chip],
+  );
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingConn(null);
+    qc.invalidateQueries({ queryKey: ["connections"] });
+    qc.invalidateQueries({ queryKey: ["cliAccountTokens"] });
+  };
+
   const handleTest = async (id: string) => {
     const result = await testConnection.mutateAsync(id);
     setTestResults((prev) => ({ ...prev, [id]: result }));
   };
+
+  const columns: Column<ConnectionRow>[] = [
+    {
+      header: "이름",
+      render: (r) => <span className="font-mono text-xs font-semibold">{r.conn.name || r.conn.id}</span>,
+    },
+    { header: "어댑터", width: "150px", render: (r) => <span className="text-muted-foreground">{r.kind}</span> },
+    {
+      header: "상태",
+      width: "110px",
+      render: (r) => <Badge color={statusColor(r.conn.status)}>{r.conn.status ?? "-"}</Badge>,
+    },
+    {
+      header: "실행기",
+      render: (r) => <span className="font-mono text-xs">{r.token?.agent_name ?? "-"}</span>,
+    },
+    {
+      header: "계정 폴더",
+      render: (r) =>
+        r.token ? (
+          <span className="font-mono text-xs" title={r.token.config_dir}>
+            {folderName(r.token.config_dir)}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        ),
+    },
+    {
+      header: "1년 토큰",
+      width: "130px",
+      render: (r) =>
+        r.token ? (
+          <TokenBadge row={r.token} platformAsGroup />
+        ) : r.state === "unknown" ? (
+          <span className="text-xs text-muted-foreground">{tokens.isLoading ? "불러오는 중입니다." : "불러오지 못했습니다."}</span>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        ),
+    },
+    {
+      header: "기한",
+      width: "100px",
+      render: (r) => <span className="text-xs text-muted-foreground">{dateOf(r.token?.expires_at)}</span>,
+    },
+    {
+      header: "",
+      width: "170px",
+      render: (r) => {
+        const result = testResults[r.conn.id];
+        return (
+          // 단추를 눌러도 줄 누름(수정 창 열기)으로 번지지 않게 막는다.
+          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+            {result && (
+              <span className={cn("mr-1 text-[11px]", result.ok ? "text-success" : "text-destructive")}>
+                {result.ok ? `성공 ${result.latencyMs}ms` : "실패"}
+              </span>
+            )}
+            <ActionButton variant="ghost" small disabled={testConnection.isPending} onClick={() => handleTest(r.conn.id)}>테스트</ActionButton>
+            <ActionButton variant="ghost" small onClick={() => deleteConnection.mutate(r.conn.id)}>삭제</ActionButton>
+          </div>
+        );
+      },
+    },
+  ];
 
   const openCreateModal = () => {
     setEditingConn(null);
@@ -228,7 +366,7 @@ export default function Connections() {
       const adapter = displayAdapter(selectedType, storedAdapter) === selectedAdapter ? storedAdapter : selectedAdapter;
       updateConnection.mutate(
         { id: editingConn.id, data: { id: editingConn.id, name: form["이름"] ?? editingConn.name, adapter, type: selectedType, config } },
-        { onSuccess: () => { setShowModal(false); setEditingConn(null); } },
+        { onSuccess: closeModal },
       );
     } else {
       const req: ConnectionRequest = {
@@ -238,7 +376,7 @@ export default function Connections() {
         type: selectedType,
         config,
       };
-      createConnection.mutate(req, { onSuccess: () => setShowModal(false) });
+      createConnection.mutate(req, { onSuccess: closeModal });
     }
   };
 
@@ -268,6 +406,13 @@ export default function Connections() {
       }
     >
 
+      <TokenRecipientsCard
+        description="이 소비앱이 넣은 1년 토큰의 기한이 다가오면 이 수신자에게 이메일과 문자가 갑니다."
+        recipients={recipients.data}
+        loadError={recipients.isError}
+        onSave={(next) => updateRecipients.mutateAsync(next)}
+      />
+
       {connections.length === 0 ? (
         <EmptyState
           icon={<PlugZap className="size-6" />}
@@ -280,60 +425,29 @@ export default function Connections() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {connections.map((conn: Connection) => {
-            const testResult = testResults[conn.id];
-            return (
-              <div
-                key={conn.id}
-                className={cn(
-                  "bg-card border border-border rounded-xl p-5 relative",
-                  conn.status === "connected" ? "border-l-[3px] border-l-success" : "border-l-[3px] border-l-warning"
-                )}
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex gap-2.5 items-center">
-                    <span className="text-2xl">{getIcon(conn)}</span>
-                    <div>
-                      <div className="text-sm font-semibold font-mono text-foreground">
-                        {conn.name || conn.id}
-                      </div>
-                      <div className="text-xs text-muted-foreground">{conn.adapter}</div>
-                    </div>
-                  </div>
-                  <Badge color={statusColor(conn.status)}>{conn.type}</Badge>
-                </div>
-
-                <div className="text-xs font-mono text-muted-foreground/60 mb-2">
-                  {conn.name}
-                </div>
-
-                {testResult && (
-                  <div className={cn("text-[11px] font-mono mb-2", testResult.ok ? "text-success" : "text-destructive")}>
-                    {testResult.ok ? `✓ 연결 성공 (${testResult.latencyMs}ms)` : "✕ 연결 실패"}
-                  </div>
-                )}
-
-                <div className="flex justify-between items-center">
-                  <span className="text-[11px] font-mono text-muted-foreground/60">
-                    {conn.lastHealthCheckAt
-                      ? `${new Date(conn.lastHealthCheckAt).toLocaleTimeString("ko-KR")} 확인`
-                      : conn.status ?? "—"}
-                  </span>
-                  <div className="flex gap-1">
-                    <ActionButton variant="ghost" small onClick={() => openEditModal(conn)}>수정</ActionButton>
-                    <ActionButton variant="ghost" small disabled={testConnection.isPending} onClick={() => handleTest(conn.id)}>테스트</ActionButton>
-                    <ActionButton variant="ghost" small onClick={() => deleteConnection.mutate(conn.id)}>삭제</ActionButton>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <Input
+              className="w-72"
+              placeholder="이름, 어댑터, 실행기, 계정 폴더로 찾기"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <TokenStateChips states={TENANT_CHIPS} counts={counts} total={searched.length} selected={chip} onSelect={setChip} />
+            <span className="ml-auto text-xs text-muted-foreground">{shown.length}건</span>
+          </div>
+          <DataTable
+            columns={columns}
+            data={shown}
+            keyExtractor={(r) => r.conn.id}
+            onRowClick={(r) => openEditModal(r.conn)}
+            emptyMessage="조건에 맞는 연결이 없습니다"
+          />
+        </>
       )}
 
       {/* New Connection Modal */}
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditingConn(null); }} title={editingConn ? "연결 수정" : "새 연결 추가"}>
+      <Modal open={showModal} onClose={closeModal} title={editingConn ? "연결 수정" : "새 연결 추가"}>
         <FormField label="연결 유형">
           <div className="flex gap-2 mt-2">
             {CONNECTION_TYPES.map((t) => (
@@ -443,6 +557,22 @@ export default function Connections() {
                 <FormField label="Config Dir (선택)">
                   <input style={inputStyle} placeholder="/data/agents/<id>/.claude" value={form["Config Dir"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "Config Dir": e.target.value }))} />
                 </FormField>
+                {editingConn && editingServerRunner && (
+                  <AccountTokenField
+                    key={editingConn.id}
+                    row={editingToken.data}
+                    loading={editingToken.isLoading}
+                    loadError={editingToken.isError}
+                    platformView={false}
+                    separateFromEdit
+                    onSubmit={(token) => putToken.mutateAsync({ connectionId: editingConn.id, token })}
+                  />
+                )}
+                {editingConn && !editingServerRunner && (
+                  <div className="mb-4 rounded-lg border border-border p-3.5 text-xs text-muted-foreground">
+                    사용자 PC 실행기는 그 PC 에서 넣습니다.
+                  </div>
+                )}
                 <FormField label="Runner API Key (선택)">
                   <input type="password" style={inputStyle} placeholder="Runner 인증용 (미지정 시 무인증)" value={form["Runner API Key"] ?? ""} onChange={(e) => setForm((p) => ({ ...p, "Runner API Key": e.target.value }))} />
                 </FormField>
@@ -556,7 +686,7 @@ export default function Connections() {
         )}
 
         <div className="flex gap-2 justify-end mt-2">
-          <ActionButton variant="ghost" onClick={() => { setShowModal(false); setEditingConn(null); }}>취소</ActionButton>
+          <ActionButton variant="ghost" onClick={closeModal}>취소</ActionButton>
           <ActionButton
             variant="primary"
             icon="💾"
