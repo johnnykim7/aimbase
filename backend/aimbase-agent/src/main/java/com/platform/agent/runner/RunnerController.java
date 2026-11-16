@@ -59,11 +59,49 @@ public class RunnerController {
 
     private final RunnerService service;
     private final RunnerProperties props;
+    private final RunnerAccountTokenService accountTokens;
     private final long startedAtEpochMs = System.currentTimeMillis();
 
-    public RunnerController(RunnerService service, RunnerProperties props) {
+    public RunnerController(RunnerService service, RunnerProperties props, RunnerAccountTokenService accountTokens) {
         this.service = service;
         this.props = props;
+        this.accountTokens = accountTokens;
+    }
+
+    /** CR-196 PRD-641: 계정 폴더 토큰 상태. 토큰 값은 싣지 않는다. config_dir 이 비면 기본 계정 폴더다. */
+    @org.springframework.web.bind.annotation.GetMapping(value = "/account-token",
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> accountToken(
+            @RequestHeader(value = RUNNER_API_KEY_HEADER, required = false) String apiKey,
+            @org.springframework.web.bind.annotation.RequestParam(value = "config_dir", required = false)
+            String configDir) {
+        verifyApiKey(apiKey);
+        return accountTokens.describe(configDir);
+    }
+
+    /**
+     * CR-196 PRD-646: 화면에서 넣은 1년 토큰을 확인 질문 뒤 그 계정 폴더에 적는다. 요청 본문은 기록하지 않는다.
+     * 본문 {@code {config_dir, token, by}}.
+     */
+    @org.springframework.web.bind.annotation.PutMapping(value = "/account-token",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> putAccountToken(
+            @RequestHeader(value = RUNNER_API_KEY_HEADER, required = false) String apiKey,
+            @RequestBody Map<String, Object> body) {
+        verifyApiKey(apiKey);
+        if (body == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "body required");
+        return accountTokens.put(str(body.get("config_dir")), str(body.get("token")), str(body.get("by")));
+    }
+
+    @ExceptionHandler(RunnerAccountTokenService.TokenRejected.class)
+    public ResponseEntity<Map<String, String>> tokenRejected(RunnerAccountTokenService.TokenRejected e) {
+        return ResponseEntity.status(e.status())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("error", e.getMessage()));
+    }
+
+    private static String str(Object v) {
+        return v instanceof String s && !s.isBlank() ? s : null;
     }
 
     @PostMapping(value = "/chat", consumes = MediaType.APPLICATION_JSON_VALUE,

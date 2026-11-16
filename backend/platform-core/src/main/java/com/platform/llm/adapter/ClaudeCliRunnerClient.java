@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -245,6 +246,62 @@ public class ClaudeCliRunnerClient {
             log.warn("Runner /v1/interrupt 호출 실패: {}", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * CR-196: 실행기 토큰 API(PRD-641, PRD-646)의 답. 2xx 가 아니면 {@code body.error} 가 실행기 오류 코드다.
+     * 토큰 값은 실행기가 싣지 않으므로 본문에도 없다.
+     */
+    public record AccountTokenReply(int status, Map<String, Object> body) {
+        public boolean ok() { return status / 100 == 2; }
+
+        public String error() {
+            Object e = body != null ? body.get("error") : null;
+            return e != null ? e.toString() : null;
+        }
+    }
+
+    /** CR-196: 그 계정 폴더의 토큰 파일 상태를 묻는다. {@code configDir} 가 비면 실행기 기본 폴더다. */
+    public AccountTokenReply accountToken(AgentEndpoint endpoint, String configDir, String runnerApiKey,
+                                          Duration timeout) throws IOException, InterruptedException {
+        String query = configDir != null && !configDir.isBlank()
+                ? "?config_dir=" + URLEncoder.encode(configDir, StandardCharsets.UTF_8) : "";
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(endpoint.runnerEndpoint() + "/v1/account-token" + query))
+                .timeout(timeout != null ? timeout : httpRequestTimeout)
+                .GET();
+        return sendAccountToken(endpoint, b, runnerApiKey);
+    }
+
+    /**
+     * CR-196: 그 계정 폴더에 토큰을 넣으라고 넘긴다. 실행기가 확인 질문을 던지느라 길게 걸려 대화 요청과 같은 시한을 쓴다.
+     * 본문에 토큰이 있어 요청과 실패 사유 어디에도 본문을 남기지 않는다.
+     */
+    public AccountTokenReply putAccountToken(AgentEndpoint endpoint, String configDir, String token, String by,
+                                             String runnerApiKey) throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("config_dir", configDir != null ? configDir : "");
+        body.put("token", token);
+        body.put("by", by);
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(endpoint.runnerEndpoint() + "/v1/account-token"))
+                .header("Content-Type", "application/json")
+                .timeout(httpRequestTimeout)
+                .PUT(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body), StandardCharsets.UTF_8));
+        return sendAccountToken(endpoint, b, runnerApiKey);
+    }
+
+    private AccountTokenReply sendAccountToken(AgentEndpoint endpoint, HttpRequest.Builder b, String runnerApiKey)
+            throws IOException, InterruptedException {
+        if (runnerApiKey != null && !runnerApiKey.isBlank()) {
+            b.header(API_KEY_HEADER, runnerApiKey);
+        }
+        HttpResponse<String> resp = clientFor(endpoint).send(b.build(), HttpResponse.BodyHandlers.ofString());
+        Map<String, Object> json;
+        try {
+            json = resp.body() == null || resp.body().isBlank() ? Map.of() : MAPPER.readValue(resp.body(), MAP_TYPE);
+        } catch (IOException e) {
+            json = Map.of();
+        }
+        return new AccountTokenReply(resp.statusCode(), json);
     }
 
     // ─── 내부 ─────────────────────────────────────────────────────────────

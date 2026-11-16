@@ -1,5 +1,6 @@
 package com.platform.agent.runner;
 
+import com.platform.runner.claudecli.ClaudeAccountToken;
 import com.platform.runner.claudecli.ClaudeCliAdapterConfig;
 import com.platform.runner.claudecli.ClaudeCliWorker;
 import com.platform.runner.claudecli.ClaudeCliWorkerPool;
@@ -8,6 +9,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Clock;
 import java.time.Duration;
 
 /**
@@ -44,20 +46,8 @@ public class RunnerAutoConfiguration {
     @Bean
     public ClaudeCliWorkerPool claudeCliWorkerPool(RunnerProperties props, ClaudeCliAdapterConfig adapterConfig) {
         // CR-072: 빌드된 mcpConfigJson 을 Worker 에 주입 — AIMBASE/HYBRID 일 때 CommandBuilder 가 그대로 박음.
-        String mcpConfig = adapterConfig.resolveMcpConfigJson();
-        ClaudeCliWorkerPool.WorkerFactory factory = (model, resumeSessionId, forkSession, configDir) -> {
-            ClaudeCliWorker worker = new ClaudeCliWorker(
-                    props.getClaudeBinary(),
-                    model,
-                    resumeSessionId,
-                    forkSession,
-                    configDir,
-                    Duration.ofSeconds(props.getTurnTimeoutSeconds()),  // CR-106: 설정화 (기본 300s)
-                    mcpConfig);
-            worker.setMcpConnectTimeout(Duration.ofSeconds(props.getMcpConnectTimeoutSeconds()));  // CR-152
-            worker.setMcpToolTimeout(Duration.ofSeconds(props.getMcpToolTimeoutSeconds()));  // CR-185
-            return worker;
-        };
+        ClaudeCliWorkerPool.WorkerFactory factory =
+                workerFactory(props, adapterConfig.resolveMcpConfigJson(), Clock.systemUTC());
         // CR-121: reaper 설정 주입 — idle 좀비 워커 자동 회수.
         ClaudeCliWorkerPool pool = new ClaudeCliWorkerPool(factory, props.getMaxWorkers(), Duration.ofSeconds(60),
                 (com.platform.runner.claudecli.ClaudeCliCommandBuilder.ToolMode) null,
@@ -70,13 +60,40 @@ public class RunnerAutoConfiguration {
         return pool;
     }
 
+    /**
+     * CR-196 BIZ-283: 계정 폴더의 1년 토큰을 읽어 CLI 에 넘긴다. 토큰이 없거나 기한이 지난 계정은 워커를 만들지 않는다.
+     */
+    static ClaudeCliWorkerPool.WorkerFactory workerFactory(RunnerProperties props, String mcpConfig, Clock clock) {
+        return (model, resumeSessionId, forkSession, configDir) -> {
+            ClaudeAccountToken token = ClaudeAccountToken.load(configDir, clock);
+            ClaudeCliWorker worker = new ClaudeCliWorker(
+                    props.getClaudeBinary(),
+                    model,
+                    resumeSessionId,
+                    forkSession,
+                    configDir,
+                    Duration.ofSeconds(props.getTurnTimeoutSeconds()),  // CR-106: 설정화 (기본 300s)
+                    mcpConfig);
+            worker.setOauthToken(token.token());
+            worker.setMcpConnectTimeout(Duration.ofSeconds(props.getMcpConnectTimeoutSeconds()));  // CR-152
+            worker.setMcpToolTimeout(Duration.ofSeconds(props.getMcpToolTimeoutSeconds()));  // CR-185
+            return worker;
+        };
+    }
+
     @Bean
     public RunnerService runnerService(ClaudeCliWorkerPool pool, RunnerProperties props) {
         return new RunnerService(pool, props.getDefaultModel());
     }
 
     @Bean
-    public RunnerController runnerController(RunnerService service, RunnerProperties props) {
-        return new RunnerController(service, props);
+    public RunnerAccountTokenService runnerAccountTokenService(RunnerProperties props) {
+        return new RunnerAccountTokenService(props, Clock.systemUTC());
+    }
+
+    @Bean
+    public RunnerController runnerController(RunnerService service, RunnerProperties props,
+                                             RunnerAccountTokenService accountTokens) {
+        return new RunnerController(service, props, accountTokens);
     }
 }

@@ -1,5 +1,6 @@
 package com.platform.runner.claudecli;
 
+import java.time.Clock;
 import java.time.Duration;
 
 /**
@@ -189,12 +190,21 @@ public class ClaudeCliAdapterConfig {
      * 이 설정으로 ClaudeCliWorkerPool 을 생성한다.
      * Spring 의존을 제거한 plain factory — 호출처(Phase 4 ClaudeCliAdapter / Runner) 가 직접 호출.
      */
+    /** CR-196 BIZ-283: 계정 폴더의 1년 토큰을 읽어 CLI 에 넘긴다. 토큰이 없거나 기한이 지난 계정은 워커를 만들지 않는다. */
+    ClaudeCliWorkerPool.WorkerFactory workerFactory(Duration turnTimeout, String mcpConfig, Clock clock) {
+        return (model, resumeSessionId, forkSession, configDir) -> {
+            ClaudeAccountToken token = ClaudeAccountToken.load(configDir, clock);
+            ClaudeCliWorker worker = new ClaudeCliWorker(cliBinaryPath, model, resumeSessionId, forkSession,
+                    configDir, turnTimeout, mcpConfig);
+            worker.setOauthToken(token.token());
+            return worker;
+        };
+    }
+
     public ClaudeCliWorkerPool createWorkerPool() {
         Duration turnTimeout = turnTimeout();
         String mcpConfig = resolveMcpConfigJson();
-        ClaudeCliWorkerPool.WorkerFactory factory = (model, resumeSessionId, forkSession, configDir) ->
-                new ClaudeCliWorker(cliBinaryPath, model, resumeSessionId, forkSession,
-                        configDir, turnTimeout, mcpConfig);
+        ClaudeCliWorkerPool.WorkerFactory factory = workerFactory(turnTimeout, mcpConfig, Clock.systemUTC());
         return new ClaudeCliWorkerPool(factory, maxWorkersPerRun,
                 Duration.ofSeconds(acquireTimeoutSeconds), resolveToolMode());
     }

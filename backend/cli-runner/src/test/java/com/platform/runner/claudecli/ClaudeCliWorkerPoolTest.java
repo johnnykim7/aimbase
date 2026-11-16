@@ -492,4 +492,33 @@ class ClaudeCliWorkerPoolTest {
         } catch (UnsupportedOperationException ignored) {}
         return p;
     }
+
+    /** CR-196 TC-TOK-008: 갈래 워커 공장이 실행 오류를 내도 run 자리와 프로세스 자리가 돌아온다. */
+    @Test
+    void spawnForkedWorker_returns_slots_when_factory_throws() {
+        java.util.concurrent.atomic.AtomicBoolean failFork = new java.util.concurrent.atomic.AtomicBoolean(true);
+        ClaudeCliWorkerPool pool = new ClaudeCliWorkerPool(
+                (model, sid, fork, cfg) -> {
+                    if (fork && failFork.get()) throw new ClaudeCliException(ClaudeAccountToken.MISSING_PREFIX + cfg);
+                    return new ClaudeCliWorker(binary.toString(), model, sid, fork, cfg, Duration.ofSeconds(5));
+                },
+                2, Duration.ofMillis(300), null, Duration.ZERO, Duration.ofMinutes(15));
+        pool.setProcessLimit(2, Duration.ofMillis(300));
+        ClaudeCliWorker main = pool.getOrCreateMain("run-T", null, null);
+        main.turnFirst(List.of(UnifiedMessage.ofText(UnifiedMessage.Role.USER, "go")));
+
+        for (int i = 0; i < 3; i++) {
+            assertThatThrownBy(() -> pool.spawnForkedWorker("run-T", main.getSessionId(), null, "/acct/work01"))
+                    .isInstanceOf(ClaudeCliException.class)
+                    .hasMessage(ClaudeAccountToken.MISSING_PREFIX + "/acct/work01");
+        }
+        assertThat(pool.processCount()).isEqualTo(1);
+
+        failFork.set(false);
+        ClaudeCliWorker fork = pool.spawnForkedWorker("run-T", main.getSessionId(), null, "/acct/work01");
+        assertThat(fork.isAlive()).isTrue();
+        assertThat(pool.processCount()).isEqualTo(2);
+
+        pool.shutdownForRun("run-T");
+    }
 }

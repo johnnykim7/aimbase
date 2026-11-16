@@ -612,3 +612,18 @@ aimbase-agent가 시작 시 Aimbase 서버에 등록 (CR-041 `AgentRegistryServi
 - [ ] 가이드 문서 4개 갱신
 - [ ] BIZ-099/100/101 룰 재정의 반영
 - [ ] CR_변경_이력.md 상태를 ✅ 구현 완료로 갱신
+
+## 15. 계정 인증 [CR-196]
+
+설계 상세: [CR-196_실행기_계정_1년_토큰과_만료_알림.md](CR-196_실행기_계정_1년_토큰과_만료_알림.md) 3, 4절.
+
+- 실행기는 CLI 를 띄울 때 계정 폴더(`config_dir`, 없으면 `CLAUDE_CONFIG_DIR`, 그것도 없으면 `~/.claude`)의 `oauth-token.json` 을 읽어 `CLAUDE_CODE_OAUTH_TOKEN` 으로 넘긴다. 토큰은 `claude setup-token` 의 1년 토큰이다(BIZ-283)
+- 토큰 파일이 없거나 기한이 지나면 CLI 를 띄우지 않는다. 오류는 `cli_account_token_missing:<계정 폴더>`, `cli_account_token_expired:<계정 폴더>:expires_at=<시각>` 이고 다른 CLI 실패와 같은 길(`/v1/chat` 의 `{"error"}`, 스트림 error 이벤트)로 api 에 간다
+- 인증 순서에서 앞서는 `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY` 는 CLI 환경에서 뺀다
+- 로그인 파일(`.credentials.json`)은 보지도 고치지도 않는다
+- 검사는 워커를 만드는 두 공장(`RunnerAutoConfiguration`, `ClaudeCliAdapterConfig.createWorkerPool`)에 있다
+- 실행기 API 에 `GET /v1/account-token?config_dir=`, `PUT /v1/account-token` 이 는다. 머리글 `X-Api-Key`. 응답 `{config_dir, present, issued_at, expires_at, managed_by}`, 토큰 값은 싣지 않는다. GET 은 api 의 만료 확인 작업(BIZ-284)과 토큰 목록이, PUT 은 화면의 토큰 넣기(BIZ-289)가 부른다. 요청과 오류 코드는 T3-2 「실행기 계정 1년 토큰」
+- PUT 은 받은 값으로 짧은 질문 하나를 CLI 에 던진다. 토큰은 환경변수 `CLAUDE_CODE_OAUTH_TOKEN` 으로만 넘기고 위 다섯 환경변수는 뺀다. 모델은 `aimbase.runner.token-verify-model`. 답이 오면 같은 폴더에 임시 파일을 600 으로 쓰고 이름을 바꿔 토큰 파일을 갈아 끼운다. 답이 없으면 파일을 건드리지 않는다
+- 실행기 설정 `aimbase.runner.token-managed-by`(기본 `tenant`)가 `platform` 이면 `by=tenant` 넣기를 409 로 막는다. 서버에서 실행기 여럿이 한 폴더를 같이 붙이는 Aimbase 관리 계정이 그렇다
+- 이미 떠 있는 워커는 쓰던 값으로 그 실행을 마치고, 새 워커부터 새 파일을 읽는다
+

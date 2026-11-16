@@ -97,6 +97,8 @@ services:
         required: false
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
+      # 이 서버의 계정 폴더는 Aimbase 가 빌려준 계정을 여러 실행기가 같이 붙인다. 소비앱 관리자가 토큰을 바꾸지 못하게 한다(CR-196).
+      AIMBASE_RUNNER_TOKEN_MANAGED_BY: "platform"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "3"
       AIMBASE_RUNNER_TURN_TIMEOUT_SECONDS: "600"
@@ -154,6 +156,8 @@ services:
         required: false
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
+      # 이 서버의 계정 폴더는 Aimbase 가 빌려준 계정을 여러 실행기가 같이 붙인다. 소비앱 관리자가 토큰을 바꾸지 못하게 한다(CR-196).
+      AIMBASE_RUNNER_TOKEN_MANAGED_BY: "platform"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "2"
       # 실행기 전체 Claude 프로세스 상한(CR-173 14절). 하나에 170MB 부터 300MB 라 java 와 합쳐 메모리 한도 안에 둔다.
@@ -211,6 +215,8 @@ services:
         required: false
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
+      # 이 서버의 계정 폴더는 Aimbase 가 빌려준 계정을 여러 실행기가 같이 붙인다. 소비앱 관리자가 토큰을 바꾸지 못하게 한다(CR-196).
+      AIMBASE_RUNNER_TOKEN_MANAGED_BY: "platform"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "2"
       # 실행기 전체 Claude 프로세스 상한(CR-173 14절). 하나에 170MB 부터 300MB 라 java 와 합쳐 메모리 한도 안에 둔다.
@@ -264,6 +270,8 @@ services:
     env_file: agent-3plgw.env
     environment:
       AIMBASE_RUNNER_ENABLED: "true"
+      # 이 서버의 계정 폴더는 Aimbase 가 빌려준 계정을 여러 실행기가 같이 붙인다. 소비앱 관리자가 토큰을 바꾸지 못하게 한다(CR-196).
+      AIMBASE_RUNNER_TOKEN_MANAGED_BY: "platform"
       AIMBASE_RUNNER_DEFAULT_MODEL: "claude-sonnet-4-5"
       AIMBASE_RUNNER_MAX_WORKERS: "1"
       # 수리 요청이 한꺼번에 오면 Claude 프로세스(약 320MB)가 그 수만큼 떠 메모리 상한을 넘겨 실행기가 죽는다.

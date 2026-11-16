@@ -165,6 +165,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
             } catch (RuntimeException re) {
                 CliAccountLimitedException limited = CliAccountLimitedException.from(re);
                 if (limited != null) throw limited; // CR-161
+                CliAccountTokenException token = CliAccountTokenException.from(re);
+                if (token != null) throw token; // CR-196
                 // CR-082: runner 호출 자체 실패 — 사유를 식별 가능한 prefix 로 감싸 RuntimeException 전파.
                 // ResponseStatusException 을 던지면 Spring 이 ASYNC dispatch 를 통해 SecurityContext 재검사를 일으켜
                 // 위젯에 "network error" 로 보이는 부수효과 발생 (운영 검증). 따라서 단순 RuntimeException 으로.
@@ -193,6 +195,8 @@ public class ClaudeCliAdapter implements LLMAdapter {
         } catch (RuntimeException re) {
             CliAccountLimitedException limited = CliAccountLimitedException.from(re);
             if (limited != null) throw limited; // CR-161
+            CliAccountTokenException token = CliAccountTokenException.from(re);
+            if (token != null) throw token; // CR-196
             // CR-082: stream 경로도 동일 — RuntimeException 으로 일관.
             String classified = classifyRunnerFailure(re);
             log.warn("CLI runner unreachable (stream): {} ({})", classified, re.getMessage());
@@ -276,7 +280,7 @@ public class ClaudeCliAdapter implements LLMAdapter {
      * CR-082: runner 호출 실패의 원인을 진단 로그/에러 메시지에 식별 가능한 사유 코드로 분류.
      * 정확한 사유보다 "어디서 끊겼는지" 단서 하나가 운영 진단을 빠르게 한다.
      */
-    private static String classifyRunnerFailure(Throwable t) {
+    public static String classifyRunnerFailure(Throwable t) {
         Throwable cur = t;
         for (int i = 0; i < 5 && cur != null; i++) {
             String msg = cur.getMessage();

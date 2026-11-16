@@ -97,4 +97,20 @@ class ClaudeCliAdapterConfigTest {
         JsonNode server = root.get("mcpServers").get("aimbase-server");
         assertThat(server.has("headers")).isFalse();
     }
+
+    @Test
+    @DisplayName("TC-TOK-007 내장 공장도 토큰 없는 계정은 워커를 만들지 않는다")
+    void cr196_worker_factory_requires_account_token(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
+            throws Exception {
+        ClaudeCliAdapterConfig cfg = new ClaudeCliAdapterConfig();
+        java.time.Clock clock = java.time.Clock.systemUTC();
+        ClaudeCliWorkerPool.WorkerFactory factory = cfg.workerFactory(java.time.Duration.ofSeconds(5), null, clock);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> factory.create(null, null, false, dir.toString()))
+                .isInstanceOf(ClaudeCliException.class)
+                .hasMessage(ClaudeAccountToken.MISSING_PREFIX + dir);
+
+        ClaudeAccountTokenTest.writeToken(dir, ClaudeAccountTokenTest.TOKEN, "2099-01-01T00:00:00+09:00");
+        assertThat(factory.create(null, null, false, dir.toString())).isNotNull();
+    }
 }

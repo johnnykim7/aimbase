@@ -151,6 +151,8 @@ public class ClaudeCliWorker implements AutoCloseable {
      * 짧아, 사용자가 정하기 전에 호출이 끊기고 모델이 시간 초과로 답을 끝낸다. null 이면 CLI 기본값을 쓴다.
      */
     private volatile Duration mcpToolTimeout;
+    /** CR-196: 계정의 1년 토큰. null 이면 CLI 가 계정 폴더의 로그인으로 인증한다(단위시험 전용). */
+    private volatile String oauthToken;
     /** CR-152: 이 워커가 CLI 에 넘긴 MCP 서버 이름. 턴을 시작할 때 모두 connected 여야 한다. */
     private volatile Set<String> requiredMcpServers = Set.of();
     static final String ENV_MCP_NONBLOCKING = "MCP_CONNECTION_NONBLOCKING";
@@ -292,6 +294,17 @@ public class ClaudeCliWorker implements AutoCloseable {
         this.mcpConnectTimeout = timeout;
     }
 
+    /**
+     * CR-196: start() 호출 전, CLI 가 쓸 계정의 1년 토큰 설정. 설정하면 CLAUDE_CODE_OAUTH_TOKEN 으로 넘기고
+     * 그보다 앞서는 인증 값은 CLI 환경에서 뺀다. 워커 팩토리가 {@link ClaudeAccountToken#load} 로 읽어 넣는다.
+     */
+    public void setOauthToken(String token) {
+        if (process != null) {
+            throw new IllegalStateException("Worker already started; cannot set oauthToken after start()");
+        }
+        this.oauthToken = token;
+    }
+
     /** CR-185: start() 호출 전, CLI 가 MCP 도구 호출 하나를 기다릴 상한 설정. */
     public void setMcpToolTimeout(Duration timeout) {
         if (process != null) {
@@ -343,6 +356,13 @@ public class ClaudeCliWorker implements AutoCloseable {
         return DataChannelTools.open(tools);
     }
 
+    /** CR-196: 토큰을 넘기고, 공식 인증 순서에서 그보다 앞서는 값은 CLI 환경에서 뺀다. 토큰이 없으면 손대지 않는다. */
+    static void applyOauthToken(Map<String, String> env, String token) {
+        if (token == null) return;
+        ClaudeAccountToken.OVERRIDING_ENV.forEach(env::remove);
+        env.put(ClaudeAccountToken.ENV_NAME, token);
+    }
+
     /** 프로세스 기동 + 파서/드레인 스레드 시작. 반환 후 turn*() 호출 가능 상태. */
     public synchronized void start() throws IOException {
         if (process != null) {
@@ -355,6 +375,7 @@ public class ClaudeCliWorker implements AutoCloseable {
             pb.environment().put("CLAUDE_CONFIG_DIR", configDir);
         }
         pb.environment().remove("CLAUDECODE");   // 중첩 세션 방지
+        applyOauthToken(pb.environment(), oauthToken);
         // CR-152: 넘긴 MCP 서버가 있으면 연결이 끝난 뒤에 첫 턴을 시작하게 한다.
         if (!requiredMcpServers.isEmpty()) {
             pb.environment().put(ENV_MCP_NONBLOCKING, "false");

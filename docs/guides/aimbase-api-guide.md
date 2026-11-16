@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.43.1** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.45.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -727,6 +727,7 @@ DELETE /api/v1/workflows/{id}
 | 404 | 리소스 없음 | ID 확인 |
 | 503 | RAG 사이드카 미기동 | 사이드카 상태 확인 (port 8002) |
 | 503 | `connection_group_unavailable:retry_after=<시각>` 연결 묶음에 고를 커넥션이 없음 (CR-161) | `retry_after` 뒤에 다시 요청 (§ 25-3) |
+| 503 | `cli_account_token_missing:`, `cli_account_token_expired:` 단일 CLI 커넥션의 계정에 1년 토큰이 없거나 기한이 지남 (CR-196) | 다시 보내도 같다. Aimbase 담당에게 알린다. 연결 묶음을 쓰면 다른 계정으로 넘어간다 (§ 25-3) |
 
 ---
 
@@ -1106,6 +1107,14 @@ GET /api/v1/agents/active
 | DELETE | `/platform/api-keys/{id}` | 키 폐기 (비활성화) |
 | POST | `/platform/api-keys/{id}/regenerate` | 키 재발급 (기존 키 폐기 → 동일 설정 신규 발급) |
 
+### 실행기 계정 토큰 (SUPER_ADMIN) [CR-196]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/platform/cli-account-tokens` | 모든 테넌트의 계정 폴더별 1년 토큰 상태. Master 에 마지막으로 확인해 둔 값이며 실행기에 묻지 않는다. 줄마다 `tenant_id`, `tenant_name`, `checked_at` |
+
+- 플랫폼 관리자가 넣을 때는 `POST /platform/tenants/{id}/impersonate` 로 받은 토큰으로 테넌트 API `PUT /connections/{id}/account-token` 을 부른다. 실행기에는 `by=platform` 으로 가고 감사 기록 주체는 플랫폼 관리자다.
+
 ### 지식 소스
 
 | 메서드 | 경로 | 설명 |
@@ -1145,6 +1154,11 @@ GET /api/v1/agents/active
 | GET | `/connections` | 연결 목록 |
 | POST | `/connections` | 연결 생성 |
 | POST | `/connections/{id}/test` | 연결 테스트 |
+| GET | `/cli-account-tokens` | 서버 실행기를 쓰는 CLI 연결의 계정 폴더별 1년 토큰 상태 (CR-196). 실행기에 그때 묻고, 꺼진 실행기는 마지막 값과 `reachable=false` |
+| GET | `/connections/{id}/account-token` | 그 연결 계정 폴더의 1년 토큰 상태 (CR-196) |
+| PUT | `/connections/{id}/account-token` | 본문 `{token}`. 실행기가 그 값으로 짧은 질문을 던져 답이 오면 계정 폴더에 적는다. 값은 Aimbase 에 남지 않는다. 오류 400 `account_token_invalid`, `account_token_rejected`, `account_token_not_server_runner`, 409 `account_token_platform_managed`, 404 없는 연결, 503 `cli_runner_unreachable:` (CR-196) |
+| GET | `/cli-token-recipients` | 1년 토큰 만료 알림 수신자 `{emails, phones}` (CR-196) |
+| PUT | `/cli-token-recipients` | 본문 `{emails, phones}` 로 통째 바꾼다. 모양이 틀리면 400 `recipient_invalid:<값>` (CR-196) |
 
 ### 오케스트레이션
 
@@ -2330,6 +2344,8 @@ LLM_CALL, AGENT_CALL 단계 config 에 `skills` 를 적습니다. 워크플로�
 |---|---|---|---|
 | 1 | `connection_group_unavailable:retry_after=<ISO-8601>` | 고를 수 있는 커넥션이 없다. 가장 먼저 풀리는 시각 | 503 |
 | 2 | `cli_account_limited:resets_at=<epoch 초>:type=<한도 종류>:` | CLI 계정 한도. 그룹이 아닌 단일 커넥션 요청이면 그대로 돌려준다 | 503 |
+| 3 | `cli_account_token_missing:<계정 폴더>` | CLI 계정에 1년 토큰이 없다. 그룹은 그 커넥션을 5분 빼고 다음으로 넘기고, 단일 커넥션 요청이면 그대로 돌려준다. 다시 보내도 같고 Aimbase 담당이 토큰을 넣어야 풀린다 (CR-196) | 503 |
+| 4 | `cli_account_token_expired:<계정 폴더>:expires_at=<ISO-8601>` | CLI 계정의 1년 토큰 기한이 지났다. 나머지는 3 과 같다 (CR-196) | 503 |
 
 실시간은 SSE `error` 이벤트로 끝납니다. 워크플로우 단계는 단계 실패로 남고 메시지는 위와 같습니다.
 
@@ -3450,6 +3466,8 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.45.0 | 2026-11-16 | **CR-196 1년 토큰 API** (§ 13 LLM 연결, 실행기 계정 토큰). `GET /cli-account-tokens`, `GET`/`PUT /connections/{id}/account-token`, `GET`/`PUT /cli-token-recipients`, 플랫폼 `GET /platform/cli-account-tokens`. 플랫폼 관리자는 임퍼소네이션 토큰으로 테넌트 API 를 부른다 |
+| v3.44.0 | 2026-11-16 | **CR-196 CLI 계정 1년 토큰 오류** (§ 5, § 25-3). 오류 머리 `cli_account_token_missing`, `cli_account_token_expired`. 연결 묶음은 그 커넥션을 5분 빼고 다음으로 넘기고, 단일 커넥션 비실시간은 503 |
 | v3.43.1 | 2026-11-16 | **CR-194 위젯 보정** (§ 38-1, § 38-4, § 38-5). 연결 속성을 하나씩 바꿀 때 마지막 연결 설정만 쓰고 받기 전 질문은 기다림. 모달 위 위젯 누름과 복사, `data-aimbase-widget` 표시. 화면 키 없는 화면에서 `session-id` 가 없으면 지난 대화를 묻지 않음 |
 | v3.43.0 | 2026-11-16 | **CR-194 위젯 계정 묶음** (§ 28-2, § 28-4, § 38-4). 위젯 설정 조회 질의와 다음 질문 제안 본문에 `connection_group_id`. 대화 요청 모델 검사를 묶음 구성원 모두로. 위젯 속성 `connection-group-id` |
 | v3.42.0 | 2026-11-15 | **CR-194 위젯 화면별 대화와 함께 보는 대화** (§ 17-2, § 38). 토큰 발급 `user_name`, `share_key`, 모르는 칸 무시. `POST /api/v1/chat/sessions/shared` 추가. 대화 목록 `screen_key`, 대화 요청 `screen_key`, 이어보기 `shared` 와 `question.asker`, 위젯 설정 `shared_available` 과 `user_name`. 대화 번호를 받는 위젯 API 의 접근 확인을 하나로 모아 대화 요청에도 건다 |

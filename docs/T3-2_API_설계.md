@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.27 | 최종 수정: 2026-11-16 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194
+> 설계 버전: 7.29 | 최종 수정: 2026-11-16 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -297,6 +297,8 @@
 |------|------------|----|--------------|
 | 1 | `connection_group_unavailable:retry_after=<ISO-8601>` | 고를 수 있는 멤버가 없다. 가장 먼저 풀리는 시각 | 503 |
 | 2 | `cli_account_limited:resets_at=<epoch 초>:type=<한도 종류>:` | CLI 계정 한도. 그룹 안에서는 다음 멤버로 넘기고, 단일 커넥션 요청이면 그대로 돌려준다 | 503 |
+| 3 | `cli_account_token_missing:<계정 폴더>` | CLI 계정에 1년 토큰이 없다. 그룹 안에서는 그 멤버를 5분 빼고 다음 멤버로 넘기고, 단일 커넥션 요청이면 그대로 돌려준다. 담당자가 토큰을 넣어야 풀린다 (CR-196) | 503 |
+| 4 | `cli_account_token_expired:<계정 폴더>:expires_at=<ISO-8601>` | CLI 계정의 1년 토큰 기한이 지났다. 나머지는 3 과 같다 (CR-196) | 503 |
 
 실시간은 기존처럼 SSE 오류로 끝난다.
 
@@ -3985,6 +3987,80 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 ### 대화 요청
 
 요청 본문에 칸을 더하지 않는다. 주인이 있는 위젯 대화면 서버가 내 선호와 자동 기억을 이번 질문 바로 앞에 질문마다 붙이는 지시로 넣고(BIZ-181), 응답이 정상으로 끝나면 응답과 따로 기억을 뽑는다(BIZ-182).
+
+## 실행기 계정 1년 토큰 [v7.29, CR-196]
+
+설계 상세: [CR-196_실행기_계정_1년_토큰과_만료_알림.md](CR-196_실행기_계정_1년_토큰과_만료_알림.md) 4절. 토큰 값은 어느 응답, 기록, DB 에도 싣지 않는다(BIZ-289).
+
+### 실행기 토큰 API [PRD-646, PRD-641]
+
+실행기(aimbase-agent, cli-runner)의 API 다. 머리글 `X-Api-Key` 는 실행기 호출 키이고 틀리면 401 이다. 요청 본문은 기록하지 않는다.
+
+| 순번 | 방법 | 경로 | 뜻 |
+|---|---|---|---|
+| 1 | GET | /v1/account-token?config_dir=<계정 폴더> | 토큰 파일 상태. `config_dir` 을 비우면 기본 계정 폴더 |
+| 2 | PUT | /v1/account-token | 본문 `{config_dir, token, by}`. 확인 질문에 답이 오면 토큰 파일을 600 으로 바꿔 적는다 |
+
+응답(둘 다):
+
+```json
+{"config_dir": "/data/claude-accounts/work01", "present": true,
+ "issued_at": "2026-11-16T08:30:00+09:00", "expires_at": "2027-11-16T08:30:00+09:00",
+ "managed_by": "platform"}
+```
+
+- `by` 는 `tenant` 또는 `platform` 이고 api 가 정한다. `managed_by` 는 실행기 설정 `aimbase.runner.token-managed-by`(기본 `tenant`)다
+- 확인 질문 모델은 `aimbase.runner.token-verify-model`, 새 기한은 지금부터 `aimbase.runner.token-days`(기본 365)일 뒤다
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `account_token_invalid` | 값이 `sk-ant-oat01-` 로 시작하지 않음 |
+| 400 | `account_token_rejected` | 그 값으로 던진 확인 질문에 답이 없음. 파일은 그대로 |
+| 409 | `account_token_platform_managed` | `managed_by=platform` 인데 `by=tenant` |
+
+### 테넌트 토큰 API [PRD-646]
+
+테넌트 관리자 권한이다. 4 를 빼면 `anthropic-cli` 연결이고 `config.agent_name` 이 있는 연결만 다룬다.
+
+| 순번 | 방법 | 경로 | 뜻 |
+|---|---|---|---|
+| 1 | GET | /api/v1/cli-account-tokens | 이 테넌트의 서버 실행기 연결을 (agent_name, config_dir) 로 묶어 실행기마다 묻는다(한 곳당 `aimbase.cli-token.query-timeout`, 기본 5초). 결과를 Master `cli_account_tokens` 에 적는다 |
+| 2 | GET | /api/v1/connections/{id}/account-token | 그 연결 하나로 1 과 같은 한 줄 |
+| 3 | PUT | /api/v1/connections/{id}/account-token | 본문 `{"token": "sk-ant-oat01-..."}`. 그 연결의 실행기에 넘기고 2 와 같은 한 줄을 돌려준다 |
+| 4 | GET, PUT | /api/v1/cli-token-recipients | 만료 알림 수신자. 본문과 응답 `{"emails": ["a@x.com"], "phones": ["01012345678"]}`. PUT 은 목록 전체를 바꾼다 |
+
+1, 2 의 한 줄:
+
+```json
+{"agent_name": "cli-runner-bp-wes-cs", "config_dir": "/data/claude-accounts/work01",
+ "managed_by": "tenant", "present": true, "issued_at": "2026-11-16T08:30:00+09:00",
+ "expires_at": "2027-11-16T08:30:00+09:00", "days_left": 365, "reachable": true,
+ "connection_ids": ["conn-a", "conn-b"]}
+```
+
+- 1 은 `[한 줄, ...]` 이다. 실행기가 답하지 않으면 그 줄은 `reachable=false` 이고 앞서 확인한 값을 싣는다
+- 3 은 실행기가 확인 질문의 답을 기다리므로 연결 호출 시간 제한 `platform.llm.anthropic-cli.http-timeout-seconds`(기본 300초)까지 기다린다
+- 3 의 `by` 는 요청 JWT 가 임퍼소네이션(CR-096, `impersonating=true`)이면 `platform`, 아니면 `tenant` 다
+- 3 의 감사 기록(BIZ-020)에는 누가(임퍼소네이션이면 플랫폼 관리자), 어느 연결, 새 기한만 남긴다
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `account_token_not_server_runner` | Claude CLI 연결이 아니거나 `config.agent_name` 이 없음 |
+| 400 | `account_token_invalid`, `account_token_rejected` | 실행기 응답 그대로 |
+| 400 | `recipient_invalid:<값>` | 메일 주소나 휴대폰 번호 모양이 아님 |
+| 404 | `Connection not found: <id>` | 없는 연결. 연결 상세 조회와 같은 오류 |
+| 409 | `account_token_platform_managed` | Aimbase 관리 폴더에 테넌트 관리자가 넣음 |
+| 503 | `cli_runner_unreachable:AGENT_OFFLINE:` | 실행기가 꺼져 있음 |
+
+### 플랫폼 토큰 목록 [PRD-647]
+
+| 방법 | 경로 | 뜻 |
+|---|---|---|
+| GET | /api/v1/platform/cli-account-tokens | Master `cli_account_tokens` 전체. 줄마다 `tenant_id`, `tenant_name`, 테넌트 목록의 칸, `checked_at` |
+
+- Master DB 만 본다(BIZ-024). 실행기에 묻지 않는다
+- 넣기는 플랫폼 화면이 그 테넌트로 임퍼소네이션(`POST /api/v1/platform/tenants/{id}/impersonate`)한 뒤 테넌트 토큰 API 3 을 부른다
+- Aimbase 관리 계정의 수신자는 플랫폼 설정 API(`PUT /api/v1/platform/settings`)로 `runner.token_expiry.emails`, `runner.token_expiry.phones` 를 바꾼다
 
 ## 작성 가이드
 

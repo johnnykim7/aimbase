@@ -3,6 +3,7 @@ package com.platform.api;
 import com.platform.document.DocumentRenderException;
 import com.platform.session.ChatRejectedException;
 import com.platform.llm.adapter.CliAccountLimitedException;
+import com.platform.llm.adapter.CliAccountTokenException;
 import com.platform.session.BlockingLimitException;
 import com.platform.skill.SkillNotFoundException;
 import com.platform.tenant.quota.QuotaExceededException;
@@ -72,6 +73,21 @@ public class GlobalExceptionHandler {
         log.warn("CLI account limited: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /** CR-196: 단일 커넥션의 CLI 계정에 1년 토큰이 없거나 기한이 지났다. 한도와 같이 503 이다. */
+    @ExceptionHandler(CliAccountTokenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCliAccountToken(CliAccountTokenException ex) {
+        log.warn("CLI account token unavailable: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /** CR-196: 1년 토큰 API 의 거절. 실행기 오류 코드를 그대로 싣는다(T3-2). */
+    @ExceptionHandler(com.platform.clitoken.CliTokenApiException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCliTokenApi(com.platform.clitoken.CliTokenApiException ex) {
+        log.warn("CLI token API rejected: {} {}", ex.getStatus().value(), ex.getMessage());
+        return ResponseEntity.status(ex.getStatus()).body(ApiResponse.error(ex.getMessage()));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

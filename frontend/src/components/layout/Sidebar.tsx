@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
+  KeySquare,
   LayoutDashboard,
   PlugZap,
   Wrench,
@@ -70,6 +71,7 @@ const PLATFORM_ITEMS: NavItemDef[] = [
   { path: "/platform/tenants", icon: Building2, label: "테넌트 관리" },
   { path: "/platform/subscriptions", icon: CreditCard, label: "구독 관리" },
   { path: "/platform/api-keys", icon: KeyRound, label: "API Key 관리" },
+  { path: "/platform/cli-account-tokens", icon: KeySquare, label: "실행기 계정 토큰" },
   { path: "/platform/monitoring", icon: Globe, label: "플랫폼 현황" },
   { path: "/platform/skill-bundles", icon: Package, label: "공용 스킬" },
   { path: "/platform/settings", icon: Settings2, label: "런타임 설정" },

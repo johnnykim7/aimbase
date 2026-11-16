@@ -3,7 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, PlugZap, Wrench, FileJson, Shield, MessageSquare,
   Zap, BookOpen, Target, FileText, FolderOpen, Users, BarChart3,
-  Building2, CreditCard, KeyRound, Globe,
+  Building2, CreditCard, KeyRound, KeySquare, Globe,
   MessageSquareText, MessageCircle, Layers, Settings2, History, Sparkles, Package, ThumbsUp,
 } from "lucide-react";
 import { Sidebar } from "./Sidebar";
@@ -43,6 +43,7 @@ const ROUTE_HEADERS: Record<string, RouteHeader> = {
   "/platform/tenants":      { title: "테넌트 관리", subtitle: "Super Admin — 플랫폼 테넌트 전체 관리", icon: <Building2 className={ICON} /> },
   "/platform/subscriptions":{ title: "구독/쿼터 관리", subtitle: "Super Admin — 테넌트별 사용 한도 설정", icon: <CreditCard className={ICON} /> },
   "/platform/api-keys":     { title: "API Key 관리", subtitle: "Super Admin — 시스템 API Key 발급 및 관리", icon: <KeyRound className={ICON} /> },
+  "/platform/cli-account-tokens": { title: "실행기 계정 토큰", subtitle: "Super Admin, 서버 실행기 계정마다 넣은 1년 토큰과 기한", icon: <KeySquare className={ICON} /> },
   "/platform/monitoring":   { title: "플랫폼 현황", subtitle: "Super Admin — 전체 테넌트 사용량 총괄", icon: <Globe className={ICON} /> },
   "/platform/skill-bundles":{ title: "공용 스킬", subtitle: "Super Admin, 모든 테넌트가 같이 쓰는 스킬 묶음", icon: <Package className={ICON} /> },
   "/platform/settings":    { title: "런타임 설정", subtitle: "Super Admin — 서버 재기동 없이 플랫폼 설정 미세조정", icon: <Settings2 className={ICON} /> },

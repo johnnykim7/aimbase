@@ -31,6 +31,7 @@ import Tenants from "./pages/platform/Tenants";
 import Subscriptions from "./pages/platform/Subscriptions";
 import PlatformMonitoring from "./pages/platform/PlatformMonitoring";
 import ApiKeys from "./pages/platform/ApiKeys";
+import CliAccountTokens from "./pages/platform/CliAccountTokens";
 import PlatformSettings from "./pages/platform/PlatformSettings";
 import PlatformSkillBundles from "./pages/platform/PlatformSkillBundles";
 
@@ -72,6 +73,7 @@ export default function App() {
           <Route path="tenants" element={<Tenants />} />
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="api-keys" element={<ApiKeys />} />
+          <Route path="cli-account-tokens" element={<CliAccountTokens />} />
           <Route path="monitoring" element={<PlatformMonitoring />} />
           <Route path="skill-bundles" element={<PlatformSkillBundles />} />
           <Route path="settings" element={<PlatformSettings />} />
