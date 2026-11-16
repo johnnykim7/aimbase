@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.43.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.44.0** | 2026-11-16 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1105,6 +1105,14 @@ GET /api/v1/agents/active
 | DELETE | `/platform/api-keys/{id}` | 키 폐기 (비활성화) |
 | POST | `/platform/api-keys/{id}/regenerate` | 키 재발급 (기존 키 폐기 → 동일 설정 신규 발급) |
 
+### 실행기 계정 토큰 (SUPER_ADMIN) [CR-196]
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/platform/cli-account-tokens` | 모든 테넌트의 계정 폴더별 1년 토큰 상태. Master 에 마지막으로 확인해 둔 값이며 실행기에 묻지 않는다. 줄마다 `tenant_id`, `tenant_name`, `checked_at` |
+
+- 플랫폼 관리자가 넣을 때는 `POST /platform/tenants/{id}/impersonate` 로 받은 토큰으로 테넌트 API `PUT /connections/{id}/account-token` 을 부른다. 실행기에는 `by=platform` 으로 가고 감사 기록 주체는 플랫폼 관리자다.
+
 ### 지식 소스
 
 | 메서드 | 경로 | 설명 |
@@ -1144,6 +1152,11 @@ GET /api/v1/agents/active
 | GET | `/connections` | 연결 목록 |
 | POST | `/connections` | 연결 생성 |
 | POST | `/connections/{id}/test` | 연결 테스트 |
+| GET | `/cli-account-tokens` | 서버 실행기를 쓰는 CLI 연결의 계정 폴더별 1년 토큰 상태 (CR-196). 실행기에 그때 묻고, 꺼진 실행기는 마지막 값과 `reachable=false` |
+| GET | `/connections/{id}/account-token` | 그 연결 계정 폴더의 1년 토큰 상태 (CR-196) |
+| PUT | `/connections/{id}/account-token` | 본문 `{token}`. 실행기가 그 값으로 짧은 질문을 던져 답이 오면 계정 폴더에 적는다. 값은 Aimbase 에 남지 않는다. 오류 400 `account_token_invalid`, `account_token_rejected`, `account_token_not_server_runner`, 409 `account_token_platform_managed`, 404 없는 연결, 503 `cli_runner_unreachable:` (CR-196) |
+| GET | `/cli-token-recipients` | 1년 토큰 만료 알림 수신자 `{emails, phones}` (CR-196) |
+| PUT | `/cli-token-recipients` | 본문 `{emails, phones}` 로 통째 바꾼다. 모양이 틀리면 400 `recipient_invalid:<값>` (CR-196) |
 
 ### 오케스트레이션
 
@@ -3441,6 +3454,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.44.0 | 2026-11-16 | **CR-196 1년 토큰 API** (§ 13 LLM 연결, 실행기 계정 토큰). `GET /cli-account-tokens`, `GET`/`PUT /connections/{id}/account-token`, `GET`/`PUT /cli-token-recipients`, 플랫폼 `GET /platform/cli-account-tokens`. 플랫폼 관리자는 임퍼소네이션 토큰으로 테넌트 API 를 부른다 |
 | v3.43.0 | 2026-11-16 | **CR-196 CLI 계정 1년 토큰 오류** (§ 5, § 25-3). 오류 머리 `cli_account_token_missing`, `cli_account_token_expired`. 연결 묶음은 그 커넥션을 5분 빼고 다음으로 넘기고, 단일 커넥션 비실시간은 503 |
 | v3.42.0 | 2026-11-16 | **CR-194 위젯 계정 묶음** (§ 28-2, § 28-4, § 38-4). 위젯 설정 조회 질의와 다음 질문 제안 본문에 `connection_group_id`. 대화 요청 모델 검사를 묶음 구성원 모두로. 위젯 속성 `connection-group-id` |
 | v3.41.0 | 2026-11-15 | **CR-194 위젯 화면별 대화와 함께 보는 대화** (§ 17-2, § 38). 토큰 발급 `user_name`, `share_key`, 모르는 칸 무시. `POST /api/v1/chat/sessions/shared` 추가. 대화 목록 `screen_key`, 대화 요청 `screen_key`, 이어보기 `shared` 와 `question.asker`, 위젯 설정 `shared_available` 과 `user_name`. 대화 번호를 받는 위젯 API 의 접근 확인을 하나로 모아 대화 요청에도 건다 |
