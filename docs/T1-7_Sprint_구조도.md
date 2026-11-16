@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 3.31 | 최종 수정: 2026-11-16 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-193, CR-194, CR-196
+> 설계 버전: 3.32 | 최종 수정: 2026-11-16 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-193, CR-194, CR-196
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -846,16 +846,20 @@ flowchart LR
 
 ---
 
-### CR-196: 실행기 계정 1년 토큰과 만료 알림 (실행기 + BE + 스크립트) [v3.31, CR-196]
+### CR-196: 실행기 계정 1년 토큰과 만료 알림 (실행기 + BE + FE + 스크립트) [v3.31, v3.32, CR-196]
 
-설계 상세: [CR-196_실행기_계정_1년_토큰과_만료_알림.md](CR-196_실행기_계정_1년_토큰과_만료_알림.md). 1단계(토큰)를 먼저 반영하고 2단계(알림)를 잇는다(사용자 06:20).
+설계 상세: [CR-196_실행기_계정_1년_토큰과_만료_알림.md](CR-196_실행기_계정_1년_토큰과_만료_알림.md). 1단계(토큰)를 먼저 반영하고 2단계(화면에서 넣는 토큰과 알림)를 잇는다(사용자 06:20, 14:14, 14:39).
 
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
-| PRD-640, BIZ-283 | `ClaudeAccountToken`(토큰 파일 읽기와 검사), 워커 환경(`CLAUDE_CODE_OAUTH_TOKEN`, 앞서는 인증 변수 빼기), 두 워커 공장에 검사, 갈래 워커 실행 오류 때 run 자리 반환 | CR-161 | 단위시험 TC-TOK-001 ~ 008, 시험항목 IT-25-001 ~ 004 | 실행기 | 설계중 |
-| PRD-640 | 기동 스크립트 `token` 단계(토큰 파일, 로그인 파일의 1년 토큰 옮기기, 서비스 이름 받기), `connections` 구성원 세기, `scripts/cli-token.py` | 위 실행기 | 시험항목 IT-25-005 ~ 007 | 스크립트 | 설계중 |
-| PRD-641 | 실행기 `GET /v1/account-token` | 위 실행기 | 단위시험 TC-TOK-009, 시험항목 IT-25-008 | 실행기 | 설계중 |
-| PRD-641, BIZ-284 | 마스터 V95 `cli_token_expiry_notices`, 운영 설정 분류 runner, 하루 한 번 확인과 bp-notification 발송 | 위 조회, bp-notification 양식 | 단위시험 TC-TOK-010 ~ 014, 시험항목 IT-25-009 ~ 011 | BE | 설계중 |
+| PRD-640, BIZ-283 | `ClaudeAccountToken`(토큰 파일 읽기와 검사), 워커 환경(`CLAUDE_CODE_OAUTH_TOKEN`, 앞서는 인증 변수 빼기), 두 워커 공장에 검사, 갈래 워커 실행 오류 때 run 자리 반환 | CR-161 | 단위시험 TC-TOK-001 ~ 008, 시험항목 IT-25-001 ~ 004 | 실행기 | 운영 chaws 반영 |
+| PRD-640 | 기동 스크립트 `token` 단계(토큰 파일, 로그인 파일의 1년 토큰 옮기기, 서비스 이름 받기), `connections` 구성원 세기, `scripts/cli-token.py` | 위 실행기 | 시험항목 IT-25-005 ~ 007 | 스크립트 | 운영 chaws 반영 |
+| PRD-641, PRD-646 | 실행기 `GET /v1/account-token`(managed_by 포함), `PUT /v1/account-token`(확인 질문 뒤 적기), 실행기 설정 `aimbase.runner.token-managed-by`, `token-verify-model`, `token-days` | 위 실행기 | 단위시험 TC-TOK-009, 017 ~ 019, 시험항목 IT-25-008 | 실행기 | 설계중 |
+| PRD-641, BIZ-284 | 마스터 V95 `cli_token_expiry_notices`(tenant_id 포함), 런타임 설정 분류 runner, 하루 한 번 확인과 bp-notification 발송 | 위 조회, bp-notification 양식 | 단위시험 TC-TOK-010 ~ 014, 024, 시험항목 IT-25-009 ~ 011 | BE | 설계중 |
+| PRD-646, BIZ-289 | 마스터 V95 `cli_account_tokens`, 테넌트 V96 `cli_token_recipients`, 테넌트 API `GET /cli-account-tokens`, `GET/PUT /connections/{id}/account-token`, `GET/PUT /cli-token-recipients`, 임퍼소네이션 표시로 by 정하기 | 위 실행기 PUT | 단위시험 TC-TOK-020 ~ 023, 시험항목 IT-25-016 ~ 018 | BE | 설계중 |
+| PRD-647, BIZ-024 | 플랫폼 API `GET /platform/cli-account-tokens` | 위 테넌트 API | 단위시험 TC-TOK-025 | BE | 설계중 |
+| PRD-646 | 연결 관리 목록(검색, 상태 칩), 연결 수정 창 「1년 토큰」 칸, 만료 알림 수신자 카드 | 위 테넌트 API | 단위시험 TC-TOK-026, 027, 시험항목 IT-25-014 ~ 016, 020 | FE | 설계중 |
+| PRD-647 | 플랫폼 화면 실행기 계정 토큰(목록, 1년 토큰 창, Aimbase 관리 계정 수신자), 메뉴 | 위 플랫폼 API | 시험항목 IT-25-019, 020 | FE | 설계중 |
 | (레포 간) | bp-notification Aimbase 솔루션 키와 양식 둘 | | 59 에서 메일과 문자 한 번 | bp-notification | 요청 |
 
 ---

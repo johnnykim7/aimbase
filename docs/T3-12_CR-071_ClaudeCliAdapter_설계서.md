@@ -622,5 +622,8 @@ aimbase-agent가 시작 시 Aimbase 서버에 등록 (CR-041 `AgentRegistryServi
 - 인증 순서에서 앞서는 `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY` 는 CLI 환경에서 뺀다
 - 로그인 파일(`.credentials.json`)은 보지도 고치지도 않는다
 - 검사는 워커를 만드는 두 공장(`RunnerAutoConfiguration`, `ClaudeCliAdapterConfig.createWorkerPool`)에 있다
-- 실행기 API 에 `GET /v1/account-token?config_dir=` 이 는다. 머리글 `X-Api-Key`. 응답 `{config_dir, present, issued_at, expires_at}`, 토큰 값은 싣지 않는다. api 의 만료 확인 작업(BIZ-284)이 부른다
+- 실행기 API 에 `GET /v1/account-token?config_dir=`, `PUT /v1/account-token` 이 는다. 머리글 `X-Api-Key`. 응답 `{config_dir, present, issued_at, expires_at, managed_by}`, 토큰 값은 싣지 않는다. GET 은 api 의 만료 확인 작업(BIZ-284)과 토큰 목록이, PUT 은 화면의 토큰 넣기(BIZ-289)가 부른다. 요청과 오류 코드는 T3-2 「실행기 계정 1년 토큰」
+- PUT 은 받은 값으로 짧은 질문 하나를 CLI 에 던진다. 토큰은 환경변수 `CLAUDE_CODE_OAUTH_TOKEN` 으로만 넘기고 위 다섯 환경변수는 뺀다. 모델은 `aimbase.runner.token-verify-model`. 답이 오면 같은 폴더에 임시 파일을 600 으로 쓰고 이름을 바꿔 토큰 파일을 갈아 끼운다. 답이 없으면 파일을 건드리지 않는다
+- 실행기 설정 `aimbase.runner.token-managed-by`(기본 `tenant`)가 `platform` 이면 `by=tenant` 넣기를 409 로 막는다. 서버에서 실행기 여럿이 한 폴더를 같이 붙이는 Aimbase 관리 계정이 그렇다
+- 이미 떠 있는 워커는 쓰던 값으로 그 실행을 마치고, 새 워커부터 새 파일을 읽는다
 

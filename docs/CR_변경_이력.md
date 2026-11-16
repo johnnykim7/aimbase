@@ -151,7 +151,7 @@
 | CR-193 | [검사 반복에 코드 대조 결과를 더하는 기능](CR-193_검사_반복에_코드_대조_결과를_더하는_기능.md) | 신규 | Medium | - | 59 반영 |
 | CR-194 | [대화창 화면별 지난 대화 불러오기](CR-194_대화창_화면별_지난_대화_불러오기.md) | 신규 | High | - | 설계중 |
 | CR-195 | [실행기 CLI 판 고정과 대화창 모델 넷](CR-195_실행기_CLI_판_고정과_대화창_모델_넷.md) | 변경 | Medium | - | 운영 반영 |
-| CR-196 | [실행기 계정 1년 토큰과 만료 알림](CR-196_실행기_계정_1년_토큰과_만료_알림.md) | 변경 | High | - | 1단계 구현(서버 반영 전) |
+| CR-196 | [실행기 계정 1년 토큰과 만료 알림](CR-196_실행기_계정_1년_토큰과_만료_알림.md) | 변경 | High | - | 1단계 운영 chaws 반영, 2단계 설계 |
 
 ---
 
@@ -3037,7 +3037,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **상태**: 59 반영(11/16 03:18), 운영 반영(11/16 05:38, 실행기 넷과 일반 화면, CS 위젯 연결)
 
 ### CR-196 | 실행기 계정 1년 토큰과 만료 알림
-- **대상 기능 ID**: PRD-640(신규), PRD-641(신규), BIZ-283(신규), BIZ-284(신규)
+- **대상 기능 ID**: PRD-640(신규), PRD-641(신규), PRD-646(신규), PRD-647(신규), BIZ-283(신규), BIZ-284(신규), BIZ-289(신규)
 - **변경 타입**: 변경(실행기 계정 인증), 신규(만료 알림)
 - **원본 요구사항**: [docs/origins/원본_요구사항_CR196_실행기_계정_1년_토큰_20261116.md](origins/원본_요구사항_CR196_실행기_계정_1년_토큰_20261116.md)
 - **변경 내용**:
@@ -3047,13 +3047,15 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
   4. 갈래 워커를 만들다 실행 오류가 나도 run 자리를 돌려준다
   5. 실행기 `GET /v1/account-token`, api 의 하루 한 번 만료 확인과 bp-notification 메일, 문자(만료 30, 7, 1, 0일 전, 문턱마다 한 번)
   6. api 는 토큰 실패를 계정 한도처럼 다룬다. 연결 묶음은 그 계정을 5분 빼고 다음 계정으로 넘기고, 단일 커넥션 비실시간은 503 에 그 머리 그대로. API 가이드 § 5, § 25-3 과 소비앱 세 곳 알림
-- **결정**: 11/16 06:01 정석(환경변수). 06:06 실행기가 도는 곳 모두. 06:15 bp-notification 메일과 문자. 06:18 대규모 승인. 06:20 토큰 먼저, 알림은 이어서. 06:54 토큰 실패는 한도처럼 넘기고 소비앱에 알림. 06:59 이 창의 구현을 정본으로 하고 다른 창의 CR-196 은 쓰지 않는다
-- **영향 모듈**: cli-runner `ClaudeCliWorker`, `ClaudeCliWorkerPool`, `ClaudeCliAdapterConfig`, 새 `ClaudeAccountToken`. aimbase-agent `RunnerAutoConfiguration`, `RunnerController`. platform-core `ConnectionGroupSelector`, `ClaudeCliAdapter`, 새 `CliAccountTokenException`, `GlobalExceptionHandler`, 만료 확인과 발송, `PlatformSettingsService`. scripts `chaws-bootstrap.sh`, 새 `cli-token.py`, `deploy.sh`
+  7. 화면에서 토큰을 넣는다. 연결 관리를 검색되는 목록으로 바꾸고, 연결 수정 창에 「1년 토큰」 칸과 목록 위 만료 알림 수신자를 둔다. 실행기 `PUT /v1/account-token` 이 그 값으로 짧은 질문에 답을 받은 뒤에만 적는다. 값은 api 어디에도 남기지 않는다
+  8. Aimbase 가 빌려준 계정 폴더는 플랫폼 화면 실행기 계정 토큰에서 플랫폼 관리자가 임퍼소네이션으로 넣는다. 그 화면은 Master `cli_account_tokens` 로 모든 테넌트의 폴더를 보인다
+- **결정**: 11/16 06:01 정석(환경변수). 06:06 실행기가 도는 곳 모두. 06:15 bp-notification 메일과 문자. 06:18 대규모 승인. 06:20 토큰 먼저, 알림은 이어서. 06:54 토큰 실패는 한도처럼 넘기고 소비앱에 알림. 06:59 이 창의 구현을 정본으로 하고 다른 창의 CR-196 은 쓰지 않는다. 07:29 2단계는 화면에서 넣는다. 08:25 운영 work01 ~ 03 은 한 번씩 받고 같은 계정 폴더에 복사. 14:14 실화면 목업 승인(목록, 연결 수정 창 1년 토큰 칸, 수신자). 14:39 Aimbase 관리 계정은 플랫폼 화면에서 넣는다
+- **영향 모듈**: cli-runner `ClaudeCliWorker`, `ClaudeCliWorkerPool`, `ClaudeCliAdapterConfig`, 새 `ClaudeAccountToken`. aimbase-agent `RunnerAutoConfiguration`, `RunnerController`. platform-core `ConnectionGroupSelector`, `ClaudeCliAdapter`, 새 `CliAccountTokenException`, `GlobalExceptionHandler`, 만료 확인과 발송, 새 토큰 조회와 넣기(테넌트, 플랫폼 API), `PlatformSettingsService`, `JwtAuthenticationFilter`(임퍼소네이션 표시). frontend `Connections`(목록, 1년 토큰 칸, 수신자), 새 `CliAccountTokens`, `Sidebar`. 마이그레이션 마스터 V95, 테넌트 V96. scripts `chaws-bootstrap.sh`, 새 `cli-token.py`, `deploy.sh`
 - **영향도**: High (토큰 파일이 없는 계정은 새 실행기에서 바로 막힌다. 토큰을 먼저 넣고 실행기를 올린다)
 - **영향 범위**: CR-161(계정 묶음), CR-162(운영 chaws 계정), CR-194(token 단계), CR-195(실행기 CLI 판). 다른 레포 bp-notification(양식 등록), bp-wes, bp-wms, bp-3plgw(오류 머리 알림, 바꿀 것 없음)
-- **영향 설계서**: T1-1 v7.22(PRD-640, 641), T1-3 v5.24(BIZ-283, 284), T1-7 v3.31(CR-196 묶음), T3-1 v4.26(cli_token_expiry_notices, runner 설정), T3-2 v7.28(커넥션 그룹 오류 3, 4), T3-5 v4.25(TC-TOK-001 ~ 016), T3-12 15절, API 가이드 v3.43.0(§ 5, § 25-3), 운용 가이드
-- **영향 없음 확인**: T1-5, T1-6(상태 전환, 이벤트 없음), T2-1, T2-2(새 라이브러리와 구현 규약 없음), 소비앱이 부르는 API 의 요청과 응답 모양(오류 머리 둘만 는다), T3-3, T3-4(화면 변경 없음, 운영 설정 화면에 분류 하나)
-- **상태**: 1단계 구현(서버 반영 전), 2단계 설계
+- **영향 설계서**: T1-1 v7.23(PRD-640, 641, 646, 647), T1-3 v5.25(BIZ-283, 284, 289), T1-7 v3.32(CR-196 묶음), T1-10 v1.10(1년 토큰, 토큰 넣기, 만료 알림 수신자, Aimbase 관리, 실행기 계정 토큰), T3-1 v4.27(cli_token_expiry_notices, cli_account_tokens, cli_token_recipients, runner 설정), T3-2 v7.29(커넥션 그룹 오류 3, 4, 실행기 계정 1년 토큰), T3-3 v3.20(Connections, CliAccountTokens), T3-4 v3.18(토큰 넣기, 수신자 고치기), T3-5 v4.26(TC-TOK-001 ~ 027), T3-12 15절, API 가이드 v3.43.0(§ 5, § 25-3), 운용 가이드
+- **영향 없음 확인**: T1-5, T1-6(상태 전환, 이벤트 없음), T2-1, T2-2(새 라이브러리와 구현 규약 없음), 소비앱이 부르는 API 의 요청과 응답 모양(오류 머리 둘만 는다. 토큰 API 는 관리 화면용이다)
+- **상태**: 1단계 운영 chaws 반영(59 반영 전), 2단계 설계
 
 ## CR 후보 (발번 전)
 
