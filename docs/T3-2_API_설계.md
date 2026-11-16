@@ -4039,6 +4039,7 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 ```
 
 - 1 은 `[한 줄, ...]` 이다. 실행기가 답하지 않으면 그 줄은 `reachable=false` 이고 앞서 확인한 값을 싣는다
+- 3 은 실행기가 확인 질문의 답을 기다리므로 연결 호출 시간 제한 `platform.llm.anthropic-cli.http-timeout-seconds`(기본 300초)까지 기다린다
 - 3 의 `by` 는 요청 JWT 가 임퍼소네이션(CR-096, `impersonating=true`)이면 `platform`, 아니면 `tenant` 다
 - 3 의 감사 기록(BIZ-020)에는 누가(임퍼소네이션이면 플랫폼 관리자), 어느 연결, 새 기한만 남긴다
 
