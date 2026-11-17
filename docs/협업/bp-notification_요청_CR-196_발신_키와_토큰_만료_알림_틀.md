@@ -5,7 +5,7 @@
 - **작성**: 2026-11-18, aimbase CR-196 워커 aimbase-9275
 - **근거**: 사용자 2026-11-18 06:13 「bp-notification 창에 요청」 승인. 부르는 모양은 CR-196 문서 4.6, 4.7, 4.9
 - **기준**: 59 개발기 `http://59.8.160.12:8185/api/v1`, 운영 chaws 알림 서버(같은 서버 8089), `docs/guides/notification-api-guide.md`
-- **상태**: 보냄, 회신 기다림
+- **상태**: 회신 받음(bp-notification CR-030), Aimbase 두 서버에 키 반영(2026-11-18 07:50)
 
 ---
 
@@ -75,3 +75,12 @@ X-API-Key: <Aimbase 키>
 - 두 서버에서 `GET /templates/code/AIMBASE_CLI_TOKEN_EXPIRY_EMAIL/variables`, `GET /templates/code/AIMBASE_CLI_TOKEN_EXPIRY_SMS/variables` 결과
 - 문자 틀이 SMS 와 LMS 중 무엇으로 나가는지
 - 키를 둔 파일 위치(값은 쓰지 않는다)
+
+## 7. 회신
+
+- bp-notification CR-030. dev b286be0(틀), main d597813(PR #11, 틀과 문자 장문 전환)
+- 59 개발기 2026-11-18 07:01:50, 운영 chaws 07:04:49 반영(둘 다 V130). 솔루션 AIMBASE(EMAIL, SMS, 하루 1000통), 59 번호 20, 운영 번호 5
+- 두 서버, 두 틀 모두 변수 runner, account, expiresOn, daysLeft. 키 없이 부르면 401, daysLeft 가 빠지면 7001
+- 문자는 LMS 로 나간다. 고정 글자만 76바이트라 값이 들어가면 늘 90바이트를 넘는다
+- 메일 텍스트 본문의 claude setup-token 앞뒤 역따옴표를 뺐다(HTML 본문은 code 로 표시)
+- 키 파일 `~/.claude-secrets/aimbase-notification-59.env`, `~/.claude-secrets/aimbase-notification-chaws.env`. 실제 발송은 하지 않았다
