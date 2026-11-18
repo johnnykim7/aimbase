@@ -419,7 +419,7 @@ Claude Code 스킬 묶음(`.skill`, `.zip`)을 그대로 올려 모든 테넌트
    echo "SKILL_SANDBOX_API_KEY=$(openssl rand -hex 32)" >> /opt/wjbid/aimbase/sandbox.env && chmod 600 /opt/wjbid/aimbase/sandbox.env
    ```
 2. `./deploy.sh wjbid` 로 실행 컨테이너, api, 러너를 이 순서로 올린다. 하나씩은 `wjbid-sandbox`, `wjbid-be`, `wjbid-agent`.
-3. 스크립트가 바꾸기 전 이미지를 `pre-<시각>` 태그로 남기고 되돌리는 명령을 출력한다. 바꾸기 전 compose 는 서버 `deploy-backup/` 에 남는다.
+3. 스크립트가 바꾸기 전 이미지를 `pre-<시각>` 태그로 남기고 되돌리는 명령을 출력한다. 배포가 healthy 로 끝나면 이미지마다 최근 `PRE_IMAGE_KEEP` 개(기본 2)만 남기고 오래된 `pre-<시각>` 태그를 지운다(CR-201, § 2-10 되돌리기). 바꾸기 전 compose 는 서버 `deploy-backup/` 에 남는다.
 
 스크립트가 쓸 패키지 추가: 운영 망에서 스크립트가 패키지를 내려받을 수 없으므로 이미지에 미리 넣습니다. `skill-sandbox/Dockerfile` 의 `pip install`(Python), `npm install -g`(Node), `apt-get install`(시스템) 줄에 추가하고 `./deploy.sh sandbox` 로 다시 만듭니다. 지금 들어 있는 것은 그 파일이 정본입니다.
 
@@ -517,6 +517,8 @@ ssh -t chaws 'cd /home/ubuntu/aimbase && bash build/chaws-bootstrap.sh token wms
 **고치기**: `./deploy.sh chaws-be` 는 api 만, `./deploy.sh chaws-agent` 는 실행기만 다시 만듭니다(`--no-deps`). 올릴 커밋은 `CHAWS_COMMIT` 으로 줍니다. 맥 작업 폴더에는 다른 창의 덜 된 변경이 섞여 있어, 그 커밋만 받은 별도 worktree(`~/.cache/aimbase-chaws-build`)에서 jar 를 빌드하고 Dockerfile, compose, 설치 스크립트도 거기서 보냅니다. 무엇이 도는지는 서버 `deploy-backup/deployed.log` 에 서비스별 커밋으로 남습니다. db, redis 와 운영 3PL 컨테이너는 다시 만들지 않습니다. 운영 3PL 의 자동 배포는 자기 서비스만 다시 만들고 꼬리표 없는 이미지만 지워 Aimbase 와 겹치지 않습니다.
 
 **되돌리기**: 배포 때 앞 이미지에 `pre-<시각>` 꼬리표를 붙이고 되돌리는 명령을 찍습니다(`docker tag aimbase-api:pre-<시각> aimbase-api:latest && docker compose up -d --no-deps --force-recreate api`). 앞 compose 는 `deploy-backup/docker-compose.yml.<시각>` 에 있습니다.
+
+**되돌리기 이미지 정리**(CR-201): 배포가 healthy 로 끝나면 그 이미지의 `pre-<시각>` 태그를 최근 `PRE_IMAGE_KEEP` 개(기본 2)만 남기고 지웁니다. 실행기 둘(`aimbase-agent`, `aimbase-agent-3plgw`)이 이미지 이름 하나를 같이 써서 둘을 잇달아 올리면 태그가 둘 생기므로 2 보다 줄이지 않습니다. 더 남기려면 `PRE_IMAGE_KEEP=3 ./deploy.sh chaws-be` 처럼 줍니다. 컨테이너(멈춘 것 포함)가 쓰는 이미지, `pre-cr146-20261012` 처럼 형식이 다른 태그, 다른 이미지, 볼륨, 빌드 캐시는 건드리지 않습니다. healthy 가 되지 않은 배포는 정리하지 않습니다. 지울 대상만 보려면 맥 레포 폴더에서 `ssh <서버> 'bash -s -- --dry-run 2 aimbase-api aimbase-aimbase-agent' < scripts/prune-pre-images.sh` 를 칩니다.
 
 **점검**: 한도 대비 쓰는 양은 `docker stats --no-stream $(docker compose ps -q)`. 실행기가 안 붙으면 § 2-9 의 `Aimbase registration failed` 줄을 봅니다. CLI 가 `Not logged in` 으로 실패하면 그 커넥션의 계정 폴더에 로그인이 없는 것입니다.
 
@@ -2332,6 +2334,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.45.1 | 2026-11-19 | **CR-201 되돌리기 이미지 정리** (§ 2-8, § 2-10). wjbid, chaws 배포가 healthy 로 끝나면 이미지마다 `pre-<시각>` 태그를 최근 `PRE_IMAGE_KEEP` 개(기본 2)만 남기고 지운다. 지울 대상만 보는 명령 |
 | v3.45.0 | 2026-11-16 | **CR-196 1년 토큰 화면과 만료 알림** (§ 2-10, § 2-22, § 3-1). 연결 관리가 검색되는 목록이 되고 연결 수정 창에서 1년 토큰을 넣는다. 플랫폼 메뉴 「실행기 계정 토큰」 에서 모든 테넌트 계정 폴더를 보고 Aimbase 관리 계정 토큰을 넣는다. 매일 09:00 만료 문턱(30, 7, 1, 0일 전)에 bp-notification 으로 이메일과 문자를 보낸다 |
 | v3.44.0 | 2026-11-16 | **CR-196 계정 1년 토큰** (§ 2-10, § 2-13, 시나리오 H, P). 실행기는 계정 폴더의 `oauth-token.json` 으로만 CLI 를 띄우고(`CLAUDE_CODE_OAUTH_TOKEN`), 없거나 기한이 지난 계정은 막는다. `token` 단계가 이 파일을 쓰고 로그인 파일의 1년 토큰을 옮긴다. 계정 로그인 절차와 CR-194 인증 파일 끼워 넣기를 걷어냄. PC 는 `scripts/cli-token.py` 또는 손으로 만든 파일 |
 | v3.43.0 | 2026-11-16 | **CR-194 일반 화면 실행기 계정 묶음** (§ 2-10). 계정 하나짜리 위젯 연결 대신 계정마다 연결과 묶음 `cli-runner-bp-wes-assist-rr`. 로그인 계정 work01, work02, work03 |

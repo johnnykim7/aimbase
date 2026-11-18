@@ -36,6 +36,8 @@
 #         ./deploy.sh chaws-tts   (같은 목소리 음성 생성기. chaws 묶음에 들지 않는다)
 #         ./deploy.sh chaws       (be, agent 를 이 순서로)
 #
+# wjbid, chaws 배포는 바꾸기 전 이미지에 pre-<시각> 태그를 붙이고, 끝나면 이미지마다 최근 PRE_IMAGE_KEEP 개(기본 2)만 남긴다(CR-201).
+#
 # ⚠️ CR-124 이후: BE 와 러너는 MCP transport(Streamable HTTP)가 맞아야 도구 호출이 된다.
 #    한쪽만 올리면 그 사이 BE↔agent 도구 호출이 실패하므로, MCP 관련 배포는
 #    반드시 `./deploy.sh mcp` 로 BE + 러너 전체를 연속 배포할 것.
@@ -227,6 +229,16 @@ deploy_mcp() {
   echo "════ 완료 — /mcp Streamable 엔드포인트로 BE·러너 정렬됨 ════"
 }
 
+# 운영 서버(wjbid, chaws) 배포가 이미지마다 남길 되돌리기용 pre- 태그 개수(CR-201). 배포가 healthy 로 끝나면 이보다 오래된 것을 지운다.
+# chaws 는 실행기 둘(aimbase-agent, aimbase-agent-3plgw)이 이미지 이름 하나를 같이 써서 둘을 잇달아 올리면 태그가 둘 생긴다.
+# 먼저 올린 실행기의 되돌릴 이미지가 남으려면 2 이상이어야 한다. 바꿀 때는 PRE_IMAGE_KEEP=3 ./deploy.sh chaws-be 처럼 준다.
+PRE_IMAGE_KEEP="${PRE_IMAGE_KEEP:-2}"
+case "$PRE_IMAGE_KEEP" in ''|*[!0-9]*) PRE_IMAGE_KEEP_OK=0 ;; *) PRE_IMAGE_KEEP_OK=$PRE_IMAGE_KEEP ;; esac
+if [ "$PRE_IMAGE_KEEP_OK" -lt 1 ]; then
+  echo "PRE_IMAGE_KEEP 는 1 이상의 숫자여야 합니다: '$PRE_IMAGE_KEEP'"
+  exit 1
+fi
+
 # 우진비드 AWS 서버는 소스와 빌드 도구 없이 이미지와 환경 파일만 있다. 여기서 만든 jar 와 Dockerfile 을 build/ 아래로 보내
 # 서버에서 이미지를 만든다. 바꾸기 전 이미지는 pre-<시각> 태그로 남겨 되돌릴 수 있게 한다.
 WJBID_SERVER="ubuntu@54.116.150.247"
@@ -258,6 +270,12 @@ wjbid_keep_image() {
   echo "[wjbid] 되돌리기: docker tag $1:pre-$WJBID_STAMP $1:latest && cd $WJBID_REMOTE && docker compose up -d --force-recreate $2"
 }
 
+# $1 이미지. healthy 를 본 뒤에 부른다. 정리가 실패해도 배포는 끝난 것으로 둔다.
+wjbid_prune_images() {
+  wjbid_run "bash -s -- $PRE_IMAGE_KEEP $1" < scripts/prune-pre-images.sh \
+    || echo "[wjbid] $1 의 옛 pre- 태그를 정리하지 못했습니다. 배포는 끝났습니다"
+}
+
 wjbid_wait_healthy() {
   if ! wjbid_run "for i in \$(seq 1 180); do s=\$(docker inspect --format '{{.State.Health.Status}}' \$(cd $WJBID_REMOTE && docker compose ps -q $1) 2>/dev/null); [ \"\$s\" = healthy ] && exit 0; sleep 1; done; exit 1"; then
     echo "[wjbid] $1 이 180초 안에 healthy 가 되지 않았습니다."
@@ -277,6 +295,7 @@ deploy_wjbid_sandbox() {
   echo "[wjbid-sandbox] 이미지 빌드와 재시작"
   wjbid_run "cd $WJBID_REMOTE && docker compose up -d --build skill-sandbox"
   wjbid_wait_healthy skill-sandbox
+  wjbid_prune_images aimbase-skill-sandbox
 }
 
 deploy_wjbid_be() {
@@ -293,6 +312,7 @@ deploy_wjbid_be() {
   echo "[wjbid-be] 이미지 빌드와 api 재시작"
   wjbid_run "cd $WJBID_REMOTE && docker compose build api && docker compose up -d --force-recreate api"
   wjbid_wait_healthy api
+  wjbid_prune_images aimbase-api
 }
 
 deploy_wjbid_agent() {
@@ -307,6 +327,7 @@ deploy_wjbid_agent() {
   echo "[wjbid-agent] 이미지 빌드와 러너 재시작"
   wjbid_run "cd $WJBID_REMOTE && docker compose build aimbase-agent && docker compose up -d --force-recreate aimbase-agent"
   wjbid_wait_healthy aimbase-agent
+  wjbid_prune_images aimbase-aimbase-agent
 }
 
 # 운영 3PL 서버 chaws 는 jar 와 Dockerfile 을 build/ 로 보내 서버에서 이미지를 만든다.
@@ -402,6 +423,13 @@ chaws_keep_image() {
   echo "[chaws] 되돌리기: docker tag $1:pre-$CHAWS_STAMP $1:latest && cd $CHAWS_REMOTE && docker compose up -d --no-deps --force-recreate $2"
 }
 
+# $1 이미지. healthy 를 본 뒤에 부른다. 정리 스크립트는 서버에 올리는 것이 아니라 deploy.sh 의 일부라
+# CHAWS_COMMIT worktree 가 아니라 deploy.sh 와 같은 폴더 것을 쓴다. 정리가 실패해도 배포는 끝난 것으로 둔다.
+chaws_prune_images() {
+  chaws_run "bash -s -- $PRE_IMAGE_KEEP $1" < scripts/prune-pre-images.sh \
+    || echo "[chaws] $1 의 옛 pre- 태그를 정리하지 못했습니다. 배포는 끝났습니다"
+}
+
 # $1 서비스, $2 기다릴 초(기본 180)
 chaws_wait_healthy() {
   local seconds=${2:-180}
@@ -430,6 +458,7 @@ deploy_chaws_be() {
   chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build api && docker compose up -d --no-deps --force-recreate api"
   chaws_wait_healthy api
   chaws_record api
+  chaws_prune_images aimbase-api
 }
 
 # $1 compose 서비스, $2 env 파일, $3 테넌트, $4 운용 가이드 절. 실행기마다 env 파일이 다르고 이미지는 같다.
@@ -448,6 +477,7 @@ deploy_chaws_runner() {
   chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build $service && docker compose up -d --no-deps --force-recreate $service"
   chaws_wait_healthy "$service"
   chaws_record "$service"
+  chaws_prune_images aimbase-aimbase-agent
 }
 
 deploy_chaws_agent() { deploy_chaws_runner aimbase-agent agent.env bp_wms "§ 2-10"; }
@@ -497,6 +527,7 @@ deploy_chaws_agent_wes() {
   chaws_run "cd $CHAWS_REMOTE && nice -n 10 docker compose build $svc && docker compose up -d --no-deps --force-recreate $svc"
   chaws_wait_healthy "$svc"
   chaws_record "$svc"
+  chaws_prune_images "aimbase-$svc"
 }
 
 deploy_chaws_tts() {
@@ -515,6 +546,7 @@ deploy_chaws_tts() {
   # 처음에는 모델(4.3GB)을 받는다. compose 의 start_period 와 맞춘다.
   chaws_wait_healthy tts-sidecar 900
   chaws_record tts-sidecar
+  chaws_prune_images aimbase-tts-sidecar
 }
 
 case "$TARGET" in
