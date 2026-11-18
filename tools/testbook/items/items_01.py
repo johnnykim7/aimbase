@@ -511,4 +511,20 @@ dict(id='IT-01-039', flow='플랜 분당 요청 한도', kind='정상', title='�
      pair={1: [1], 2: [2], 3: [3]},
      req=['BIZ-153'], src=['CR-191'], pri='High'),
 
+dict(id='IT-01-040', flow='운영 배포 되돌리기 이미지 정리', kind='정상', title='운영 chaws 에 Aimbase 를 다시 올린 뒤 올린 이미지의 되돌리기용 pre- 태그가 최근 2개만 남고 다른 이미지와 컨테이너는 그대로다',
+     pre='CR-201 이 들어간 dev 의 deploy.sh 로 하는 운영 chaws Aimbase 배포 한 번(chaws-be, chaws-agent 등 어느 것이든), PRE_IMAGE_KEEP 을 주지 않은 상태(기본 2). 배포 전 docker images, 컨테이너별 이미지 ID, docker volume ls 를 적어 둔다',
+     steps='1. 배포 출력에서 [pre 정리] 로 시작하는 줄을 본다\n'
+           '2. 배포 뒤 chaws 에서 올린 이미지의 pre-YYYYMMDD-HHMMSS 태그를 시각과 함께 본다\n'
+           '3. 배포 뒤 컨테이너별 이미지 ID 를 배포 전 목록과 대조한다\n'
+           '4. 배포 뒤 올리지 않은 이미지(운영 3PL bp-infra-*, 다른 aimbase-* 이미지)의 태그 목록을 배포 전과 대조한다\n'
+           '5. 배포 뒤 docker volume ls 를 배포 전과 대조한다',
+     expect='1. healthy 줄 뒤에 [pre 정리] 남김 또는 지움 줄이 나오고 못 지움 줄이 없다\n'
+            '2. 올린 이미지의 pre- 태그가 2개 이하이고 남은 것이 시각이 가장 늦은 것들이다\n'
+            '3. 다시 만든 컨테이너 말고는 모든 컨테이너가 배포 전과 같은 이미지 ID 로 떠 있다\n'
+            '4. 올리지 않은 이미지의 태그 목록이 배포 전과 같다\n'
+            '5. 볼륨 목록이 배포 전과 같다',
+     judge=['서버', '서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5]},
+     req=[], src=['CR-201'], pri='Medium'),
+
 ]
