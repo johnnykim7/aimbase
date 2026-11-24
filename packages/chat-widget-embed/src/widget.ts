@@ -32,6 +32,7 @@ import {
 } from "./frame/i18n";
 import { Menu } from "./frame/menu";
 import { Panes } from "./frame/panes";
+import { WindowDrag } from "./frame/window-drag";
 import { FIRST_SEND_WAIT_MS, StartupGate } from "./frame/startup-gate";
 import { LatestLoad } from "./frame/latest-load";
 import { isolateHost } from "./frame/host-isolation";
@@ -314,6 +315,8 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   let titleFromServer = false;
   let titleIsDefault = true;
   let expanded = false;
+  /** 떠 있는 위젯과 옆 칸 위젯만 만든다(CR-198). 틀이 다 그려진 뒤 붙인다 */
+  let windowDrag: WindowDrag | null = null;
   let pinned = true;
   let fontSize: FontSize = "medium";
   let workflowRuns = new Map<string, { stepEl: HTMLDivElement; steps: Map<string, HTMLElement> }>();
@@ -476,6 +479,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     header,
     setExpanded: (v) => setExpanded(v),
     canDock: () => display === "bubble" && !expanded,
+    dockChanged: (v) => windowDrag?.setDocked(v),
     closeLabel: () => T.close,
     iconButton: (html, label) => htmlButton(html, label),
     leftToggleIcon: icon("panelLeft"),
@@ -483,6 +487,13 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   });
 
   afterExpand = () => panes.refresh();
+
+  // 칸 안 위젯은 붙이는 앱의 칸 크기를 따르므로 옮기거나 크기를 바꾸지 않는다(CR-198).
+  if (display === "bubble" || display === "panel") {
+    windowDrag = new WindowDrag({ mode: display === "bubble" ? "floating" : "side", root, panel, header });
+    windowDrag.setExpanded(expanded);
+    windowDrag.setOpen(open);
+  }
 
   const toast = el("div", "toast");
   panel.appendChild(toast);
@@ -513,6 +524,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     open = v;
     panel.classList.toggle("hidden", !v);
     if (!v) setExpanded(false);
+    windowDrag?.setOpen(v);
     events.emit("panelToggle", { open: v });
   }
 
@@ -522,6 +534,8 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     backdrop.classList.toggle("on", v);
     expandBtn.innerHTML = icon(v ? "min" : "max");
     expandBtn.setAttribute("aria-pressed", String(v));
+    // 붙여 둔 자리를 먼저 떼야 판이 크게 보기 폭이 되고, 그 폭으로 칸을 붙일지 다시 정한다.
+    windowDrag?.setExpanded(v);
     afterExpand();
   }
 
@@ -2548,6 +2562,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
       events.emit("destroy", undefined);
       events.clear();
       panes.destroy();
+      windowDrag?.destroy();
       cancelRecording();
       if (busy) void chat.abort(options.baseUrl, sessionId);
       tokens.destroy();

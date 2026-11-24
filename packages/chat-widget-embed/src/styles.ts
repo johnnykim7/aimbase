@@ -1,3 +1,5 @@
+import { DOCK_PANE_WIDTH_PX } from "./frame/panes";
+
 /** Shadow DOM 내부 스타일. CSS 변수로 테마 커스터마이징 가능. */
 export const WIDGET_CSS = `
 :host {
@@ -84,15 +86,33 @@ button { font: inherit; color: inherit; }
 .backdrop { display: none; position: fixed; inset: 0; background: rgba(24,24,27,.32); z-index: 9999; }
 .backdrop.on { display: block; }
 
+/* 대화창 옮기기와 크기 바꾸기(CR-198). 잡는 자리는 판 바깥 가장자리에 보이지 않게 둔다. 판 안에 두면 판의 overflow 에 잘리고 대화 칸 스크롤 막대를 가린다 */
+.panel.movable .hd { cursor: move; touch-action: none; }
+.win-frame { position: fixed; pointer-events: none; z-index: 9999; }
+.win-frame.side { top: 0; right: 0; bottom: 0; }
+.rz { position: absolute; pointer-events: auto; touch-action: none; }
+.rz-n, .rz-s { left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.rz-n { top: -6px; }
+.rz-s { bottom: -6px; }
+.rz-e, .rz-w { top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.rz-e { right: -6px; }
+.rz-w { left: -6px; }
+.win-frame.side .rz-w { top: 0; bottom: 0; }
+.rz-nw, .rz-ne, .rz-sw, .rz-se { width: 14px; height: 14px; }
+.rz-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.rz-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.rz-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.rz-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.win-dragging, .win-dragging * { user-select: none !important; -webkit-user-select: none !important; }
+
 /* 위젯 틀(CR-177): 판은 [왼쪽 칸][대화][옆 창] 가로 배치다 */
 [hidden] { display: none !important; }
 .main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .lp { width: 228px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--aimbase-border); background: var(--aimbase-assistant-bg); }
 .lp-body { flex: 1; min-height: 0; overflow-y: auto; }
 .lp.overlay { position: absolute; top: 0; bottom: 0; left: 0; width: 280px; max-width: 85%; z-index: 50; background: var(--aimbase-bg); box-shadow: 4px 0 16px rgba(0,0,0,.12); }
-/* CR-194: 메뉴 화면은 떠 있는 창에서 대화 목록을 대화 옆에 붙이고 판을 넓힌다(목록 240px, 대화 400px) */
-.panel.floating.dock:not(.expanded) { width: 640px; }
-.panel.dock .lp { width: 240px; }
+/* CR-194: 메뉴 화면은 떠 있는 창에서 대화 목록을 대화 옆에 붙인다. 판을 목록 폭만큼 넓히는 일은 window-drag.ts 가 한다(CR-198) */
+.panel.dock .lp { width: ${DOCK_PANE_WIDTH_PX}px; }
 /* CR-194: 머리줄 아래 회색 띠 한 줄 */
 .hd-note { flex-shrink: 0; padding: 6px 14px; font-size: .85em; color: var(--aimbase-muted); background: var(--aimbase-assistant-bg); border-bottom: 1px solid var(--aimbase-border); }
 .notice .notice-act { margin-left: 8px; }

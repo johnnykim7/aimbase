@@ -4,6 +4,8 @@ import type { LeftPaneHandle, LeftPaneSpec, SidePaneSpec } from "./context";
 const WIDE_MIN_PX = 760;
 /** CR-194: 붙여 넓힌 판(640px)이 오른쪽 여백과 함께 들어가는 브라우저 창 폭. 모자라면 칸을 덮어 연다(T3-3). */
 export const DOCK_MIN_VIEWPORT_PX = 680;
+/** CR-194: 붙인 왼쪽 칸의 폭. 판은 대화 폭에 이만큼 더 넓어진다(CR-198). */
+export const DOCK_PANE_WIDTH_PX = 240;
 
 export interface PanesHost {
   panel: HTMLElement;
@@ -12,6 +14,8 @@ export interface PanesHost {
   setExpanded(v: boolean): void;
   /** CR-194: 지금 왼쪽 칸을 붙여 판을 넓힐 수 있는지(떠 있는 창이고 크게 보기가 아님) */
   canDock(): boolean;
+  /** CR-198: 왼쪽 칸을 붙여 판을 넓히거나 되돌릴 때. 판 폭은 사람이 정할 수 있어 넓히는 일은 받는 쪽이 한다 */
+  dockChanged?(docked: boolean): void;
   closeLabel(): string;
   iconButton(iconHtml: string, label: string): HTMLButtonElement;
   leftToggleIcon: string;
@@ -33,6 +37,8 @@ interface SideState {
 /** 왼쪽 칸과 옆 창(CR-177 T3-3 화면 컨셉 6, 7). */
 export class Panes {
   private wide = false;
+  /** 왼쪽 칸을 붙여 판이 넓어져 있는지. 넓어진 만큼은 대화 폭이 아니다 */
+  private dockOn = false;
   private left: LeftState | null = null;
   private side: SideState | null = null;
   private readonly scrim: HTMLDivElement;
@@ -190,7 +196,12 @@ export class Panes {
     this.left.el.hidden = !on;
     this.left.el.classList.toggle("overlay", overlay);
     this.scrim.classList.toggle("on", on && overlay);
-    this.host.panel.classList.toggle("dock", on && docked);
+    const dockOn = on && docked;
+    this.host.panel.classList.toggle("dock", dockOn);
+    if (dockOn !== this.dockOn) {
+      this.dockOn = dockOn;
+      this.host.dockChanged?.(dockOn);
+    }
     this.left.toggle.setAttribute("aria-pressed", String(on));
   }
 
@@ -198,7 +209,9 @@ export class Panes {
     const width = this.host.panel.clientWidth;
     // 접힌 버블처럼 보이지 않는 동안은 폭이 0 이라 열린 칸을 그대로 둔다.
     if (width === 0) return;
-    const wide = width >= WIDE_MIN_PX;
+    // 붙인 칸으로 넓어진 판을 넓은 판으로 보면 칸이 안으로 들어가며 판이 다시 좁아지기를 되풀이한다(CR-198).
+    const chatWidth = this.dockOn ? width - DOCK_PANE_WIDTH_PX : width;
+    const wide = chatWidth >= WIDE_MIN_PX;
     if (wide === this.wide) return;
     this.wide = wide;
     this.host.panel.classList.toggle("narrow", !wide);
