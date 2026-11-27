@@ -153,6 +153,19 @@
 | 2026-11-27 23:15 | 단위시험. TC-CHT-159~161 을 `RagSourceAccessTest`, `KnowledgeWidgetGuardTest`(새 파일), `WidgetTokenControllerTest`, `JwtProviderWidgetTest`, `JwtAuthenticationFilterWidgetTest`, `ChatOwnerTest`, `ChatWidgetAccessTest`, `KnowledgeControllerChunkTest` 에 더함. 대화 요청 칸이 늘어 `ChatController` 시험 5개의 주입 목록도 고침 | 13개 클래스 75건 통과 |
 | 2026-11-27 23:22 | 로컬 확인. 워크트리 bootRun(local, 18206, Redis 도커 16206), 맥 PG 테넌트 `cr196_local`(V96)에 자료 `kb_office_a`, `kb_office_b` 두 행과 master `api_keys` 에 발급용 키를 넣고 curl 로 9경로 | 아래 표. 전부 3절대로 |
 | 2026-11-27 23:25 | 로컬 서버와 Redis 내림. 시험 행(자료 두 개, 키 한 개)은 맥 PG 에 남김 | 배포 대기 |
+| 2026-11-27 23:31 | 59 반영(사용자 23:30 승인, 컨타 전달). 가지 `cr206-rag-token-bind` 를 origin/dev 에 빨리감기로 올리고(fd977ac5) 그 워크트리에서 `./deploy.sh be` | api 재기동, 상태 UP. 마이그레이션 없음 |
+| 2026-11-28 07:33 | 59 확인. 테넌트 lexflow 의 붙이는 앱 키로 토큰을 받아 읽기와 거절 경로만 침(대화 저장, 모델 호출, DB 쓰기 없음) | 아래 표. lexflow 에는 59 에 지식 자료가 없어 허용 목록 안 자료 경로는 59 에서 치지 못함(로컬 5, 6, 8번으로 확인) |
+
+59 확인 결과(2026-11-28 07:33, aimbase.banpoom.co.kr, 판 fd977ac5):
+
+| 순번 | 요청 | 결과 |
+|---|---|---|
+| 1 | 발급 `rag_source_ids: ["kb_cr206_nope"]` | 400 `widget_token_invalid:rag_source_id` |
+| 2 | 발급, 칸 없음 | 200, claim 없음 |
+| 3 | 목록 없는 토큰, 대화 `rag_source_id: kb_cr206_nope` | 404 `rag_source_not_found` |
+| 4 | 위젯 토큰, 지식 자료 목록 / 검색 | 403 `widget_forbidden` |
+| 5 | 위젯 토큰, 청크 원문 `kb_cr206_nope/chunks/<uuid>` | 가로채지 않음. 404 `Not Found`(자료 없음) |
+| 6 | 관리자 로그인, 지식 자료 목록 | 200 |
 
 로컬 확인 결과(2026-11-27 23:22, 18206):
 
