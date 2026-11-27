@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.29 | 최종 수정: 2026-11-16 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196
+> 설계 버전: 7.30 | 최종 수정: 2026-11-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -4061,6 +4061,45 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 - Master DB 만 본다(BIZ-024). 실행기에 묻지 않는다
 - 넣기는 플랫폼 화면이 그 테넌트로 임퍼소네이션(`POST /api/v1/platform/tenants/{id}/impersonate`)한 뒤 테넌트 토큰 API 3 을 부른다
 - Aimbase 관리 계정의 수신자는 플랫폼 설정 API(`PUT /api/v1/platform/settings`)로 `runner.token_expiry.emails`, `runner.token_expiry.phones` 를 바꾼다
+
+## 위젯 지식 자료 토큰 결합 [v7.30, CR-206]
+
+설계 상세: [CR-206_지식_자료_ID_토큰_결합_사무소별_격리_LexFlow_Q10.md](CR-206_지식_자료_ID_토큰_결합_사무소별_격리_LexFlow_Q10.md) 3절. LexFlow 검토 회신 Q10(사무소별 자료).
+
+### 위젯 토큰 발급 칸 [PRD-648]
+
+`POST /api/v1/sessions/issue-widget-token` 요청에 칸 하나를 더한다. 모르는 칸은 무시한다. 응답은 지금과 같고 토큰 claim `rag_source_ids` 에 정리한 목록이 실린다. 목록이 비면 claim 을 두지 않는다.
+
+| 칸 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| rag_source_ids | string[] | 선택 | 허용 자료 ID 목록(BIZ-290). 첫 자료가 기본 자료. 각 100자 이하, 20개 이하. 빈 값과 중복은 빼고 싣는다. 모두 이 테넌트의 지식 자료여야 한다 |
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `widget_token_invalid:rag_source_id` | 테넌트에 없는 자료, 100자 초과, 20개 초과 |
+
+### 대화 요청 칸 [PRD-001, PRD-002, PRD-648]
+
+`POST /api/v1/chat/completions` 에 `rag_source_id`(string, 선택)를 둔다. 위젯이 속성 `rag-source-id` 로 보내던 값이고, 이 CR 전에는 서버가 받지 않고 버렸다. 정해진 자료 ID 는 자료 검색(출처 카드, CR-058)으로 간다. 대조는 대화 접근 확인(BIZ-275) 다음, 모델 검사 전이라 거절을 HTTP 코드로 준다.
+
+| 요청자 | 요청의 rag_source_id | 결과 |
+|---|---|---|
+| 허용 자료 있는 위젯 토큰 | 없음 | 기본 자료로 검색 |
+| 허용 자료 있는 위젯 토큰 | 목록 안 | 그 자료로 검색 |
+| 허용 자료 있는 위젯 토큰 | 목록 밖 | 404 `rag_source_not_found` |
+| 허용 자료 없는 위젯 토큰, 로그인 | 없음 | 검색 없음 |
+| 허용 자료 없는 위젯 토큰, 로그인 | 테넌트에 있는 자료 | 그 자료로 검색 |
+| 누구든 | 테넌트에 없는 자료 | 404 `rag_source_not_found` |
+
+### 청크 원문 조회 [PRD-648]
+
+`GET /api/v1/knowledge-sources/{sourceId}/chunks/{chunkId}`. 허용 자료 있는 위젯 토큰은 `sourceId` 가 목록 안이어야 한다. 아니면 404 `rag_source_not_found`. 허용 자료 없는 위젯 토큰과 로그인은 지금과 같다.
+
+### 지식 자료 API 위젯 토큰 제한 [PRD-649]
+
+`/api/v1/knowledge-sources/**` 중 청크 원문 조회를 뺀 모든 창구는 위젯 토큰이면 403 `widget_forbidden`(BIZ-291). 관리 화면의 로그인 호출은 바뀌지 않는다.
+
+---
 
 ## 작성 가이드
 

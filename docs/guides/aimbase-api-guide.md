@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.45.0** | 2026-11-16 | Aimbase v8.18.0 기준
+> **v3.46.0** | 2026-11-27 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -1493,9 +1493,11 @@ curl -X POST $AIMBASE/api/v1/sessions/issue-widget-token \
 - `origin` 이 `widget.allowed-origins` 화이트리스트에 없으면 400
 - `TenantContext` 가 설정되지 않은 호출은 401
 
-**JWT claims**: `sub=user_ref`, `tenant_id`, `project_id`, `user_ref`, `scopes[]`, `origin`, `type: "widget"`, `exp`.
+**JWT claims**: `sub=user_ref`, `tenant_id`, `project_id`, `user_ref`, `scopes[]`, `origin`, `type: "widget"`, `exp`. 실었을 때만 `user_name`, `share_key`(CR-194), `rag_source_ids[]`(CR-206).
 
 **묻는 사람 이름과 함께 보기 키** [CR-194]: 요청에 `user_name`(100자 이하), `share_key`(함께 보기 키)를 더할 수 있고 토큰에 실린다. 모르는 칸은 무시한다. 쓰는 법은 § 38.
+
+**허용 자료** [CR-206]: 요청에 `rag_source_ids`(지식 자료 ID 목록, 20개 이하)를 더하면 토큰에 실리고, 그 토큰의 대화와 청크 원문 조회는 그 안의 자료만 씁니다. 첫 자료가 기본 자료입니다. 테넌트에 없는 자료가 있으면 400 `widget_token_invalid:rag_source_id`. 쓰는 법은 § 39.
 
 ### 17-3. 위젯 토큰으로 Aimbase API 호출
 
@@ -1504,6 +1506,8 @@ curl -X POST $AIMBASE/api/v1/sessions/issue-widget-token \
 ### 17-4. 채팅 + RAG Citations — `POST /api/v1/chat/completions`
 
 기존 엔드포인트 그대로. CR-058 에서 **응답에 `citations` / `rag_used` 필드** 가 추가되었다 (`rag_source_id` 지정 + 검색 결과 존재 시에만 포함).
+
+> CR-206 부터 요청 본문의 `rag_source_id` 를 서버가 실제로 받습니다. 그 전 판은 이 칸을 버려 출처가 붙지 않았습니다. 토큰에 허용 자료가 있으면 그 안의 자료여야 하고, 비우면 기본 자료입니다. 목록 밖이거나 테넌트에 없는 자료는 404 `rag_source_not_found` 입니다(§ 39).
 
 **Citation 객체 포맷** (`List<Map>`):
 ```json
@@ -1533,7 +1537,7 @@ CR-175 부터 `done` 에 답 번호 `turn_id`, 묶음 첫 순번 `turn_seq`, 답
 
 citation 클릭 시 위젯이 원문 미리보기 패널을 렌더하기 위해 호출.
 
-**Scope**: `rag:read` (위젯 토큰) 또는 기본 인증.
+**Scope**: `rag:read` (위젯 토큰) 또는 기본 인증. 토큰에 허용 자료가 있으면 `sourceId` 는 그 안이어야 하고, 아니면 404 `rag_source_not_found` 입니다(CR-206, § 39).
 
 ```bash
 curl "$AIMBASE/api/v1/knowledge-sources/kb_rescue/chunks/a7c9f3b0-... " \
@@ -3462,10 +3466,60 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 
 ---
 
+## 39. 위젯 지식 자료 토큰 결합 [CR-206]
+
+설계 상세: `docs/CR-206_지식_자료_ID_토큰_결합_사무소별_격리_LexFlow_Q10.md`. 사무소(지점)마다 다른 지식 자료를 쓰는 소비앱을 위한 것입니다. 자료 ID 를 브라우저 속성에만 두면 사용자가 값을 바꿔 같은 테넌트의 다른 자료를 볼 수 있으므로, 소비앱 서버(BFF)가 토큰을 받을 때 그 사용자가 쓸 자료를 싣고 서버가 요청과 대조합니다.
+
+### 39-1. 토큰에 허용 자료 싣기
+
+`POST /api/v1/sessions/issue-widget-token` 요청에 `rag_source_ids` 를 더합니다. 운영자가 사무소별로 등록한 지식 자료 ID(§ 2)를 그 사용자 사무소에 맞게 고르는 것은 BFF 의 몫입니다.
+
+```json
+{
+  "user_ref": "lawyer_17",
+  "origin": "https://lexflow.site",
+  "scopes": ["chat:stream", "rag:read"],
+  "rag_source_ids": ["kb_office_seoul", "kb_common"]
+}
+```
+
+- 첫 자료가 기본 자료입니다. 대화 요청에 자료 ID 가 없으면 이 자료를 찾습니다
+- 각 100자 이하, 20개 이하. 빈 값과 중복은 빼고 싣습니다
+- 테넌트에 없는 자료가 하나라도 있으면 400 `widget_token_invalid:rag_source_id`
+- 칸을 주지 않으면 지금과 같습니다. 그 토큰은 테넌트의 어느 자료든 요청대로 씁니다
+
+### 39-2. 대화 요청의 자료
+
+`POST /api/v1/chat/completions` 의 `rag_source_id` 는 위젯 속성 `rag-source-id` 가 보내는 값입니다.
+
+| 토큰 | 요청의 `rag_source_id` | 결과 |
+|---|---|---|
+| 허용 자료 있음 | 없음 | 기본 자료로 검색 |
+| 허용 자료 있음 | 목록 안 | 그 자료로 검색 |
+| 허용 자료 있음 | 목록 밖 | 404 `rag_source_not_found`(응답 시작 전) |
+| 허용 자료 없음, 로그인 | 테넌트에 있는 자료 | 그 자료로 검색 |
+| 누구든 | 테넌트에 없는 자료 | 404 `rag_source_not_found` |
+
+목록 밖과 없는 자료를 같은 코드로 거절합니다. 다른 사무소 자료가 있다는 것을 알리지 않기 위해서입니다.
+
+### 39-3. 청크 원문 조회와 지식 자료 API
+
+- `GET /api/v1/knowledge-sources/{sourceId}/chunks/{chunkId}`(§ 17-5): 허용 자료 있는 토큰은 `sourceId` 가 목록 안이어야 합니다. 아니면 404 `rag_source_not_found`
+- 그 밖의 `/api/v1/knowledge-sources/**`(목록, 상세, 검색, 등록, 수정, 삭제, 올리기, 동기화, 기록)는 위젯 토큰으로 부르면 403 `widget_forbidden` 입니다. 관리 화면의 로그인 호출은 바뀌지 않습니다
+
+### 39-4. 소비앱 점검
+
+| 할 일 | 내용 |
+|---|---|
+| BFF | 토큰 요청에 그 사용자 사무소의 `rag_source_ids` 를 싣는다 |
+| 화면 | 위젯 속성 `rag-source-id` 는 생략해도 됩니다. 토큰의 기본 자료로 갑니다. 한 사용자가 자료 둘 중 하나를 고르게 하려면 속성으로 고르되 토큰 목록 안의 값이어야 합니다 |
+| 오류 처리 | 404 `rag_source_not_found` 는 속성과 토큰 목록이 어긋난 것입니다. 400 `widget_token_invalid:rag_source_id` 는 BFF 가 실은 ID 가 테넌트에 없는 것입니다 |
+
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.46.0 | 2026-11-27 | **CR-206 위젯 지식 자료 토큰 결합** (§ 17-2, § 17-4, § 17-5, § 39). 토큰 발급 칸 `rag_source_ids`, 대화 요청 `rag_source_id` 를 서버가 받음(그 전 판은 버렸음), 허용 자료 밖은 404 `rag_source_not_found`, 지식 자료 API 는 청크 원문 조회 외 위젯 토큰 403 |
 | v3.45.0 | 2026-11-16 | **CR-196 1년 토큰 API** (§ 13 LLM 연결, 실행기 계정 토큰). `GET /cli-account-tokens`, `GET`/`PUT /connections/{id}/account-token`, `GET`/`PUT /cli-token-recipients`, 플랫폼 `GET /platform/cli-account-tokens`. 플랫폼 관리자는 임퍼소네이션 토큰으로 테넌트 API 를 부른다 |
 | v3.44.0 | 2026-11-16 | **CR-196 CLI 계정 1년 토큰 오류** (§ 5, § 25-3). 오류 머리 `cli_account_token_missing`, `cli_account_token_expired`. 연결 묶음은 그 커넥션을 5분 빼고 다음으로 넘기고, 단일 커넥션 비실시간은 503 |
 | v3.43.1 | 2026-11-16 | **CR-194 위젯 보정** (§ 38-1, § 38-4, § 38-5). 연결 속성을 하나씩 바꿀 때 마지막 연결 설정만 쓰고 받기 전 질문은 기다림. 모달 위 위젯 누름과 복사, `data-aimbase-widget` 표시. 화면 키 없는 화면에서 `session-id` 가 없으면 지난 대화를 묻지 않음 |

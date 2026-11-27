@@ -65,6 +65,10 @@ UPDATE global_config
 | `widget.token-ttl-seconds` | `1800` | 기본 TTL |
 | `widget.token-max-ttl-seconds` | `3600` | 최대 TTL 하드캡 |
 
+### 1-3. 사무소(지점)별 지식 자료 [CR-206]
+
+사무소마다 다른 자료를 쓰는 소비앱이면 운영자가 지식 자료를 사무소별로 등록하고(운용 가이드 § 3-6) 자료 ID 를 소비앱에 알린다. 소비앱 BFF 는 토큰을 받을 때 그 사용자 사무소의 ID 를 `rag_source_ids` 로 싣는다(§ 2-1). 그 토큰은 목록 안의 자료만 쓴다. API 가이드 § 39.
+
 ---
 
 ## 2. BFF 구현 (소비앱 백엔드 개발자)
@@ -90,6 +94,7 @@ async function issueWidgetToken() {
       origin: process.env.ALLOWED_ORIGIN,  // 소비앱 브라우저 origin
       scopes: ["chat:stream", "workflow:subscribe", "rag:read"],
       ttl_seconds: 1800,
+      rag_source_ids: ["kb_office_a"],     // CR-206 이 사용자가 쓸 지식 자료. 사무소별 자료가 없으면 생략
     }),
   });
   if (!res.ok) throw new Error(`Aimbase token ${res.status}: ${await res.text()}`);
@@ -254,7 +259,7 @@ const handle = createWidget({
 | `token-endpoint` | URL | — | BFF 프록시 경로 (authResolver 를 JS 로 주입 시 생략 가능) |
 | `display` | `bubble` \| `inline` \| `panel` | `inline`(CE) | 렌더 모드 |
 | `session-id` | string | auto UUID | 대화 세션. 그 대화가 이 사용자의 것으로 서버에 있으면 위젯이 뜰 때 내용을 읽어 보인다 (CR-178) |
-| `rag-source-id` | string | — | RAG 소스 지정 시 citations 자동 표시 |
+| `rag-source-id` | string | 토큰의 기본 자료 | 지식 자료 ID. 지정하면 그 자료를 찾아 답하고 출처(citations)를 보인다. 토큰에 허용 자료(`rag_source_ids`)가 있으면 그 안이어야 하고, 비우면 첫 자료다. 목록 밖이면 404 `rag_source_not_found` (CR-206) |
 | `theme-mode` | `light` \| `dark` \| `auto` | `auto` | 테마 |
 | `connection-id` | string | 테넌트 기본 | 쓸 연결. 모델 목록과 깊게 생각하기 단추가 이 연결을 따른다 |
 | `model` | string | 연결 기본 모델 | 처음 고른 모델. 연결의 허용 모델에 없으면 연결 기본 모델로 시작한다 |
@@ -329,7 +334,8 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | `401 API Key is required` | BFF 가 JWT 로 Aimbase 호출 | 반드시 `X-API-Key` 헤더로 호출 |
 | `400 origin is not allowed` | 토큰 발급 body 의 `origin` 과 화이트리스트 불일치 | 둘을 맞춘다. 프로토콜·포트 포함 |
 | `403` 가 간헐 발생 | 위젯 토큰 만료 | 위젯이 자동 갱신하지만 네트워크 오류 시 실패 가능. `on.onTokenExpiring` 콜백에서 재시도 |
-| `done` 이벤트에 citations 없음 | `rag-source-id` 미지정 또는 검색 결과 0건 | 속성/옵션에 `ragSourceId` 지정 + 해당 소스에 인제스트된 문서 확인 |
+| `done` 이벤트에 citations 없음 | `rag-source-id` 미지정(토큰에도 허용 자료 없음), 검색 결과 0건, 또는 Aimbase 서버가 CR-206 전 판이라 이 칸을 받지 않음 | 속성이나 토큰 `rag_source_ids` 로 자료를 정하고 그 자료에 넣은 문서를 확인한다. 서버를 올린다 |
+| `404 rag_source_not_found` | 속성 `rag-source-id` 가 토큰 허용 자료 밖이거나 테넌트에 없는 자료 | BFF 가 실은 `rag_source_ids` 와 속성 값을 맞춘다. 사무소별 자료는 속성을 비우고 토큰에만 싣는다 (CR-206) |
 | 워크플로우 subscribe 연결은 되는데 이벤트 없음 | 이미 종료된 run | `workflow.snapshot` + `workflow.done` 1회씩만 오고 close 되는 정상 동작 |
 | 모델 선택 칸이 없다 | 연결의 허용 모델이 비었거나 하나 | 운영자가 연결 「허용 모델」에 둘 이상 넣는다 (운용 가이드 § 2-14) |
 | 깊게 생각하기 단추가 없다 | 그 연결이 요청마다 생각을 바꾸지 못함 | Anthropic API 나 Claude CLI 연결을 쓴다 |
