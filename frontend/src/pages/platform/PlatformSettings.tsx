@@ -65,7 +65,7 @@ const CATEGORY_LABELS: Record<string, { label: string; description: string }> = 
   skills: { label: "Skills", description: "스킬 묶음 올리기 상한, 스킬 도구 읽기와 스크립트 실행 한도" },
   plan: {
     label: "플랜",
-    description: "플랜 목록, 처음 플랜, 플랜별 분당 요청 한도. 바꾼 한도는 새로 만들거나 플랜을 바꾼 테넌트부터 적용됩니다.",
+    description: "플랜 목록, 처음 플랜, 플랜별 분당 요청 한도와 채팅 분당 요청 한도. 바꾼 한도는 신규 테넌트와 플랜을 바꾼 테넌트부터 적용됩니다.",
   },
   chat: { label: "Chat", description: "위젯 파일 만들기, 저장과 내보내기, 공유 링크" },
 };

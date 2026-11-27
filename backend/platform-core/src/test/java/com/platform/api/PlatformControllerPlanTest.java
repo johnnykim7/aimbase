@@ -59,7 +59,11 @@ class PlatformControllerPlanTest {
                 "plan.free.api-rpm-limit", "60",
                 "plan.starter.api-rpm-limit", "300",
                 "plan.pro.api-rpm-limit", "1000",
-                "plan.enterprise.api-rpm-limit", "0");
+                "plan.enterprise.api-rpm-limit", "0",
+                "plan.free.chat-rpm-limit", "60",
+                "plan.starter.chat-rpm-limit", "300",
+                "plan.pro.chat-rpm-limit", "1000",
+                "plan.enterprise.chat-rpm-limit", "0");
         when(settings.getString(anyString(), any())).thenAnswer(call ->
                 values.getOrDefault(call.getArgument(0, String.class), call.getArgument(1, String.class)));
 
@@ -80,6 +84,7 @@ class PlatformControllerPlanTest {
     private void current(String plan, int limit) {
         sub.setPlan(plan);
         sub.setApiRpmLimit(limit);
+        sub.setChatRpmLimit(limit);
     }
 
     private ResultActions update(String body) throws Exception {
@@ -155,5 +160,57 @@ class PlatformControllerPlanTest {
                 .andExpect(jsonPath("$.data.plans[2].apiRpmLimit").value(1000))
                 .andExpect(jsonPath("$.data.plans[3].code").value("enterprise"))
                 .andExpect(jsonPath("$.data.plans[3].apiRpmLimit").value(0));
+    }
+
+    /** CR-205 TC-PLAN-015: 채팅 한도는 플랜을 바꿀 때 그 플랜의 값, 같은 플랜은 그대로, 같이 보낸 값이 이긴다(BIZ-298). */
+    @Test
+    @DisplayName("TC-PLAN-015 플랜 변경과 채팅 분당 요청 한도")
+    void tcPlan015_chatLimitFollowsPlanChange() throws Exception {
+        current("free", 60);
+        update("{\"plan\":\"pro\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.chatRpmLimit").value(1000));
+
+        current("pro", 300);
+        update("{\"plan\":\"pro\"}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.chatRpmLimit").value(300));
+
+        current("free", 60);
+        update("{\"plan\":\"pro\",\"chatRpmLimit\":120}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.apiRpmLimit").value(1000))
+                .andExpect(jsonPath("$.data.chatRpmLimit").value(120));
+    }
+
+    /** CR-205 TC-PLAN-016: 채팅 한도 검사는 분당 요청 한도와 같다. 0 은 무제한이라 받는다. */
+    @Test
+    @DisplayName("TC-PLAN-016 틀린 채팅 한도는 400 이고 같이 보낸 값도 저장하지 않는다")
+    void tcPlan016_invalidChatLimitSavesNothing() throws Exception {
+        current("free", 60);
+
+        for (String body : new String[] {"{\"chatRpmLimit\":-1}", "{\"chatRpmLimit\":1.5}",
+                "{\"maxConnections\":9,\"chatRpmLimit\":-1}"}) {
+            update(body)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("chatRpmLimit must be an integer of 0 or greater."));
+        }
+        update("{\"chatRpmLimit\":\"abc\"}").andExpect(status().isBadRequest());
+        verify(subscriptions, never()).save(any());
+        assertThat(sub.getMaxConnections()).isEqualTo(5);
+        assertThat(sub.getChatRpmLimit()).isEqualTo(60);
+
+        update("{\"chatRpmLimit\":0}").andExpect(status().isOk());
+        assertThat(saved().getChatRpmLimit()).isEqualTo(0);
+    }
+
+    /** CR-205 TC-PLAN-017: 플랜 목록에 플랜마다 채팅 한도가 든다. */
+    @Test
+    @DisplayName("TC-PLAN-017 플랜 목록 API 는 채팅 분당 요청 한도도 준다")
+    void tcPlan017_listsChatLimits() throws Exception {
+        mvc.perform(get("/api/v1/platform/plans"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.plans[0].chatRpmLimit").value(60))
+                .andExpect(jsonPath("$.data.plans[1].chatRpmLimit").value(300))
+                .andExpect(jsonPath("$.data.plans[2].chatRpmLimit").value(1000))
+                .andExpect(jsonPath("$.data.plans[3].chatRpmLimit").value(0));
     }
 }
