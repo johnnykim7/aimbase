@@ -174,8 +174,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String originClaim = claims.get("origin", String.class);
         String requestOrigin = request.getHeader("Origin");
         if (requestOrigin != null && originClaim != null && !requestOrigin.equals(originClaim)) {
-            log.warn("Widget token origin mismatch — claim='{}', request='{}'", originClaim, requestOrigin);
-            return;
+            // CR-203 (BIZ-302): 채팅창 전용 페이지(frame.html) 안의 요청은 Aimbase 와 같은 출처라 Origin 이
+            // 소비앱이 아니다. 브라우저만 붙이는 Sec-Fetch-Site 가 same-origin 일 때만 대조를 건너뛴다.
+            if (isSameOriginRequest(request)) {
+                log.debug("Widget token origin check skipped for same-origin request, claim='{}'", originClaim);
+            } else {
+                log.warn("Widget token origin mismatch, claim='{}', request='{}'", originClaim, requestOrigin);
+                return;
+            }
         }
 
         String tenantId = claims.get("tenant_id", String.class);
@@ -225,5 +231,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 principal, null, authorities);
         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
+    private static boolean isSameOriginRequest(HttpServletRequest request) {
+        return "same-origin".equals(request.getHeader("Sec-Fetch-Site"));
     }
 }

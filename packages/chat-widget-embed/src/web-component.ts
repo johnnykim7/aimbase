@@ -1,4 +1,5 @@
 import { createWidget } from "./widget";
+import { CHAT_ATTRIBUTE_NAMES } from "./frame/frame-protocol";
 import { LOCALES, type Locale, type LocalizedList, type LocalizedText } from "./frame/i18n";
 import type { FontSize, WidgetHandle, WidgetOptions } from "./types";
 
@@ -65,26 +66,7 @@ export class AimbaseChatElement extends HTMLElement {
   public ragSourceId: string | null = null;
 
   static get observedAttributes(): string[] {
-    return [
-      "base-url",
-      "token-endpoint",
-      "display",
-      "theme-mode",
-      "rag-source-id",
-      "session-id",
-      "connection-id",
-      "connection-group-id",
-      "actions-enabled",
-      "model",
-      "suggestions",
-      "empty-title",
-      "empty-subtitle",
-      "font-size",
-      "locale",
-      "allow-approval",
-      "screen-key",
-      "history-list",
-    ];
+    return [...CHAT_ATTRIBUTE_NAMES];
   }
 
   /**

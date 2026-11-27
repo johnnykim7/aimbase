@@ -98,7 +98,7 @@
 | 방향 | type | 내용 | 때 |
 |---|---|---|---|
 | 전용 → 부모 | `ready` | 없음 | 전용 페이지 스크립트가 뜰 때 |
-| 부모 → 전용 | `init` | `attrs`(속성 이름과 값 전부), `display` | `ready` 를 받으면 |
+| 부모 → 전용 | `init` | `attrs`(채팅창 속성 이름과 값. `frame-src`, `id`, `class`, `style` 은 빼고), `display` | `ready` 를 받으면 |
 | 전용 → 부모 | `token:request` | `id` | 위젯이 토큰이 필요할 때(처음, 갱신 때) |
 | 부모 → 전용 | `token:reply` | `id`, `token`(TokenResponse) 또는 `error` | 소비앱 BFF 응답을 받으면 |
 | 전용 → 부모 | `context:request` | `id` | 질문을 보낼 때 |
@@ -176,6 +176,7 @@
 - 2026-11-27 22:44 착수. 작업 폴더 `~/Documents/GitHub/_worktrees/aimbase-cr203`(origin/dev b83dcb32, 브랜치 `cr203-iframe`). 메인 폴더는 origin/dev 보다 448 커밋 뒤고 다른 창의 미커밋 수정이 있어 건드리지 않는다. 대장 등록도 작업 폴더의 대장에 했다.
 - 2026-11-27 23:05 화면 컨셉 승인요청을 컨타에 보냄(새 화면 요소 없음).
 - 2026-11-27 23:10 CR-206 이 PRD-648, 649, BIZ-290, 291, TC-CHT-159 ~ 161 을 먼저 잡아 이 CR 의 번호를 PRD-660 ~ 663, BIZ-300 ~ 302, TC-CHT-170 ~ 174 로 옮김. 설계 캐스케이드(T1-1, T1-3, T1-7, T2-1, T3-2, T3-3, T3-4, T3-5)와 대장 등록.
+- 2026-11-27 23:16 설계분 커밋(949d6c18). 화면이 아닌 부분 구현: 메시지 규약(`frame-protocol.ts`, TC-CHT-170~172 13건 통과), BIZ-302 토큰 검사(TC-FRM-001~003), BIZ-300 머리글(`WidgetFrameHeaderWriter`, TC-FRM-004~006). 서버 시험 14건 통과. 화면 컨셉 답 대기 중. CR-204 예약 번호(PRD-650·651, BIZ-292~296, TC-CHT-162~166, 영역 29)와 겹침 없음
 
 ## 기획서 화면 대조
 

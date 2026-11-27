@@ -107,6 +107,7 @@ class JwtAuthenticationFilterWidgetTest {
     }
 
     @Test
+    @org.junit.jupiter.api.DisplayName("TC-FRM-003 Origin 이 없으면 지금처럼 인증된다")
     void widgetToken_skipsOriginCheckWhenHeaderAbsent() throws Exception {
         // 서버간 헬스체크/테스트용 호출은 Origin 헤더 없이 올 수 있다.
         String token = jwtProvider.generateWidgetToken(
@@ -171,5 +172,61 @@ class JwtAuthenticationFilterWidgetTest {
                 (com.platform.auth.UserPrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         assertThat(com.platform.session.ChatOwner.of(principal)).isNull();
         assertThat(com.platform.session.ChatOwner.ragSourceIdsOf(principal)).containsExactly("kb_a", "kb_b");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-FRM-001 claim 과 Origin 이 달라도 Sec-Fetch-Site 가 same-origin 이면 인증된다")
+    void widgetToken_sameOriginRequest_skipsOriginCheck() throws Exception {
+        // CR-203 (BIZ-302): 전용 페이지 안의 요청은 Aimbase 출처라 Origin 이 소비앱(claim)과 다르다.
+        String token = jwtProvider.generateWidgetToken(
+                "tenant-abc", null, null,
+                List.of("chat:stream"),
+                "https://lexflow.site", 60L);
+        when(request.getHeader("Authorization")).thenReturn("Bearer " + token);
+        when(request.getHeader("Origin")).thenReturn("https://aimbase.example");
+        when(request.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+
+        filter.doFilter(request, response, chain);
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        assertThat(auth).isNotNull();
+        assertThat(auth.getAuthorities())
+                .extracting(GrantedAuthority::getAuthority)
+                .contains("SCOPE_chat:stream");
+        assertThat(TenantContext.getTenantId()).isEqualTo("tenant-abc");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-FRM-002 claim 과 Origin 이 다르고 Sec-Fetch-Site 가 cross-site 면 거절된다")
+    void widgetToken_crossSiteRequest_rejected() throws Exception {
+        String token = jwtProvider.generateWidgetToken(
+                "tenant-abc", null, null,
+                List.of("chat:stream"),
+                "https://lexflow.site", 60L);
+        when(request.getHeader("Authorization")).thenReturn("Bearer " + token);
+        when(request.getHeader("Origin")).thenReturn("https://other.site");
+        when(request.getHeader("Sec-Fetch-Site")).thenReturn("cross-site");
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-FRM-002 claim 과 Origin 이 다르고 Sec-Fetch-Site 가 없으면 거절된다")
+    void widgetToken_noFetchSite_rejected() throws Exception {
+        String token = jwtProvider.generateWidgetToken(
+                "tenant-abc", null, null,
+                List.of("chat:stream"),
+                "https://lexflow.site", 60L);
+        when(request.getHeader("Authorization")).thenReturn("Bearer " + token);
+        when(request.getHeader("Origin")).thenReturn("https://other.site");
+        when(request.getHeader("Sec-Fetch-Site")).thenReturn(null);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(chain).doFilter(request, response);
     }
 }

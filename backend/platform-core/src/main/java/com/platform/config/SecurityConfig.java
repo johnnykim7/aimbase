@@ -38,15 +38,18 @@ public class SecurityConfig {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final ApiKeyRepository apiKeyRepository;
+    private final PlatformSettingsService settings;
 
     public SecurityConfig(JwtProvider jwtProvider,
                           UserRepository userRepository,
                           RoleRepository roleRepository,
-                          ApiKeyRepository apiKeyRepository) {
+                          ApiKeyRepository apiKeyRepository,
+                          PlatformSettingsService settings) {
         this.jwtProvider = jwtProvider;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.apiKeyRepository = apiKeyRepository;
+        this.settings = settings;
     }
 
     @Bean
@@ -64,6 +67,10 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults())  // CR-058: CorsConfigurationSource bean 사용
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // CR-203 (BIZ-300): 채팅창 전용 페이지만 허용 주소의 화면에 끼워지고, 나머지는 지금처럼 DENY
+            .headers(headers -> headers
+                .frameOptions(frame -> frame.disable())
+                .addHeaderWriter(new WidgetFrameHeaderWriter(settings)))
             .authorizeHttpRequests(auth -> auth
                 // CR-082 root fix (2026-04-30): ASYNC dispatch (SseEmitter.complete/completeWithError 후의 재진입)
                 // 는 권한 재검사를 건너뛴다. 이미 첫 진입 시 jwtFilter 가 인증 통과한 동일 요청이며,
