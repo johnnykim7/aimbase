@@ -6,11 +6,16 @@ import com.platform.repository.ConversationMessageRepository;
 import com.platform.repository.ConversationSessionRepository;
 import com.platform.session.ChatHistoryService;
 import com.platform.session.ChatOwner;
+import com.platform.auth.UserPrincipal;
 import com.platform.session.ChatRejectedException;
+import com.platform.session.ConversationPurgeRequest;
+import com.platform.session.ConversationPurgeResult;
+import com.platform.session.ConversationPurgeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,13 +33,16 @@ public class ConversationController {
     private final ConversationSessionRepository sessionRepository;
     private final ConversationMessageRepository messageRepository;
     private final ChatHistoryService historyService;
+    private final ConversationPurgeService purgeService;
 
     public ConversationController(ConversationSessionRepository sessionRepository,
                                    ConversationMessageRepository messageRepository,
-                                   ChatHistoryService historyService) {
+                                   ChatHistoryService historyService,
+                                   ConversationPurgeService purgeService) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.historyService = historyService;
+        this.purgeService = purgeService;
     }
 
     /**
@@ -100,6 +108,18 @@ public class ConversationController {
 
         // CR-178: 위젯 대화 삭제와 같은 서비스를 쓴다(답 멈춤, 지운 표시, Redis 기록 비우기)
         historyService.deleteSession(session);
+    }
+
+    /**
+     * CR-204 PRD-650 BIZ-296: 소비앱 서버가 연동키(API 키)나 관리자 로그인으로 부르는 일괄 완전 삭제.
+     * 위젯 토큰은 rejectWidgetToken 이 먼저 막는다. 남은 수가 0 이 될 때까지 같은 본문으로 다시 부른다(BIZ-294).
+     */
+    @PostMapping("/purge")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @Operation(summary = "대화 일괄 완전 삭제 (사용자, 사건 대화, 접두어 묶음)")
+    public ApiResponse<ConversationPurgeResult> purge(@RequestBody ConversationPurgeRequest request) {
+        UserPrincipal principal = ChatOwner.currentPrincipal();
+        return ApiResponse.ok(purgeService.purge(request.validated(), principal == null ? null : principal.getId()));
     }
 
     /** CR-029: 세션 메타 조회 */

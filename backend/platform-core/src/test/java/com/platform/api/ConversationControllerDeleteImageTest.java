@@ -50,7 +50,7 @@ class ConversationControllerDeleteImageTest {
         ChatHistoryService historyService = new ChatHistoryService(sessionRepository, messageRepository,
                 attachmentRepository, feedbackRepository, projectService, cancellationRegistry, sessionStore,
                 settings, imageRepository, shareService);
-        ConversationController controller = new ConversationController(sessionRepository, messageRepository, historyService);
+        ConversationController controller = new ConversationController(sessionRepository, messageRepository, historyService, null);
         ConversationSessionEntity session = new ConversationSessionEntity();
         session.setSessionId("s-1");
         when(sessionRepository.findBySessionId("s-1")).thenReturn(Optional.of(session));

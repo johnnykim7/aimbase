@@ -62,7 +62,7 @@ class ChatWidgetAccessTest {
     @Test
     void widget_token_cannot_use_admin_conversation_api() {
         signIn(widget(null));
-        ConversationController controller = new ConversationController(null, null, null);
+        ConversationController controller = new ConversationController(null, null, null, null);
 
         assertRejected(controller::rejectWidgetToken, HttpStatus.FORBIDDEN, "widget_forbidden");
 

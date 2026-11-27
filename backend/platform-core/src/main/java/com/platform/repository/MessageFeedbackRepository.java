@@ -1,5 +1,6 @@
 package com.platform.repository;
 
+import java.util.List;
 import com.platform.domain.MessageFeedbackEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -50,4 +51,21 @@ public interface MessageFeedbackRepository extends JpaRepository<MessageFeedback
     @Transactional
     @Query("DELETE FROM MessageFeedbackEntity f WHERE f.turnId = :turnId AND f.userRef = :userRef")
     int deleteByTurnIdAndUserRef(@Param("turnId") UUID turnId, @Param("userRef") String userRef);
+
+    /** CR-204 BIZ-292: 대화 완전 삭제. 삭제 표시 여부와 관계없이 그 대화의 행을 모두 지운다. */
+    @Modifying
+    @Query("DELETE FROM MessageFeedbackEntity f WHERE f.sessionId = :sessionId")
+    int purgeBySessionId(@Param("sessionId") String sessionId);
+
+    /** CR-204 BIZ-293: 그 사람이 남긴 평가 전부(남의 대화에 남긴 것 포함). */
+    @Modifying
+    @Query("DELETE FROM MessageFeedbackEntity f WHERE f.userRef = :userRef")
+    int purgeByUserRef(@Param("userRef") String userRef);
+
+    @Modifying
+    @Query("DELETE FROM MessageFeedbackEntity f WHERE f.userRef LIKE :pattern ESCAPE '!'")
+    int purgeByUserRefPrefix(@Param("pattern") String pattern);
+
+    @Query("SELECT DISTINCT f.userRef FROM MessageFeedbackEntity f WHERE f.userRef LIKE :pattern ESCAPE '!'")
+    List<String> findUserRefsByPrefix(@Param("pattern") String pattern);
 }

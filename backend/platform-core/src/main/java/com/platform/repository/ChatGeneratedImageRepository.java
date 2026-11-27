@@ -1,5 +1,9 @@
 package com.platform.repository;
 
+import java.util.Collection;
+import org.springframework.data.domain.Pageable;
+import java.util.List;
+import org.springframework.data.repository.query.Param;
 import com.platform.domain.ChatGeneratedImageEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -32,4 +36,19 @@ public interface ChatGeneratedImageRepository extends JpaRepository<ChatGenerate
             + "AND NOT EXISTS (SELECT 1 FROM conversation_messages m WHERE m.session_id = i.session_id "
             + "AND m.turn_id = i.turn_id AND m.deleted_at IS NULL)", nativeQuery = true)
     int softDeleteOrphanedBySessionId(String sessionId, OffsetDateTime ts);
+
+    /** CR-204 BIZ-292: 대화 완전 삭제. 삭제 표시 여부와 관계없이 그 대화의 행을 모두 지운다. */
+    @Modifying
+    @Query("DELETE FROM ChatGeneratedImageEntity g WHERE g.sessionId = :sessionId")
+    int purgeBySessionId(@Param("sessionId") String sessionId);
+
+    /** CR-204: 삭제 표시 여부와 관계없이 대화의 그림 전부(파일 경로를 모으려고). */
+    List<ChatGeneratedImageEntity> findBySessionId(String sessionId);
+
+    /** CR-204 BIZ-295: 삭제 표시 뒤 보관 기간이 지난 그림. */
+    List<ChatGeneratedImageEntity> findByDeletedAtBefore(OffsetDateTime cutoff, Pageable pageable);
+
+    @Modifying
+    @Query("DELETE FROM ChatGeneratedImageEntity g WHERE g.id IN :ids")
+    int deleteByIds(@Param("ids") Collection<UUID> ids);
 }

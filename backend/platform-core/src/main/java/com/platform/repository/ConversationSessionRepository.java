@@ -1,5 +1,8 @@
 package com.platform.repository;
 
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import java.util.List;
+import java.time.OffsetDateTime;
 import com.platform.domain.ConversationSessionEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -14,7 +17,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface ConversationSessionRepository extends JpaRepository<ConversationSessionEntity, UUID> {
+public interface ConversationSessionRepository extends JpaRepository<ConversationSessionEntity, UUID>,
+        JpaSpecificationExecutor<ConversationSessionEntity> {
 
     // CR-046: 모든 활성 조회는 deletedAt IS NULL 필터 적용.
     @Query("SELECT s FROM ConversationSessionEntity s WHERE s.sessionId = :sessionId AND s.deletedAt IS NULL")
@@ -127,4 +131,12 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
             + "AND s.chat_project_id IS NOT NULL GROUP BY s.chat_project_id",
             nativeQuery = true)
     java.util.List<Object[]> summarizeByChatProject(@Param("ownerRef") String ownerRef);
+
+    /** CR-204 BIZ-295: 삭제 표시 뒤 보관 기간이 지난 대화. 오래된 것부터. */
+    @Query("SELECT s FROM ConversationSessionEntity s WHERE s.deletedAt < :cutoff ORDER BY s.deletedAt ASC")
+    List<ConversationSessionEntity> findSoftDeletedBefore(@Param("cutoff") OffsetDateTime cutoff, Pageable pageable);
+
+    /** CR-204 BIZ-293: 접두어로 시작하는 대화 주인. 접두어는 호출한 쪽이 LIKE 글자를 '!' 로 이스케이프한다. */
+    @Query("SELECT DISTINCT s.userId FROM ConversationSessionEntity s WHERE s.userId LIKE :pattern ESCAPE '!'")
+    List<String> findUserIdsByPrefix(@Param("pattern") String pattern);
 }

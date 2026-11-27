@@ -1,5 +1,7 @@
 package com.platform.repository;
 
+import org.springframework.data.repository.query.Param;
+import org.springframework.data.jpa.repository.Modifying;
 import com.platform.domain.ChatDocumentEntity;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -27,4 +29,9 @@ public interface ChatDocumentRepository extends JpaRepository<ChatDocumentEntity
     Optional<ChatDocumentEntity> findForUpdate(UUID id);
 
     List<ChatDocumentEntity> findBySessionIdOrderByCreatedAtAsc(String sessionId);
+
+    /** CR-204 BIZ-292: 대화 완전 삭제. 삭제 표시 여부와 관계없이 그 대화의 행을 모두 지운다. */
+    @Modifying
+    @Query("DELETE FROM ChatDocumentEntity d WHERE d.sessionId = :sessionId")
+    int purgeBySessionId(@Param("sessionId") String sessionId);
 }
