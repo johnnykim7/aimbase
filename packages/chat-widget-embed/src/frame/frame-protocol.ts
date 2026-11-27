@@ -8,7 +8,10 @@ import type { DisplayMode, TokenResponse } from "../types";
 export const FRAME_MARK = "aimbase-chat-frame" as const;
 export const FRAME_PROTOCOL_VERSION = 1 as const;
 export const FRAME_SRC_ATTRIBUTE = "frame-src";
-export const DEFAULT_FRAME_DISPLAY: DisplayMode = "bubble";
+/** <aimbase-chat> 과 같다. 연결 요소도 display 가 없으면 칸 안에 뜬다. */
+export const DEFAULT_FRAME_DISPLAY: DisplayMode = "inline";
+/** frame-src 가 없으면 base-url 아래 이 경로를 끼운다. */
+export const FRAME_PAGE_PATH = "/widget/v1/frame.html";
 export const TOKEN_REPLY_TIMEOUT_MS = 10_000;
 export const CONTEXT_REPLY_TIMEOUT_MS = 2_000;
 
@@ -46,6 +49,12 @@ export interface FrameState {
   docked: boolean;
 }
 
+/** 머리줄 끌기. 전용 페이지가 포인터를 붙잡고 화면 좌표를 보내면 부모가 상자를 옮긴다. */
+export type DragPhase = "start" | "move" | "end";
+
+/** 부모 화면으로 다시 내보내는 요소 이벤트. 이 밖의 이름은 무시한다. */
+export const RELAYED_EVENTS = ["new-conversation"] as const;
+
 export type FrameMessage =
   | { type: "ready" }
   | { type: "init"; attrs: Record<string, string>; display: DisplayMode }
@@ -57,7 +66,8 @@ export type FrameMessage =
   | { type: "open" }
   | { type: "close" }
   | ({ type: "state" } & FrameState)
-  | { type: "drag"; screenX: number; screenY: number }
+  | { type: "expand"; expanded: boolean }
+  | { type: "drag"; phase: DragPhase; screenX: number; screenY: number }
   | { type: "event"; name: string; detail?: unknown };
 
 export type FrameMessageType = FrameMessage["type"];
@@ -74,6 +84,7 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set<FrameMessageType>([
   "open",
   "close",
   "state",
+  "expand",
   "drag",
   "event",
 ]);
@@ -118,7 +129,7 @@ export interface NamedValue {
   value: string;
 }
 
-/** 연결 요소의 속성에서 init 메시지를 만든다. 채팅창 속성만 넘기고 display 가 없으면 bubble. */
+/** 연결 요소의 속성에서 init 메시지를 만든다. 채팅창 속성만 넘기고 display 가 없으면 칸 안(inline). */
 export function initMessage(attributes: Iterable<NamedValue>): InitMessage {
   const attrs: Record<string, string> = {};
   for (const { name, value } of attributes) {
@@ -158,4 +169,28 @@ export function tokenOrigin(token: string): string | null {
 export function tokenMatchesOrigin(token: string, parentOrigin: string): boolean {
   const origin = tokenOrigin(token);
   return origin !== null && origin === parentOrigin;
+}
+
+/** frame-src 가 있으면 그것, 없으면 base-url 아래 전용 페이지. 둘 다 없거나 주소가 아니면 null. */
+export function frameSrcOf(frameSrc: string | null, baseUrl: string | null, pageUrl: string): URL | null {
+  try {
+    if (frameSrc) return new URL(frameSrc, pageUrl);
+    if (baseUrl) return new URL(FRAME_PAGE_PATH, new URL(baseUrl, pageUrl));
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** postMessage 로 보낼 수 있게 화면 자료를 JSON 값으로만 남긴다. 함수, DOM 같은 값은 빠진다. */
+export function plainContext(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || value === undefined || typeof value !== "object") return undefined;
+  try {
+    const plain: unknown = JSON.parse(JSON.stringify(value));
+    return plain !== null && typeof plain === "object" && !Array.isArray(plain)
+      ? (plain as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }

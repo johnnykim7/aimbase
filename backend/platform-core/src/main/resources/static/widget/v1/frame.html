@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aimbase</title>
+<!-- CR-203: 채팅창 전용 페이지. 붙이는 앱 화면이 <aimbase-chat-frame> 으로 끼운다. 허용 주소 밖의 화면은 frame-ancestors 가 막는다 -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  .aimbase-frame-notice {
+    box-sizing: border-box; height: 100%; margin: 0; padding: 24px;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    background: #ffffff; color: #52525b; border-radius: 10px;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  }
+</style>
+<script type="module" src="./aimbase-chat.frame.js"></script>
+</head>
+<body></body>
+</html>

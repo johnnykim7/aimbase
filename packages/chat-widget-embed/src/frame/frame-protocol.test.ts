@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   CHAT_ATTRIBUTE_NAMES,
   FRAME_MARK,
+  frameSrcOf,
   initMessage,
+  plainContext,
   receive,
   seal,
   tokenMatchesOrigin,
@@ -107,10 +109,25 @@ describe("TC-CHT-172 속성 전달", () => {
     });
   });
 
-  it("display 가 없으면 bubble 이다", () => {
+  it("display 가 없으면 <aimbase-chat> 처럼 칸 안(inline)이다", () => {
     const message = initMessage([{ name: "base-url", value: FRAME }]);
-    expect(message.display).toBe("bubble");
-    expect(message.attrs.display).toBe("bubble");
+    expect(message.display).toBe("inline");
+    expect(message.attrs.display).toBe("inline");
+  });
+
+  it("frame-src 가 없으면 base-url 아래 전용 페이지를 끼운다", () => {
+    expect(frameSrcOf(null, FRAME, `${PARENT}/cases/1`)?.href).toBe(`${FRAME}/widget/v1/frame.html`);
+    expect(frameSrcOf(`${FRAME}/widget/v2/frame.html`, FRAME, PARENT)?.href).toBe(`${FRAME}/widget/v2/frame.html`);
+    expect(frameSrcOf(null, null, PARENT)).toBeNull();
+  });
+
+  it("화면 자료는 JSON 값만 남긴다", () => {
+    expect(plainContext({ caseId: 12, at: new Date(0), fn: () => 1 })).toEqual({ caseId: 12, at: "1970-01-01T00:00:00.000Z" });
+    expect(plainContext(undefined)).toBeUndefined();
+    expect(plainContext([1, 2])).toBeUndefined();
+    const loop: Record<string, unknown> = {};
+    loop.self = loop;
+    expect(plainContext(loop)).toBeUndefined();
   });
 
   it("<aimbase-chat> 이 받는 속성 전부가 목록에 있다", () => {

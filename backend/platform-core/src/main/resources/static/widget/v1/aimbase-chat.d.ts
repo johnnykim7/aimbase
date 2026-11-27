@@ -27,8 +27,31 @@ interface TokenResponse {
 }
 type AuthResolver = () => Promise<TokenResponse>;
 type DisplayMode = "bubble" | "inline" | "panel";
+/**
+ * 질문을 보낼 때 함께 실을 화면 자료. 바로 돌려줘도 되고 Promise 로 돌려줘도 된다(CR-203: iframe 방식은
+ * 부모 화면에 메시지로 묻기 때문에 기다려야 한다). 돌려준 값이 없으면 자료 없이 보낸다.
+ */
 interface ContextProvider {
-    (): Record<string, unknown>;
+    (): Record<string, unknown> | undefined | Promise<Record<string, unknown> | undefined>;
+}
+/** CR-203: 열림, 크게 보기, 왼쪽 칸 붙임. 전용 페이지가 부모 화면에 알린다. */
+interface FrameWindowState {
+    open: boolean;
+    expanded: boolean;
+    docked: boolean;
+}
+/**
+ * CR-203: 채팅창 전용 페이지(frame.html) 안에서 뜰 때 위젯이 부모 화면과 잇는 길.
+ * 이것을 주면 위젯은 창을 꽉 채우고, 자리와 크기, 그림자, 뒷막, 잡는 자리는 부모 화면이 그린다.
+ */
+interface FrameBridge {
+    stateChanged(state: FrameWindowState): void;
+    /** 머리줄 끌기. 화면 좌표다. 상자가 움직여도 값이 흔들리지 않는다 */
+    drag(phase: "start" | "move" | "end", screenX: number, screenY: number): void;
+    /** 위젯이 뜰 때마다 한 번. 부모 화면의 뒷막을 누르면 크게 보기를 끈다 */
+    attach?(controls: {
+        setExpanded(v: boolean): void;
+    }): void;
 }
 interface Citation {
     index?: number;
@@ -114,6 +137,8 @@ interface WidgetOptions {
     contextProvider?: ContextProvider;
     /** 기본 bubble (우하단). inline 은 target 필수. panel 은 측면 고정 */
     display?: DisplayMode;
+    /** CR-203: 전용 페이지 안에서 뜰 때만. target 없이 창을 꽉 채운다 */
+    frame?: FrameBridge;
     /** display === 'inline' 또는 'panel' 일 때 마운트할 컨테이너 */
     target?: string | HTMLElement;
     /** 초기 session_id. 미지정 시 crypto.randomUUID() 생성 */
@@ -248,6 +273,8 @@ declare class AimbaseChatElement extends HTMLElement {
     authResolver: WidgetOptions["authResolver"] | null;
     contextProvider: WidgetOptions["contextProvider"] | null;
     ragSourceId: string | null;
+    /** CR-203: 전용 페이지(frame.html)가 넣는다. 붙이는 앱은 쓰지 않는다 */
+    frameBridge: FrameBridge | null;
     static get observedAttributes(): string[];
     /**
      * CR-194 계약 6-1: 붙이는 앱은 화면을 옮겨도 위젯 요소 하나를 그대로 두고 속성만 바꾼다. 화면 키가 바뀌면 그 화면의

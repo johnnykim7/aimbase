@@ -5,7 +5,8 @@ export default defineConfig([
   // CR-131: splitting 활성화로 mermaid/highlight.js/fflate 는 별도 lazy 청크로 분리.
   //         평소 로드는 core(~70KB)만, [엑셀]/코드/mermaid 사용 시에만 청크 fetch.
   {
-    entry: { "aimbase-chat.esm": "src/index.ts" },
+    // CR-203: 채팅창 전용 페이지(frame.html) 스크립트도 같은 빌드에 넣어 조각을 같이 쓴다.
+    entry: { "aimbase-chat.esm": "src/index.ts", "aimbase-chat.frame": "src/frame-page/main.ts" },
     format: ["esm"],
     dts: { entry: "src/index.ts" },
     sourcemap: true,
@@ -26,6 +27,19 @@ export default defineConfig([
     entry: { "aimbase-chat.umd": "src/umd-entry.ts" },
     format: ["iife"],
     globalName: "AimbaseChat",
+    sourcemap: true,
+    clean: false,
+    minify: true,
+    splitting: false,
+    platform: "browser",
+    target: "es2020",
+  },
+  // CR-203: iframe 연결 스크립트 — 붙이는 앱 화면에 <script> 로 넣는다. 채팅창 코드를 담지 않는다.
+  {
+    entry: { "aimbase-chat-frame": "src/frame-host/index.ts" },
+    format: ["iife"],
+    globalName: "AimbaseChatFrame",
+    outExtension: () => ({ js: ".js" }),
     sourcemap: true,
     clean: false,
     minify: true,

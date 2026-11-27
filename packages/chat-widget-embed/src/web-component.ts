@@ -1,7 +1,8 @@
 import { createWidget } from "./widget";
 import { CHAT_ATTRIBUTE_NAMES } from "./frame/frame-protocol";
+import { fetchWidgetToken } from "./frame/token-endpoint";
 import { LOCALES, type Locale, type LocalizedList, type LocalizedText } from "./frame/i18n";
-import type { FontSize, WidgetHandle, WidgetOptions } from "./types";
+import type { FontSize, FrameBridge, WidgetHandle, WidgetOptions } from "./types";
 
 const FONT_SIZES: FontSize[] = ["small", "medium", "large"];
 
@@ -64,6 +65,8 @@ export class AimbaseChatElement extends HTMLElement {
   public authResolver: WidgetOptions["authResolver"] | null = null;
   public contextProvider: WidgetOptions["contextProvider"] | null = null;
   public ragSourceId: string | null = null;
+  /** CR-203: 전용 페이지(frame.html)가 넣는다. 붙이는 앱은 쓰지 않는다 */
+  public frameBridge: FrameBridge | null = null;
 
   static get observedAttributes(): string[] {
     return [...CHAT_ATTRIBUTE_NAMES];
@@ -110,23 +113,7 @@ export class AimbaseChatElement extends HTMLElement {
     }
 
     const tokenEndpoint = this.getAttribute("token-endpoint");
-    const resolver =
-      this.authResolver ??
-      (tokenEndpoint
-        ? async () => {
-            const res = await fetch(tokenEndpoint, { method: "POST", credentials: "include" });
-            if (!res.ok) throw new Error(`token endpoint ${res.status}`);
-            const data = (await res.json()) as { data?: Record<string, unknown>; token?: string };
-            // Aimbase ApiResponse 는 { data: { token, expires_at, refresh_after, scopes } }
-            const payload = (data.data ?? data) as {
-              token: string;
-              expires_at: string | number;
-              refresh_after: number;
-              scopes?: string[];
-            };
-            return payload;
-          }
-        : null);
+    const resolver = this.authResolver ?? (tokenEndpoint ? () => fetchWidgetToken(tokenEndpoint) : null);
 
     if (!resolver) {
       console.error("[aimbase-chat] token-endpoint attribute or authResolver property is required");
@@ -148,7 +135,8 @@ export class AimbaseChatElement extends HTMLElement {
       connectionGroupId: this.getAttribute("connection-group-id") || undefined,
       actionsEnabled: actionsAttr === "true" || actionsAttr === "" ? true : undefined,
       model: this.getAttribute("model") ?? undefined,
-      target: displayAttr === "inline" ? (this as HTMLElement) : undefined,
+      target: displayAttr === "inline" && !this.frameBridge ? (this as HTMLElement) : undefined,
+      frame: this.frameBridge ?? undefined,
       theme: themeAttr ? { mode: themeAttr } : undefined,
       contextProvider: this.contextProvider ?? undefined,
       suggestions: parseSuggestions(this.getAttribute("suggestions")),

@@ -33,6 +33,7 @@ import {
 import { Menu } from "./frame/menu";
 import { Panes } from "./frame/panes";
 import { WindowDrag } from "./frame/window-drag";
+import { FrameHeaderDrag } from "./frame/frame-drag";
 import { FIRST_SEND_WAIT_MS, StartupGate } from "./frame/startup-gate";
 import { LatestLoad } from "./frame/latest-load";
 import { isolateHost } from "./frame/host-isolation";
@@ -265,6 +266,8 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   const options: WidgetOptions = { ...initialOptions };
   const display: DisplayMode = options.display ?? "bubble";
   const theme = options.theme?.mode ?? "auto";
+  /** CR-203: 전용 페이지 안이면 창을 꽉 채우고 자리와 크기는 부모 화면에 맡긴다 */
+  const framed = options.frame ?? null;
 
   // CR-177: 첫 화면부터 그 언어로 그린다. 사용자가 고른 값, 붙이는 앱이 준 값, 한국어 순이다.
   let locale: Locale = readStoredLocale() ?? normalizeLocale(options.locale) ?? DEFAULT_LOCALE;
@@ -273,6 +276,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   const host = document.createElement("div");
   host.setAttribute("data-aimbase-widget", "true");
   host.setAttribute("data-display", display);
+  if (framed) host.setAttribute("data-framed", "");
   if (theme === "dark") host.setAttribute("data-theme", "dark");
   if (theme === "light") host.setAttribute("data-theme", "light");
   isolateHost(host);
@@ -292,10 +296,10 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
       ? (document.querySelector(options.target) as HTMLElement | null)
       : options.target ?? null;
 
-  if ((display === "inline" || display === "panel") && !mountTarget) {
+  if (!framed && (display === "inline" || display === "panel") && !mountTarget) {
     throw new Error(`display='${display}' requires options.target`);
   }
-  (mountTarget ?? document.body).appendChild(host);
+  (framed ? document.body : mountTarget ?? document.body).appendChild(host);
 
   const shadow = host.attachShadow({ mode: "open" });
   const style = document.createElement("style");
@@ -328,8 +332,12 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   let titleFromServer = false;
   let titleIsDefault = true;
   let expanded = false;
+  /** 왼쪽 칸을 붙여 창이 넓어져 있다(CR-194). 전용 페이지는 이것을 부모 화면에 알린다(CR-203) */
+  let docked = false;
   /** 떠 있는 위젯과 옆 칸 위젯만 만든다(CR-198). 틀이 다 그려진 뒤 붙인다 */
   let windowDrag: WindowDrag | null = null;
+  /** CR-203: 전용 페이지 안 떠 있는 창의 머리줄 끌기 */
+  let frameDrag: FrameHeaderDrag | null = null;
   let pinned = true;
   let fontSize: FontSize = "medium";
   let workflowRuns = new Map<string, { stepEl: HTMLDivElement; steps: Map<string, HTMLElement> }>();
@@ -492,7 +500,11 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     header,
     setExpanded: (v) => setExpanded(v),
     canDock: () => display === "bubble" && !expanded,
-    dockChanged: (v) => windowDrag?.setDocked(v),
+    dockChanged: (v) => {
+      docked = v;
+      windowDrag?.setDocked(v);
+      reportFrame();
+    },
     closeLabel: () => T.close,
     iconButton: (html, label) => htmlButton(html, label),
     leftToggleIcon: icon("panelLeft"),
@@ -502,7 +514,10 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   afterExpand = () => panes.refresh();
 
   // 칸 안 위젯은 붙이는 앱의 칸 크기를 따르므로 옮기거나 크기를 바꾸지 않는다(CR-198).
-  if (display === "bubble" || display === "panel") {
+  // 전용 페이지 안에서는 부모 화면이 상자를 옮기고 크기를 바꾼다(CR-203).
+  if (framed) {
+    if (display === "bubble") frameDrag = new FrameHeaderDrag(header, framed.drag.bind(framed), () => open && !expanded);
+  } else if (display === "bubble" || display === "panel") {
     windowDrag = new WindowDrag({ mode: display === "bubble" ? "floating" : "side", root, panel, header });
     windowDrag.setExpanded(expanded);
     windowDrag.setOpen(open);
@@ -510,6 +525,9 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
 
   const toast = el("div", "toast");
   panel.appendChild(toast);
+
+  framed?.attach?.({ setExpanded: (v) => setExpanded(v) });
+  reportFrame();
 
   // CR-060: 녹음 오버레이
   const recordingOverlay = el("div", "recording-overlay hidden");
@@ -538,6 +556,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     panel.classList.toggle("hidden", !v);
     if (!v) setExpanded(false);
     windowDrag?.setOpen(v);
+    reportFrame();
     events.emit("panelToggle", { open: v });
   }
 
@@ -550,6 +569,15 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     // 붙여 둔 자리를 먼저 떼야 판이 크게 보기 폭이 되고, 그 폭으로 칸을 붙일지 다시 정한다.
     windowDrag?.setExpanded(v);
     afterExpand();
+    reportFrame();
+  }
+
+  /** CR-203: 부모 화면이 상자를 그 상태에 맞추게 알린다. 닫힌 떠 있는 창은 버블 단추만 상자를 채운다 */
+  function reportFrame(): void {
+    if (!framed) return;
+    bubbleBtn?.classList.toggle("off", open);
+    panel.classList.toggle("movable", display === "bubble" && open && !expanded);
+    framed.stateChanged({ open, expanded, docked });
   }
 
   function applyFontSize(size: FontSize): void {
@@ -2577,6 +2605,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
       events.clear();
       panes.destroy();
       windowDrag?.destroy();
+      frameDrag?.destroy();
       cancelRecording();
       if (busy) void chat.abort(options.baseUrl, sessionId);
       tokens.destroy();

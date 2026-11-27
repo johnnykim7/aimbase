@@ -22,10 +22,10 @@ import {
 } from "./window-rect";
 
 /** 머리줄을 누르고 이만큼 넘게 움직여야 옮기기로 본다. 그냥 누른 것과 가른다. */
-const DRAG_START_PX = 3;
+export const DRAG_START_PX = 3;
 
 /** 머리줄에서 이것을 누른 것은 옮기기가 아니다. 기능이 머리줄에 붙인 단추도 여기 걸린다. */
-const INTERACTIVE = "button, a, input, textarea, select, label, [role='button'], [contenteditable='true']";
+export const INTERACTIVE = "button, a, input, textarea, select, label, [role='button'], [contenteditable='true']";
 
 /** 크게 보기에서는 CSS 가 화면을 채운다. 붙여 둔 자리가 남으면 그것을 이기므로 뗀다. */
 const PLACED_PROPS = ["left", "top", "right", "bottom", "width", "height", "max-height"];
