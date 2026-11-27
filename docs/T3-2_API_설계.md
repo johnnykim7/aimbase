@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.30 | 최종 수정: 2026-11-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206, CR-205
+> 설계 버전: 7.31 | 최종 수정: 2026-11-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206, CR-205, CR-204
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -1155,6 +1155,7 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 | GET | `/conversations` | 대화 세션 목록 조회 (페이징, 검색) | 🔒 |
 | GET | `/conversations/{sessionId}` | 대화 상세 (메시지 포함) | 🔒 |
 | DELETE | `/conversations/{sessionId}` | 대화 삭제 (Soft Delete + Redis 정리) [v4.4, CR-046] | 🔒 |
+| POST | `/conversations/purge` | 대화 일괄 완전 삭제(사용자, 사건 대화, 접두어 묶음) [v7.31, CR-204] | 🔒 관리자, API 키 |
 | GET | `/conversations/{sessionId}/meta` | 세션 메타데이터 조회 [v4.0, CR-029] | 🔒 |
 | PUT | `/conversations/{sessionId}/meta` | 세션 메타데이터 수정 [v4.0, CR-029] | 🔒 |
 
@@ -1176,6 +1177,8 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 ```
 
 **감사·과금 로그 (`tool_execution_log`/`usage_logs`/`audit_logs`/`traces`/`session_briefs`)는 보존**된다 (FK 미연결, 의도적). 휴지통 UI / 복구(restore) 엔드포인트 / 벌크 삭제 / 관리자 강제 삭제는 본 CR 범위 밖.
+
+[v7.31, CR-204] 삭제 표시된 대화와 메시지는 `chat.purge.retention-days`(기본 30일)가 지나면 「대화 일괄 완전 삭제」 절의 순서로 자동 완전 삭제한다. 보존한다고 적은 `tool_execution_log`, `traces`, `session_briefs` 도 그때 대화와 함께 지워진다. `usage_logs`, `audit_logs` 만 남는다.
 
 ### 세션 메타데이터 조회 [v4.0, CR-029]
 
@@ -4102,6 +4105,80 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 `/api/v1/knowledge-sources/**` 중 청크 원문 조회를 뺀 모든 창구는 위젯 토큰이면 403 `widget_forbidden`(BIZ-291). 관리 화면의 로그인 호출은 바뀌지 않는다.
 
 ---
+## 대화 일괄 완전 삭제 [v7.31, CR-204]
+
+설계 상세: [CR-204_대화_일괄_삭제_API_와_완전_삭제_LexFlow_R3.md](CR-204_대화_일괄_삭제_API_와_완전_삭제_LexFlow_R3.md) 3절. 소비앱 서버가 연동키로 부른다. 위젯 토큰은 403 `widget_forbidden`(BIZ-170).
+
+### 일괄 완전 삭제 API [PRD-650]
+
+`POST /api/v1/conversations/purge`. 권한은 테넌트 API 키(`X-API-Key` 또는 `Authorization: ApiKey`) 또는 로그인 역할 `ADMIN`, `SUPER_ADMIN`. 그 밖의 로그인은 403.
+
+요청 본문. 네 조건 중 하나 이상, 둘 이상이면 합집합.
+
+| 칸 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| user_ref | string(200자 이하) | 선택 | 이 값이 주인(`conversation_sessions.user_id`)인 대화 전부와 이 사람의 자료(BIZ-293) |
+| share_key | string | 선택 | 이 함께 보기 키의 대화. 글자 규칙은 BIZ-277 |
+| user_ref_prefix | string(200자 이하) | 선택 | 이 글자로 시작하는 모든 `user_ref` 의 대화와 자료 |
+| share_key_prefix | string(128자 이하) | 선택 | 이 글자로 시작하는 모든 함께 보기 키의 대화 |
+| dry_run | boolean | 선택, 기본 false | true 면 삭제하지 않고 맞는 대화 수와 사람 수만 돌려준다 |
+| limit | int | 선택 | 이번 호출에서 삭제할 대화 상한. 비우면 `chat.purge.batch-limit`(200). 그보다 크면 그 값으로 줄인다 |
+
+```json
+{"user_ref_prefix": "office-12:", "share_key_prefix": "lexflow:case:office-12:", "dry_run": false}
+```
+
+응답 200.
+
+```json
+{
+  "dry_run": false,
+  "completed": true,
+  "sessions": {"matched": 12, "deleted": 12, "remaining": 0, "failed": 0, "failed_session_ids": []},
+  "rows": {"messages": 340, "attachments": 5, "generated_images": 2, "documents": 1, "document_versions": 3,
+           "shares": 1, "feedback": 3, "memories": 4, "briefs": 2, "approvals": 0, "tool_results": 0,
+           "traces": 50, "tool_logs": 10},
+  "files": {"deleted": 11, "failed": 0},
+  "users": {"matched": 3, "preferences": 3, "memories": 7, "projects": 1, "project_files": 2,
+            "feedback": 4, "asker_names_cleared": 12}
+}
+```
+
+- `sessions.matched` 는 조건에 맞는 대화 전부(상한 무관, 삭제 표시된 것 포함), `deleted` 는 이번 호출에서 지운 수, `remaining` 은 남은 수, `failed` 는 파일을 지우지 못해 행을 남긴 대화 수(번호는 20개까지)
+- `users` 는 `user_ref` 나 `user_ref_prefix` 가 있는 요청에서 남은 대화가 0 일 때 한 번 처리하고 채운다. 그 전에는 `null`
+- `completed` 는 남은 수 0, 실패 0, 사람 자료 처리까지 끝났을 때 true. false 면 같은 본문으로 다시 부른다
+- `dry_run` 이면 `sessions.matched`, `users.matched` 만 채운다. 감사 기록도 남기지 않는다
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `purge_invalid:criteria` | 네 조건이 모두 비어 있음 |
+| 400 | `purge_invalid:share_key` | BIZ-277 글자 규칙 위반 |
+| 400 | `purge_invalid:share_key_prefix` | 비어 있음, 128자 초과, 글자 규칙 위반 |
+| 400 | `purge_invalid:user_ref` | 비어 있음, 200자 초과(`user_ref_prefix` 도 같은 코드) |
+| 400 | `purge_invalid:limit` | 1 보다 작음 |
+| 403 | `widget_forbidden` | 위젯 토큰 |
+
+**대화 한 건의 삭제 순서 (BIZ-292).** 한 건이 한 트랜잭션이다.
+
+1. 답이 돌고 있으면 멈춤(`CancellationRegistry.cancel`)
+2. 저장소 파일 삭제: 첨부 `chat_attachments.storage_path`, 그림 `chat_generated_images.storage_path`, 문서 판 `chat_document_versions.storage_path`, `source_storage_path`, 공유 사본 폴더(`chat_shares.snapshot_path` 의 부모). 지우지 못한 파일이 남아 있으면 이 대화는 실패로 두고 다음으로 가지 않는다
+3. DB 물리 삭제(삭제 표시 여부 무관): `conversation_messages`, `chat_attachments`, `chat_generated_images`, `chat_document_versions`, `chat_documents`, `chat_shares`, `message_feedback`, `session_briefs`, `conversation_memories`(session_id), `tool_result_storage`, `pending_approvals`, `traces`, `tool_execution_log`
+4. `conversation_sessions` 행 삭제
+5. Redis 대화 기록 삭제(`SessionStore.clearSession`)
+
+**조건에 맞는 대화 찾기 (BIZ-294).** `user_id = :ref`, `share_key = :key`, `user_id LIKE :p ESCAPE '\\'`, `share_key LIKE :p ESCAPE '\\'`. 접두어의 `\`, `%`, `_` 는 이스케이프해 글자 그대로 맞춘다. 생성 순으로 상한만큼 집는다.
+
+**사람 자료 삭제 (BIZ-293).** 남은 대화가 0 일 때 한 번. `chat_projects`(owner_ref)와 자료 파일, `widget_user_preferences`(user_ref), `conversation_memories`(user_id, 모든 종류), `message_feedback`(user_ref), 그리고 `conversation_messages.display` 에서 `asker.user_ref` 가 맞는 행의 `asker.user_name` 키를 뗀다(`display #- '{asker,user_name}'`).
+
+**감사 기록 (BIZ-296).** `AuditLogger.log("conversation_purge", 조건 요약, 호출자 id, null, {criteria, sessions, users, files})`.
+
+### 삭제 표시된 것의 자동 완전 삭제 [PRD-651]
+
+`ConversationPurgeScheduler`. 1시간마다, 기동 10분 뒤 처음, 캐시된 테넌트마다. 기준 시각은 지금에서 `chat.purge.retention-days`(기본 30일)를 뺀 시각.
+
+1. `conversation_sessions.deleted_at < 기준` 인 대화는 위 순서로 완전 삭제. 한 회차에 `chat.purge.batch-limit` 만큼
+2. 살아 있는 대화의 `conversation_messages.deleted_at < 기준` 인 행(되감긴 질문과 답)은 물리 삭제. 그 턴의 `chat_generated_images.deleted_at < 기준` 그림과 `chat_document_versions.deleted_at < 기준` 판은 파일과 행을 삭제
+3. 실패한 대화는 다음 회차에 다시 본다. 회차 결과(테넌트, 삭제 수, 실패 수)는 로그
 
 ## 작성 가이드
 

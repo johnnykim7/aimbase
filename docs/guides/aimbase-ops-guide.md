@@ -1,6 +1,6 @@
 # Aimbase 운용 가이드
 
-> **v3.46.0** | 2026-11-27 | Aimbase v8.18.0 기준
+> **v3.47.0** | 2026-11-27 | Aimbase v8.18.0 기준
 
 Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 소비앱 연동은 [aimbase-api-guide.md](aimbase-api-guide.md)를 참조하세요.
@@ -880,6 +880,8 @@ location /share/ { proxy_pass http://127.0.0.1:8280; }
 | `chat.share.ttl-days` | 7 | 기본 기한(일) |
 | `chat.share.max-ttl-days` | 30 | 요청으로 늘릴 수 있는 기한 상한 |
 | `chat.share.open-rate-per-minute` | 60 | 같은 주소에서 분당 열기 상한. 넘으면 429 |
+| `chat.purge.retention-days` | 30 | 삭제 표시된 대화, 되감긴 질문과 답, 삭제 표시된 그림과 문서 판을 삭제 시각부터 이 일수가 지나면 자동으로 완전 삭제합니다. 1시간마다 테넌트마다 돕니다 (CR-204) |
+| `chat.purge.batch-limit` | 200 | 일괄 완전 삭제 API 한 번과 자동 완전 삭제 한 회차에 지우는 대화 상한. API 요청의 `limit` 이 이보다 크면 이 값으로 줄입니다 (CR-204) |
 
 | 증상 | 원인 | 조치 |
 |---|---|---|
@@ -2339,6 +2341,7 @@ psql -U platform -h localhost -p 5432 aimbase_master \
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.47.0 | 2026-11-27 | **CR-204 대화 일괄 완전 삭제** (Chat 런타임 설정). `chat.purge.retention-days`(30), `chat.purge.batch-limit`(200). 삭제 표시된 대화는 그 일수 뒤 자동 완전 삭제, 소비앱 서버는 `POST /conversations/purge` 로 바로 완전 삭제 |
 | v3.46.0 | 2026-11-27 | **CR-206 사무소별 지식 자료** (§ 2-5). 위젯 토큰에 허용 자료를 싣는 운영 흐름. 위젯 토큰은 지식 자료 API 중 청크 원문 조회만 부른다 |
 | v3.46.0 | 2026-11-27 | **CR-205 채팅 분당 요청 한도** (§ 2-2). 위젯 토큰 요청을 따로 세는 구독 칸 `chatRpmLimit`, 플랜별 초기값 `plan.<플랜>.chat-rpm-limit`, 「구독 관리」 화면의 칸 |
 | v3.45.1 | 2026-11-19 | **CR-201 되돌리기 이미지 정리** (§ 2-8, § 2-10). wjbid, chaws 배포가 healthy 로 끝나면 이미지마다 `pre-<시각>` 태그를 최근 `PRE_IMAGE_KEEP` 개(기본 2)만 남기고 지운다. 지울 대상만 보는 명령 |
