@@ -3210,7 +3210,7 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **변경 타입**: 신규(채팅 칸, 구독의 채팅 분당 요청 한도) + 변경(구독 변경 API, 플랜 목록 API, 구독 관리 화면, 채팅창 429 문구)
 - **원본 요구사항**: `docs/origins/원본_요구사항_CR205_채팅_연결_별도_요청_한도_20261127.md`(LexFlow 검토 회신 2026-11-25 I9, R6, Q5. 컨타 lexflow-7434 브리핑)
 - **변경 내용**: 위젯 토큰으로 인증된 요청(채팅 요청)을 테넌트 분당 요청 한도와 별개의 채팅 칸으로 센다. 상한은 구독의 `chat_rpm_limit`(초기값은 플랜의 `plan.<플랜>.chat-rpm-limit`, 반영 때 기존 행은 `api_rpm_limit` 값). 응답 머리 `X-RateLimit-Scope`, 채팅 칸 429 본문 `chat_rate_limited` 와 `data.scope`. 구독 변경과 플랜 목록 API 에 `chatRpmLimit`. 「구독 관리」 화면에 칸, 채팅창은 429 때 남은 초와 다시 시도 안내
-- **결정**: 결정 1(요청 종류로 가름, 분리), 결정 2(59 lexflow 채팅 300, 테넌트 300 그대로) 승인 대기
+- **결정**: 결정 1(요청 종류로 가름, 분리), 결정 2(59 lexflow 채팅 300, 테넌트 300 그대로). 사용자 2026-11-27 23:30 승인(컨타 lexflow-7434 전달)
 - **영향 모듈**: `RateLimitFilter`, `SubscriptionEntity`, `SubscriptionPlanService`, `PlatformSettingsService`, `TenantOnboardingService`, `PlatformController`, FE `Subscriptions`, `PlatformSettings`, `types/tenant.ts`, 위젯 `widget-api.ts`, `widget.ts`, `strings.ts`, master V96
 - **영향도**: Medium (테넌트 칸 요청은 머리 하나와 429 본문 `data.scope` 가 늘 뿐 값과 문장은 그대로)
 - **영향 범위**: CR-013, CR-168, CR-169, CR-191 의 한도 규칙. LexFlow 안내서 부록 D
