@@ -1,0 +1,159 @@
+# CR-205: 채팅 연결 별도 요청 한도(LexFlow R6)
+
+- 발번: 2026-11-27
+- 원본 요구사항: `docs/origins/원본_요구사항_CR205_채팅_연결_별도_요청_한도_20261127.md`
+- 요청: 컨타 lexflow-7434 브리핑(2026-11-27 22:40). 요청 쪽은 LexFlow 검토 회신 2026-11-25 의 I9, R6, Q5
+- 앞 건: CR-013(테넌트 분당 요청 한도), CR-168(실행기 연결 신호 전용 칸), CR-169(구독 변경 API 와 화면의 한도), CR-191(플랜별 기본 한도), CR-058(위젯 토큰)
+- 규모: 중. 구독 행에 칸이 하나 늘고(master 마이그레이션), 구독 변경 API 와 플랜 목록 API 의 요청, 응답이 늘고, 한도 판정 필터가 요청 종류를 가르고, 「구독 관리」 화면과 채팅창 문구가 바뀐다. 새 테이블과 새 화면은 없다
+- 사용자 결정: 결정 1, 2 승인 대기
+- 상태: 설계중
+
+---
+
+## 1. 배경
+
+- LexFlow 는 서면 초안을 연동키(`X-API-Key`)로 부르고, 채팅은 Aimbase 채팅창(위젯 토큰)으로 붙인다. 두 쪽이 테넌트 `lexflow` 의 분당 300 을 함께 쓴다
+- LexFlow 회신 I9: 채팅이 몰리면 서면 초안이 429 를 받을 수 있다. R6: 채팅 한도를 분리하거나, 공유한다면 채팅에 별도 상한을 두어 서면 초안이 막히지 않게 해 달라. Q5: 채팅이 같은 300 을 공유하는가
+- 사용자 결정(2026-11-27): 요청된 기능을 다 구현한 뒤 회신한다. 이 건은 그중 R6, Q5 다
+
+## 2. 지금 동작 (코드 확인 2026-11-27, origin/dev b83dcb32)
+
+| 순번 | 자리 | 지금 동작 | 근거 |
+|---|---|---|---|
+| 1 | 한도 판정 | `/api/v1/**` 요청을 테넌트 하나의 칸(`rl:{tenant}:{분}`)으로 센다. 서면 초안 실행, 상태 조회, 채팅 질문, 지난 대화, 설정 조회가 모두 같은 칸이다 | `RateLimitFilter.java:111-113`, `TokenBucketRateLimiter.java:54` |
+| 2 | 상한 값 | 구독 행의 `api_rpm_limit`. 행이 없으면 기본 플랜의 `plan.<플랜>.api-rpm-limit`, 설정도 없으면 코드의 60 | `RateLimitFilter.java:145-149` |
+| 3 | 따로 세는 칸 | 실행기 연결 신호(등록, 상태 알림)만 전용 칸 `rl:agent-signal:{tenant}:{분}` 으로 따로 센다(CR-168). 요청 종류를 가르는 자리는 이것 하나다 | `RateLimitFilter.java:98-109` |
+| 4 | 요청 종류 식별 | 위젯 토큰(`type=widget`)으로 인증된 요청은 사용자 정보의 역할이 `WIDGET` 이다. 한도 판정 필터는 인증 뒤에 돌아 이 값을 볼 수 있다 | `JwtAuthenticationFilter.java:215-216`, `ChatOwner.java:30`, `RateLimitFilter.java:25-27` |
+| 5 | 연결별, 연동키별 | 없다. 연결은 요청 본문의 `connection_id` 나 사용자 참조로 오케스트레이터가 정하므로 필터에서는 모른다. 위젯 요청에는 연동키가 없다 | `ChatController.java:163` |
+| 6 | 429 응답 | 머리 `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`. 본문 `error` 는 영문 문장, `data` 에 `limit`, `current`, `retry_after_seconds` | `RateLimitFilter.java:116-135` |
+| 7 | 채팅창의 429 | 본문 `error` 를 그대로 오류 코드로 삼아 말풍선에 영문 문장을 보인다. 몇 초 뒤 다시 시도하면 되는지 모른다. 「다시 시도」 단추는 있다 | `widget-api.ts:18-28`, `widget.ts:662-665`, `widget.ts:1181-1183` |
+| 8 | lexflow 값 | 59 의 `lexflow` 는 pro, 300(2026-11-14 사용자 승인값, CR-191 3.1절) | CR-191 문서 |
+
+## 3. 결정
+
+### 결정 1. 한도 단위와 분리 방식
+
+1. 요청 종류로 가른다. 위젯 토큰으로 인증된 요청을 「채팅 요청」 으로 보고 테넌트 칸과 별개의 채팅 칸으로 센다. 채팅 칸의 상한은 테넌트마다 구독 행의 「채팅 분당 요청 한도」 이고, 초기값은 플랜의 `plan.<플랜>.chat-rpm-limit` 다. 분리이므로 채팅이 몰려도 서면 초안의 300 은 줄지 않는다(권장)
+2. 연결별(`cli-runner-lexflow-chat`)로 센다. 연결은 필터 뒤에서 정해지므로 질문 본문을 읽은 뒤에야 셀 수 있고, 지난 대화와 설정 조회처럼 연결이 없는 채팅창 요청은 걸러지지 않는다
+3. 연동키별로 센다. LexFlow 는 연동키 하나로 서면 초안과 위젯 토큰 발급을 다 부르고, 채팅창 요청에는 연동키가 없어 채팅을 가르지 못한다
+
+①을 권장하는 이유: LexFlow 가 말한 「연동키 기준 300」 은 서버가 연동키로 부르는 요청이고, 채팅은 채팅창이 위젯 토큰으로 부르는 요청이다. 인증 종류가 곧 두 흐름의 경계이고, 필터가 이미 그 값을 가지고 있다. 「공유하되 채팅에만 상한」 은 채팅이 상한만큼 서면 초안의 여유를 쓰므로 서면 초안 보호가 완전하지 않아 고르지 않는다.
+
+### 결정 2. 59 lexflow 운영값
+
+1. 채팅 분당 요청 한도 300, 테넌트 분당 요청 한도 300 그대로. 반영 때 기존 구독 행의 채팅 한도를 그 행의 분당 요청 한도로 채우므로 따로 바꿀 것이 없다. 채팅은 지금 상한과 같고 서면 초안은 300 을 혼자 쓰게 된다(권장)
+2. 채팅 한도를 300 보다 낮게 둔다(예: 120). 사무소 사용자 수와 질문 빈도를 아직 모른다
+3. 테넌트 분당 요청 한도를 올린다. 분리로 서면 초안이 보호되므로 지금 올릴 이유가 없다
+
+## 4. 설계 (결정 1, 2 의 ① 기준, 승인 뒤 확정)
+
+### 4.1 채팅 요청의 뜻 (BIZ-297)
+
+위젯 토큰(`type=widget`)으로 인증된 요청이다. 채팅창이 보내는 질문, 응답 중지, 지난 대화, 설정, 선호, 첨부, 읽어 주기, 음성 입장권, 산출물 내려받기가 모두 든다. 연동키(`X-API-Key`)와 로그인 토큰 요청은 지금처럼 테넌트 칸이다. 위젯 토큰 발급(`POST /api/v1/sessions/issue-widget-token`)은 소비앱 서버가 연동키로 부르므로 테넌트 칸이다. 실행기 연결 신호의 전용 칸(BIZ-141)은 그대로다.
+
+### 4.2 운영 설정 (master V96)
+
+| 키 | 초기값 | 설명 |
+|---|---|---|
+| plan.free.chat-rpm-limit | 60 | free 플랜의 채팅 분당 요청 한도. 0 은 무제한. 신규 테넌트와 플랜을 바꾼 테넌트부터 적용 |
+| plan.starter.chat-rpm-limit | 300 | |
+| plan.pro.chat-rpm-limit | 1000 | |
+| plan.enterprise.chat-rpm-limit | 0 | |
+
+- 초기값은 그 플랜의 `api-rpm-limit` 와 같다. 분리 자체가 보호이고, 플랜이 허용하는 빈도를 채팅에도 같게 둔다
+- 「운영 설정」 의 「플랜」 카드는 `plan.` 으로 시작하는 행을 다 보이므로 4행이 저절로 보인다. 카드 설명을 고친다
+- 저장 검사(BIZ-153): 플랜 목록의 이름마다 `api-rpm-limit` 와 `chat-rpm-limit` 두 행이 다 있어야 한다. 값은 0 이상 정수만 받는다
+- `ON CONFLICT DO NOTHING`. 운영에서 바꾼 값은 덮지 않는다
+
+### 4.3 구독 (BIZ-298)
+
+- `subscriptions.chat_rpm_limit INTEGER NOT NULL`. 반영 때 기존 행은 그 행의 `api_rpm_limit` 값으로 채운다(지금의 채팅 상한이 곧 테넌트 한도였으므로 바뀌는 값이 없다). DB 기본값을 두지 않는다. 값을 넣지 않는 경로가 생기면 조용히 무제한이 되는 대신 저장이 실패해 드러난다
+- 테넌트 생성: 플랜의 `chat-rpm-limit` 를 넣는다(`TenantOnboardingService`)
+- 구독 변경 `PUT /platform/subscriptions/{tenantId}`: `chatRpmLimit`(십진수로 받아 0 이상 정수만, `apiRpmLimit` 과 같은 검사와 문구 `chatRpmLimit must be an integer of 0 or greater.`). 다른 플랜으로 바꾸면 `chatRpmLimit` 도 그 플랜의 기본으로 바뀌고, 같은 플랜이면 그대로, 같이 보내면 보낸 값이다(BIZ-153 과 같은 규칙). 거절되면 같이 보낸 값도 저장하지 않는다
+- 구독 목록과 수정 응답에 `chatRpmLimit` 칸이 는다
+- 플랜 목록 `GET /platform/plans` 의 플랜마다 `chatRpmLimit` 이 는다
+
+### 4.4 한도 판정
+
+- 테넌트가 식별된 `/api/v1/**` 요청에서, 실행기 연결 신호가 아니고 사용자 정보의 역할이 `WIDGET` 이면 채팅 칸 `rl:chat:{tenant}:{분}` 으로 센다. 상한은 구독 행의 `chat_rpm_limit`, 행이 없으면 기본 플랜의 `plan.<플랜>.chat-rpm-limit`, 설정 행도 없으면(마이그레이션 전) 코드의 60(V96 의 free 시드와 같다). 0 은 세지 않고 통과한다(BIZ-142)
+- 그 밖의 요청은 지금처럼 테넌트 칸이다
+- 응답 머리: 두 칸 모두 `X-RateLimit-Limit`, `X-RateLimit-Remaining` 에 그 칸의 값을 싣고, 어느 칸인지 `X-RateLimit-Scope`(`tenant` 또는 `chat`)를 더한다. 테넌트 칸 응답에 머리 하나가 늘 뿐 값은 그대로다
+- 채팅 칸을 넘으면 429, `Retry-After`, 본문 `error` 는 `chat_rate_limited`, `data` 에 `limit`, `current`, `retry_after_seconds`, `scope: chat`. 테넌트 칸의 429 본문 `error` 문장은 그대로 두고 `data.scope: tenant` 만 더한다. LexFlow 서면 초안이 지금 읽는 모양이 바뀌지 않는다
+- 상한은 요청마다 구독 행을 읽으므로 재기동 없이 다음 요청부터 적용된다(BIZ-142)
+
+### 4.5 채팅창 표시
+
+- 429 응답의 `data.retry_after_seconds`(없으면 `Retry-After` 머리)를 오류에 담는다(`WidgetApiError.retryAfterSeconds`)
+- 오류 코드 `chat_rate_limited` 의 문구: 「질문이 많아 잠시 받을 수 없습니다. N초 뒤 「다시 시도」를 눌러 주세요」, 영어 「Too many requests right now. Try again in N seconds」. 그 밖의 429(테넌트 칸 문장 등)도 상태 코드가 429 면 같은 문구로 보인다
+- 「다시 시도」 단추는 지금 있는 것을 쓴다. 다시 시도는 새 요청으로 센다
+
+### 4.6 화면
+
+- 「구독 관리」(`/platform/subscriptions`): 표에 「채팅 분당 요청 한도」 칸(0 은 「무제한」), 편집 창에 같은 이름의 칸. 안내 「채팅창(위젯 토큰) 요청만 따로 셉니다. 저장하면 다음 요청부터 적용됩니다. 0 은 무제한입니다.」 편집 창은 네 칸이라 두 칸씩 두 줄이다
+- 「운영 설정」 플랜 카드 설명: 「플랜 목록, 처음 플랜, 플랜별 분당 요청 한도와 채팅 분당 요청 한도. 바꾼 한도는 신규 테넌트와 플랜을 바꾼 테넌트부터 적용됩니다.」
+- 「테넌트 관리」 생성 창은 바뀌지 않는다(플랜만 고르고 한도는 서버가 넣는다)
+
+### 4.7 마이그레이션 (master V96)
+
+1. `global_config` 에 4.2 의 4행(`ON CONFLICT DO NOTHING`)
+2. `subscriptions` 에 `chat_rpm_limit INTEGER` 추가, `UPDATE ... SET chat_rpm_limit = api_rpm_limit`, `SET NOT NULL`
+
+### 4.8 59 lexflow 반영 (결정 2 의 ①)
+
+마이그레이션이 `lexflow` 행을 300 으로 채운다. 따로 부를 API 가 없다. 반영 뒤 구독 목록으로 `lexflow` 의 두 값(300, 300)을 확인해 적는다.
+
+## 5. 예외·경계 상황
+
+| 순번 | 질문 | 이 CR 에서 그때 어떻게 되나 | 시험항목 |
+|---|---|---|---|
+| 1 | 취소, 보류, 다시 연 것, 만료된 것, 이미 끝난 것이 들어오면 | 만료된 위젯 토큰은 인증에서 401 로 끝나 어느 칸에도 세지 않는다. 429 를 받은 질문을 「다시 시도」 하면 새 요청으로 세고, 그 분 안이면 다시 429 와 남은 초를 보인다 | IT-01-048 |
+| 2 | 값이 비었거나 0 이거나 아직 없으면 | 채팅 한도 0 은 무제한이라 세지 않고 통과한다. 구독 행이 없으면 기본 플랜의 채팅 한도, 설정 행도 없으면(마이그레이션 전) 60. 구독 변경에 `chatRpmLimit` 을 보내지 않으면 그대로이고, 음수, 소수, 문자면 400 이며 같이 보낸 값도 저장하지 않는다. 플랜 설정 저장에서 채팅 한도 키가 빠진 플랜 이름은 저장 실패다 | IT-01-043, IT-01-044, IT-01-046 |
+| 3 | 두 사람이나 두 기기가 같은 것을 동시에 하면 | 같은 사무소의 여러 사용자가 동시에 질문해도 Redis 가 원자적으로 더하므로 상한을 넘는 요청만 429 다. 사용자별로 따로 세지는 않는다 | IT-01-042 |
+| 4 | 연결이 끊기거나 같은 요청이 두 번 오면 | 응답 스트림이 도중에 끊겨도 이미 센 1 은 그대로다. 같은 질문을 두 번 보내면 둘 다 센다. `Retry-After` 초 뒤에는 새 분이라 통과한다 | IT-01-042 |
+| 5 | 같은 데이터를 쓰는 다른 화면, 다른 CR 은 어떻게 되나 | 「구독 관리」 표와 편집 창에 칸이 늘고, 「운영 설정」 플랜 카드에 4행이 늘며, 플랜 저장 검사(CR-191)가 채팅 한도 키도 본다. 「테넌트 관리」 생성 창은 그대로다. 관리자 화면의 채팅 시험(로그인 토큰)과 실행기 연결 신호(CR-168)는 지금 칸 그대로다. 구독 목록 응답에 칸이 하나 늘어 기존 소비자는 영향이 없다 | IT-01-045, IT-01-046, IT-01-047 |
+| 6 | 실제 기기 화면 크기(태블릿, 좁은 PC 폭)에서 어떻게 보이나 | 「구독 관리」 표는 칸이 하나 늘어 좁은 폭에서 가로 스크롤이 생긴다(DataTable 기본). 편집 창은 두 칸씩 두 줄이다. 채팅창 문구는 말풍선 안 한 줄이고 좁은 폭에서는 줄이 바뀐다 | IT-01-047, IT-01-048 |
+| 7 | 상대 서버와 맞춘 약속은 몇 판이고, 바뀌면 어디가 따라 바뀌나 | LexFlow 안내서(2026-11-25) 부록 D 1행 「서면 초안, 상태 조회, 채팅이 동일한 한도 공유」 와 10행 「429 테넌트 분당 요청 한도 초과」 가 바뀐다. 서면 초안이 받는 429 의 머리와 본문 `error` 는 그대로이고 `X-RateLimit-Scope` 머리와 `data.scope` 가 는다. 바뀐 내용은 컨타에게 문서 경로로 알린다 | IT-01-042 |
+| 8 | 이 CR 이 따라야 하는 기존 규칙은 무엇이고 그대로 되나 | BIZ-141(연결 신호 전용 칸)은 채팅 칸보다 먼저 판정해 그대로다. BIZ-142(0 은 무제한, 음수와 정수 아닌 값은 400, 다음 요청부터 적용)를 채팅 한도에도 그대로 쓴다. BIZ-153(초기값은 플랜, 다른 플랜으로 바꿀 때만 채움, 같이 보내면 보낸 값, 플랜 설정을 바꿔도 기존 테넌트는 그대로)을 채팅 한도에도 그대로 쓴다. CR-013 의 `X-RateLimit-*` 머리는 유지한다 | IT-01-041, IT-01-044, IT-01-045 |
+| 9 | 위젯 토큰 발급 요청은 어느 칸인가 | 소비앱 서버가 연동키로 부르므로 테넌트 칸이다. 사용자 한 명이 로그인할 때 한 번, 토큰 기한마다 한 번이다 | IT-01-041 |
+| 10 | 반영 때 기존 테넌트의 채팅 한도는 무엇이 되나 | 그 행의 분당 요청 한도와 같은 값이다(59 lexflow 300, bp_wes 600, enterprise 0 은 0). 채팅은 지금 상한과 같고 다른 요청은 채팅이 쓰던 만큼 여유가 생긴다 | IT-01-049 |
+
+## 6. 바뀌는 파일
+
+| 순번 | 파일 | 바뀌는 것 |
+|---|---|---|
+| 1 | `db/migration/master/V96__cr205_chat_rpm_limit.sql` | 새 파일. 4.7 |
+| 2 | `domain/master/SubscriptionEntity.java` | `chatRpmLimit` |
+| 3 | `tenant/plan/SubscriptionPlanService.java` | `chatRpmLimitKey`, `chatRpmLimit(plan)`, `defaultPlanChatRpmLimit`, `PlanInfo.chatRpmLimit` |
+| 4 | `config/PlatformSettingsService.java` | 플랜 저장 검사가 채팅 한도 키도 본다 |
+| 5 | `tenant/onboarding/TenantOnboardingService.java` | 생성 때 플랜의 채팅 한도 |
+| 6 | `api/PlatformController.java` | `SubscriptionUpdateRequest.chatRpmLimit`, 검사, 플랜 변경 때 채움 |
+| 7 | `policy/RateLimitFilter.java` | 채팅 칸 판정, `X-RateLimit-Scope`, 429 본문 `scope`, `chat_rate_limited` |
+| 8 | `frontend/src/types/tenant.ts`, `pages/platform/Subscriptions.tsx`, `pages/platform/PlatformSettings.tsx` | 칸, 편집, 카드 설명 |
+| 9 | `packages/chat-widget-embed/src/widget-api.ts`, `widget.ts`, `strings.ts` | `retryAfterSeconds`, 429 문구 |
+| 10 | `static/widget/v1/*` | 위젯 빌드분 |
+| 11 | 단위시험 `RateLimitFilterTest`, `SubscriptionPlanServiceTest`, `PlatformControllerSubscriptionTest`(이름은 기존 시험 파일에 맞춘다) | TC-RL-009 ~ 014, TC-PLAN-013 ~ 017 |
+
+## 7. 시험
+
+### 7.1 단위시험
+
+T3-5 「채팅 분당 요청 한도 (CR-205)」 TC-RL-009 ~ 014, TC-PLAN-013 ~ 017.
+
+### 7.2 통합시험 시험항목
+
+영역 01 IT-01-041 ~ 049(`tools/testbook/items/items_01.py`). 구현 전에 만든다.
+
+### 7.3 로컬 확인
+
+맥 PG 의 master 에 V96 을 Flyway 로 올리고 로컬 앱을 기동해, 위젯 토큰 요청과 연동키 요청이 다른 칸으로 세어지는지, 채팅 한도를 1 로 낮춘 뒤 두 번째 질문이 429 와 문구를 보이는지, 구독 변경 API 와 「구독 관리」 화면에서 값이 바뀌는지 본다.
+
+## 8. 이 건에서 고치지 않는 것
+
+- 사용자(user_ref)별 채팅 상한. 요청에 없다. 필요하면 다음 건
+- 테넌트 분당 요청 한도 외의 플랜 쿼터(월 토큰, 최대 연결 등)와 플랜의 연결. CR-191 9절과 같다
+- 연결별, 연동키별 한도. 결정 1 의 ②, ③
+
+## 9. 진행
+
+- 2026-11-27 22:44 착수. origin/dev b83dcb32 의 작업 사본(`_worktrees/aimbase-cr205`, 가지 `cr205-chat-rate-limit`)에서 진행한다. 메인 폴더는 다른 창의 미커밋 수정이 있어 건드리지 않는다
+- 2026-11-27 결정 1, 2 승인 요청(컨타 lexflow-7434)

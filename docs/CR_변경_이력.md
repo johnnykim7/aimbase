@@ -157,6 +157,7 @@
 | CR-200 | https 화면에서 위젯 열기 | 결함 수정 | Low | - | 진행중 |
 | CR-201 | [운영 배포가 남기는 되돌리기용 이미지가 지워지지 않아 운영 서버 디스크가 참](CR-201_운영_배포가_남기는_되돌리기용_이미지가_지워지지_않아_운영_서버_디스크가.md) | 결함 수정 | Low | - | 진행중 |
 | CR-206 | [지식 자료 ID 토큰 결합, 사무소별 격리(LexFlow Q10)](CR-206_지식_자료_ID_토큰_결합_사무소별_격리_LexFlow_Q10.md) | 신규 + 결함 수정 | Medium | 59 fd977ac5 | 진행중 |
+| CR-205 | [채팅 연결 별도 요청 한도(LexFlow R6)](CR-205_채팅_연결_별도_요청_한도_LexFlow_R6.md) | 신규 | Medium | - | 설계중 |
 
 ---
 
@@ -3203,3 +3204,15 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **영향 설계서**: T1-1 v7.24(PRD-648, PRD-649, PRD-001), T1-3 v5.26(BIZ-290, BIZ-291), T1-7 v3.34(CR-206 묶음), T1-10 v1.11(지식 자료, 허용 자료, 기본 자료), T3-2 v7.30(토큰 발급 칸, 대화 요청 칸, 청크 원문 조회, 위젯 제한), T3-5 v4.28(TC-CHT-159 ~ 161), API 가이드 v3.46.0, 위젯 붙이기 가이드 § 1-3, 운용 가이드 v3.46.0, 시험항목 IT-28-001 ~ 004
 - **영향 없음 확인**: T1-5, T1-6(상태 전환, 이벤트 없음), T2-1, T2-2(새 라이브러리와 구현 규약 없음), T3-1(표 변경 없음), T3-3, T3-4(화면 변경 없음)
 - **상태**: 59 반영, 완료 처리 대기 (2026-11-28). 단위시험 75건 통과, 로컬 9경로와 59 거절 경로 확인(CR 문서 10절)
+
+### CR-205 | 채팅 연결 별도 요청 한도(LexFlow R6)
+- **대상 기능 ID**: PRD-652(신규), PRD-087, PRD-376, BIZ-297(신규), BIZ-298(신규)
+- **변경 타입**: 신규(채팅 칸, 구독의 채팅 분당 요청 한도) + 변경(구독 변경 API, 플랜 목록 API, 구독 관리 화면, 채팅창 429 문구)
+- **원본 요구사항**: `docs/origins/원본_요구사항_CR205_채팅_연결_별도_요청_한도_20261127.md`(LexFlow 검토 회신 2026-11-25 I9, R6, Q5. 컨타 lexflow-7434 브리핑)
+- **변경 내용**: 위젯 토큰으로 인증된 요청(채팅 요청)을 테넌트 분당 요청 한도와 별개의 채팅 칸으로 센다. 상한은 구독의 `chat_rpm_limit`(초기값은 플랜의 `plan.<플랜>.chat-rpm-limit`, 반영 때 기존 행은 `api_rpm_limit` 값). 응답 머리 `X-RateLimit-Scope`, 채팅 칸 429 본문 `chat_rate_limited` 와 `data.scope`. 구독 변경과 플랜 목록 API 에 `chatRpmLimit`. 「구독 관리」 화면에 칸, 채팅창은 429 때 남은 초와 다시 시도 안내
+- **결정**: 결정 1(요청 종류로 가름, 분리), 결정 2(59 lexflow 채팅 300, 테넌트 300 그대로) 승인 대기
+- **영향 모듈**: `RateLimitFilter`, `SubscriptionEntity`, `SubscriptionPlanService`, `PlatformSettingsService`, `TenantOnboardingService`, `PlatformController`, FE `Subscriptions`, `PlatformSettings`, `types/tenant.ts`, 위젯 `widget-api.ts`, `widget.ts`, `strings.ts`, master V96
+- **영향도**: Medium (테넌트 칸 요청은 머리 하나와 429 본문 `data.scope` 가 늘 뿐 값과 문장은 그대로)
+- **영향 범위**: CR-013, CR-168, CR-169, CR-191 의 한도 규칙. LexFlow 안내서 부록 D
+- **영향 설계서**: T1-1 v7.24(PRD-652, PRD-087, PRD-376), T1-3 v5.26(BIZ-297, BIZ-298), T1-7 v3.34(CR-205 묶음), T1-10 v1.11(용어 2개), T3-1 v4.28(subscriptions, global_config `plan.*.chat-rpm-limit`), T3-2 v7.30(공통 요청 한도, 구독 수정, 플랜 목록 응답), T3-3 v3.22(Subscriptions, PlatformSettings), T3-4 v3.21(구독 관리, 플랜 카드), T3-5 v4.28(TC-RL-009 ~ 014, TC-PLAN-013 ~ 017), API 가이드 v3.46.0(§ 5, § 17-3), 운용 가이드 v3.46.0(§ 2-2), 위젯 통합 가이드(§ 5), 시험항목 IT-01-041 ~ 049
+- **상태**: 설계중 (2026-11-27)

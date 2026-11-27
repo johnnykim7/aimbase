@@ -334,6 +334,7 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | `401 API Key is required` | BFF 가 JWT 로 Aimbase 호출 | 반드시 `X-API-Key` 헤더로 호출 |
 | `400 origin is not allowed` | 토큰 발급 body 의 `origin` 과 화이트리스트 불일치 | 둘을 맞춘다. 프로토콜·포트 포함 |
 | `403` 가 간헐 발생 | 위젯 토큰 만료 | 위젯이 자동 갱신하지만 네트워크 오류 시 실패 가능. `on.onTokenExpiring` 콜백에서 재시도 |
+| 답 대신 「질문이 많아 잠시 받을 수 없습니다. N초 뒤 다시 시도」 가 보인다 | 테넌트의 채팅 분당 요청 한도(위젯 토큰 요청만 따로 센다)를 넘어 429 (CR-205) | N초 뒤 「다시 시도」. 자주 보이면 Aimbase 운영자에게 「구독 관리」 의 채팅 분당 요청 한도 조정을 요청한다 |
 | `done` 이벤트에 citations 없음 | `rag-source-id` 미지정(토큰에도 허용 자료 없음), 검색 결과 0건, 또는 Aimbase 서버가 CR-206 전 판이라 이 칸을 받지 않음 | 속성이나 토큰 `rag_source_ids` 로 자료를 정하고 그 자료에 넣은 문서를 확인한다. 서버를 올린다 |
 | `404 rag_source_not_found` | 속성 `rag-source-id` 가 토큰 허용 자료 밖이거나 테넌트에 없는 자료 | BFF 가 실은 `rag_source_ids` 와 속성 값을 맞춘다. 사무소별 자료는 속성을 비우고 토큰에만 싣는다 (CR-206) |
 | 워크플로우 subscribe 연결은 되는데 이벤트 없음 | 이미 종료된 run | `workflow.snapshot` + `workflow.done` 1회씩만 오고 close 되는 정상 동작 |

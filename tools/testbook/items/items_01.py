@@ -4,6 +4,7 @@
 # CR-173 항목(IT-01-026 ~ 028)의 근거는 CR-173 문서 12절(키 없는 서버의 임베딩)과 13절(세션 없는 요청 뒤 실행기 프로세스)이다.
 # CR-191 항목(IT-01-031 ~ 039)의 근거는 T1-3 BIZ-153, T1-1 PRD-080, PRD-087, PRD-376, T3-2 테넌트 생성과 구독 수정과 플랜 목록 응답, T3-4 플랜, T3-5 TC-PLAN-001 ~ 012 다.
 # 대상 기능이 T1-1 에 행이 없어 req 를 비워 두고 src 에 CR 번호를 적는다.
+# CR-205 항목(IT-01-041 ~ 049)의 근거는 T1-1 PRD-652, T1-3 BIZ-297, BIZ-298, T3-2 공통 사항 요청 한도와 구독 수정과 플랜 목록 응답, T3-4 구독 관리와 플랜, T3-5 TC-RL-009 ~ 014, TC-PLAN-013 ~ 017 다.
 
 ITEMS = [
 
@@ -526,5 +527,131 @@ dict(id='IT-01-040', flow='운영 배포 되돌리기 이미지 정리', kind='�
      judge=['서버', '서버', '서버', '서버', '서버'],
      pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5]},
      req=[], src=['CR-201'], pri='Medium'),
+
+dict(id='IT-01-041', flow='채팅 분당 요청 한도', kind='정상', title='위젯 토큰 요청은 채팅 칸, 연동키와 로그인 토큰 요청과 위젯 토큰 발급은 테넌트 칸으로 센다',
+     pre='로컬 또는 개발기 서버. 채팅 한도 5, 테넌트 한도 5 인 테넌트 하나, 그 테넌트의 연동키(X-API-Key)와 위젯 토큰(연동키로 발급), 테넌트 관리자 로그인 토큰. 실행기 연결(cli-runner) 하나',
+     steps='1. 연동키로 워크플로우 목록 조회를 1번, 위젯 토큰 발급(POST /sessions/issue-widget-token)을 1번 부르고 응답 머리를 본다\n'
+           '2. 로그인 토큰으로 대화 목록 조회를 1번 부르고 응답 머리를 본다\n'
+           '3. 위젯 토큰으로 질문(POST /chat/completions), 지난 대화 목록, 선호 조회를 각 1번 부르고 응답 머리를 본다\n'
+           '4. 실행기가 보내는 연결 신호(agent 신호)의 응답 머리를 본다\n'
+           '5. Redis 의 rl: 으로 시작하는 키를 본다',
+     expect='1. 둘 다 X-RateLimit-Scope 가 tenant 이고 X-RateLimit-Remaining 이 4, 3 으로 줄어든다\n'
+            '2. X-RateLimit-Scope 가 tenant, Remaining 2\n'
+            '3. 셋 다 X-RateLimit-Scope 가 chat 이고 Remaining 이 4, 3, 2 로 줄어든다. 테넌트 칸 Remaining 은 2 그대로다\n'
+            '4. 연결 신호는 tenant 도 chat 도 아닌 전용 칸(BIZ-141)이라 두 칸의 Remaining 이 바뀌지 않는다\n'
+            '5. rl:{테넌트}:{분} 과 rl:chat:{테넌트}:{분} 두 키가 따로 있고 값이 3 과 3 이다',
+     judge=['서버', '서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5]},
+     req=['PRD-652', 'BIZ-297'], src=['CR-205'], pri='High'),
+
+dict(id='IT-01-042', flow='채팅 분당 요청 한도', kind='정상', title='채팅이 몰려 채팅 칸을 다 써도 같은 테넌트의 연동키 요청(서면 초안)은 거절되지 않는다',
+     pre='IT-01-041 과 같은 테넌트(채팅 한도 5, 테넌트 한도 300). 위젯 토큰 둘(사용자 둘)',
+     steps='1. 두 위젯 토큰으로 같은 분 안에 질문을 번갈아 6번 보낸다(여섯째는 응답 도중 연결을 끊는다)\n'
+           '2. 이어서 같은 분 안에 위젯 토큰으로 질문을 1번 더 보낸다\n'
+           '3. 같은 분 안에 연동키로 워크플로우 실행(서면 초안)을 1번 부른다\n'
+           '4. 다음 분에 위젯 토큰으로 질문을 1번 보낸다',
+     expect='1. 다섯째까지 200 이고 여섯째는 429 다. 끊은 요청도 1 로 센다\n'
+            '2. 429, X-RateLimit-Scope 가 chat\n'
+            '3. 200(또는 실행 접수), X-RateLimit-Scope 가 tenant, X-RateLimit-Remaining 이 299\n'
+            '4. 200, 채팅 칸 Remaining 이 4',
+     judge=['서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4]},
+     req=['PRD-652', 'BIZ-297'], src=['CR-205'], pri='High'),
+
+dict(id='IT-01-043', flow='채팅 분당 요청 한도', kind='예외', title='채팅 칸을 넘으면 429 본문이 chat_rate_limited 이고, 테넌트 칸 429 본문은 그대로이며, 0 은 무제한이다',
+     pre='채팅 한도 1, 테넌트 한도 1 인 테넌트와 그 위젯 토큰, 연동키',
+     steps='1. 위젯 토큰으로 질문을 2번 보내고 둘째의 상태, 머리, 본문을 본다\n'
+           '2. 연동키로 워크플로우 목록 조회를 2번 부르고 둘째의 상태, 머리, 본문을 본다\n'
+           '3. 구독 변경 API 로 chatRpmLimit 을 0 으로 바꾸고 위젯 토큰으로 질문을 5번 보낸다',
+     expect='1. 429, Retry-After 와 X-RateLimit-Scope: chat, 본문 success false, error 가 chat_rate_limited, data 에 limit 1, current 2, retry_after_seconds, scope chat\n'
+            '2. 429, X-RateLimit-Scope: tenant, 본문 error 가 Rate limit exceeded. Max 1 requests per minute. 이고 data.scope 가 tenant\n'
+            '3. 다섯 번 다 200 이고 응답 머리에 X-RateLimit-Limit 이 없다',
+     judge=['서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3]},
+     req=['PRD-652', 'BIZ-297'], src=['CR-205'], pri='High'),
+
+dict(id='IT-01-044', flow='채팅 분당 요청 한도', kind='정상', title='채팅 상한은 구독 행, 없으면 기본 플랜의 설정, 설정도 없으면 60 이다',
+     pre='로컬 서버. 구독 행이 있는 테넌트 A(chat_rpm_limit 20), 구독 행이 없는 테넌트 B 와 각 위젯 토큰. plan.default 가 free',
+     steps='1. A 의 위젯 토큰으로 질문을 1번 보내고 X-RateLimit-Limit 을 본다\n'
+           '2. plan.free.chat-rpm-limit 을 30 으로 두고 B 의 위젯 토큰으로 질문을 1번 보낸다\n'
+           '3. plan.free.chat-rpm-limit 행을 DB 에서 지우고 B 로 1번 더 보낸다(끝나면 60 으로 되살린다)',
+     expect='1. X-RateLimit-Limit 20, Scope chat\n'
+            '2. X-RateLimit-Limit 30\n'
+            '3. X-RateLimit-Limit 60',
+     judge=['서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3]},
+     req=['BIZ-297'], src=['CR-205'], pri='Medium'),
+
+dict(id='IT-01-045', flow='채팅 분당 요청 한도', kind='정상', title='구독 변경 API 의 chatRpmLimit 은 다음 요청부터 적용되고, 틀린 값은 400, 플랜을 바꾸면 그 플랜의 값으로 바뀐다',
+     pre='플랫폼 관리자 토큰. free 플랜(60, 채팅 60)인 테넌트와 그 위젯 토큰. plan.pro.chat-rpm-limit 1000',
+     steps='1. PUT /platform/subscriptions/{tenantId} 에 {"chatRpmLimit": 7} 을 보내고 바로 위젯 토큰으로 질문을 1번 보낸다\n'
+           '2. {"chatRpmLimit": -1}, {"chatRpmLimit": 1.5}, {"chatRpmLimit": "abc"}, {"maxConnections": 9, "chatRpmLimit": -1} 을 차례로 보낸다\n'
+           '3. {"plan": "pro"} 를 보내고 구독을 조회한다\n'
+           '4. {"plan": "pro"} 를 다시 보내고, 이어서 {"plan": "free", "chatRpmLimit": 120} 을 보내고 구독을 조회한다',
+     expect='1. 200 이고 응답 본문 chatRpmLimit 7. 질문의 X-RateLimit-Limit 이 7 이다(재기동 없이)\n'
+            '2. 넷 다 400 이고 error 가 chatRpmLimit must be an integer of 0 or greater. 이며 maxConnections 도 바뀌지 않았다\n'
+            '3. apiRpmLimit 1000, chatRpmLimit 1000\n'
+            '4. 같은 플랜은 그대로(1000). free 로 바꾸며 보낸 값이 이겨 apiRpmLimit 60, chatRpmLimit 120',
+     judge=['서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4]},
+     req=['PRD-087', 'BIZ-298'], src=['CR-205'], pri='High'),
+
+dict(id='IT-01-046', flow='채팅 분당 요청 한도', kind='예외', title='플랜 목록에 chatRpmLimit 이 들고, 채팅 한도 설정 행이 없는 플랜 이름이나 음수는 플랜 설정 저장에서 거절된다',
+     pre='플랫폼 관리자 토큰. 운영 설정 플랜 카드가 초기값(60, 300, 1000, 0)',
+     steps='1. GET /platform/plans 를 부른다\n'
+           '2. 운영 설정 저장 API 로 plan.codes 를 free,starter,pro,enterprise,gold 로 보낸다(gold 의 chat-rpm-limit 행은 없고 api-rpm-limit 행만 미리 넣어 둔다)\n'
+           '3. plan.pro.chat-rpm-limit 을 -1 로 보낸다\n'
+           '4. plan.pro.chat-rpm-limit 을 0 으로 보내고 다시 1000 으로 보낸다',
+     expect='1. 200 이고 plans 의 모든 플랜에 apiRpmLimit 과 chatRpmLimit 이 있다. free 60/60, starter 300/300, pro 1000/1000, enterprise 0/0\n'
+            '2. 400 이고 저장되지 않는다(plan.codes 가 그대로)\n'
+            '3. 400 이고 저장되지 않는다\n'
+            '4. 둘 다 200 이고 플랜 목록의 pro chatRpmLimit 이 0, 다음에 1000 이다',
+     judge=['서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4]},
+     req=['PRD-376', 'BIZ-298'], src=['CR-205'], pri='Medium'),
+
+dict(id='IT-01-047', flow='채팅 분당 요청 한도 화면', kind='정상', title='「구독 관리」 표와 편집 창에 「채팅 분당 요청 한도」 가 보이고 저장하면 바뀐다',
+     pre='로컬 화면, 플랫폼 관리자 로그인. 채팅 한도 300 인 테넌트와 채팅 한도 0 인 테넌트(끝나면 바꾼 값을 되돌린다)',
+     steps='1. 구독 관리를 연다\n'
+           '2. 채팅 한도 300 인 테넌트의 편집 단추를 누른다\n'
+           '3. 「채팅 분당 요청 한도」 를 120 으로 바꿔 저장한다\n'
+           '4. 창 폭을 1024 로 줄여 표를 본다',
+     expect='1. 표에 「분당 요청 한도」 다음에 「채팅 분당 요청 한도」 칸이 있고, 300 인 행은 300, 0 인 행은 「무제한」 으로 보인다\n'
+            '2. 편집 창이 두 칸씩 두 줄이고 「채팅 분당 요청 한도」 에 300 이 있으며, 칸 아래 「채팅창(위젯 토큰) 요청만 따로 셉니다. 저장하면 다음 요청부터 적용됩니다. 0 은 무제한입니다.」 가 보인다\n'
+            '3. 창이 닫히고 표의 그 행이 120 으로 바뀐다. 「분당 요청 한도」 는 그대로다\n'
+            '4. 칸이 잘리지 않고 표가 가로로 넘치면 가로 스크롤이 생긴다',
+     judge=['화면', '화면', '화면', '화면'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4]},
+     req=['PRD-652'], src=['CR-205'], pri='Medium'),
+
+dict(id='IT-01-048', flow='채팅 분당 요청 한도 화면', kind='예외', title='채팅창이 429 를 받으면 남은 초와 함께 다시 시도 안내를 보이고, 만료 토큰의 401 은 그대로다',
+     pre='채팅 한도 1 인 테넌트의 위젯을 띄운 소비앱 화면(ko). 같은 테넌트의 만료된 위젯 토큰 하나',
+     steps='1. 질문을 보내 답을 받은 뒤 같은 분 안에 질문을 1번 더 보낸다\n'
+           '2. 안내에 적힌 초가 지난 뒤 「다시 시도」 를 누른다\n'
+           '3. 위젯 언어를 en 으로 바꿔 1 을 되풀이한다\n'
+           '4. 만료된 위젯 토큰으로 위젯을 띄워 질문을 보낸다',
+     expect='1. 답 자리에 「질문이 많아 잠시 받을 수 없습니다. N초 뒤 「다시 시도」를 눌러 주세요」 가 보이고 N 은 응답의 retry_after_seconds 와 같다. 보낸 질문은 지워지지 않는다\n'
+            '2. 질문이 다시 가고 답이 온다\n'
+            '3. 「Too many requests right now. Try again in N seconds」\n'
+            '4. 429 문구가 아니라 기존 인증 만료 처리(토큰 갱신 또는 401 안내)가 그대로다',
+     judge=['화면', '화면', '화면', '화면'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4]},
+     req=['PRD-652'], src=['CR-205'], pri='High'),
+
+dict(id='IT-01-049', flow='채팅 분당 요청 한도', kind='정상', title='V96 반영 뒤 이미 있는 테넌트의 채팅 한도는 그때의 분당 요청 한도와 같고 운영 설정에 채팅 한도 4행이 있다',
+     pre='V95 까지 올라간 master DB 사본(구독 행 둘 이상, 분당 요청 한도가 서로 다름)과 CR-205 가 든 서버',
+     steps='1. 반영 전 subscriptions 의 tenant_id, api_rpm_limit 을 적어 둔다\n'
+           '2. 서버를 띄워 Flyway 를 돌리고 flyway_schema_history 의 마지막 행을 본다\n'
+           '3. subscriptions 의 tenant_id, api_rpm_limit, chat_rpm_limit 을 본다\n'
+           '4. global_config 의 plan. 으로 시작하는 행을 본다\n'
+           '5. 59 의 lexflow 테넌트 구독을 조회한다',
+     expect='1. (기록)\n'
+            '2. 마지막 행이 V96 이고 success 다\n'
+            '3. 모든 행의 chat_rpm_limit 이 같은 행의 api_rpm_limit 과 같고 NULL 이 없다\n'
+            '4. plan.free.chat-rpm-limit 60, plan.starter.chat-rpm-limit 300, plan.pro.chat-rpm-limit 1000, plan.enterprise.chat-rpm-limit 0 이 있고 기존 api-rpm-limit 4행은 그대로다\n'
+            '5. apiRpmLimit 300, chatRpmLimit 300',
+     judge=['서버', '서버', '서버', '서버', '서버'],
+     pair={1: [1], 2: [2], 3: [3], 4: [4], 5: [5]},
+     req=['BIZ-298'], src=['CR-205'], pri='High'),
 
 ]

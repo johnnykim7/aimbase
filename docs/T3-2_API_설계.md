@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.30 | 최종 수정: 2026-11-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206
+> 설계 버전: 7.30 | 최종 수정: 2026-11-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206, CR-205
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -16,6 +16,7 @@
 - **응답 래퍼**: `ApiResponse<T>` → `{success, data, error, pagination}`
 - **페이지네이션**: `{page, size, totalElements, totalPages}`
 - **에러 코드**: HTTP 상태 코드 (400, 401, 403, 404, 409, 500)
+- **요청 한도** [CR-013, CR-205]: 테넌트가 식별된 요청은 분당 요청 한도를 센다. 위젯 토큰으로 인증된 요청(채팅 요청, BIZ-297)은 채팅 칸, 그 밖은 테넌트 칸이다. 응답 머리 `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Scope`(`tenant` 또는 `chat`). 넘으면 429, `Retry-After`, 본문 `{success:false, error, data:{limit, current, retry_after_seconds, scope}}`. 채팅 칸의 `error` 는 `chat_rate_limited`, 테넌트 칸의 `error` 는 `Rate limit exceeded. Max N requests per minute.` 다. 실행기 연결 신호는 전용 칸(BIZ-141)
 - **날짜 형식**: ISO 8601 (YYYY-MM-DDTHH:mm:ssZ)
 
 ### 공통 응답 구조
@@ -1316,7 +1317,7 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 | DELETE | `/platform/tenants/{id}` | 테넌트 삭제 (디프로비저닝) | 🔒 Super Admin |
 | GET | `/platform/subscriptions` | 구독 목록 조회 | 🔒 Super Admin |
 | PUT | `/platform/subscriptions/{tenantId}` | 구독 수정 (쿼터 변경) | 🔒 Super Admin |
-| GET | `/platform/plans` | 플랜 목록과 플랜별 분당 요청 한도 [CR-191] | 🔒 Super Admin |
+| GET | `/platform/plans` | 플랜 목록과 플랜별 분당 요청 한도, 채팅 분당 요청 한도 [CR-191, CR-205] | 🔒 Super Admin |
 | GET | `/platform/usage` | 플랫폼 사용량 대시보드 | 🔒 Super Admin |
 
 #### 테넌트 생성 요청 스키마
@@ -1352,20 +1353,21 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| plan | String | 선택 | 구독 플랜. 운영 설정 `plan.codes` 의 이름. 다른 플랜으로 바꾸면 `apiRpmLimit` 도 그 플랜의 기본 한도로 바뀐다 [CR-191] |
+| plan | String | 선택 | 구독 플랜. 운영 설정 `plan.codes` 의 이름. 다른 플랜으로 바꾸면 `apiRpmLimit` 도 그 플랜의 기본 한도로 바뀐다 [CR-191]. `chatRpmLimit` 도 같다 [CR-205] |
 | llmMonthlyTokenQuota | Long | 선택 | 월 토큰 쿼터 |
 | maxConnections | Integer | 선택 | 최대 연결 수 |
 | maxKnowledgeSources | Integer | 선택 | 최대 지식소스 수 |
 | maxWorkflows | Integer | 선택 | 최대 워크플로우 수 |
 | storageGb | Integer | 선택 | 스토리지 (GB) |
 | apiRpmLimit | Integer | 선택 | 분당 요청 한도. 0 은 무제한. 보내지 않으면 그대로 둔다 [CR-169]. 플랜과 같이 보내면 이 값을 쓴다 [CR-191] |
+| chatRpmLimit | Integer | 선택 | 채팅 분당 요청 한도(위젯 토큰 요청의 칸). 0 은 무제한. 보내지 않으면 그대로 둔다. 플랜과 같이 보내면 이 값을 쓴다. 검사와 거절은 `apiRpmLimit` 과 같고 문구는 `chatRpmLimit must be an integer of 0 or greater.` 다(BIZ-298) [CR-205] |
 
 - `apiRpmLimit` 이 음수, 소수, 정수 범위 밖이면 400, 본문 `error` 는 `apiRpmLimit must be an integer of 0 or greater.` 이다. 숫자가 아니면 요청 본문 해석 오류로 400 이다. 어느 경우든 같이 보낸 값도 저장하지 않는다(BIZ-142)
 - 재기동 없이 다음 요청부터 적용된다. 그 분에 이미 센 수는 그대로다(BIZ-142)
-- 구독 목록과 수정 응답의 칸 이름은 `tenantId`, `plan`, `llmMonthlyTokenQuota`, `maxConnections`, `maxKnowledgeSources`, `maxWorkflows`, `storageGb`, `maxUsers`, `connectionManagementMode`, `apiRpmLimit`, `validFrom`, `validUntil`, `createdAt`, `updatedAt` 이다
+- 구독 목록과 수정 응답의 칸 이름은 `tenantId`, `plan`, `llmMonthlyTokenQuota`, `maxConnections`, `maxKnowledgeSources`, `maxWorkflows`, `storageGb`, `maxUsers`, `connectionManagementMode`, `apiRpmLimit`, `chatRpmLimit` [CR-205], `validFrom`, `validUntil`, `createdAt`, `updatedAt` 이다
 - 플랜을 보냈을 때(BIZ-153) [CR-191]: 다른 플랜이고 `apiRpmLimit` 이 없으면 새 플랜의 기본 한도를 넣는다. 같은 플랜이면 한도는 그대로다. 목록에 없는 플랜은 400(본문 `error` 는 생성과 같다)이고 같이 보낸 값도 저장하지 않는다
 
-#### 플랜 목록 응답 [CR-191]
+#### 플랜 목록 응답 [CR-191, CR-205]
 
 `GET /platform/plans`
 
@@ -1375,10 +1377,10 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
   "data": {
     "defaultPlan": "free",
     "plans": [
-      {"code": "free", "apiRpmLimit": 60},
-      {"code": "starter", "apiRpmLimit": 300},
-      {"code": "pro", "apiRpmLimit": 1000},
-      {"code": "enterprise", "apiRpmLimit": 0}
+      {"code": "free", "apiRpmLimit": 60, "chatRpmLimit": 60},
+      {"code": "starter", "apiRpmLimit": 300, "chatRpmLimit": 300},
+      {"code": "pro", "apiRpmLimit": 1000, "chatRpmLimit": 1000},
+      {"code": "enterprise", "apiRpmLimit": 0, "chatRpmLimit": 0}
     ]
   }
 }

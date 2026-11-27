@@ -725,6 +725,7 @@ DELETE /api/v1/workflows/{id}
 | 401 | 토큰 만료 또는 잘못된 인증 | 재로그인 |
 | 403 | 권한 없음, `X-Tenant-Id` 누락, API Key 만료 | 인증 헤더 확인 |
 | 404 | 리소스 없음 | ID 확인 |
+| 429 | 분당 요청 한도 초과. `X-RateLimit-Scope` 가 `tenant` 면 테넌트 한도, `chat` 이면 채팅(위젯 토큰 요청) 한도 (CR-013, CR-205) | `Retry-After` 초 뒤 재시도. 채팅 칸 본문 `error` 는 `chat_rate_limited`, 테넌트 칸은 `Rate limit exceeded. Max N requests per minute.` 문장. 두 칸은 서로 세지 않는다 (§ 17-3) |
 | 503 | RAG 사이드카 미기동 | 사이드카 상태 확인 (port 8002) |
 | 503 | `connection_group_unavailable:retry_after=<시각>` 연결 묶음에 고를 커넥션이 없음 (CR-161) | `retry_after` 뒤에 다시 요청 (§ 25-3) |
 | 503 | `cli_account_token_missing:`, `cli_account_token_expired:` 단일 CLI 커넥션의 계정에 1년 토큰이 없거나 기한이 지남 (CR-196) | 다시 보내도 같다. Aimbase 담당에게 알린다. 연결 묶음을 쓰면 다른 계정으로 넘어간다 (§ 25-3) |
@@ -1502,6 +1503,9 @@ curl -X POST $AIMBASE/api/v1/sessions/issue-widget-token \
 ### 17-3. 위젯 토큰으로 Aimbase API 호출
 
 브라우저는 `Authorization: Bearer <token>` 헤더, SSE 는 `?access_token=<token>` 쿼리로 전달 (EventSource 가 커스텀 헤더를 못 다루므로). **access 토큰은 쿼리 전달 금지**(로그 유출 리스크) — 위젯 토큰만 쿼리 파라미터를 수용한다.
+
+
+**요청 한도** (CR-205, BIZ-297): 위젯 토큰으로 부르는 요청은 테넌트 분당 요청 한도와 별개의 「채팅 분당 요청 한도」 로 셉니다. 소비앱 서버가 연동키로 부르는 요청(워크플로우 실행, 상태 조회, 위젯 토큰 발급)이 채팅 때문에 429 를 받지 않습니다. 응답 머리 `X-RateLimit-Scope: chat`, 넘으면 429 와 `Retry-After`, 본문 `{"success":false,"error":"chat_rate_limited","data":{"limit":300,"current":301,"retry_after_seconds":12,"scope":"chat"}}`. 위젯은 이 응답을 받으면 남은 초와 함께 다시 시도 안내를 보입니다. 한도 값은 Aimbase 운영자가 「구독 관리」 에서 바꿉니다.
 
 ### 17-4. 채팅 + RAG Citations — `POST /api/v1/chat/completions`
 
@@ -3520,6 +3524,7 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
 | v3.46.0 | 2026-11-27 | **CR-206 위젯 지식 자료 토큰 결합** (§ 17-2, § 17-4, § 17-5, § 39). 토큰 발급 칸 `rag_source_ids`, 대화 요청 `rag_source_id` 를 서버가 받음(그 전 판은 버렸음), 허용 자료 밖은 404 `rag_source_not_found`, 지식 자료 API 는 청크 원문 조회 외 위젯 토큰 403 |
+| v3.46.0 | 2026-11-27 | **CR-205 채팅 분당 요청 한도** (§ 5, § 17-3). 위젯 토큰 요청은 테넌트 분당 요청 한도와 별개의 채팅 칸으로 센다. 응답 머리 `X-RateLimit-Scope`, 채팅 칸 429 본문 `chat_rate_limited` 와 `data.scope` |
 | v3.45.0 | 2026-11-16 | **CR-196 1년 토큰 API** (§ 13 LLM 연결, 실행기 계정 토큰). `GET /cli-account-tokens`, `GET`/`PUT /connections/{id}/account-token`, `GET`/`PUT /cli-token-recipients`, 플랫폼 `GET /platform/cli-account-tokens`. 플랫폼 관리자는 임퍼소네이션 토큰으로 테넌트 API 를 부른다 |
 | v3.44.0 | 2026-11-16 | **CR-196 CLI 계정 1년 토큰 오류** (§ 5, § 25-3). 오류 머리 `cli_account_token_missing`, `cli_account_token_expired`. 연결 묶음은 그 커넥션을 5분 빼고 다음으로 넘기고, 단일 커넥션 비실시간은 503 |
 | v3.43.1 | 2026-11-16 | **CR-194 위젯 보정** (§ 38-1, § 38-4, § 38-5). 연결 속성을 하나씩 바꿀 때 마지막 연결 설정만 쓰고 받기 전 질문은 기다림. 모달 위 위젯 누름과 복사, `data-aimbase-widget` 표시. 화면 키 없는 화면에서 `session-id` 가 없으면 지난 대화를 묻지 않음 |
