@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.30 | 최종 수정: 2026-11-27 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206
+> 설계 버전: 7.31 | 최종 수정: 2026-11-28 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206, CR-203
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -4100,6 +4100,36 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 `/api/v1/knowledge-sources/**` 중 청크 원문 조회를 뺀 모든 창구는 위젯 토큰이면 403 `widget_forbidden`(BIZ-291). 관리 화면의 로그인 호출은 바뀌지 않는다.
 
 ---
+## 채팅창 iframe 방식 [v7.31, CR-203]
+
+설계 상세 [CR-203_채팅창_iframe_방식_LexFlow_R1.md](CR-203_채팅창_iframe_방식_LexFlow_R1.md) 4.5, 5절. 새 API 는 없다. 정적 파일과 응답 머리글, 토큰 검사가 바뀐다.
+
+### 정적 파일 [PRD-660, PRD-661]
+
+| 경로 | 무엇 | 캐시 |
+|---|---|---|
+| `GET /widget/v1/frame.html` | 채팅창 전용 페이지 | no-cache |
+| `GET /widget/v1/aimbase-chat.frame.js` | 전용 페이지 스크립트(esm, 위젯 조각 공유) | no-cache |
+| `GET /widget/v1/aimbase-chat-frame.js` | 소비앱 화면에 넣는 연결 스크립트(iife 한 파일) | no-cache |
+
+### 전용 페이지 응답 머리글 [PRD-662]
+
+`/widget/*/frame.html` 응답에만 `Content-Security-Policy: frame-ancestors <허용 주소를 공백으로 이은 것>` 을 붙이고 `X-Frame-Options` 를 뺀다. 허용 주소는 `widget.allowed-origins`(PlatformSettingsService, 5분 캐시)다. 목록이 비면 `frame-ancestors 'none'`. 다른 모든 응답은 `X-Frame-Options: DENY` 그대로다(BIZ-300).
+
+### 위젯 토큰 origin 대조 [PRD-663]
+
+위젯 토큰(`type=widget`) 인증에서 origin claim 과 요청 `Origin` 이 다를 때:
+
+| Sec-Fetch-Site | 결과 |
+|---|---|
+| `same-origin` | 인증(전용 페이지에서 온 요청) |
+| 그 밖(`cross-site`, `same-site`, 없음) | 지금처럼 거절(경고 기록) |
+
+`Origin` 이 없는 요청(서버 간)은 지금처럼 인증한다(BIZ-302). 토큰 발급 `POST /api/v1/sessions/issue-widget-token` 은 바뀌지 않는다. iframe 방식에서도 `origin` 은 소비앱 화면의 출처다.
+
+### 부모 화면과 전용 페이지의 메시지
+
+브라우저 안 `postMessage` 규약이다. 서버는 관여하지 않는다. 표는 CR 문서 4.5 절.
 
 ## 작성 가이드
 

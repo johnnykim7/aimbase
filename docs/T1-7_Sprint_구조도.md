@@ -1,6 +1,6 @@
 # T1-7. Sprint 구조도
 
-> 설계 버전: 3.34 | 최종 수정: 2026-11-27 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-193, CR-194, CR-198, CR-196, CR-206
+> 설계 버전: 3.35 | 최종 수정: 2026-11-28 | 관련 CR: CR-006, CR-007, CR-011, CR-015, CR-016, CR-017, CR-026, CR-031, CR-032, CR-035, CR-037, CR-038, CR-147, CR-161, CR-164, CR-165, CR-166, CR-167, CR-169, CR-170, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-193, CR-194, CR-198, CR-196, CR-206, CR-203
 
 > **프로젝트**: Aimbase
 > **작성일**: 2026-03-10 (역설계)
@@ -883,6 +883,22 @@ flowchart LR
 | PRD-646 | 연결 관리 목록(검색, 상태 칩), 연결 수정 창 「1년 토큰」 칸, 만료 알림 수신자 카드 | 위 테넌트 API | 단위시험 TC-TOK-026, 027, 시험항목 IT-28-014 ~ 016, 020 | FE | 설계중 |
 | PRD-647 | 플랫폼 화면 실행기 계정 토큰(목록, 1년 토큰 창, Aimbase 관리 계정 수신자), 메뉴 | 위 플랫폼 API | 시험항목 IT-28-019, 020 | FE | 설계중 |
 | (레포 간) | bp-notification Aimbase 솔루션 키와 양식 둘 | | 59 에서 메일과 문자 한 번 | bp-notification | 요청 |
+
+---
+
+### CR-203: 채팅창 iframe 방식 (위젯 + BE) [v3.35, CR-203]
+
+설계 상세: [CR-203_채팅창_iframe_방식_LexFlow_R1.md](CR-203_채팅창_iframe_방식_LexFlow_R1.md) 8절. CR-202 가 버전 고정 주소를 정하면 전용 페이지 주소를 그 체계에 맞춘다.
+
+| 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
+|--------|---------|---------|---------|------|------|
+| PRD-660, PRD-661 | 위젯 `src/frame/frame-protocol.ts` 메시지 봉투, 검사, 토큰 origin claim 해독 | CR-177 위젯 틀 | 단위시험 TC-CHT-170 ~ 172 | 위젯 | 설계중 |
+| PRD-660 | 위젯 끼운 틀 모드(`widget.ts`, `styles.ts`, `web-component.ts`), `ContextProvider` 비동기, 전용 페이지 스크립트 `src/frame-page/`, `frame.html`, tsup 과 gradle 복사 | 위 규약 | 로컬 확인(전용 페이지 바로 열기 안내, 끼워서 대화) | 위젯 | 설계중 |
+| PRD-661 | 연결 스크립트 `src/frame-host/` 요소, iframe 상자, 가림막 끌기, 잡는 자리, 기억 | 위 규약, CR-198 `window-rect.ts` | 단위시험 TC-CHT-173, 174. 로컬 확인(끌기, 크기, 기억, panel, inline) | 위젯 | 설계중 |
+| PRD-662 | api `WidgetFrameHeaderWriter`, `SecurityConfig` 머리글 | | 단위시험 TC-FRM-004 ~ 006 | BE | 설계중 |
+| PRD-663 | api `JwtAuthenticationFilter` 같은 출처 판정 | | 단위시험 TC-FRM-001 ~ 003 | BE | 설계중 |
+| - | 위젯 붙이기 가이드 두 방식, API 가이드 17절, 운용 가이드 허용 주소, `index.html` | 위 전부 | 가이드 변경 이력 | 위젯 | 설계중 |
+| (레포 간) | LexFlow 안내서와 답변 문서에 요소 이름, 속성, 주소, 두 방식 차이 반영 | 59 반영 뒤 | 컨타 lexflow-7434 에 [알림] | lexflow | 대기 |
 
 ---
 
