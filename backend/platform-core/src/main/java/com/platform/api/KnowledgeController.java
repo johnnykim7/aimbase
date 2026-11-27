@@ -52,6 +52,8 @@ public class KnowledgeController {
     private final StorageService storageService;
     private final ProjectResourceRepository projectResourceRepository;
 
+    private final com.platform.session.RagSourceAccess ragSourceAccess;
+
     public KnowledgeController(KnowledgeSourceRepository knowledgeSourceRepository,
                                 IngestionLogRepository ingestionLogRepository,
                                 EmbeddingRepository embeddingRepository,
@@ -59,7 +61,9 @@ public class KnowledgeController {
                                 MCPRagClient mcpRagClient,
                                 VectorSearcher vectorSearcher,
                                 StorageService storageService,
-                                ProjectResourceRepository projectResourceRepository) {
+                                ProjectResourceRepository projectResourceRepository,
+                                com.platform.session.RagSourceAccess ragSourceAccess) {
+        this.ragSourceAccess = ragSourceAccess;
         this.knowledgeSourceRepository = knowledgeSourceRepository;
         this.ingestionLogRepository = ingestionLogRepository;
         this.embeddingRepository = embeddingRepository;
@@ -386,6 +390,8 @@ public class KnowledgeController {
             @PathVariable String sourceId,
             @PathVariable String chunkId
     ) {
+        // CR-206 BIZ-290: 허용 목록이 있는 위젯 토큰은 목록 안 자료만 읽는다
+        ragSourceAccess.requireReadable(sourceId);
         java.util.UUID chunkUuid;
         try {
             chunkUuid = java.util.UUID.fromString(chunkId);

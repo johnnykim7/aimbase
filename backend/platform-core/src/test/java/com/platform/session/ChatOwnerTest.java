@@ -72,4 +72,14 @@ class ChatOwnerTest {
     private static Authentication auth(UserPrincipal principal) {
         return new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
     }
+
+    @Test
+    void rag_source_ids_come_from_widget_tokens_only() {
+        UserPrincipal bound = new UserPrincipal("widget-sub", null, "tenant-a", ChatOwner.WIDGET_ROLE,
+                Map.of(ChatOwner.RAG_SOURCE_IDS_KEY, java.util.List.of("kb_a", "kb_b")));
+        assertThat(ChatOwner.ragSourceIdsOf(bound)).containsExactly("kb_a", "kb_b");
+        assertThat(ChatOwner.ragSourceIdsOf(widget(null))).isEmpty();
+        assertThat(ChatOwner.ragSourceIdsOf(login())).isEmpty();
+        assertThat(ChatOwner.ragSourceIdsOf(null)).isEmpty();
+    }
 }

@@ -44,7 +44,7 @@ class KnowledgeControllerSearchTest {
         controller = new KnowledgeController(
                 knowledgeSourceRepository, ingestionLogRepository, embeddingRepository,
                 ingestionPipeline, mcpRagClient, vectorSearcher, storageService,
-                projectResourceRepository);
+                projectResourceRepository, new com.platform.session.RagSourceAccess(knowledgeSourceRepository));
         KnowledgeSourceEntity source = new KnowledgeSourceEntity();
         source.setId("src-1");
         source.setName("axopm-entities");

@@ -72,4 +72,16 @@ class JwtProviderWidgetTest {
         assertThat(provider.getTokenType(widget)).isEqualTo("widget");
         assertThat(provider.getTokenType(access)).isEqualTo("access");
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-159 1, 6 허용 자료 목록은 주면 claim 에 실리고 비우면 없다")
+    void generateWidgetToken_carriesRagSourceIdsOnlyWhenGiven() {
+        String bound = provider.generateWidgetToken(
+                "t1", null, null, null, null, List.of("chat:stream"), null, 60L, List.of("kb_a", "kb_b"));
+        assertThat(provider.extractClaims(bound).get("rag_source_ids", List.class)).containsExactly("kb_a", "kb_b");
+
+        String unbound = provider.generateWidgetToken(
+                "t1", null, null, null, null, List.of("chat:stream"), null, 60L, List.of());
+        assertThat(provider.extractClaims(unbound).containsKey("rag_source_ids")).isFalse();
+    }
 }

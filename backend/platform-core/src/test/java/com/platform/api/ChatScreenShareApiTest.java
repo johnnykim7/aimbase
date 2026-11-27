@@ -59,6 +59,7 @@ class ChatScreenShareApiTest {
 
         @Mock private PlatformSettingsService settings;
         @Mock private HttpServletRequest http;
+        @Mock private com.platform.session.RagSourceAccess ragSources;
 
         private final JwtProvider jwtProvider = new JwtProvider(SECRET, 1800_000L, 604800_000L);
 
@@ -100,7 +101,7 @@ class ChatScreenShareApiTest {
             lenient().when(settings.getStringList(eq("widget.allowed-scopes"), any())).thenReturn(List.of("chat:stream"));
             lenient().when(settings.getInt("widget.token-ttl-seconds", 1800)).thenReturn(1800);
             lenient().when(settings.getInt("widget.token-max-ttl-seconds", 3600)).thenReturn(3600);
-            ResponseEntity<?> response = new WidgetTokenController(jwtProvider, settings).issueWidgetToken(req, http);
+            ResponseEntity<?> response = new WidgetTokenController(jwtProvider, settings, ragSources).issueWidgetToken(req, http);
             @SuppressWarnings("unchecked")
             Map<String, Object> body = (Map<String, Object>) ((ApiResponse<?>) Objects.requireNonNull(response.getBody())).data();
             return (String) body.get("token");
@@ -136,6 +137,7 @@ class ChatScreenShareApiTest {
         @Mock private com.platform.session.ChatSessionOwnership sessionAccess;
         @Mock private com.platform.session.SharedConversationService sharedConversations;
         @Mock private com.platform.chatdoc.DocumentEditService documentEditService;
+        @Mock private com.platform.session.RagSourceAccess ragSourceAccess;
         @InjectMocks private ChatController chatController;
 
         @Test

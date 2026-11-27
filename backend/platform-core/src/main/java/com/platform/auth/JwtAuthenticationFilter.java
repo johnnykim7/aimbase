@@ -212,6 +212,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String shareKey = claims.get("share_key", String.class);
             if (shareKey != null) widgetInfo.put(com.platform.session.ChatOwner.SHARE_KEY_KEY, shareKey);
         }
+        // CR-206: 허용 자료 목록은 사람이 아니라 사무소 단위라 user_ref 가 없어도 둔다(BIZ-290)
+        @SuppressWarnings("unchecked")
+        List<String> ragSourceIds = claims.get(com.platform.session.ChatOwner.RAG_SOURCE_IDS_KEY, List.class);
+        if (ragSourceIds != null && !ragSourceIds.isEmpty()) {
+            widgetInfo.put(com.platform.session.ChatOwner.RAG_SOURCE_IDS_KEY, List.copyOf(ragSourceIds));
+        }
         UserPrincipal principal = new UserPrincipal(
                 principalId, principalId, tenantId, com.platform.session.ChatOwner.WIDGET_ROLE, widgetInfo);
 

@@ -7,6 +7,7 @@ import com.platform.session.ChatRejectedException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -23,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -49,6 +51,7 @@ class ChatWidgetAccessTest {
 
     @Mock private com.platform.session.ChatSessionOwnership sessionAccess;
     @Mock private com.platform.session.SharedConversationService sharedConversations;
+    @Mock private com.platform.session.RagSourceAccess ragSourceAccess;
     @InjectMocks private ChatController chatController;
 
     @AfterEach
@@ -87,6 +90,40 @@ class ChatWidgetAccessTest {
         assertRejected(() -> chatController.completions(request("s-new", othersProject)),
                 HttpStatus.NOT_FOUND, "project_not_found");
         verifyNoInteractions(orchestrator, rewindService);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-160 2 허용 목록 밖 자료의 대화 요청은 응답을 시작하기 전에 404 rag_source_not_found")
+    void a_source_outside_the_token_list_is_404_before_answering() {
+        signIn(widget("u-77"));
+        doThrow(new ChatRejectedException(HttpStatus.NOT_FOUND, "rag_source_not_found"))
+                .when(ragSourceAccess).resolve("kb_other");
+
+        assertRejected(() -> chatController.completions(request("s-new", "kb_other", true)),
+                HttpStatus.NOT_FOUND, "rag_source_not_found");
+        verifyNoInteractions(orchestrator, rewindService, chatProjectService);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-160 6 정해진 자료가 ChatRequest.ragSourceId 에 실려 검색으로 간다")
+    void the_resolved_source_is_sent_with_the_request() {
+        signIn(widget("u-77"));
+        when(ragSourceAccess.resolve(null)).thenReturn("kb_a");
+        ArgumentCaptor<com.platform.orchestrator.ChatRequest> sent =
+                ArgumentCaptor.forClass(com.platform.orchestrator.ChatRequest.class);
+        when(orchestrator.chat(sent.capture())).thenThrow(new UnsupportedOperationException("stop"));
+
+        // 검색으로 보낸 요청만 본다. 모델을 부르는 자리에서 멈춘다
+        org.assertj.core.api.Assertions.catchThrowable(() -> chatController.completions(request("s-new", null, false)));
+
+        assertThat(sent.getValue().ragSourceId()).isEqualTo("kb_a");
+    }
+
+    private static ChatController.ChatCompletionRequest request(String sessionId, String ragSourceId, boolean stream) {
+        return new ChatController.ChatCompletionRequest(
+                null, sessionId, List.of(new ChatController.MessageDto("user", "질문")),
+                stream, false, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, ragSourceId);
     }
 
     private static ChatController.ChatCompletionRequest request(String sessionId, String chatProjectId) {

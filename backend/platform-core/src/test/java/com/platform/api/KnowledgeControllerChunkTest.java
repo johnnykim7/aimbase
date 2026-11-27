@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -49,7 +50,50 @@ class KnowledgeControllerChunkTest {
         controller = new KnowledgeController(
                 knowledgeSourceRepository, ingestionLogRepository, embeddingRepository,
                 ingestionPipeline, mcpRagClient, vectorSearcher, storageService,
-                projectResourceRepository);
+                projectResourceRepository, new com.platform.session.RagSourceAccess(knowledgeSourceRepository));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clear() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-161 1 허용 목록 토큰은 목록 안 자료의 청크를 읽는다")
+    void getChunk_allowsSourceInsideTokenList() {
+        signInWidget(List.of("src-1"));
+        UUID chunkId = UUID.randomUUID();
+        KnowledgeSourceEntity src = new KnowledgeSourceEntity();
+        src.setId("src-1");
+        src.setName("doc");
+        when(knowledgeSourceRepository.findById("src-1")).thenReturn(Optional.of(src));
+        when(embeddingRepository.findChunkDetail(eq("src-1"), any(UUID.class)))
+                .thenReturn(Optional.of(new EmbeddingRepository.ChunkDetail(
+                        chunkId, "src-1", "doc-1", 0, "내용", Map.of(), null, null)));
+
+        ApiResponse<Map<String, Object>> res = controller.getChunk("src-1", chunkId.toString());
+
+        assertThat(res.data().get("content")).isEqualTo("내용");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-161 2 목록 밖 자료의 청크는 있는지 보지 않고 404 rag_source_not_found")
+    void getChunk_returns404ForSourceOutsideTokenList() {
+        signInWidget(List.of("src-1"));
+
+        assertThatThrownBy(() -> controller.getChunk("src-2", UUID.randomUUID().toString()))
+                .isInstanceOf(com.platform.session.ChatRejectedException.class)
+                .hasMessage("rag_source_not_found");
+        org.mockito.Mockito.verifyNoInteractions(knowledgeSourceRepository, embeddingRepository);
+    }
+
+    private static void signInWidget(List<String> ragSourceIds) {
+        com.platform.auth.UserPrincipal principal = new com.platform.auth.UserPrincipal(
+                "widget-sub", null, "tenant-a", com.platform.session.ChatOwner.WIDGET_ROLE,
+                Map.of(com.platform.session.ChatOwner.RAG_SOURCE_IDS_KEY, ragSourceIds));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
     }
 
     @Test

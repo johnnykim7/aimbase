@@ -7,6 +7,7 @@ import com.platform.auth.JwtProvider;
 import com.platform.config.PlatformSettingsService;
 import com.platform.session.ChatKeys;
 import com.platform.session.ChatRejectedException;
+import com.platform.session.RagSourceAccess;
 import com.platform.tenant.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -32,10 +33,13 @@ public class WidgetTokenController {
 
     private final JwtProvider jwtProvider;
     private final PlatformSettingsService settings;
+    private final RagSourceAccess ragSources;
 
-    public WidgetTokenController(JwtProvider jwtProvider, PlatformSettingsService settings) {
+    public WidgetTokenController(JwtProvider jwtProvider, PlatformSettingsService settings,
+                                 RagSourceAccess ragSources) {
         this.jwtProvider = jwtProvider;
         this.settings = settings;
+        this.ragSources = ragSources;
     }
 
     @PostMapping("/issue-widget-token")
@@ -105,9 +109,13 @@ public class WidgetTokenController {
             throw new ChatRejectedException(HttpStatus.BAD_REQUEST, "widget_token_invalid:user_ref");
         }
 
-        // 6) 발급
+        // 6) CR-206: 허용 자료 목록. 모두 이 테넌트의 지식 자료여야 한다(BIZ-290)
+        List<String> ragSourceIds = ragSources.forToken(req.ragSourceIds);
+
+        // 7) 발급
         String token = jwtProvider.generateWidgetToken(
-                tenantId, req.projectId, req.userRef, userName, shareKey, grantedScopes, req.origin, ttl);
+                tenantId, req.projectId, req.userRef, userName, shareKey, grantedScopes, req.origin, ttl,
+                ragSourceIds);
         Instant expiresAt = Instant.now().plusSeconds(ttl);
         long refreshAfter = Math.max(60, ttl - 300); // exp - 5min
 
@@ -139,5 +147,8 @@ public class WidgetTokenController {
         public String userName;
         @JsonProperty("share_key")
         public String shareKey;
+        /** CR-206: 허용 자료 ID 목록. 첫 자료가 기본 자료(BIZ-290) */
+        @JsonProperty("rag_source_ids")
+        public List<String> ragSourceIds;
     }
 }

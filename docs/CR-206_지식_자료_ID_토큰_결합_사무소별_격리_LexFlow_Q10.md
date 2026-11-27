@@ -1,6 +1,6 @@
 # CR-206 지식 자료 ID 토큰 결합, 사무소별 격리(LexFlow Q10)
 
-> 설계 버전: 1.0 | 최종 수정: 2026-11-27 | 관련 CR: CR-206, CR-058, CR-194, CR-190
+> 설계 버전: 1.1 | 최종 수정: 2026-11-27 | 관련 CR: CR-206, CR-058, CR-194, CR-190
 
 - 원본 요구사항: [origins/원본_요구사항_CR206_지식_자료_ID_토큰_결합_20261127.md](origins/원본_요구사항_CR206_지식_자료_ID_토큰_결합_20261127.md)
 - 출처: LexFlow 검토 회신 2026-11-25 질문 Q10 「공통 자료(RAG)를 사무소별로 분리해 등록할 수 있는지요?」. AI 파트 답변 초안 4장 추가 개발 6번
@@ -93,7 +93,7 @@
 ### 3.5 공통 부품
 
 - `ChatOwner` 에 `RAG_SOURCE_IDS_KEY` 와 `ragSourceIdsOf(principal)` 을 둔다. `JwtAuthenticationFilter.authenticateWidget` 이 claim 을 위젯 정보에 담는다. user_ref 가 없는 토큰에도 담는다(자료 격리는 사람이 아니라 사무소 단위다)
-- `RagSourceAccess`(session 패키지, `ChatSessionOwnership` 과 같은 자리): `resolve(requested)` 가 3.2 표대로 자료 ID 를 정하거나 404 를 던지고, `requireReadable(sourceId)` 가 3.3 을 한다. 둘 다 `KnowledgeSourceRepository.findById` 로 테넌트 안 존재를 본다
+- `RagSourceAccess`(session 패키지, `ChatSessionOwnership` 과 같은 자리): `resolve(requested)` 가 3.2 표대로 자료 ID 를 정하거나 404 를 던지고, `requireReadable(sourceId)` 가 3.3 을 한다. 발급 때 목록 정리와 존재 확인은 `forToken(list)` 이다. 존재는 `KnowledgeSourceRepository.existsById` 로 본다(knowledge_sources 는 테넌트 DB 표)
 - 거절은 `ChatRejectedException` 으로 던진다. 전역 처리기가 `ApiResponse.error(code)` 로 돌려준다
 
 ## 4. 위젯
@@ -150,3 +150,20 @@
 | 일시 | 무엇 | 결과 |
 |---|---|---|
 | 2026-11-27 23:05 | origin/dev b83dcb32 조사. 대화 요청이 `rag_source_id` 를 받지 않는 것, 위젯 토큰이 지식 자료 API 전체에 열린 것을 확인 | 2절. 범위에 1.1 의 1번과 4번을 더함 |
+| 2026-11-27 23:15 | 단위시험. TC-CHT-159~161 을 `RagSourceAccessTest`, `KnowledgeWidgetGuardTest`(새 파일), `WidgetTokenControllerTest`, `JwtProviderWidgetTest`, `JwtAuthenticationFilterWidgetTest`, `ChatOwnerTest`, `ChatWidgetAccessTest`, `KnowledgeControllerChunkTest` 에 더함. 대화 요청 칸이 늘어 `ChatController` 시험 5개의 주입 목록도 고침 | 13개 클래스 75건 통과 |
+| 2026-11-27 23:22 | 로컬 확인. 워크트리 bootRun(local, 18206, Redis 도커 16206), 맥 PG 테넌트 `cr196_local`(V96)에 자료 `kb_office_a`, `kb_office_b` 두 행과 master `api_keys` 에 발급용 키를 넣고 curl 로 9경로 | 아래 표. 전부 3절대로 |
+| 2026-11-27 23:25 | 로컬 서버와 Redis 내림. 시험 행(자료 두 개, 키 한 개)은 맥 PG 에 남김 | 배포 대기 |
+
+로컬 확인 결과(2026-11-27 23:22, 18206):
+
+| 순번 | 요청 | 결과 |
+|---|---|---|
+| 1 | 발급 `rag_source_ids: ["kb_office_a", " ", "kb_office_b", "kb_office_a"]` | 200, claim `["kb_office_a", "kb_office_b"]` |
+| 2 | 발급 `["kb_office_a", "kb_other"]` | 400 `widget_token_invalid:rag_source_id` |
+| 3 | 발급, 칸 없음 | 200, claim 없음 |
+| 4 | 허용 토큰, 대화 `rag_source_id: kb_other` | 404 `rag_source_not_found` |
+| 5 | 허용 토큰, 대화 `kb_office_b` | 대조 통과, 검색 단계 진입. 503 `EmbeddingModel not available`(로컬에 임베딩 모델이 없어서. 59 와 운영은 있음) |
+| 6 | 허용 토큰, 대화에 자료 없음 | 기본 자료로 대조 통과, 검색 단계 진입(5 와 같은 503) |
+| 7 | 목록 없는 토큰, 대화 `kb_nope` / `kb_office_b` | 404 `rag_source_not_found` / 대조 통과(5 와 같은 503) |
+| 8 | 허용 토큰, 청크 `kb_office_b/chunks/<uuid>` / `kb_other/chunks/<uuid>` | 404 `Not Found`(자료는 통과, 청크가 없음) / 404 `rag_source_not_found` |
+| 9 | 위젯 토큰, 지식 자료 목록 / 상세 / 검색 | 모두 403 `widget_forbidden` |

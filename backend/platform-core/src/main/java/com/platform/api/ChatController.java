@@ -68,6 +68,7 @@ public class ChatController {
     private final com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService;
     private final com.platform.session.ChatSessionOwnership sessionAccess;
     private final com.platform.session.SharedConversationService sharedConversations;
+    private final com.platform.session.RagSourceAccess ragSourceAccess;
 
     public ChatController(OrchestratorEngine orchestrator,
                           WorkspaceProperties workspaceProperties,
@@ -88,7 +89,9 @@ public class ChatController {
                           com.platform.chatdoc.DocumentEditService documentEditService,
                           com.platform.orchestrator.approval.ApprovalDecisionService approvalDecisionService,
                           com.platform.session.ChatSessionOwnership sessionAccess,
-                          com.platform.session.SharedConversationService sharedConversations) {
+                          com.platform.session.SharedConversationService sharedConversations,
+                          com.platform.session.RagSourceAccess ragSourceAccess) {
+        this.ragSourceAccess = ragSourceAccess;
         this.approvalDecisionService = approvalDecisionService;
         this.sessionAccess = sessionAccess;
         this.sharedConversations = sharedConversations;
@@ -160,6 +163,8 @@ public class ChatController {
         validateWorkingDirectory(request.workingDirectory());
         // CR-194 BIZ-275: 들어갈 수 없는 대화는 응답을 시작하기 전에 거른다. 아직 없는 대화 번호(첫 질문)는 통과한다
         sessionAccess.requireIfExists(request.sessionId());
+        // CR-206 BIZ-290: 쓸 자료를 정한다. 토큰의 허용 목록 밖이거나 테넌트에 없는 자료면 응답을 시작하기 전에 404
+        String ragSourceId = ragSourceAccess.resolve(request.ragSourceId());
         String screenKey = validScreenKey(request.screenKey());
         // CR-194 BIZ-281: 계정 묶음이면 구성원 모두, 아니면 요청 연결 하나. 첫째가 능력(생각, 첨부, 그림)을 정한다
         List<String> targets = targetConnections(request);
@@ -219,7 +224,7 @@ public class ChatController {
                 request.stream(),
                 request.actionsEnabled(),
                 null,
-                null,
+                ragSourceId,
                 request.connectionId(),
                 toolFilter,
                 request.toolChoice(),
@@ -514,7 +519,9 @@ public class ChatController {
             // CR-181: 옆 창 문서 고치기(PRD-480). 비우면 평소 대화
             @JsonProperty("document_edit") com.platform.chatdoc.DocumentEditRequest documentEdit,
             // CR-194: 대화를 처음 저장할 때 남길 화면 키. 이미 있는 대화면 쓰지 않는다(BIZ-277)
-            @JsonProperty("screen_key") String screenKey
+            @JsonProperty("screen_key") String screenKey,
+            // CR-206: 검색할 지식 자료. 토큰에 허용 목록이 있으면 그 안이어야 하고, 비우면 첫 자료다(BIZ-290)
+            @JsonProperty("rag_source_id") String ragSourceId
     ) {
         /** CR-184 이전 15칸 호환(그림 없음) */
         public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
@@ -524,7 +531,7 @@ public class ChatController {
                                      Integer rewindFromSeq, String thinking) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, null, null, null, null, null, null);
+                    thinking, null, null, null, null, null, null, null);
         }
 
         /** CR-184 다음 16칸 호환(위젯 프로젝트, 그리기 형식 없음) */
@@ -558,7 +565,7 @@ public class ChatController {
                                      List<String> renderFeatures) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, renderFeatures, null, null, null);
+                    thinking, image, chatProjectId, renderFeatures, null, null, null, null);
         }
 
         /** CR-181 이전 19칸 호환(문서 고치기 없음) */
@@ -570,7 +577,7 @@ public class ChatController {
                                      List<String> renderFeatures, Boolean fileCreate) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, renderFeatures, fileCreate, null, null);
+                    thinking, image, chatProjectId, renderFeatures, fileCreate, null, null, null);
         }
 
         /** CR-194 이전 20칸 호환(화면 키 없음) */
@@ -583,7 +590,20 @@ public class ChatController {
                                      com.platform.chatdoc.DocumentEditRequest documentEdit) {
             this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
                     toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
-                    thinking, image, chatProjectId, renderFeatures, fileCreate, documentEdit, null);
+                    thinking, image, chatProjectId, renderFeatures, fileCreate, documentEdit, null, null);
+        }
+
+        /** CR-206 이전 21칸 호환(지식 자료 없음) */
+        public ChatCompletionRequest(String model, String sessionId, List<MessageDto> messages, boolean stream,
+                                     boolean actionsEnabled, String connectionId, String connectionGroupId,
+                                     ToolFilterDto toolFilter, String toolChoice, ResponseFormatDto responseFormat,
+                                     String workingDirectory, String toolMode, String systemPromptOverride,
+                                     Integer rewindFromSeq, String thinking, ImageDto image, String chatProjectId,
+                                     List<String> renderFeatures, Boolean fileCreate,
+                                     com.platform.chatdoc.DocumentEditRequest documentEdit, String screenKey) {
+            this(model, sessionId, messages, stream, actionsEnabled, connectionId, connectionGroupId, toolFilter,
+                    toolChoice, responseFormat, workingDirectory, toolMode, systemPromptOverride, rewindFromSeq,
+                    thinking, image, chatProjectId, renderFeatures, fileCreate, documentEdit, screenKey, null);
         }
     }
 

@@ -42,6 +42,7 @@ class ChatControllerConnectionGroupTest {
     @Mock private ImageGenerationSettings imageSettings;
     @Mock private com.platform.session.ChatSessionOwnership sessionAccess;
     @Mock private com.platform.session.SharedConversationService sharedConversations;
+    @Mock private com.platform.session.RagSourceAccess ragSourceAccess;
     @InjectMocks private ChatController controller;
 
     @Test

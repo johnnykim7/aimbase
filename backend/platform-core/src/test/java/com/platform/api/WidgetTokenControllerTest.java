@@ -3,6 +3,10 @@ package com.platform.api;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.auth.JwtProvider;
 import com.platform.config.PlatformSettingsService;
+import com.platform.repository.KnowledgeSourceRepository;
+import com.platform.session.ChatRejectedException;
+import com.platform.session.RagSourceAccess;
+import io.jsonwebtoken.Claims;
 import com.platform.tenant.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
@@ -19,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 /**
@@ -29,6 +34,7 @@ class WidgetTokenControllerTest {
 
     @Mock private PlatformSettingsService settings;
     @Mock private HttpServletRequest request;
+    @Mock private KnowledgeSourceRepository sources;
 
     private JwtProvider jwtProvider;
     private WidgetTokenController controller;
@@ -38,7 +44,7 @@ class WidgetTokenControllerTest {
         jwtProvider = new JwtProvider(
                 "cr058-widget-controller-test-secret-which-is-long-enough-1234",
                 1800_000L, 604800_000L);
-        controller = new WidgetTokenController(jwtProvider, settings);
+        controller = new WidgetTokenController(jwtProvider, settings, new RagSourceAccess(sources));
         TenantContext.setTenantId("tenant-abc");
     }
 
@@ -217,5 +223,62 @@ class WidgetTokenControllerTest {
 
     private static <T> T eq(T value) {
         return org.mockito.ArgumentMatchers.eq(value);
+    }
+
+    @Test
+    @DisplayName("TC-CHT-159 1, 2 허용 자료 두 개가 빈 값과 중복을 뺀 채 토큰 claim 에 실린다")
+    void issues_token_with_rag_source_ids() {
+        stubAllowed();
+        when(sources.existsById("kb_a")).thenReturn(true);
+        when(sources.existsById("kb_b")).thenReturn(true);
+        WidgetTokenController.IssueRequest req = new WidgetTokenController.IssueRequest();
+        req.origin = "https://oms.com";
+        req.ragSourceIds = List.of("kb_a", " ", "kb_b", "kb_a");
+
+        Claims claims = jwtProvider.extractClaims(issue(req));
+
+        assertThat(claims.get("rag_source_ids", List.class)).containsExactly("kb_a", "kb_b");
+    }
+
+    @Test
+    @DisplayName("TC-CHT-159 3 테넌트에 없는 자료가 하나라도 있으면 400 widget_token_invalid:rag_source_id")
+    void rejects_unknown_rag_source_id() {
+        stubAllowed();
+        when(sources.existsById("kb_a")).thenReturn(true);
+        WidgetTokenController.IssueRequest req = new WidgetTokenController.IssueRequest();
+        req.origin = "https://oms.com";
+        req.ragSourceIds = List.of("kb_a", "kb_x");
+
+        assertThatThrownBy(() -> controller.issueWidgetToken(req, request))
+                .isInstanceOf(ChatRejectedException.class).hasMessage("widget_token_invalid:rag_source_id")
+                .extracting("status").isEqualTo(org.springframework.http.HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    @DisplayName("TC-CHT-159 6 칸이 없으면 claim 도 없다")
+    void no_claim_without_rag_source_ids() {
+        stubAllowed();
+        WidgetTokenController.IssueRequest req = new WidgetTokenController.IssueRequest();
+        req.origin = "https://oms.com";
+
+        Claims claims = jwtProvider.extractClaims(issue(req));
+
+        assertThat(claims.containsKey("rag_source_ids")).isFalse();
+    }
+
+    private void stubAllowed() {
+        when(request.getHeader("X-API-Key")).thenReturn("test-api-key");
+        when(settings.getStringList("widget.allowed-origins", List.of())).thenReturn(List.of("https://oms.com"));
+        when(settings.getStringList(eq("widget.allowed-scopes"), org.mockito.ArgumentMatchers.<List<String>>any()))
+                .thenReturn(List.of("chat:stream", "rag:read"));
+        when(settings.getInt("widget.token-ttl-seconds", 1800)).thenReturn(1800);
+        when(settings.getInt("widget.token-max-ttl-seconds", 3600)).thenReturn(3600);
+    }
+
+    private String issue(WidgetTokenController.IssueRequest req) {
+        ResponseEntity<?> response = controller.issueWidgetToken(req, request);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) ((ApiResponse<?>) Objects.requireNonNull(response.getBody())).data();
+        return (String) body.get("token");
     }
 }

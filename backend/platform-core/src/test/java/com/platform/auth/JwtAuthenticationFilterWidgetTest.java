@@ -155,4 +155,21 @@ class JwtAuthenticationFilterWidgetTest {
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         verify(chain).doFilter(request, response);
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("TC-CHT-159 user_ref 없는 토큰이라도 허용 자료 목록은 사용자 정보에 실린다")
+    void widgetToken_carriesRagSourceIdsWithoutUserRef() throws Exception {
+        String token = jwtProvider.generateWidgetToken(
+                "tenant-abc", null, null, null, null,
+                List.of("chat:stream", "rag:read"), "https://oms.com", 60L, List.of("kb_a", "kb_b"));
+        when(request.getHeader("Authorization")).thenReturn("Bearer " + token);
+        when(request.getHeader("Origin")).thenReturn("https://oms.com");
+
+        filter.doFilter(request, response, chain);
+
+        com.platform.auth.UserPrincipal principal =
+                (com.platform.auth.UserPrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        assertThat(com.platform.session.ChatOwner.of(principal)).isNull();
+        assertThat(com.platform.session.ChatOwner.ragSourceIdsOf(principal)).containsExactly("kb_a", "kb_b");
+    }
 }

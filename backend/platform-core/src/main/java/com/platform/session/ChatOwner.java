@@ -4,6 +4,9 @@ import com.platform.auth.UserPrincipal;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * CR-178 BIZ-170: 대화와 위젯 프로젝트의 주인. 위젯 토큰은 user_ref, 로그인은 사용자 id 다.
  *
@@ -18,6 +21,8 @@ public final class ChatOwner {
     public static final String USER_NAME_KEY = "user_name";
     /** CR-194: 함께 보기 키(BIZ-275). */
     public static final String SHARE_KEY_KEY = "share_key";
+    /** CR-206: 허용 자료 목록(BIZ-290). 첫 자료가 기본 자료다. */
+    public static final String RAG_SOURCE_IDS_KEY = "rag_source_ids";
 
     private ChatOwner() {}
 
@@ -66,6 +71,25 @@ public final class ChatOwner {
 
     public static String currentShareKey() {
         return shareKeyOf(currentPrincipal());
+    }
+
+    /**
+     * CR-206: 위젯 토큰의 허용 자료 목록. 위젯 토큰이 아니거나 목록이 없으면 빈 목록.
+     * 자료 격리는 사람이 아니라 사무소 단위라 user_ref 가 없는 토큰에도 실린다(BIZ-290).
+     */
+    public static List<String> ragSourceIdsOf(UserPrincipal principal) {
+        if (!isWidget(principal)) return List.of();
+        Object value = principal.getPermissions().get(RAG_SOURCE_IDS_KEY);
+        if (!(value instanceof List<?> list) || list.isEmpty()) return List.of();
+        List<String> ids = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof String s && !s.isBlank()) ids.add(s);
+        }
+        return List.copyOf(ids);
+    }
+
+    public static List<String> currentRagSourceIds() {
+        return ragSourceIdsOf(currentPrincipal());
     }
 
     private static String widgetValue(UserPrincipal principal, String key) {

@@ -70,6 +70,16 @@ public class JwtProvider {
      */
     public String generateWidgetToken(String tenantId, String projectId, String userRef, String userName,
                                       String shareKey, List<String> scopes, String origin, long ttlSeconds) {
+        return generateWidgetToken(tenantId, projectId, userRef, userName, shareKey, scopes, origin, ttlSeconds, null);
+    }
+
+    /**
+     * CR-206 BIZ-290: 허용 자료 목록을 같이 싣는다. 붙이는 앱 서버가 그 사용자(사무소)가 쓸 수 있다고 보증한 자료라
+     * 브라우저가 고칠 수 없는 토큰에만 둔다. 비면 claim 을 두지 않는다.
+     */
+    public String generateWidgetToken(String tenantId, String projectId, String userRef, String userName,
+                                      String shareKey, List<String> scopes, String origin, long ttlSeconds,
+                                      List<String> ragSourceIds) {
         Date now = new Date();
         Map<String, Object> claims = new HashMap<>();
         claims.put("tenant_id", tenantId);
@@ -77,6 +87,7 @@ public class JwtProvider {
         if (userRef != null) claims.put("user_ref", userRef);
         if (userName != null) claims.put("user_name", userName);
         if (shareKey != null) claims.put("share_key", shareKey);
+        if (ragSourceIds != null && !ragSourceIds.isEmpty()) claims.put("rag_source_ids", ragSourceIds);
         claims.put("scopes", scopes);
         if (origin != null) claims.put("origin", origin);
         claims.put("type", "widget");
