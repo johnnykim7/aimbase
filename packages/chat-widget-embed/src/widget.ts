@@ -661,7 +661,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
 
   function errorText(e: unknown): string {
     if (e instanceof WidgetApiError) {
-      // CR-205: 채팅 한도(429)는 서버가 준 남은 초를 문구에 넣는다. 초가 없으면 코드의 문구다.
+      // CR-205: 채팅 분당 요청 한도(429)는 서버가 준 남은 초를 문구에 넣는다. 초가 없으면 코드의 문구다.
       if (e.code === "chat_rate_limited" && e.retryAfterSeconds !== undefined) {
         return T.chatRateLimited(e.retryAfterSeconds);
       }

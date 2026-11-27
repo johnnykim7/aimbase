@@ -892,7 +892,7 @@ flowchart LR
 | 기능ID | 작업내용 | 의존관계 | 검증기준 | 담당 | 상태 |
 |--------|---------|---------|---------|------|------|
 | PRD-652, BIZ-297 | 한도 판정 필터의 채팅 칸(위젯 토큰 요청), `X-RateLimit-Scope`, 429 본문 `chat_rate_limited` 와 `data.scope` | CR-168, CR-191 | 단위시험 TC-RL-009 ~ 014, 시험항목 IT-01-041 ~ 043 | BE | 설계중 |
-| PRD-087, PRD-376, BIZ-298 | master V96(`subscriptions.chat_rpm_limit`, `plan.<플랜>.chat-rpm-limit` 4행), 생성과 플랜 변경의 채팅 한도 채우기, 구독 변경 `chatRpmLimit`, 플랜 목록 `chatRpmLimit`, 플랜 설정 저장 검사 | 위 BE | 단위시험 TC-PLAN-013 ~ 017, 시험항목 IT-01-044 ~ 046, 049 | BE | 설계중 |
+| PRD-087, PRD-376, BIZ-298 | master V96(`subscriptions.chat_rpm_limit`, `plan.<플랜>.chat-rpm-limit` 4행), 생성과 플랜 변경의 채팅 분당 요청 한도 채우기, 구독 변경 `chatRpmLimit`, 플랜 목록 `chatRpmLimit`, 플랜 설정 저장 검사 | 위 BE | 단위시험 TC-PLAN-013 ~ 017, 시험항목 IT-01-044 ~ 046, 049 | BE | 설계중 |
 | PRD-652 | 「구독 관리」 표와 편집 창의 「채팅 분당 요청 한도」, 「운영 설정」 플랜 카드 설명 | 위 BE | 시험항목 IT-01-046, 047 | FE | 설계중 |
 | PRD-652 | 채팅창 429 문구(`chat_rate_limited`, 남은 초)와 다시 시도 | 위 BE | 시험항목 IT-01-048 | 위젯 | 설계중 |
 | (레포 간) | LexFlow 안내서 부록 D 1행, 10행과 답변 문서 R6, Q5 | 위 전부 | 컨타에 문서 경로 알림 | lexflow 문서 | 대기 |
