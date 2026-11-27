@@ -16,8 +16,12 @@ export type AuthResolver = () => Promise<TokenResponse>;
 
 export type DisplayMode = "bubble" | "inline" | "panel";
 
+/**
+ * 질문을 보낼 때 함께 실을 화면 자료. 바로 돌려줘도 되고 Promise 로 돌려줘도 된다(CR-203: iframe 방식은
+ * 부모 화면에 메시지로 묻기 때문에 기다려야 한다). 돌려준 값이 없으면 자료 없이 보낸다.
+ */
 export interface ContextProvider {
-  (): Record<string, unknown>;
+  (): Record<string, unknown> | undefined | Promise<Record<string, unknown> | undefined>;
 }
 
 export interface Citation {

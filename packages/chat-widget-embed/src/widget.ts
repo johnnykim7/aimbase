@@ -247,6 +247,19 @@ function newVersion(): AnswerVersion {
   };
 }
 
+/** 화면 자료 함수가 실패하거나 Promise 로 거절되면 자료 없이 보낸다. 질문까지 막지 않는다. */
+async function resolveContext(
+  provider: WidgetOptions["contextProvider"],
+): Promise<Record<string, unknown> | undefined> {
+  if (!provider) return undefined;
+  try {
+    return (await provider()) ?? undefined;
+  } catch (e) {
+    console.warn("[aimbase-chat] contextProvider failed", e);
+    return undefined;
+  }
+}
+
 export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   // CR-194: update 로 바꾸는 칸이 있어 붙이는 앱이 준 객체를 고치지 않도록 사본을 쓴다.
   const options: WidgetOptions = { ...initialOptions };
@@ -1539,6 +1552,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     events.emit("answerStart", answerView(turn, version));
 
     try {
+      const context = await resolveContext(options.contextProvider);
       await chat.sendMessage(
         {
           baseUrl: options.baseUrl,
@@ -1549,7 +1563,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
           connectionId: options.connectionId,
           connectionGroupId: options.connectionGroupId,
           actionsEnabled: options.actionsEnabled,
-          context: options.contextProvider?.(),
+          context,
           attachments: turn.attachments,
           rewindFromSeq,
           // 끔도 보낸다. Claude CLI 연결은 아무것도 안 보내면 생각하므로 단추를 끈 뜻이 전해지지 않는다.
