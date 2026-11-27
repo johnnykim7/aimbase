@@ -121,6 +121,14 @@ describe("TC-CHT-172 속성 전달", () => {
     expect(frameSrcOf(null, null, PARENT)).toBeNull();
   });
 
+  it("frame-src 가 없으면 연결 스크립트와 같은 폴더의 전용 페이지를 끼운다", () => {
+    const script = `${FRAME}/widget/v2/aimbase-chat-frame.js`;
+    expect(frameSrcOf(null, FRAME, PARENT, script)?.href).toBe(`${FRAME}/widget/v2/frame.html`);
+    expect(frameSrcOf(null, null, PARENT, script)?.href).toBe(`${FRAME}/widget/v2/frame.html`);
+    // 붙이는 앱 서버에 복사한 스크립트는 base-url 아래 전용 페이지를 끼운다.
+    expect(frameSrcOf(null, FRAME, PARENT, `${PARENT}/js/aimbase-chat-frame.js`)?.href).toBe(`${FRAME}/widget/v1/frame.html`);
+  });
+
   it("화면 자료는 JSON 값만 남긴다", () => {
     expect(plainContext({ caseId: 12, at: new Date(0), fn: () => 1 })).toEqual({ caseId: 12, at: "1970-01-01T00:00:00.000Z" });
     expect(plainContext(undefined)).toBeUndefined();

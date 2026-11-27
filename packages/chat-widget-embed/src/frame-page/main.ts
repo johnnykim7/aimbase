@@ -7,6 +7,7 @@ import type { AimbaseChatElement } from "../web-component";
 import type { FrameBridge, TokenResponse } from "../types";
 import {
   CONTEXT_REPLY_TIMEOUT_MS,
+  INIT_TIMEOUT_MS,
   TOKEN_REPLY_TIMEOUT_MS,
   isChatAttribute,
   receive,
@@ -59,7 +60,8 @@ export function startFramePage(win: Window = window): void {
   let parentOrigin: string | null = null;
   let locale: Locale = pageLocale(win);
   let chat: AimbaseChatElement | null = null;
-  let controls: { setExpanded(v: boolean): void } | null = null;
+  let controls: { setExpanded(v: boolean): void; viewportChanged(): void } | null = null;
+  let parentWidth = 0;
   let refused = false;
   let seq = 0;
   const pending = new Map<string, Pending>();
@@ -117,6 +119,7 @@ export function startFramePage(win: Window = window): void {
       if (!refused) post({ type: "state", ...state });
     },
     drag: (phase, screenX, screenY) => post({ type: "drag", phase, screenX, screenY }),
+    viewportWidth: () => parentWidth,
     attach: (c) => {
       controls = c;
     },
@@ -162,14 +165,20 @@ export function startFramePage(win: Window = window): void {
       case "expand":
         controls?.setExpanded(m.expanded);
         break;
+      case "viewport":
+        if (!Number.isFinite(m.width) || m.width === parentWidth) break;
+        parentWidth = m.width;
+        controls?.viewportChanged();
+        break;
       default:
         break;
     }
   }
 
+  let gaveUp = false;
   win.addEventListener("message", (event) => {
     const m = receive(event, { origin: parentOrigin ?? undefined, source: parent });
-    if (!m) return;
+    if (!m || gaveUp) return;
     if (parentOrigin === null) {
       // 처음 init 을 보낸 부모 출처만 믿는다. 끼울 수 있는 출처는 frame-ancestors 가 이미 막았다(BIZ-300).
       if (m.type !== "init" || event.origin === "null") return;
@@ -182,6 +191,12 @@ export function startFramePage(win: Window = window): void {
 
   // 내용이 없어 어느 출처로 보내도 된다. init 을 받은 뒤로는 그 출처로만 보낸다.
   parent.postMessage(seal({ type: "ready" }), "*");
+  // 연결 스크립트 없이 다른 화면이 끼웠으면 init 이 오지 않는다.
+  win.setTimeout(() => {
+    if (parentOrigin !== null) return;
+    gaveUp = true;
+    showNotice(doc, FRAME_TEXT[pageLocale(win)].standalone);
+  }, INIT_TIMEOUT_MS);
 }
 
 startFramePage();

@@ -17,20 +17,24 @@ import {
   type FrameState,
 } from "../frame/frame-protocol";
 import { fetchWidgetToken, plainToken } from "../frame/token-endpoint";
-import { HOST_CSS, HostWindow } from "./host-window";
+import { HOST_CSS, HostWindow, viewport } from "./host-window";
 
 /** 전용 페이지가 쓰는 브라우저 기능. 음성 입력, 이 화면 캡처, 복사, 크게 보기 */
 export const FRAME_ALLOW = "microphone; display-capture; clipboard-read; clipboard-write; fullscreen";
+
+/** 이 스크립트를 받은 주소. 스크립트가 처음 돌 때만 읽을 수 있다 */
+const SCRIPT_URL =
+  typeof document !== "undefined" ? ((document.currentScript as HTMLScriptElement | null)?.src || null) : null;
 
 /** 붙을 때만 읽는 속성. 바뀌어도 전용 페이지에 넘기지 않는다 */
 const MOUNT_ONLY = new Set(["display", "base-url", "token-endpoint", FRAME_SRC_ATTRIBUTE]);
 
 export class AimbaseChatFrameElement extends HTMLElement {
   /** 고급 사용. token-endpoint 대신 토큰을 직접 준다 */
-  public authResolver: AuthResolver | null = null;
+  declare public authResolver: AuthResolver | null;
   /** 질문을 보낼 때 실을 화면 자료. JSON 값만 간다 */
-  public contextProvider: ContextProvider | null = null;
-  public ragSourceId: string | null = null;
+  declare public contextProvider: ContextProvider | null;
+  declare public ragSourceId: string | null;
 
   private iframe: HTMLIFrameElement | null = null;
   private hostWindow: HostWindow | null = null;
@@ -39,6 +43,18 @@ export class AimbaseChatFrameElement extends HTMLElement {
   private queued: FrameMessage[] = [];
   private state: FrameState | null = null;
   private readonly onMessage = (e: MessageEvent) => this.receive(e);
+  private readonly onResize = () => {
+    if (this.ready) this.sendViewport();
+  };
+
+  constructor() {
+    super();
+    // 요소가 등록되기 전에 넣은 값은 그대로 둔다. 초기값을 필드로 두면 등록될 때 그 값을 덮어 연결 스크립트를
+    // defer, async 로 넣은 화면의 화면 자료 함수가 사라진다.
+    this.authResolver ??= null;
+    this.contextProvider ??= null;
+    this.ragSourceId ??= null;
+  }
 
   static get observedAttributes(): string[] {
     return [...CHAT_ATTRIBUTE_NAMES];
@@ -46,7 +62,7 @@ export class AimbaseChatFrameElement extends HTMLElement {
 
   connectedCallback(): void {
     if (this.iframe) return;
-    const src = frameSrcOf(this.getAttribute(FRAME_SRC_ATTRIBUTE), this.getAttribute("base-url"), location.href);
+    const src = frameSrcOf(this.getAttribute(FRAME_SRC_ATTRIBUTE), this.getAttribute("base-url"), location.href, SCRIPT_URL);
     if (!src) {
       console.error("[aimbase-chat-frame] base-url or frame-src attribute is required");
       return;
@@ -70,10 +86,12 @@ export class AimbaseChatFrameElement extends HTMLElement {
     this.iframe = iframe;
     this.hostWindow = new HostWindow(shadow, display, iframe, () => this.post({ type: "expand", expanded: false }));
     window.addEventListener("message", this.onMessage);
+    window.addEventListener("resize", this.onResize);
   }
 
   disconnectedCallback(): void {
     window.removeEventListener("message", this.onMessage);
+    window.removeEventListener("resize", this.onResize);
     this.hostWindow?.destroy();
     this.hostWindow = null;
     this.iframe = null;
@@ -114,6 +132,12 @@ export class AimbaseChatFrameElement extends HTMLElement {
     this.send(m);
   }
 
+  /** 왼쪽 칸을 붙일 자리는 부모 화면 폭으로 정한다(CR-194). 전용 페이지는 iframe 폭만 안다 */
+  private sendViewport(): void {
+    const vp = viewport();
+    this.send({ type: "viewport", width: vp.width, height: vp.height });
+  }
+
   private send(m: FrameMessage): void {
     this.iframe?.contentWindow?.postMessage(seal(m), this.frameOrigin);
   }
@@ -128,6 +152,7 @@ export class AimbaseChatFrameElement extends HTMLElement {
         // 전용 페이지가 다시 뜨면(새로 고침) 처음부터 다시 잇는다.
         this.ready = true;
         this.send(initMessage(this.attributeList()));
+        this.sendViewport();
         const queued = this.queued;
         this.queued = [];
         for (const q of queued) this.send(q);

@@ -1,0 +1,2 @@
+import{d as a,e as b}from"./chunk-5WSHDNL4.js";import"./chunk-JZ6TE7SP.js";import"./chunk-Y4PCVSQ3.js";import"./chunk-QBDK6E7H.js";import"./chunk-5IV3NQOF.js";export{a as AimbaseChatElement,b as defineAimbaseChat};
+//# sourceMappingURL=web-component-KRBC3TGQ.js.map

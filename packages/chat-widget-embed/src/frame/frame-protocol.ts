@@ -12,6 +12,10 @@ export const FRAME_SRC_ATTRIBUTE = "frame-src";
 export const DEFAULT_FRAME_DISPLAY: DisplayMode = "inline";
 /** frame-src 가 없으면 base-url 아래 이 경로를 끼운다. */
 export const FRAME_PAGE_PATH = "/widget/v1/frame.html";
+/** 연결 스크립트와 같은 폴더의 전용 페이지 이름 */
+export const FRAME_PAGE_FILE = "frame.html";
+/** 전용 페이지가 뜬 뒤 이 안에 init 이 오지 않으면 부모 화면이 없는 것으로 보고 안내를 보인다 */
+export const INIT_TIMEOUT_MS = 3_000;
 export const TOKEN_REPLY_TIMEOUT_MS = 10_000;
 export const CONTEXT_REPLY_TIMEOUT_MS = 2_000;
 
@@ -67,6 +71,7 @@ export type FrameMessage =
   | { type: "close" }
   | ({ type: "state" } & FrameState)
   | { type: "expand"; expanded: boolean }
+  | { type: "viewport"; width: number; height: number }
   | { type: "drag"; phase: DragPhase; screenX: number; screenY: number }
   | { type: "event"; name: string; detail?: unknown };
 
@@ -85,6 +90,7 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set<FrameMessageType>([
   "close",
   "state",
   "expand",
+  "viewport",
   "drag",
   "event",
 ]);
@@ -171,11 +177,23 @@ export function tokenMatchesOrigin(token: string, parentOrigin: string): boolean
   return origin !== null && origin === parentOrigin;
 }
 
-/** frame-src 가 있으면 그것, 없으면 base-url 아래 전용 페이지. 둘 다 없거나 주소가 아니면 null. */
-export function frameSrcOf(frameSrc: string | null, baseUrl: string | null, pageUrl: string): URL | null {
+/**
+ * 끼울 전용 페이지 주소. frame-src 가 있으면 그것이다. 없으면 연결 스크립트와 같은 폴더의 frame.html 이고,
+ * 스크립트를 붙이는 앱 서버에 복사해 두어 base-url 과 출처가 다르면 base-url 아래 전용 페이지다.
+ * 스크립트 폴더를 따르는 것은 버전 폴더(CR-202)에서 받은 스크립트가 같은 버전의 전용 페이지를 끼우게 하려는 것이다.
+ */
+export function frameSrcOf(
+  frameSrc: string | null,
+  baseUrl: string | null,
+  pageUrl: string,
+  scriptUrl: string | null = null,
+): URL | null {
   try {
     if (frameSrc) return new URL(frameSrc, pageUrl);
-    if (baseUrl) return new URL(FRAME_PAGE_PATH, new URL(baseUrl, pageUrl));
+    const base = baseUrl ? new URL(baseUrl, pageUrl) : null;
+    const script = scriptUrl ? new URL(scriptUrl, pageUrl) : null;
+    if (script && (!base || base.origin === script.origin)) return new URL(FRAME_PAGE_FILE, script);
+    if (base) return new URL(FRAME_PAGE_PATH, base);
   } catch {
     return null;
   }

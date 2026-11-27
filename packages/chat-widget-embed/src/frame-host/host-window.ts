@@ -85,10 +85,12 @@ export function dragFloating(start: Rect, from: { x: number; y: number }, to: { 
 export const HOST_CSS = `
 :host { display: block; }
 :host([data-display="inline"]) { height: 100%; }
+:host([data-display="inline"]) .wrap { height: 100%; }
 .box { position: fixed; z-index: 9999; overflow: hidden; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
 .box.bubble { z-index: 9998; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
 .box.side { top: 0; right: 0; bottom: 0; box-shadow: none; }
-.box.inline { position: relative; width: 100%; height: 100%; min-height: 400px; box-shadow: none; z-index: auto; }
+.box.inline { position: relative; display: flex; width: 100%; height: 100%; min-height: 400px; box-shadow: none; z-index: auto; }
+.box.inline iframe { flex: 1 1 auto; height: auto; }
 .box.expanded { position: fixed; inset: 28px; width: auto; height: auto; z-index: 10000; box-shadow: 0 24px 60px rgba(0,0,0,.22); }
 .box.hidden { display: none; }
 .box iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; color-scheme: normal; }
@@ -99,7 +101,7 @@ ${RESIZE_HANDLE_CSS}
 .resizing { user-select: none; }
 `;
 
-function viewport(): Viewport {
+export function viewport(): Viewport {
   const d = document.documentElement;
   return { width: d.clientWidth || window.innerWidth, height: d.clientHeight || window.innerHeight };
 }
@@ -140,6 +142,7 @@ export class HostWindow {
     this.state = { open: display !== "bubble", expanded: false, docked: false };
 
     this.wrap = document.createElement("div");
+    this.wrap.className = "wrap";
     this.backdrop = document.createElement("div");
     this.backdrop.className = "backdrop";
     this.backdrop.addEventListener("click", onBackdrop);

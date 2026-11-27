@@ -14,6 +14,8 @@ export interface PanesHost {
   setExpanded(v: boolean): void;
   /** CR-194: 지금 왼쪽 칸을 붙여 판을 넓힐 수 있는지(떠 있는 창이고 크게 보기가 아님) */
   canDock(): boolean;
+  /** CR-203: 붙일 자리를 잴 화면 폭. 없으면 이 창의 폭. 전용 페이지 안에서는 부모 화면 폭이다 */
+  viewportWidth?(): number;
   /** CR-198: 왼쪽 칸을 붙여 판을 넓히거나 되돌릴 때. 판 폭은 사람이 정할 수 있어 넓히는 일은 받는 쪽이 한다 */
   dockChanged?(docked: boolean): void;
   closeLabel(): string;
@@ -171,13 +173,17 @@ export class Panes {
     if (typeof window !== "undefined") window.removeEventListener("resize", this.onViewport);
   }
 
+  private viewportWidth(): number {
+    if (this.host.viewportWidth) return this.host.viewportWidth();
+    return typeof window !== "undefined" ? window.innerWidth : 0;
+  }
+
   /** 넓지 않은 판에서 왼쪽 칸을 덮지 않고 붙여 판을 넓히는 경우(CR-194 메뉴 화면). */
   private docked(): boolean {
     return !this.wide
       && this.left?.spec.dock === true
       && this.host.canDock()
-      && typeof window !== "undefined"
-      && window.innerWidth >= DOCK_MIN_VIEWPORT_PX;
+      && this.viewportWidth() >= DOCK_MIN_VIEWPORT_PX;
   }
 
   private setLeftAvailable(available: boolean): void {

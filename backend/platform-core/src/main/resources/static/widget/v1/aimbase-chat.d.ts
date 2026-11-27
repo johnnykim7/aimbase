@@ -48,9 +48,15 @@ interface FrameBridge {
     stateChanged(state: FrameWindowState): void;
     /** 머리줄 끌기. 화면 좌표다. 상자가 움직여도 값이 흔들리지 않는다 */
     drag(phase: "start" | "move" | "end", screenX: number, screenY: number): void;
-    /** 위젯이 뜰 때마다 한 번. 부모 화면의 뒷막을 누르면 크게 보기를 끈다 */
+    /** 부모 화면의 폭. 왼쪽 칸을 붙여 창을 넓힐 자리가 있는지 이것으로 본다. iframe 창 폭은 채팅창 폭일 뿐이다 */
+    viewportWidth?(): number;
+    /**
+     * 위젯이 뜰 때마다 한 번. 부모 화면의 뒷막을 누르면 크게 보기를 끄고,
+     * 부모 화면 크기가 바뀌면 왼쪽 칸을 붙일지 다시 본다
+     */
     attach?(controls: {
         setExpanded(v: boolean): void;
+        viewportChanged(): void;
     }): void;
 }
 interface Citation {

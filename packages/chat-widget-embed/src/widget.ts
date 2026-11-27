@@ -500,6 +500,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
     header,
     setExpanded: (v) => setExpanded(v),
     canDock: () => display === "bubble" && !expanded,
+    viewportWidth: framed?.viewportWidth ? () => framed.viewportWidth!() : undefined,
     dockChanged: (v) => {
       docked = v;
       windowDrag?.setDocked(v);
@@ -526,7 +527,7 @@ export function createWidget(initialOptions: WidgetOptions): WidgetHandle {
   const toast = el("div", "toast");
   panel.appendChild(toast);
 
-  framed?.attach?.({ setExpanded: (v) => setExpanded(v) });
+  framed?.attach?.({ setExpanded: (v) => setExpanded(v), viewportChanged: () => panes.refresh() });
   reportFrame();
 
   // CR-060: 녹음 오버레이
