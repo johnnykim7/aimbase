@@ -22,6 +22,8 @@
 └────────────────┘                          └───────────────────┘
 ```
 
+붙이는 방법은 두 가지입니다. 위젯 스크립트를 소비앱 화면에 직접 넣는 `<aimbase-chat>`(§ 3-1 ~ 3-3)과, Aimbase 가 띄우는 채팅창 전용 페이지를 iframe 으로 끼우는 `<aimbase-chat-frame>`(§ 3-6)입니다. 토큰을 받는 BFF 는 두 방법이 같습니다.
+
 **핵심 원칙**: 브라우저에 Aimbase API Key 를 절대 내려보내지 마세요. 소비앱 BFF 가 서버간 호출로 **30분 TTL 단기 JWT** 를 대리 발급받아 브라우저에 전달하는 3-Tier 구조가 유일한 안전 경로입니다.
 
 ---
@@ -55,6 +57,8 @@ UPDATE global_config
 ```
 
 > CSV 로 여러 origin 지정 가능. 프로토콜 + 도메인 + 포트가 **정확히** 일치해야 허용. `*` 와일드카드 불가.
+>
+> iframe 방식(§ 3-6)에서는 이 목록이 채팅창 전용 페이지를 끼울 수 있는 화면도 정합니다. 목록에 없는 화면에 끼우면 브라우저가 막습니다. 바꾼 값은 5분 안에 반영됩니다.
 
 관련 설정 4종(상세 운영 절차는 `docs/guides/aimbase-ops-guide.md` § 2-5 참조):
 
@@ -314,6 +318,45 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 
 위젯 토큰에 `chat:stream` 이 있어야 한다. 마이크 단추는 토큰 scopes 에 `chat:stt` 가 있을 때만 보이므로, BFF 는 Aimbase 가 준 scopes 를 위젯에 그대로 넘긴다. 파일 미리보기는 받기와 같은 권한이라 토큰 scopes 에 `chat:upload` 가 있어야 한다. 「읽어 주기」는 `chat:tts`, 「음성 대화」는 `chat:voice` 가 있어야 보인다. 서버 API 는 API 가이드 § 28, § 29, § 32, § 33, § 34, § 35, § 36, 운영 설정은 운용 가이드 § 2-14, § 2-18, § 2-19, § 2-20, § 2-21.
 
+### 3-6. iframe 방식 (CR-203)
+
+채팅창 코드가 소비앱 화면과 같은 출처에서 돌면 안 되는 곳에 씁니다. 채팅창은 Aimbase 주소의 전용 페이지 안에서 돌아 소비앱의 쿠키와 브라우저 저장소에 닿지 않고, Aimbase 가 채팅창을 바꿔도 소비앱 화면 코드는 그대로입니다. 소비앱 화면에 남는 Aimbase 코드는 외부 의존이 없는 연결 스크립트 한 파일입니다. 채팅창의 모양과 기능은 § 3-1 방식과 같습니다.
+
+```html
+<script src="https://aimbase.company.com/widget/v1/aimbase-chat-frame.js"></script>
+<aimbase-chat-frame
+  base-url="https://aimbase.company.com"
+  token-endpoint="/my-bff/aimbase-token"
+  display="bubble"
+  screen-key="case-12"
+></aimbase-chat-frame>
+<script>
+  document.querySelector("aimbase-chat-frame").contextProvider = () => ({ caseId: 12, page: "case-detail" });
+</script>
+```
+
+| 순번 | 항목 | 내용 |
+|---|---|---|
+| 1 | 연결 스크립트 | `/widget/v1/aimbase-chat-frame.js` 한 파일(약 14 KB). 조각을 더 받지 않으므로 받아서 소비앱 서버에 두어도 됩니다(§ 3-2 와 같은 방법) |
+| 2 | 요소와 속성 | `<aimbase-chat-frame>`. 속성은 § 3-4 표와 같고 `frame-src` 하나만 더합니다. 붙은 뒤 속성을 바꾸면 채팅창에 넘깁니다. `display`, `base-url`, `token-endpoint`, `frame-src` 는 붙을 때만 읽습니다 |
+| 3 | `display` 기본값 | 적지 않으면 `inline`(칸 안)으로 `<aimbase-chat>` 과 같습니다. 칸 안은 부모 요소 높이를 채우고 최소 400px 입니다 |
+| 4 | 전용 페이지 주소 | `frame-src` 가 있으면 그 주소, 없으면 연결 스크립트와 같은 폴더의 `frame.html` 입니다. 스크립트를 소비앱 서버에 복사해 두었으면 `base-url` 아래 `/widget/v1/frame.html` 입니다. 보통은 적지 않습니다 |
+| 5 | 토큰 | BFF(§ 2)는 그대로입니다. 토큰 발급 요청의 `origin` 은 **소비앱 화면의 출처**입니다(iframe 안 Aimbase 주소가 아님). 다르면 채팅창 대신 「이 화면에서는 채팅창을 열 수 없습니다」가 보입니다 |
+| 6 | 허용 주소 | `widget.allowed-origins`(§ 1-2)에 소비앱 화면 출처가 있어야 끼워집니다 |
+| 7 | JS 속성 | `contextProvider`(Promise 를 돌려줘도 됩니다. JSON 값만 넘어가고 함수와 DOM 은 빠집니다), `authResolver`(token-endpoint 대신), `ragSourceId`. 스크립트를 `defer`, `async` 로 넣어 요소가 늦게 등록돼도 그 전에 넣은 값은 남습니다 |
+| 8 | 메서드와 이벤트 | `open()`, `close()`, `isOpen()`, `new-conversation` 이벤트. § 3-4 의 `on.*` 콜백, `sendMessage`, `createWidget` 은 이 방식에 없습니다. `allow-approval="false"` 로 승인을 소비앱 결재 화면에서 받으려면 `<aimbase-chat>` 방식을 씁니다 |
+| 9 | 창 자리와 크기 | 머리줄 끌기, 가장자리 크기 바꾸기, 크게 보기, 왼쪽 대화 목록은 `<aimbase-chat>` 과 같습니다. 기억도 같은 이름으로 소비앱 출처 브라우저 저장소에 남아 두 방식을 바꿔도 이어집니다 |
+| 10 | 브라우저 기능 | 연결 스크립트가 iframe 에 마이크, 화면 캡처, 복사, 전체 화면을 허용합니다. 소비앱 화면 자체가 다른 iframe 안이면 그 iframe 에도 같은 허용을 줍니다 |
+| 11 | 소비앱 CSP | 소비앱 화면에 보안 정책(CSP)이 있으면 `frame-src` 에 Aimbase 주소, `script-src` 에 연결 스크립트 주소를 넣습니다 |
+| 12 | iframe 만 두지 않습니다 | 연결 스크립트 없이 `<iframe src=".../frame.html">` 만 두면 3초 뒤 「이 화면은 연결된 서비스 화면 안에서만 열 수 있습니다」만 보입니다. 토큰과 화면 자료는 연결 스크립트가 넘깁니다 |
+
+**두 방식 고르기**
+
+| 순번 | 방식 | 고를 때 |
+|---|---|---|
+| 1 | `<aimbase-chat>` | 콜백(`on.*`)과 `sendMessage` 로 소비앱 화면이 채팅창과 깊게 주고받을 때, npm 으로 번들할 때 |
+| 2 | `<aimbase-chat-frame>` | 채팅창 코드를 소비앱 출처와 갈라야 할 때, 여러 소비앱에 같은 방식으로 붙일 때 |
+
 ---
 
 ## 4. UI 모드 선택 가이드
@@ -347,6 +390,10 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | HTML 「실행」 화면에서 스크립트나 바깥 그림이 돌지 않는다 | 붙이는 앱 화면의 보안 정책(CSP)이 실행 틀에도 걸림 | 앱의 CSP 가 그 스크립트와 주소를 허용해야 한다 |
 | 「공유 링크 만들기」, 「공유」 가 없다 | Aimbase 런타임 설정에 공개 주소가 없음 | 운영자에게 `chat.share.public-base-url` 을 요청한다 |
 | 「저장」, 「대화 내보내기」 가 없다 | Aimbase 서버가 CR-182 전 판이라 위젯 설정에 형식 목록이 없음 | 서버를 올린다 |
+| iframe 방식: 채팅창 자리가 비고 브라우저 콘솔에 `frame-ancestors` | `widget.allowed-origins` 에 소비앱 화면 출처가 없음 | § 1-2 로 넣는다. 5분 안에 반영 (CR-203) |
+| iframe 방식: 「이 화면에서는 채팅창을 열 수 없습니다」 | 토큰 발급 요청의 `origin` 이 소비앱 화면 출처와 다름 | BFF 가 화면 출처를 `origin` 으로 보낸다 (CR-203) |
+| iframe 방식: 「이 화면은 연결된 서비스 화면 안에서만 열 수 있습니다」 | `frame.html` 을 바로 열었거나 연결 스크립트 없이 iframe 만 둠 | `<aimbase-chat-frame>` 으로 붙인다 (CR-203) |
+| iframe 방식: 칸 안 채팅창이 낮다 | 부모 요소에 높이가 없음 | 부모 요소에 높이를 준다. 최소 400px (CR-203) |
 
 ---
 
@@ -364,6 +411,9 @@ JS API (`createWidget` / `<aimbase-chat>.property`) 에서는 추가로:
 | `/widget/v1/aimbase-chat.umd.global.js` | `<script>` 로드 (약 17 KB) |
 | `/widget/v1/aimbase-chat.esm.js` | 번들러 import (약 25 KB) |
 | `/widget/v1/aimbase-chat.d.ts` | TypeScript 타입 |
+| `/widget/v1/aimbase-chat-frame.js` | iframe 방식 연결 스크립트 (약 14 KB, § 3-6) |
+| `/widget/v1/frame.html` | iframe 방식 채팅창 전용 페이지. 연결 스크립트가 끼우며 소비앱이 직접 쓰지 않는다 |
+| `/widget/v1/aimbase-chat.frame.js` | 전용 페이지 스크립트. 전용 페이지가 부른다 |
 | `/widget/v1/guide.html` | 이 가이드의 HTML 버전 (공개 서빙) |
 
 위 모두 **인증 없이** 접근 가능. 소비앱은 이 URL 을 `<script src>` 로 직접 쓰거나 curl 로 받아 자기 서버에 배치할 수 있다.

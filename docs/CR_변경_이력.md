@@ -157,7 +157,7 @@
 | CR-200 | https 화면에서 위젯 열기 | 결함 수정 | Low | - | 진행중 |
 | CR-201 | [운영 배포가 남기는 되돌리기용 이미지가 지워지지 않아 운영 서버 디스크가 참](CR-201_운영_배포가_남기는_되돌리기용_이미지가_지워지지_않아_운영_서버_디스크가.md) | 결함 수정 | Low | - | 진행중 |
 | CR-206 | [지식 자료 ID 토큰 결합, 사무소별 격리(LexFlow Q10)](CR-206_지식_자료_ID_토큰_결합_사무소별_격리_LexFlow_Q10.md) | 신규 + 결함 수정 | Medium | 59 fd977ac5 | 진행중 |
-| CR-203 | [채팅창 iframe 방식 (LexFlow R1)](CR-203_채팅창_iframe_방식_LexFlow_R1.md) | 신규 | Medium | - | 설계중 |
+| CR-203 | [채팅창 iframe 방식 (LexFlow R1)](CR-203_채팅창_iframe_방식_LexFlow_R1.md) | 신규 | Medium | - | 구현완료, 배포 대기 |
 
 ---
 
@@ -3211,8 +3211,8 @@ CR-074(NAT 우회) 통합 후 위젯에서 채팅 호출 시 헤더 매번 명�
 - **원본 요구사항**: [docs/origins/원본_요구사항_CR203_채팅창_iframe_방식_LexFlow_R1_20261127.md](origins/원본_요구사항_CR203_채팅창_iframe_방식_LexFlow_R1_20261127.md)
 - **변경 내용**: LexFlow 검토 회신 I1, R1, Q1. 채팅창 코드가 소비앱 화면과 같은 출처에서 돌지 않게, Aimbase 가 띄우는 채팅창 전용 페이지(`/widget/v1/frame.html`)와 소비앱 화면에 넣는 연결 스크립트(`aimbase-chat-frame.js`, `<aimbase-chat-frame>`)를 만든다. 토큰, 화면 자료, 화면 키, 열기와 닫기, 창 자리와 크기는 부모 화면과 전용 페이지가 메시지로 주고받는다. 전용 페이지는 허용 주소 목록의 화면에만 끼워지고(frame-ancestors), 전용 페이지에서 온 같은 출처 요청은 토큰 origin 대조를 건너뛴다. 기존 요소 직접 삽입 방식은 그대로 두고 두 방식을 안내한다. 상세 [CR-203_채팅창_iframe_방식_LexFlow_R1.md](CR-203_채팅창_iframe_방식_LexFlow_R1.md)
 - **결정**: 2026-11-27 사용자 「iframe 제공하는 건 어려운가요. 다른 곳에서 사용도 필요할 수 있어서 만들어 놓으면 좋을 듯합니다」. 다른 소비앱에도 같은 방식으로 붙일 것을 전제로 만든다
-- **영향 모듈**: 위젯 `src/frame/frame-protocol.ts`(신규), `src/frame-page/`(신규), `src/frame-host/`(신규), `frame.html`(신규), `src/widget.ts`, `src/styles.ts`, `src/types.ts`, `src/web-component.ts`, `tsup.config.ts`, `build.gradle.kts`, api `SecurityConfig`, `WidgetFrameHeaderWriter`(신규), `JwtAuthenticationFilter`, 위젯 빌드 결과(`static/widget/v1`)
+- **영향 모듈**: 위젯 `src/frame/frame-protocol.ts`(신규), `src/frame-page/`(신규), `src/frame-host/`(신규), `static/widget/v1/frame.html`(신규), `src/widget.ts`, `src/styles.ts`, `src/types.ts`, `src/web-component.ts`, `tsup.config.ts`, `build.gradle.kts`, api `SecurityConfig`, `WidgetFrameHeaderWriter`(신규), `JwtAuthenticationFilter`, 위젯 빌드 결과(`static/widget/v1`)
 - **영향도**: Medium (전용 페이지 응답 머리글과 토큰 origin 대조가 바뀐다. DB, API, 기존 삽입 방식은 그대로)
 - **영향 범위**: 첫 적용 LexFlow. iframe 방식으로 붙이는 소비앱 전부. 기존 `<aimbase-chat>` 으로 붙인 곳은 바뀌지 않는다
-- **영향 설계서**: T1-1(PRD-660 ~ 651), T1-3(BIZ-300 ~ 292), T2-1, T3-2, T3-3, T3-4, T3-5. 위젯 붙이기 가이드, API 가이드 17절, 운용 가이드(허용 주소 설정)
-- **상태**: 설계중 (2026-11-27)
+- **영향 설계서**: T1-1(PRD-660 ~ 663), T1-3(BIZ-300 ~ 302), T2-1, T3-2, T3-3(FE-160), T3-4, T3-5(TC-CHT-170 ~ 174, 181, 182). 위젯 붙이기 가이드, API 가이드 17절, 운용 가이드(허용 주소 설정)
+- **상태**: 구현완료, 배포 대기 (2026-11-28)

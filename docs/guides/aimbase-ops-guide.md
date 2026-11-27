@@ -142,10 +142,12 @@ Aimbase 플랫폼을 운영하기 위한 관리자 가이드입니다.
 
 | 설정 키 | 타입 | 기본값 | 설명 |
 |---------|------|--------|------|
-| `widget.allowed-origins` | CSV | *(빈 문자열)* | 위젯 임베드를 허용할 전역 Origin. 비어 있으면 위젯 호출이 전부 CORS 거부된다. 위젯 파일(`/widget/**`)을 실행 중에 읽어 오는 요청도 이 목록으로 판정한다(CR-172). Origin 없는 `<script>` 요청은 판정 대상이 아니다. 예: `https://oms.company.com,https://rescue.company.com` |
+| `widget.allowed-origins` | CSV | *(빈 문자열)* | 위젯 임베드를 허용할 전역 Origin. 비어 있으면 위젯 호출이 전부 CORS 거부된다. 위젯 파일(`/widget/**`)을 실행 중에 읽어 오는 요청도 이 목록으로 판정한다(CR-172). Origin 없는 `<script>` 요청은 판정 대상이 아니다. iframe 방식(CR-203)에서는 채팅창 전용 페이지(`/widget/*/frame.html`)를 끼울 수 있는 화면도 이 목록이다(`Content-Security-Policy: frame-ancestors`). 예: `https://oms.company.com,https://rescue.company.com` |
 | `widget.allowed-scopes` | CSV | `chat:stream,chat:upload,workflow:subscribe,rag:read` | 위젯 토큰에 부여 가능한 scope 화이트리스트. 발급 요청 scope 와 교집합만 적용. CR-061: `chat:upload` 미포함 시 위젯 파일 첨부 동작 불가 |
 | `widget.token-ttl-seconds` | int | `1800` | 위젯 토큰 기본 TTL (초) |
 | `widget.token-max-ttl-seconds` | int | `3600` | 위젯 토큰 최대 TTL 하드캡. 요청 TTL 이 이를 초과하면 cap 적용 + 로그 |
+
+**iframe 방식** [CR-203]: 소비앱이 `<aimbase-chat-frame>` 으로 채팅창 전용 페이지를 끼우는 방식이다. 운영자가 할 일은 소비앱 화면 출처를 `widget.allowed-origins` 에 넣는 것뿐이고 설정 항목은 늘지 않는다. 전용 페이지 응답에만 `frame-ancestors` 가 붙고 그 밖의 응답은 `X-Frame-Options: DENY` 그대로다. 앞단 nginx 가 `/widget/` 응답에 `X-Frame-Options` 나 `frame-ancestors` 를 더하면 전용 페이지가 끼워지지 않으므로 더하지 않는다. 목록에 없는 화면에 끼우면 브라우저 콘솔에 `frame-ancestors` 위반이 찍힌다. API 가이드 § 17-12.
 
 **사무소(지점)별 지식 자료** [CR-206]: 한 테넌트 안에서 사무소마다 다른 자료를 쓰게 하려면 지식 자료를 사무소별로 등록하고(§ 3-6) 자료 ID 를 소비앱에 알린다. 소비앱 서버가 위젯 토큰을 받을 때 `rag_source_ids` 로 그 사용자 사무소의 자료를 실으면, 그 토큰의 대화와 청크 원문 조회는 목록 안의 자료만 쓴다. 위젯 토큰은 지식 자료 API 중 청크 원문 조회만 부를 수 있다. 설정 항목은 늘지 않는다. API 가이드 § 39.
 

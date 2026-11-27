@@ -57,17 +57,17 @@
 
 ### 4.1 전용 페이지 [PRD-660]
 
-- 주소: `<Aimbase>/widget/v1/frame.html`. CR-202 가 버전 고정 주소를 정하면 그 폴더에도 같은 이름으로 둔다. 연결 스크립트는 자기 주소 기준 `./frame.html` 을 기본값으로 쓰고 `frame-src` 속성으로 바꿀 수 있다(소비앱이 연결 스크립트를 자기 서버에 복사해 두었을 때는 `base-url` + `/widget/v1/frame.html`).
+- 주소: `<Aimbase>/widget/v1/frame.html`. CR-202 가 버전 고정 주소를 정하면 그 폴더에도 같은 이름으로 둔다. 연결 스크립트가 끼우는 주소는 이 순서로 정한다. ① `frame-src` 속성 ② 연결 스크립트를 받은 폴더의 `frame.html`(스크립트 출처가 `base-url` 과 같거나 `base-url` 이 없을 때) ③ `base-url` + `/widget/v1/frame.html`(스크립트를 소비앱 서버에 복사해 두어 출처가 다를 때). ② 덕분에 버전 폴더에서 받은 스크립트는 같은 버전의 전용 페이지를 끼운다.
 - 내용: 빈 html 한 장과 모듈 스크립트 `aimbase-chat.frame.js`. 몸체는 투명하고 여백 0. 스크립트가 `<aimbase-chat>` 요소를 만들어 몸체를 채운다. 위젯 코드는 지금 esm 번들과 조각을 같은 폴더에서 그대로 쓴다.
-- 끼운 틀 모드(`framed`): 위젯은 fixed 좌표를 쓰지 않고 iframe 창을 꽉 채운다. 떠 있는 창이 닫혀 있으면 버블 단추만 창을 채우고, 열리면 채팅창이 채운다. 잡는 자리와 머리줄 끌기는 위젯이 하지 않고 부모에게 알린다. 크게 보기의 어둡게 하는 뒷막도 부모가 그린다. 그 밖의 모양과 기능(메뉴, 왼쪽 칸, 옆 창, 첨부, 음성)은 지금과 같다.
-- 부모 화면이 없거나(`window.parent === window`) init 이 3초 안에 오지 않으면 채팅창 대신 안내 「이 화면은 연결된 서비스 화면 안에서만 열 수 있습니다」 를 보인다.
+- 끼운 틀 모드(위젯 옵션 `frame`, 요소에 `data-framed`): 위젯은 fixed 좌표를 쓰지 않고 iframe 창을 꽉 채운다. 떠 있는 창이 닫혀 있으면 버블 단추만 창을 채우고, 열리면 채팅창이 채운다. 잡는 자리는 부모가 두고, 머리줄 끌기는 위젯이 화면 좌표만 부모에게 보낸다. 크게 보기의 어둡게 하는 뒷막도 부모가 그린다. 왼쪽 칸(지난 대화)을 붙일지는 iframe 폭이 아니라 부모가 알려 준 부모 화면 폭(680px 이상)으로 정한다. 그 밖의 모양과 기능(메뉴, 옆 창, 첨부, 음성)은 지금과 같다.
+- 부모 화면이 없거나(`window.parent === window`) init 이 3초 안에 오지 않으면(연결 스크립트 없이 끼운 화면) 채팅창 대신 안내 「이 화면은 연결된 서비스 화면 안에서만 열 수 있습니다」 를 보인다.
 - 받은 토큰의 origin claim 이 부모 출처와 다르면 안내 「이 화면에서는 채팅창을 열 수 없습니다」 를 보이고 아무 요청도 보내지 않는다(BIZ-301). claim 은 JWT 본문을 해독해 읽는다(서명 검증은 서버가 한다).
 
 ### 4.2 연결 스크립트 [PRD-661]
 
 - 파일: `aimbase-chat-frame.js`. 한 파일이고 외부 의존이 없고 조각을 뒤에 더 받지 않는다. 소비앱이 복사해 자기 서버에서 서빙해도 된다. 요소 직접 삽입 방식의 「복사 금지」 는 조각 파일 때문이었고 이 파일에는 조각이 없다. 소비앱 화면에서 도는 Aimbase 코드는 이 파일뿐이고, 채팅창 코드는 전용 페이지(Aimbase 출처) 안에서만 돈다. 그래서 채팅창 코드는 소비앱의 쿠키, 저장소, 화면에 닿지 않는다.
-- 요소: `<aimbase-chat-frame>`. 속성은 `<aimbase-chat>` 과 같다(`base-url`, `token-endpoint`, `display`, `theme-mode`, `screen-key`, `connection-id`, `connection-group-id`, `model`, `suggestions`, `empty-title`, `empty-subtitle`, `font-size`, `locale`, `allow-approval`, `history-list`, `rag-source-id`, `session-id`, `actions-enabled`). 받은 속성은 그대로 전용 페이지로 넘기고 전용 페이지의 `<aimbase-chat>` 이 지금처럼 읽는다. 더하는 속성은 `frame-src` 하나다.
-- JS 속성과 메서드: `contextProvider`, `authResolver` 는 같은 이름으로 둔다. `open()`, `close()`, `isOpen()`. `new-conversation` 이벤트는 전용 페이지에서 받아 같은 이름으로 다시 쏜다.
+- 요소: `<aimbase-chat-frame>`. display 가 없으면 `<aimbase-chat>` 과 같이 칸 안(inline)이다. 속성은 `<aimbase-chat>` 과 같다(`base-url`, `token-endpoint`, `display`, `theme-mode`, `screen-key`, `connection-id`, `connection-group-id`, `model`, `suggestions`, `empty-title`, `empty-subtitle`, `font-size`, `locale`, `allow-approval`, `history-list`, `rag-source-id`, `session-id`, `actions-enabled`). 받은 속성은 그대로 전용 페이지로 넘기고 전용 페이지의 `<aimbase-chat>` 이 지금처럼 읽는다. 더하는 속성은 `frame-src` 하나다.
+- JS 속성과 메서드: `contextProvider`, `authResolver` 는 같은 이름으로 둔다. 요소가 등록되기 전에 넣은 값도 받는다(연결 스크립트를 `defer`, `async` 로 넣은 화면). `open()`, `close()`, `isOpen()`. `new-conversation` 이벤트는 전용 페이지에서 받아 같은 이름으로 다시 쏜다.
 - 하는 일: iframe 만들기(`allow="microphone; display-capture; clipboard-read; clipboard-write; fullscreen"`), display 별 자리와 크기(4.3), 메시지 중계(4.5), 토큰 받기(`token-endpoint` 에 POST, 쿠키 포함. `authResolver` 가 있으면 그것), 화면 자료(`contextProvider` 를 불러 회신), 끌기와 크기 바꾸기(4.4), 열림과 크게 보기 상태에 따라 상자 바꾸기.
 - 속성이 바뀌면 전용 페이지로 넘긴다. `screen-key` 가 바뀌면 전용 페이지의 `<aimbase-chat>` 이 CR-194 계약 6-1 대로 그 화면의 토큰과 대화로 다시 뜬다.
 
@@ -80,34 +80,35 @@
 | bubble | 닫힘 | 56 x 56px, 아래 20px, 오른쪽 20px | 버블 단추 |
 | bubble | 열림 | 기억한 자리와 크기. 없으면 처음 자리(아래 90px, 오른쪽 20px, 400 x 600px, 화면 높이 80% 까지). 화면 가장자리 8px 안쪽에 맞춤 | 채팅창 |
 | bubble | 크게 보기 | 가장자리 28px 안쪽 전체. 부모가 뒷막을 그린다 | 채팅창 |
-| bubble | 왼쪽 칸 붙임(CR-194) | 전용 페이지가 알린 대로 상자 폭을 240px 넓힌다(`widenForDock`). 기억은 칸을 뺀 대화 창 | 판과 대화 목록 |
+| bubble | 왼쪽 칸 붙임(CR-194) | 전용 페이지가 알린 대로 상자 폭을 왼쪽으로 240px 넓힌다(`widenForDock`). 부모 화면 폭이 680px 보다 좁으면 붙이지 않고 덮어 연다. 기억은 칸을 뺀 대화 창 | 채팅창과 대화 목록 |
 | panel | 열림 | 오른쪽 세로 전체, 폭 420px(기억) | 채팅창 |
 | inline | 열림 | 요소의 크기(폭 100%, 높이 100%). 소비앱이 요소 크기를 정한다 | 채팅창 |
 
 ### 4.4 끌기와 크기 바꾸기
 
-- 머리줄 끌기: 전용 페이지 안 위젯이 머리줄 pointerdown 에서 `drag` 메시지(화면 좌표 `screenX`, `screenY`)를 보낸다. 부모는 화면 전체를 덮는 투명 가림막을 올려 그 뒤의 pointermove 와 pointerup 을 자기가 받고, 화면 좌표 차이로 상자를 옮긴다(`moveFloating`). 손을 떼면 가림막을 내리고 기억한다. 부모와 전용 페이지는 같은 창이라 화면 좌표의 단위가 같다. iframe 안 좌표를 쓰면 상자가 움직이는 만큼 좌표가 되돌아와 쓸 수 없다.
-- 크기 바꾸기: 잡는 자리 8곳(변 6px, 모서리 14px)은 부모가 iframe 상자 바깥 가장자리에 둔다(지금 `.win-frame` 과 같은 자리). 옆 칸은 왼쪽 변 하나. 부모가 바로 받는다.
-- 손을 떼는 순간을 전용 페이지는 모른다. 그래서 끌기 상태를 전용 페이지에 두지 않는다.
+- 머리줄 끌기: 전용 페이지 안 위젯이 머리줄을 누른 포인터를 붙잡고(pointer capture) 3px 넘게 움직이면 `drag` 메시지를 `start`, `move`, `end` 로 보낸다. 값은 화면 좌표(`screenX`, `screenY`)다. 포인터를 붙잡아 두어 상자 밖으로 빠르게 끌어도 손을 뗄 때까지 전용 페이지가 받는다. 부모는 `start` 의 좌표와 상자 자리를 기억하고 그 차이로 상자를 옮기고(`moveFloating`), `end` 에서 기억한다. 부모와 전용 페이지는 같은 창이라 화면 좌표의 단위가 같다. iframe 안 좌표를 쓰면 상자가 움직이는 만큼 좌표가 되돌아와 쓸 수 없다.
+- 크기 바꾸기: 잡는 자리 8곳(변 6px, 모서리 14px)은 부모가 iframe 상자 바깥 가장자리에 둔다(지금 `.win-frame` 과 같은 자리). 옆 칸은 왼쪽 변 하나. 부모가 바로 받고, 끄는 동안 iframe 의 포인터를 꺼서(`pointer-events: none`) 커서가 상자 안으로 들어가도 놓치지 않는다.
 - 크게 보기 동안에는 잡는 자리를 숨기고 끌기 메시지를 무시한다(BIZ-287).
 
 ### 4.5 메시지 규약
 
-봉투는 `{ "aimbase-chat-frame": 1, "type": ..., "id"?: ..., ... }` 다. 표식이 없는 메시지는 양쪽 모두 무시한다. 전용 페이지는 `ready` 만 모든 출처로 보내고(내용 없음), init 을 받은 뒤로는 그 출처로만 보낸다. 부모는 자기가 만든 iframe 의 창에서 온, 전용 페이지 출처의 메시지만 받는다.
+봉투는 `{ "aimbase-chat-frame": 1, "type": ..., "id"?: ..., ... }` 다. 구현은 `src/frame/frame-protocol.ts`. 표식이 없는 메시지는 양쪽 모두 무시한다. 전용 페이지는 `ready` 만 모든 출처로 보내고(내용 없음), init 을 받은 뒤로는 그 출처로만 보낸다. 부모는 자기가 만든 iframe 의 창에서 온, 전용 페이지 출처의 메시지만 받는다.
 
-| 방향 | type | 내용 | 때 |
+| 보내는 쪽 | type | 내용 | 때 |
 |---|---|---|---|
-| 전용 → 부모 | `ready` | 없음 | 전용 페이지 스크립트가 뜰 때 |
-| 부모 → 전용 | `init` | `attrs`(채팅창 속성 이름과 값. `frame-src`, `id`, `class`, `style` 은 빼고), `display` | `ready` 를 받으면 |
-| 전용 → 부모 | `token:request` | `id` | 위젯이 토큰이 필요할 때(처음, 갱신 때) |
-| 부모 → 전용 | `token:reply` | `id`, `token`(TokenResponse) 또는 `error` | 소비앱 BFF 응답을 받으면 |
-| 전용 → 부모 | `context:request` | `id` | 질문을 보낼 때 |
-| 부모 → 전용 | `context:reply` | `id`, `context` | `contextProvider()` 결과. 구조 복사가 되는 값만 간다 |
-| 부모 → 전용 | `attr` | `name`, `value` | 요소 속성이 바뀌면 |
-| 부모 → 전용 | `open`, `close` | 없음 | `open()`, `close()` 호출 |
-| 전용 → 부모 | `state` | `open`, `expanded`, `docked` | 열림, 크게 보기, 왼쪽 칸 붙임이 바뀔 때 |
-| 전용 → 부모 | `drag` | `screenX`, `screenY` | 머리줄 pointerdown |
-| 전용 → 부모 | `event` | `name`, `detail` | `new-conversation` |
+| 전용 페이지 | `ready` | 없음 | 전용 페이지 스크립트가 뜰 때 |
+| 부모 화면 | `init` | `attrs`(`<aimbase-chat>` 이 받는 18개 속성만. `frame-src`, `id`, `class`, `style` 은 가지 않는다), `display`(없으면 inline). 전용 페이지는 `token-endpoint`, `base-url` 은 쓰지 않는다(토큰은 부모가 받고 서버는 전용 페이지 출처) | `ready` 를 받으면 |
+| 부모 화면 | `viewport` | `width`, `height`(부모 화면 크기) | init 바로 뒤, 부모 화면 크기가 바뀔 때. 왼쪽 칸을 붙일지 정하는 데 쓴다 |
+| 전용 페이지 | `token:request` | `id` | 위젯이 토큰이 필요할 때(처음, 갱신 때) |
+| 부모 화면 | `token:reply` | `id`, `token`(TokenResponse) 또는 `error` | 소비앱 BFF 응답을 받으면 |
+| 전용 페이지 | `context:request` | `id` | 질문을 보낼 때 |
+| 부모 화면 | `context:reply` | `id`, `context` | `contextProvider()` 결과. 구조 복사가 되는 값만 간다 |
+| 부모 화면 | `attr` | `name`, `value` | 요소 속성이 바뀌면 |
+| 부모 화면 | `open`, `close` | 없음 | `open()`, `close()` 호출 |
+| 전용 페이지 | `state` | `open`, `expanded`, `docked` | 열림, 크게 보기, 왼쪽 칸 붙임이 바뀔 때 |
+| 부모 화면 | `expand` | `expanded` | 부모가 그린 뒷막을 누르면 `false` |
+| 전용 페이지 | `drag` | `phase`(`start`, `move`, `end`), `screenX`, `screenY` | 머리줄을 누르고 3px 넘게 움직일 때부터 손을 뗄 때까지 |
+| 전용 페이지 | `event` | `name`, `detail` | `new-conversation` |
 
 ### 4.6 토큰과 화면 자료
 
@@ -122,10 +123,10 @@
 |---|---|---|
 | 1 | `packages/chat-widget-embed/src/frame/frame-protocol.ts` (새) | 메시지 봉투, 타입, 검사, 토큰 origin claim 해독. 양쪽 공용 |
 | 2 | `packages/chat-widget-embed/src/frame-page/main.ts` (새) | 전용 페이지 스크립트. ready, init 받기, `<aimbase-chat framed>` 만들기, 토큰과 자료 중계, 상태 보고, 안내 문구 |
-| 3 | `packages/chat-widget-embed/src/frame-host/element.ts`, `host-window.ts` (새) | 연결 스크립트. `<aimbase-chat-frame>` 요소, iframe 상자, 가림막 끌기, 잡는 자리, 기억 |
-| 4 | `packages/chat-widget-embed/frame.html` (새) → `static/widget/v1/frame.html` | 전용 페이지 html. gradle 복사에 html 도 넣는다 |
+| 3 | `packages/chat-widget-embed/src/frame-host/element.ts`, `host-window.ts`, `index.ts` (새) | 연결 스크립트. `<aimbase-chat-frame>` 요소, iframe 상자, 화면 좌표 끌기, 잡는 자리, 기억, 부모 화면 크기 알림 |
+| 4 | `backend/platform-core/src/main/resources/static/widget/v1/frame.html` (새) | 전용 페이지 html. 같은 폴더의 `index.html`, `guide.html` 처럼 손으로 관리한다. gradle 복사(`copyWidgetBundle`)는 `*.js` 만 바꾸고 html 은 남긴다 |
 | 5 | `packages/chat-widget-embed/tsup.config.ts` | esm 설정에 `aimbase-chat.frame` 진입점 추가(조각 공유), iife 설정에 `aimbase-chat-frame` 추가 |
-| 6 | `src/widget.ts`, `src/styles.ts`, `src/types.ts`, `src/web-component.ts` | `framed` 옵션과 속성, 끼운 틀 모드 스타일, 끌기 알림, `ContextProvider` 비동기, 상태 알림 |
+| 6 | `src/widget.ts`, `src/styles.ts`, `src/types.ts`, `src/web-component.ts`, `src/frame/panes.ts`, `src/frame/frame-drag.ts`(새), `src/frame/token-endpoint.ts`(새), `src/frame/frame-strings.ts`(새), `src/frame/resize-handle-css.ts`(새) | `frame` 옵션과 `frameBridge` 속성, 끼운 틀 모드 스타일, 머리줄 끌기 알림, `ContextProvider` 비동기, 상태 알림, 왼쪽 칸 붙임 폭을 부모 화면 폭으로, 안내 문구, 잡는 자리 스타일 공용 |
 | 7 | `backend/.../config/SecurityConfig.java`, `config/WidgetFrameHeaderWriter.java` (새) | BIZ-300 머리글 |
 | 8 | `backend/.../auth/JwtAuthenticationFilter.java` | BIZ-302 |
 | 9 | `docs/guides/embed-chat-widget.md`, `aimbase-api-guide.md`, `aimbase-ops-guide.md`, `static/widget/v1/index.html` | 두 방식 안내, 토큰 검사와 머리글 설명, 허용 주소 설정의 뜻 |
@@ -146,14 +147,14 @@
 
 ### 7.1 단위시험 (T3-5)
 
-- `frame-protocol.test.ts`: 표식 없는 메시지 무시, 다른 출처 무시, 토큰 origin claim 해독과 부모 출처 대조(같음, 다름, 깨진 토큰), 속성 전달 목록.
-- `host-window.test.ts`: 화면 좌표 차이로 상자 옮기기(순수 부분), display 와 상태별 상자 계산.
+- `frame-protocol.test.ts`: 표식 없는 메시지 무시, 다른 출처 무시, 토큰 origin claim 해독과 부모 출처 대조(같음, 다름, 깨진 토큰), 속성 전달 목록, display 기본값(TC-CHT-170 ~ 172), 전용 페이지 주소 기본값(TC-CHT-181), 화면 자료 JSON 값만(TC-CHT-182).
+- `host-window.test.ts`: display 와 상태별 상자 계산(TC-CHT-173), 화면 좌표 차이로 상자 옮기기(TC-CHT-174).
 - `JwtAuthenticationFilterTest`: claim 과 Origin 이 다르고 `Sec-Fetch-Site: same-origin` 이면 인증, `cross-site` 면 거절, Origin 없으면 인증.
 - `WidgetFrameHeaderWriterTest`: `frame.html` 에 CSP 와 `X-Frame-Options` 없음, 다른 경로에 DENY, 목록이 비면 `'none'`.
 
 ### 7.2 로컬 확인
 
-- 로컬 api(8280)와 예제 소비앱(`sample-consumer`, 다른 포트)을 띄우고 `<aimbase-chat-frame>` 으로 붙인다. 허용 주소에 그 포트를 넣는다.
+- 로컬 api 와 붙이는 앱 흉내 화면(다른 포트)을 띄우고 `<aimbase-chat-frame>` 으로 붙인다. 허용 주소에 그 포트를 넣는다. 8280 은 이 맥에서 다른 컨테이너가 쓰고 있어 18203 으로 띄웠다(9절).
 - 본다: 끼워짐(DENY 없음), 토큰 받기와 갱신, 질문과 답, 화면 자료가 요청에 실림, `screen-key` 바꾸기, 열기와 닫기와 크게 보기, 끌기와 크기 바꾸기와 기억, panel 과 inline, 허용 목록에 없는 출처에서 끼우면 막힘(브라우저 콘솔 CSP), `frame.html` 을 바로 열면 안내 문구.
 - 기존 `<aimbase-chat>` 방식에 회귀 없음(같은 예제 페이지의 기존 방식 칸).
 
@@ -177,6 +178,12 @@
 - 2026-11-27 23:05 화면 컨셉 승인요청을 컨타에 보냄(새 화면 요소 없음).
 - 2026-11-27 23:10 CR-206 이 PRD-648, 649, BIZ-290, 291, TC-CHT-159 ~ 161 을 먼저 잡아 이 CR 의 번호를 PRD-660 ~ 663, BIZ-300 ~ 302, TC-CHT-170 ~ 174 로 옮김. 설계 캐스케이드(T1-1, T1-3, T1-7, T2-1, T3-2, T3-3, T3-4, T3-5)와 대장 등록.
 - 2026-11-27 23:16 설계분 커밋(949d6c18). 화면이 아닌 부분 구현: 메시지 규약(`frame-protocol.ts`, TC-CHT-170~172 13건 통과), BIZ-302 토큰 검사(TC-FRM-001~003), BIZ-300 머리글(`WidgetFrameHeaderWriter`, TC-FRM-004~006). 서버 시험 14건 통과. 화면 컨셉 답 대기 중. CR-204 예약 번호(PRD-650·651, BIZ-292~296, TC-CHT-162~166, 영역 29)와 겹침 없음
+- 2026-11-27 23:33 화면 컨셉 승인(①컨셉만, 사용자 23:30)을 받고 컨셉 커밋(dc094392).
+- 2026-11-28 07:43 화면 구현 커밋(22bb7662). 전용 페이지(`frame.html`, `aimbase-chat.frame.js`), 연결 스크립트(`aimbase-chat-frame.js`), 위젯 끼운 틀 모드, 부모 쪽 상자(`host-window.ts`, TC-CHT-173, 174).
+- 2026-11-28 07:59 로컬 확인에서 나온 세 가지를 고쳐 커밋(d60a9d90). ① 끼운 채팅창이 iframe 폭으로 판정해 대화 목록을 붙이지 않던 것을 부모 화면 폭(viewport 메시지)으로 판정. ② 전용 페이지 주소를 스크립트 폴더 기준으로(버전 폴더에서 받은 스크립트가 같은 버전 페이지를 끼움, TC-CHT-181). ③ 칸 안(inline) iframe 이 150px 로 뜨던 높이. 또 연결 요소에 스크립트 등록 전에 넣은 `contextProvider` 가 등록 때 지워지지 않게 했다.
+- 2026-11-28 08:00 로컬 확인 35건 통과(18203 api, 13203~13205 붙이는 앱 흉내 화면, 가짜 모델). 끼워짐, 질문과 답(요청이 `Sec-Fetch-Site: same-origin` 으로 와 토큰 검사 통과), 화면 자료 실림, `screen-key` 거름과 바꾸기, 끌기, 크기 바꾸기, 기억(붙이는 앱 출처 저장소), 크게 보기와 뒷막, 새 대화 이벤트 전달, `open()`, `close()`, panel, inline, 허용 목록 밖 출처 막힘(CSP), 토큰 origin 다름 안내, `frame.html` 바로 열기 안내, 스크립트 없이 iframe 만 끼우면 3초 뒤 안내, defer 스크립트에서 화면 자료, 대화 목록 붙임이 기존 방식과 같은 자리, 680px 아래 붙이지 않음, 기존 `<aimbase-chat>` 방식 회귀 없음. 토큰 갱신은 처음 받기와 같은 경로라 따로 보지 않았다.
+- 2026-11-28 08:00 번호 옮김. CR-202 가 TC-CHT-175 ~ 180 을 쓰므로 새 시험을 TC-CHT-181(전용 페이지 주소), 182(화면 자료)로, CR-186 ~ 188 이 FE-140 ~ 159 를 잡아 화면 번호를 FE-160 으로 했다.
+- 2026-11-28 08:00 본 것(고치지 않음): 기존 `<aimbase-chat>` 방식에서 위젯 스크립트가 늦게 등록되면 그 전에 넣은 `contextProvider` 가 등록 때 지워진다(요소 필드 초기값이 덮음). 이 CR 범위 밖이라 컨타에 알린다.
 
 ## 기획서 화면 대조
 

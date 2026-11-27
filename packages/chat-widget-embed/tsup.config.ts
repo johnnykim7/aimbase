@@ -34,7 +34,7 @@ export default defineConfig([
     platform: "browser",
     target: "es2020",
   },
-  // CR-203: iframe 연결 스크립트 — 붙이는 앱 화면에 <script> 로 넣는다. 채팅창 코드를 담지 않는다.
+  // CR-203: iframe 연결 스크립트. 붙이는 앱 화면에 <script> 로 넣는다. 채팅창 코드를 담지 않는다.
   {
     entry: { "aimbase-chat-frame": "src/frame-host/index.ts" },
     format: ["iife"],

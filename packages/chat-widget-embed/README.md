@@ -96,6 +96,8 @@ PORT=3999 node server.js
 - `dist/aimbase-chat.umd.global.js` — `<script>` 로드용 (global: `AimbaseChat`)
 - `dist/aimbase-chat.esm.js` — 번들러용 ESM
 - `dist/index.d.ts` — TypeScript 타입
+- `dist/aimbase-chat-frame.js`: iframe 방식 연결 스크립트 `<aimbase-chat-frame>` (iife 한 파일, CR-203). 진입 `src/frame-host/index.ts`
+- `dist/aimbase-chat.frame.js`: iframe 방식 전용 페이지 스크립트(esm, 위젯 조각 공유). 진입 `src/frame-page/main.ts`. 전용 페이지 html 은 `backend/platform-core/src/main/resources/static/widget/v1/frame.html` 에 손으로 둔다
 
 UMD ~17KB (minified), ESM ~25KB.
 

@@ -1435,6 +1435,8 @@ GET /api/v1/prompt-templates/preview?tenantId=...&projectId=...
 > - `/widget/v1/aimbase-chat.esm.js` — core 번들 (~49KB, 번들러 import 겸용)
 > - `/widget/v1/*.js` (다수) — CR-131 lazy 청크 (mermaid·코드 하이라이트·엑셀 변환). 해당 기능 사용 시에만 fetch. **self-host 시 디렉토리 전체 복사 필요** (단일 파일 복사는 리치 렌더링을 깨뜨림)
 > - `/widget/v1/aimbase-chat.d.ts` — TypeScript 타입
+> - `/widget/v1/aimbase-chat-frame.js`: iframe 방식 연결 스크립트 (~14KB, 한 파일, 조각 없음) (CR-203, § 17-12)
+> - `/widget/v1/frame.html`, `/widget/v1/aimbase-chat.frame.js`: iframe 방식 채팅창 전용 페이지와 그 스크립트 (CR-203)
 > - `/widget/v1/index.html` (또는 `/widget/v1/`) — HTML 렌더링된 통합 가이드
 > - `/widget/v1/sample-bff/server.js` — Node 샘플 BFF (외부 의존 0)
 >
@@ -1772,6 +1774,21 @@ events.forEach(e =>
 ```
 
 ---
+
+### 17-12. iframe 방식의 전용 페이지 머리글과 토큰 검사 [CR-203]
+
+소비앱 화면이 `<aimbase-chat-frame>`(연결 스크립트)으로 Aimbase 의 채팅창 전용 페이지를 iframe 으로 끼우는 방식이다. 붙이는 법은 [통합 가이드](embed-chat-widget.md) § 3-6. 새 API 는 없고 아래 두 가지가 바뀐다. 토큰 발급(§ 17-2)은 그대로이고 `origin` 은 소비앱 화면의 출처다.
+
+**전용 페이지 응답 머리글**
+
+| 순번 | 응답 | 머리글 |
+|---|---|---|
+| 1 | `/widget/*/frame.html` | `Content-Security-Policy: frame-ancestors <widget.allowed-origins 를 공백으로 이은 것>`. `X-Frame-Options` 없음. 목록이 비면 `frame-ancestors 'none'` |
+| 2 | 그 밖의 모든 응답 | `X-Frame-Options: DENY` (지금과 같음) |
+
+**위젯 토큰 origin 대조**: 전용 페이지 안 채팅창이 보내는 요청은 Origin 이 Aimbase 자기 주소라 토큰의 `origin`(소비앱 화면 출처)과 다르다. 이때 브라우저가 붙이는 `Sec-Fetch-Site: same-origin` 이 있으면 인증한다. `cross-site`, `same-site`, 머리글 없음은 지금처럼 거절한다. Origin 이 없는 서버 간 호출은 지금처럼 통과한다. 전용 페이지는 받은 토큰의 `origin` 이 자기를 끼운 부모 화면의 출처와 다르면 채팅창을 띄우지 않는다.
+
+**부모 화면과 전용 페이지의 메시지**: 브라우저 안 `postMessage` 이고 서버는 관여하지 않는다. 봉투는 `{"aimbase-chat-frame": 1, "type": ...}` 이고 종류는 `ready`, `init`, `viewport`, `token:request`, `token:reply`, `context:request`, `context:reply`, `attr`, `open`, `close`, `state`, `expand`, `drag`, `event` 다. 연결 스크립트를 쓰면 소비앱이 직접 다룰 일은 없다. 상세는 `docs/CR-203_채팅창_iframe_방식_LexFlow_R1.md` 4.5절.
 
 ## 18. 위젯 파일 첨부 (이미지/PDF Vision) [CR-061]
 

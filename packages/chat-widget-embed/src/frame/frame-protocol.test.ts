@@ -115,6 +115,9 @@ describe("TC-CHT-172 속성 전달", () => {
     expect(message.attrs.display).toBe("inline");
   });
 
+});
+
+describe("TC-CHT-181 전용 페이지 주소", () => {
   it("frame-src 가 없으면 base-url 아래 전용 페이지를 끼운다", () => {
     expect(frameSrcOf(null, FRAME, `${PARENT}/cases/1`)?.href).toBe(`${FRAME}/widget/v1/frame.html`);
     expect(frameSrcOf(`${FRAME}/widget/v2/frame.html`, FRAME, PARENT)?.href).toBe(`${FRAME}/widget/v2/frame.html`);
@@ -129,6 +132,9 @@ describe("TC-CHT-172 속성 전달", () => {
     expect(frameSrcOf(null, FRAME, PARENT, `${PARENT}/js/aimbase-chat-frame.js`)?.href).toBe(`${FRAME}/widget/v1/frame.html`);
   });
 
+});
+
+describe("TC-CHT-182 화면 자료", () => {
   it("화면 자료는 JSON 값만 남긴다", () => {
     expect(plainContext({ caseId: 12, at: new Date(0), fn: () => 1 })).toEqual({ caseId: 12, at: "1970-01-01T00:00:00.000Z" });
     expect(plainContext(undefined)).toBeUndefined();
@@ -138,6 +144,9 @@ describe("TC-CHT-172 속성 전달", () => {
     expect(plainContext(loop)).toBeUndefined();
   });
 
+});
+
+describe("TC-CHT-172 속성 목록", () => {
   it("<aimbase-chat> 이 받는 속성 전부가 목록에 있다", () => {
     expect(CHAT_ATTRIBUTE_NAMES).toHaveLength(18);
     expect(CHAT_ATTRIBUTE_NAMES).toContain("history-list");
