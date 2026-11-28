@@ -3596,7 +3596,7 @@ curl -X POST .../api/v1/conversations/purge -H "X-API-Key: $API_KEY" -H "Content
 | 만든 그림, 옆 창 문서 파일 | 대화와 같음 | 위와 같음 |
 | 공유 링크 사본 | 링크 기한까지. 끊으면 바로 | `chat.share.ttl-days` |
 | 실행기 산출물 파일 | 24시간 | `aimbase.artifact.ttl-hours` |
-| 실행기 CLI 대화 기록 사본 | 마지막 활동 뒤 7일 | 운영 설정(실행기 CLI 계정 폴더의 `cleanupPeriodDays`). 이 API 로는 삭제하지 않습니다 |
+| 실행기 CLI 대화 기록 사본 | 마지막 활동 뒤 7일 | 운영 설정(실행기 CLI 계정 폴더의 `cleanupPeriodDays`). CLI 가 하루 한 번 정리하므로 최대 하루 더 남을 수 있습니다. 이 API 로는 삭제하지 않습니다 |
 | 위젯 읽어 주기 음성 | 저장하지 않음 | 없음 |
 | 사용량과 감사 로그 | 보존(대화 내용 없음) | 없음 |
 
