@@ -44,6 +44,7 @@ export const CORE = defineStrings({
     toolsUsed: (n: number) => `도구를 ${n}번 사용했습니다`,
     stopped: "응답을 중지했습니다",
     requestFailed: (message: string) => `답을 받지 못했습니다: ${message}`,
+    chatRateLimited: (seconds: number) => `질문이 많아 잠시 받을 수 없습니다. ${seconds}초 뒤 「다시 시도」를 눌러 주세요`,
     retry: "다시 시도",
     editWarning: "이 질문 뒤 대화는 지워집니다",
     attachmentLabel: (name: string) => `첨부: ${name}`,
@@ -86,6 +87,7 @@ export const CORE = defineStrings({
     approvalWaiting: (step: string, reason: string) => `승인 대기: ${step} (${reason})`,
     errors: {
       session_busy: "앞의 응답이 아직 끝나지 않았습니다. 잠시 후 다시 시도하세요",
+      chat_rate_limited: "질문이 많아 잠시 받을 수 없습니다. 잠시 후 「다시 시도」를 눌러 주세요",
       model_not_allowed: "이 연결에서 사용할 수 없는 모델입니다",
       thinking_not_supported: "이 연결은 깊게 생각하기를 지원하지 않습니다",
       "rewind_invalid:not_turn_start": "이 질문부터 다시 묻지 못했습니다. 페이지를 다시 불러온 뒤 시도하세요",
@@ -142,6 +144,7 @@ export const CORE = defineStrings({
     toolsUsed: (n: number) => (n === 1 ? "Used a tool once" : `Used tools ${n} times`),
     stopped: "Response stopped",
     requestFailed: (message: string) => `Couldn't get a response: ${message}`,
+    chatRateLimited: (seconds: number) => `Too many requests right now. Try again in ${seconds} seconds`,
     retry: "Retry",
     editWarning: "Messages after this question will be removed",
     attachmentLabel: (name: string) => `Attachment: ${name}`,
@@ -183,6 +186,7 @@ export const CORE = defineStrings({
     approvalWaiting: (step: string, reason: string) => `Waiting for approval: ${step} (${reason})`,
     errors: {
       session_busy: "The previous response hasn't finished yet. Try again in a moment",
+      chat_rate_limited: "Too many requests right now. Try again in a moment",
       model_not_allowed: "This model isn't available for this connection",
       thinking_not_supported: "This connection doesn't support extended thinking",
       "rewind_invalid:not_turn_start": "Couldn't ask again from this question. Reload the page and try again",

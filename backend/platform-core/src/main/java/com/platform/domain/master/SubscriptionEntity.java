@@ -39,6 +39,10 @@ public class SubscriptionEntity {
     @Column(name = "api_rpm_limit", nullable = false)
     private Integer apiRpmLimit = 60;
 
+    // CR-205 BIZ-297: 위젯 토큰 요청(채팅)의 칸. 초기값은 플랜이 정하므로 코드 기본값을 두지 않는다.
+    @Column(name = "chat_rpm_limit", nullable = false)
+    private Integer chatRpmLimit;
+
     @Column(name = "valid_from")
     private OffsetDateTime validFrom = OffsetDateTime.now();
 
@@ -76,6 +80,8 @@ public class SubscriptionEntity {
     public void setConnectionManagementMode(String connectionManagementMode) { this.connectionManagementMode = connectionManagementMode; }
     public Integer getApiRpmLimit() { return apiRpmLimit; }
     public void setApiRpmLimit(Integer apiRpmLimit) { this.apiRpmLimit = apiRpmLimit; }
+    public Integer getChatRpmLimit() { return chatRpmLimit; }
+    public void setChatRpmLimit(Integer chatRpmLimit) { this.chatRpmLimit = chatRpmLimit; }
     public OffsetDateTime getValidFrom() { return validFrom; }
     public void setValidFrom(OffsetDateTime validFrom) { this.validFrom = validFrom; }
     public OffsetDateTime getValidUntil() { return validUntil; }

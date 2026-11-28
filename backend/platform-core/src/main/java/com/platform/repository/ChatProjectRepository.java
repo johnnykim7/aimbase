@@ -18,4 +18,8 @@ public interface ChatProjectRepository extends JpaRepository<ChatProjectEntity, 
     /** CR-178: 프로젝트 목록 행의 자료 수. [project_id, count] */
     @Query("SELECT f.projectId, COUNT(f) FROM ChatProjectFileEntity f WHERE f.projectId IN :projectIds GROUP BY f.projectId")
     List<Object[]> countFilesByProject(@Param("projectIds") List<UUID> projectIds);
+
+    /** CR-204 BIZ-293: 접두어로 시작하는 사람들의 프로젝트. */
+    @Query("SELECT p FROM ChatProjectEntity p WHERE p.ownerRef LIKE :pattern ESCAPE '!'")
+    List<ChatProjectEntity> findByOwnerRefPrefix(@Param("pattern") String pattern);
 }

@@ -294,6 +294,28 @@ public class ChatShareService {
         return m;
     }
 
+    /** 대화 하나의 공유 사본 폴더 삭제 결과. */
+    public record SnapshotPurge(int deleted, int failed) {
+    }
+
+    /**
+     * CR-204 BIZ-292: 대화의 공유 사본 폴더를 끊긴 것까지 모두 지운다. 행은 호출한 쪽이 완전 삭제 트랜잭션에서 지운다.
+     * 남은 폴더가 있으면 failed 로 세어 호출한 쪽이 행을 남기게 한다.
+     */
+    public SnapshotPurge deleteSnapshots(String sessionId) {
+        int deleted = 0;
+        int failed = 0;
+        for (ChatShareEntity s : repository.findBySessionId(sessionId)) {
+            if (s.getSnapshotPath() == null || s.getSnapshotPath().isBlank()) continue;
+            Path dir = Path.of(s.getSnapshotPath()).getParent();
+            if (dir == null || !Files.exists(dir)) continue;
+            deleteQuietly(dir);
+            if (Files.exists(dir)) failed++;
+            else deleted++;
+        }
+        return new SnapshotPurge(deleted, failed);
+    }
+
     private static void deleteQuietly(Path dir) {
         if (dir == null || !Files.exists(dir)) return;
         try (Stream<Path> walk = Files.walk(dir)) {

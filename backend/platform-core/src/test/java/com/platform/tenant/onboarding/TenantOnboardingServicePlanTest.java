@@ -52,7 +52,11 @@ class TenantOnboardingServicePlanTest {
                 "plan.free.api-rpm-limit", "60",
                 "plan.starter.api-rpm-limit", "300",
                 "plan.pro.api-rpm-limit", "1000",
-                "plan.enterprise.api-rpm-limit", "0");
+                "plan.enterprise.api-rpm-limit", "0",
+                "plan.free.chat-rpm-limit", "60",
+                "plan.starter.chat-rpm-limit", "300",
+                "plan.pro.chat-rpm-limit", "1000",
+                "plan.enterprise.chat-rpm-limit", "0");
         when(settings.getString(anyString(), any())).thenAnswer(call ->
                 values.getOrDefault(call.getArgument(0, String.class), call.getArgument(1, String.class)));
 
@@ -101,5 +105,15 @@ class TenantOnboardingServicePlanTest {
         verify(tenants, never()).save(any());
         verify(service, never()).prepareTenantDatabase(any(), anyString());
         verify(subscriptions, never()).save(any());
+    }
+
+    /** CR-205 TC-PLAN-014: 생성 때 채팅 한도도 플랜의 값으로 시작한다(BIZ-298). */
+    @Test
+    @DisplayName("TC-PLAN-014 채팅 분당 요청 한도도 플랜의 값으로 시작한다")
+    void tcPlan014_chatLimitFromPlan() {
+        service.provision(request("pro"));
+
+        assertThat(savedSubscription().getApiRpmLimit()).isEqualTo(1000);
+        assertThat(savedSubscription().getChatRpmLimit()).isEqualTo(1000);
     }
 }

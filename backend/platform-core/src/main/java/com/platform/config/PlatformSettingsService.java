@@ -222,9 +222,12 @@ public class PlatformSettingsService {
             throw new IllegalArgumentException(SubscriptionPlanService.CODES_KEY + " must not be empty");
         }
         for (String code : codes) {
-            if (configRepository.findByConfigKey(SubscriptionPlanService.rpmLimitKey(code)).isEmpty()) {
-                throw new IllegalArgumentException("No setting for plan " + code + ": "
-                        + SubscriptionPlanService.rpmLimitKey(code));
+            // CR-205 BIZ-298: 채팅 분당 요청 한도 행도 있어야 한다. 한 플랜에 두 한도가 다 있어야 생성과 플랜 변경이 멈추지 않는다.
+            for (String key : List.of(SubscriptionPlanService.rpmLimitKey(code),
+                    SubscriptionPlanService.chatRpmLimitKey(code))) {
+                if (configRepository.findByConfigKey(key).isEmpty()) {
+                    throw new IllegalArgumentException("No setting for plan " + code + ": " + key);
+                }
             }
         }
 

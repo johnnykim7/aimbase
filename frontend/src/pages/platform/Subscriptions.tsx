@@ -11,12 +11,17 @@ import { CreditCard } from "lucide-react";
 import { useSubscriptions, useUpdateSubscription } from "../../hooks/usePlatform";
 import type { Subscription } from "../../types/tenant";
 
-type QuotaKey = "llmMonthlyTokenQuota" | "apiRpmLimit" | "maxConnections";
+type QuotaKey = "llmMonthlyTokenQuota" | "apiRpmLimit" | "chatRpmLimit" | "maxConnections";
 type EditForm = Record<QuotaKey, string> & { tenantName?: string };
 
 const QUOTA_FIELDS: { key: QuotaKey; label: string; hint?: string }[] = [
   { key: "llmMonthlyTokenQuota", label: "월간 토큰 한도" },
   { key: "apiRpmLimit", label: "분당 요청 한도", hint: "저장하면 다음 요청부터 적용됩니다. 0 은 무제한입니다." },
+  {
+    key: "chatRpmLimit",
+    label: "채팅 분당 요청 한도",
+    hint: "채팅창(위젯 토큰) 요청만 따로 셉니다. 저장하면 다음 요청부터 적용됩니다. 0 은 무제한입니다.",
+  },
   { key: "maxConnections", label: "최대 연결 수" },
 ];
 
@@ -36,6 +41,7 @@ export default function Subscriptions() {
       tenantName: sub.tenantName,
       llmMonthlyTokenQuota: String(sub.llmMonthlyTokenQuota),
       apiRpmLimit: String(sub.apiRpmLimit),
+      chatRpmLimit: String(sub.chatRpmLimit),
       maxConnections: String(sub.maxConnections),
     });
   };
@@ -50,6 +56,7 @@ export default function Subscriptions() {
         data: {
           llmMonthlyTokenQuota: Number(editForm.llmMonthlyTokenQuota),
           apiRpmLimit: Number(editForm.apiRpmLimit),
+          chatRpmLimit: Number(editForm.chatRpmLimit),
           maxConnections: Number(editForm.maxConnections),
         },
       },
@@ -91,6 +98,15 @@ export default function Subscriptions() {
         </span>
       ),
       width: "120px",
+    },
+    {
+      header: "채팅 분당 요청 한도",
+      render: (s) => (
+        <span className="font-mono text-xs">
+          {s.chatRpmLimit <= 0 ? "무제한" : s.chatRpmLimit.toLocaleString()}
+        </span>
+      ),
+      width: "140px",
     },
     {
       header: "최대 연결",
@@ -138,7 +154,7 @@ export default function Subscriptions() {
           <div className="text-sm font-semibold text-foreground mb-5">
             쿼터 편집 — {editForm.tenantName ?? editing}
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             {QUOTA_FIELDS.map(({ key, label, hint }) => {
               const invalid = !isWholeNumber(editForm[key]);
               return (

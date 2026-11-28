@@ -39,6 +39,10 @@ class PlatformSettingsPlanValidationTest {
         row("plan.starter.api-rpm-limit", "300");
         row("plan.pro.api-rpm-limit", "1000");
         row("plan.enterprise.api-rpm-limit", "0");
+        row("plan.free.chat-rpm-limit", "60");
+        row("plan.starter.chat-rpm-limit", "300");
+        row("plan.pro.chat-rpm-limit", "1000");
+        row("plan.enterprise.chat-rpm-limit", "0");
         when(repository.findByConfigKey(anyString()))
                 .thenAnswer(call -> Optional.ofNullable(rows.get(call.getArgument(0, String.class))));
         service = new PlatformSettingsService(repository, mock(AuditLogger.class));
@@ -91,5 +95,21 @@ class PlatformSettingsPlanValidationTest {
         assertThat(updated).isEqualTo(1);
         verify(repository).save(rows.get("plan.pro.api-rpm-limit"));
         assertThat(rows.get("plan.pro.api-rpm-limit").getConfigValue()).isEqualTo("0");
+    }
+
+    /** CR-205 TC-PLAN-017: 채팅 한도 행이 없는 플랜 이름과 음수 채팅 한도는 거절한다(BIZ-298). */
+    @Test
+    @DisplayName("TC-PLAN-017 채팅 한도 행이 없는 플랜과 음수 채팅 한도는 저장하지 않는다")
+    void tcPlan017_chatLimitRowsAreRequired() {
+        row("plan.gold.api-rpm-limit", "10");
+        assertThatThrownBy(() -> service.updateSettings(List.of(set("plan.codes", "free,gold")), "admin"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("plan.gold.chat-rpm-limit");
+        assertThatThrownBy(() -> service.updateSettings(List.of(set("plan.pro.chat-rpm-limit", "-1")), "admin"))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(repository, never()).save(any());
+
+        service.updateSettings(List.of(set("plan.pro.chat-rpm-limit", "0")), "admin");
+        verify(repository).save(any());
     }
 }

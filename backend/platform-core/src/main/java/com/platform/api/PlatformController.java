@@ -256,7 +256,7 @@ public class PlatformController {
     // ─── Subscription / Quota ────────────────────────────────────────
 
     @GetMapping("/plans")
-    @Operation(summary = "플랜 목록과 플랜별 분당 요청 한도 (CR-191)")
+    @Operation(summary = "플랜 목록과 플랜별 분당 요청 한도, 채팅 분당 요청 한도 (CR-191, CR-205)")
     public ApiResponse<SubscriptionPlanService.PlanCatalog> listPlans() {
         return ApiResponse.ok(planService.catalog());
     }
@@ -272,9 +272,11 @@ public class PlatformController {
     public ApiResponse<SubscriptionEntity> updateSubscription(
             @PathVariable String tenantId,
             @RequestBody SubscriptionUpdateRequest request) {
-        if (request.apiRpmLimit() != null) requireApiRpmLimit(request.apiRpmLimit());
+        if (request.apiRpmLimit() != null) requireRpmLimit(request.apiRpmLimit(), "apiRpmLimit");
+        if (request.chatRpmLimit() != null) requireRpmLimit(request.chatRpmLimit(), "chatRpmLimit");
         String plan = request.plan() != null ? planService.requireKnown(request.plan()) : null;
         Integer planRpmLimit = plan != null ? planService.rpmLimit(plan) : null;
+        Integer planChatRpmLimit = plan != null ? planService.chatRpmLimit(plan) : null;
 
         SubscriptionEntity sub = subscriptionRepository.findByTenantId(tenantId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -282,7 +284,10 @@ public class PlatformController {
 
         if (plan != null) {
             // BIZ-153: 다른 플랜으로 옮길 때만 그 플랜의 한도로 바꾼다. 같은 플랜을 다시 보내면 손으로 맞춘 한도를 지킨다.
-            if (!plan.equals(sub.getPlan())) sub.setApiRpmLimit(planRpmLimit);
+            if (!plan.equals(sub.getPlan())) {
+                sub.setApiRpmLimit(planRpmLimit);
+                sub.setChatRpmLimit(planChatRpmLimit);
+            }
             sub.setPlan(plan);
         }
         if (request.llmMonthlyTokenQuota() != null) sub.setLlmMonthlyTokenQuota(request.llmMonthlyTokenQuota());
@@ -291,6 +296,7 @@ public class PlatformController {
         if (request.maxWorkflows() != null) sub.setMaxWorkflows(request.maxWorkflows());
         if (request.storageGb() != null) sub.setStorageGb(request.storageGb());
         if (request.apiRpmLimit() != null) sub.setApiRpmLimit(request.apiRpmLimit().intValue());
+        if (request.chatRpmLimit() != null) sub.setChatRpmLimit(request.chatRpmLimit().intValue());
 
         return ApiResponse.ok(subscriptionRepository.save(sub));
     }
@@ -299,12 +305,12 @@ public class PlatformController {
      * 0 은 무제한이라 받는다(BIZ-142). 정수 칸으로 받으면 요청 본문 해석이 소수의 뒷자리를 버려
      * 1.5 가 1 로 저장되므로 십진수로 받아 여기서 거른다.
      */
-    private static void requireApiRpmLimit(BigDecimal value) {
+    private static void requireRpmLimit(BigDecimal value, String field) {
         boolean isInt = value.signum() >= 0
             && value.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) <= 0
             && value.stripTrailingZeros().scale() <= 0;
         if (!isInt) {
-            throw new IllegalArgumentException("apiRpmLimit must be an integer of 0 or greater.");
+            throw new IllegalArgumentException(field + " must be an integer of 0 or greater.");
         }
     }
 
@@ -379,7 +385,8 @@ public class PlatformController {
         Integer maxKnowledgeSources,
         Integer maxWorkflows,
         Integer storageGb,
-        BigDecimal apiRpmLimit
+        BigDecimal apiRpmLimit,
+        BigDecimal chatRpmLimit
     ) {}
 
     /** CR-066: 테넌트 일괄 마이그레이션 요청. body 생략 시 활성 테넌트 전체, dryRun=false 적용. */

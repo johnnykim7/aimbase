@@ -1,5 +1,6 @@
 package com.platform.repository;
 
+import org.springframework.data.jpa.repository.Modifying;
 import com.platform.domain.ToolExecutionLogEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -45,4 +46,9 @@ public interface ToolExecutionLogRepository extends JpaRepository<ToolExecutionL
     List<ToolExecutionLogEntity> findRecentFileReferences(
             @Param("sessionId") String sessionId,
             @Param("limit") int limit);
+
+    /** CR-204 BIZ-292: 대화 완전 삭제. 삭제 표시 여부와 관계없이 그 대화의 행을 모두 지운다. */
+    @Modifying
+    @Query("DELETE FROM ToolExecutionLogEntity l WHERE l.sessionId = :sessionId")
+    int purgeBySessionId(@Param("sessionId") String sessionId);
 }

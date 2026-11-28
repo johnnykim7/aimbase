@@ -1,6 +1,6 @@
 # T3-2. API 설계서
 
-> 설계 버전: 7.31 | 최종 수정: 2026-11-28 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206, CR-203
+> 설계 버전: 7.32 | 최종 수정: 2026-11-28 | 관련 CR: CR-009, CR-010, CR-011, CR-012, CR-014, CR-015, CR-016, CR-017, CR-018, CR-019, CR-021, CR-025, CR-029, CR-031, CR-032, CR-033, CR-035, CR-036, CR-038, CR-147, CR-149, CR-150, CR-154, CR-156, CR-161, CR-164, CR-165, CR-166, CR-167, CR-168, CR-169, CR-171, CR-174, CR-176, CR-175, CR-180, CR-181, CR-177, CR-186, CR-183, CR-184, CR-185, CR-178, CR-182, CR-179, CR-191, CR-194, CR-196, CR-206, CR-205, CR-204, CR-203
 > DEF-001 반영: 모든 POST/PUT 엔드포인트에 요청 스키마(필수/선택 필드, 타입, 예시) 명시
 
 > **프로젝트**: Aimbase
@@ -16,6 +16,7 @@
 - **응답 래퍼**: `ApiResponse<T>` → `{success, data, error, pagination}`
 - **페이지네이션**: `{page, size, totalElements, totalPages}`
 - **에러 코드**: HTTP 상태 코드 (400, 401, 403, 404, 409, 500)
+- **요청 한도** [CR-013, CR-205]: 테넌트가 식별된 요청은 분당 요청 한도를 센다. 위젯 토큰으로 인증된 요청(채팅 요청, BIZ-297)은 채팅 칸, 그 밖은 테넌트 칸이다. 응답 머리 `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Scope`(`tenant` 또는 `chat`). 넘으면 429, `Retry-After`, 본문 `{success:false, error, data:{limit, current, retry_after_seconds, scope}}`. 채팅 칸의 `error` 는 `chat_rate_limited`, 테넌트 칸의 `error` 는 `Rate limit exceeded. Max N requests per minute.` 다. 실행기 연결 신호는 전용 칸(BIZ-141)
 - **날짜 형식**: ISO 8601 (YYYY-MM-DDTHH:mm:ssZ)
 
 ### 공통 응답 구조
@@ -1154,6 +1155,7 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 | GET | `/conversations` | 대화 세션 목록 조회 (페이징, 검색) | 🔒 |
 | GET | `/conversations/{sessionId}` | 대화 상세 (메시지 포함) | 🔒 |
 | DELETE | `/conversations/{sessionId}` | 대화 삭제 (Soft Delete + Redis 정리) [v4.4, CR-046] | 🔒 |
+| POST | `/conversations/purge` | 대화 일괄 완전 삭제(사용자, 사건 대화, 접두어 묶음) [v7.31, CR-204] | 🔒 관리자, API 키 |
 | GET | `/conversations/{sessionId}/meta` | 세션 메타데이터 조회 [v4.0, CR-029] | 🔒 |
 | PUT | `/conversations/{sessionId}/meta` | 세션 메타데이터 수정 [v4.0, CR-029] | 🔒 |
 
@@ -1175,6 +1177,8 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 ```
 
 **감사·과금 로그 (`tool_execution_log`/`usage_logs`/`audit_logs`/`traces`/`session_briefs`)는 보존**된다 (FK 미연결, 의도적). 휴지통 UI / 복구(restore) 엔드포인트 / 벌크 삭제 / 관리자 강제 삭제는 본 CR 범위 밖.
+
+[v7.31, CR-204] 삭제 표시된 대화와 메시지는 `chat.purge.retention-days`(기본 30일)가 지나면 「대화 일괄 완전 삭제」 절의 순서로 자동 완전 삭제한다. 보존한다고 적은 `tool_execution_log`, `traces`, `session_briefs` 도 그때 대화와 함께 지워진다. `usage_logs`, `audit_logs` 만 남는다.
 
 ### 세션 메타데이터 조회 [v4.0, CR-029]
 
@@ -1316,7 +1320,7 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 | DELETE | `/platform/tenants/{id}` | 테넌트 삭제 (디프로비저닝) | 🔒 Super Admin |
 | GET | `/platform/subscriptions` | 구독 목록 조회 | 🔒 Super Admin |
 | PUT | `/platform/subscriptions/{tenantId}` | 구독 수정 (쿼터 변경) | 🔒 Super Admin |
-| GET | `/platform/plans` | 플랜 목록과 플랜별 분당 요청 한도 [CR-191] | 🔒 Super Admin |
+| GET | `/platform/plans` | 플랜 목록과 플랜별 분당 요청 한도, 채팅 분당 요청 한도 [CR-191, CR-205] | 🔒 Super Admin |
 | GET | `/platform/usage` | 플랫폼 사용량 대시보드 | 🔒 Super Admin |
 
 #### 테넌트 생성 요청 스키마
@@ -1352,20 +1356,21 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| plan | String | 선택 | 구독 플랜. 운영 설정 `plan.codes` 의 이름. 다른 플랜으로 바꾸면 `apiRpmLimit` 도 그 플랜의 기본 한도로 바뀐다 [CR-191] |
+| plan | String | 선택 | 구독 플랜. 운영 설정 `plan.codes` 의 이름. 다른 플랜으로 바꾸면 `apiRpmLimit` 도 그 플랜의 기본 한도로 바뀐다 [CR-191]. `chatRpmLimit` 도 같다 [CR-205] |
 | llmMonthlyTokenQuota | Long | 선택 | 월 토큰 쿼터 |
 | maxConnections | Integer | 선택 | 최대 연결 수 |
 | maxKnowledgeSources | Integer | 선택 | 최대 지식소스 수 |
 | maxWorkflows | Integer | 선택 | 최대 워크플로우 수 |
 | storageGb | Integer | 선택 | 스토리지 (GB) |
 | apiRpmLimit | Integer | 선택 | 분당 요청 한도. 0 은 무제한. 보내지 않으면 그대로 둔다 [CR-169]. 플랜과 같이 보내면 이 값을 쓴다 [CR-191] |
+| chatRpmLimit | Integer | 선택 | 채팅 분당 요청 한도(위젯 토큰 요청의 칸). 0 은 무제한. 보내지 않으면 그대로 둔다. 플랜과 같이 보내면 이 값을 쓴다. 검사와 거절은 `apiRpmLimit` 과 같고 문구는 `chatRpmLimit must be an integer of 0 or greater.` 다(BIZ-298) [CR-205] |
 
 - `apiRpmLimit` 이 음수, 소수, 정수 범위 밖이면 400, 본문 `error` 는 `apiRpmLimit must be an integer of 0 or greater.` 이다. 숫자가 아니면 요청 본문 해석 오류로 400 이다. 어느 경우든 같이 보낸 값도 저장하지 않는다(BIZ-142)
 - 재기동 없이 다음 요청부터 적용된다. 그 분에 이미 센 수는 그대로다(BIZ-142)
-- 구독 목록과 수정 응답의 칸 이름은 `tenantId`, `plan`, `llmMonthlyTokenQuota`, `maxConnections`, `maxKnowledgeSources`, `maxWorkflows`, `storageGb`, `maxUsers`, `connectionManagementMode`, `apiRpmLimit`, `validFrom`, `validUntil`, `createdAt`, `updatedAt` 이다
+- 구독 목록과 수정 응답의 칸 이름은 `tenantId`, `plan`, `llmMonthlyTokenQuota`, `maxConnections`, `maxKnowledgeSources`, `maxWorkflows`, `storageGb`, `maxUsers`, `connectionManagementMode`, `apiRpmLimit`, `chatRpmLimit` [CR-205], `validFrom`, `validUntil`, `createdAt`, `updatedAt` 이다
 - 플랜을 보냈을 때(BIZ-153) [CR-191]: 다른 플랜이고 `apiRpmLimit` 이 없으면 새 플랜의 기본 한도를 넣는다. 같은 플랜이면 한도는 그대로다. 목록에 없는 플랜은 400(본문 `error` 는 생성과 같다)이고 같이 보낸 값도 저장하지 않는다
 
-#### 플랜 목록 응답 [CR-191]
+#### 플랜 목록 응답 [CR-191, CR-205]
 
 `GET /platform/plans`
 
@@ -1375,10 +1380,10 @@ file: (binary) — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, HTML (최대 50MB)
   "data": {
     "defaultPlan": "free",
     "plans": [
-      {"code": "free", "apiRpmLimit": 60},
-      {"code": "starter", "apiRpmLimit": 300},
-      {"code": "pro", "apiRpmLimit": 1000},
-      {"code": "enterprise", "apiRpmLimit": 0}
+      {"code": "free", "apiRpmLimit": 60, "chatRpmLimit": 60},
+      {"code": "starter", "apiRpmLimit": 300, "chatRpmLimit": 300},
+      {"code": "pro", "apiRpmLimit": 1000, "chatRpmLimit": 1000},
+      {"code": "enterprise", "apiRpmLimit": 0, "chatRpmLimit": 0}
     ]
   }
 }
@@ -4100,7 +4105,85 @@ data: {"approval_id": "5d0c2a7e-...", "status": "approved", "decided_at": "2026-
 `/api/v1/knowledge-sources/**` 중 청크 원문 조회를 뺀 모든 창구는 위젯 토큰이면 403 `widget_forbidden`(BIZ-291). 관리 화면의 로그인 호출은 바뀌지 않는다.
 
 ---
-## 채팅창 iframe 방식 [v7.31, CR-203]
+
+## 대화 일괄 완전 삭제 [v7.31, CR-204]
+
+설계 상세: [CR-204_대화_일괄_삭제_API_와_완전_삭제_LexFlow_R3.md](CR-204_대화_일괄_삭제_API_와_완전_삭제_LexFlow_R3.md) 3절. 소비앱 서버가 연동키로 부른다. 위젯 토큰은 403 `widget_forbidden`(BIZ-170).
+
+### 일괄 완전 삭제 API [PRD-650]
+
+`POST /api/v1/conversations/purge`. 권한은 테넌트 API 키(`X-API-Key` 또는 `Authorization: ApiKey`) 또는 로그인 역할 `ADMIN`, `SUPER_ADMIN`. 그 밖의 로그인은 403.
+
+요청 본문. 네 조건 중 하나 이상, 둘 이상이면 합집합.
+
+| 칸 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| user_ref | string(200자 이하) | 선택 | 이 값이 주인(`conversation_sessions.user_id`)인 대화 전부와 이 사람의 자료(BIZ-293) |
+| share_key | string | 선택 | 이 함께 보기 키의 대화. 글자 규칙은 BIZ-277 |
+| user_ref_prefix | string(200자 이하) | 선택 | 이 글자로 시작하는 모든 `user_ref` 의 대화와 자료 |
+| share_key_prefix | string(128자 이하) | 선택 | 이 글자로 시작하는 모든 함께 보기 키의 대화 |
+| dry_run | boolean | 선택, 기본 false | true 면 삭제하지 않고 맞는 대화 수와 사람 수만 돌려준다 |
+| limit | int | 선택 | 이번 호출에서 삭제할 대화 상한. 비우면 `chat.purge.batch-limit`(200). 그보다 크면 그 값으로 줄인다 |
+
+```json
+{"user_ref_prefix": "office-12:", "share_key_prefix": "lexflow:case:office-12:", "dry_run": false}
+```
+
+응답 200.
+
+```json
+{
+  "dry_run": false,
+  "completed": true,
+  "sessions": {"matched": 12, "deleted": 12, "remaining": 0, "failed": 0, "failed_session_ids": []},
+  "rows": {"messages": 340, "attachments": 5, "generated_images": 2, "documents": 1, "document_versions": 3,
+           "shares": 1, "feedback": 3, "memories": 4, "briefs": 2, "approvals": 0, "tool_results": 0,
+           "traces": 50, "tool_logs": 10},
+  "files": {"deleted": 11, "failed": 0},
+  "users": {"matched": 3, "preferences": 3, "memories": 7, "projects": 1, "project_files": 2,
+            "feedback": 4, "asker_names_cleared": 12}
+}
+```
+
+- `sessions.matched` 는 조건에 맞는 대화 전부(상한 무관, 삭제 표시된 것 포함), `deleted` 는 이번 호출에서 지운 수, `remaining` 은 남은 수, `failed` 는 파일을 지우지 못해 행을 남긴 대화 수(번호는 20개까지)
+- `users` 는 `user_ref` 나 `user_ref_prefix` 가 있는 요청에서 남은 대화가 0 일 때 한 번 처리하고 채운다. 그 전에는 `null`
+- `completed` 는 남은 수 0, 실패 0, 사람 자료 처리까지 끝났을 때 true. false 면 같은 본문으로 다시 부른다
+- `dry_run` 이면 `sessions.matched`, `users.matched` 만 채운다. 감사 기록도 남기지 않는다
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `purge_invalid:criteria` | 네 조건이 모두 비어 있음 |
+| 400 | `purge_invalid:share_key` | BIZ-277 글자 규칙 위반 |
+| 400 | `purge_invalid:share_key_prefix` | 비어 있음, 128자 초과, 글자 규칙 위반 |
+| 400 | `purge_invalid:user_ref` | 비어 있음, 200자 초과(`user_ref_prefix` 도 같은 코드) |
+| 400 | `purge_invalid:limit` | 1 보다 작음 |
+| 403 | `widget_forbidden` | 위젯 토큰 |
+
+**대화 한 건의 삭제 순서 (BIZ-292).** 한 건이 한 트랜잭션이다.
+
+1. 답이 돌고 있으면 멈춤(`CancellationRegistry.cancel`)
+2. 저장소 파일 삭제: 첨부 `chat_attachments.storage_path`, 그림 `chat_generated_images.storage_path`, 문서 판 `chat_document_versions.storage_path`, `source_storage_path`, 공유 사본 폴더(`chat_shares.snapshot_path` 의 부모). 지우지 못한 파일이 남아 있으면 이 대화는 실패로 두고 다음으로 가지 않는다
+3. DB 물리 삭제(삭제 표시 여부 무관): `conversation_messages`, `chat_attachments`, `chat_generated_images`, `chat_document_versions`, `chat_documents`, `chat_shares`, `message_feedback`, `session_briefs`, `conversation_memories`(session_id), `tool_result_storage`, `pending_approvals`, `traces`, `tool_execution_log`
+4. `conversation_sessions` 행 삭제
+5. Redis 대화 기록 삭제(`SessionStore.clearSession`)
+
+**조건에 맞는 대화 찾기 (BIZ-294).** `user_id = :ref`, `share_key = :key`, `user_id LIKE :p ESCAPE '\\'`, `share_key LIKE :p ESCAPE '\\'`. 접두어의 `\`, `%`, `_` 는 이스케이프해 글자 그대로 맞춘다. 생성 순으로 상한만큼 집는다.
+
+**사람 자료 삭제 (BIZ-293).** 남은 대화가 0 일 때 한 번. `chat_projects`(owner_ref)와 자료 파일, `widget_user_preferences`(user_ref), `conversation_memories`(user_id, 모든 종류), `message_feedback`(user_ref), 그리고 `conversation_messages.display` 에서 `asker.user_ref` 가 맞는 행의 `asker.user_name` 키를 뗀다(`display #- '{asker,user_name}'`).
+
+**감사 기록 (BIZ-296).** `AuditLogger.log("conversation_purge", 조건 요약, 호출자 id, null, {criteria, sessions, users, files})`.
+
+### 삭제 표시된 것의 자동 완전 삭제 [PRD-651]
+
+`ConversationPurgeScheduler`. 1시간마다, 기동 10분 뒤 처음, 캐시된 테넌트마다. 기준 시각은 지금에서 `chat.purge.retention-days`(기본 30일)를 뺀 시각.
+
+1. `conversation_sessions.deleted_at < 기준` 인 대화는 위 순서로 완전 삭제. 한 회차에 `chat.purge.batch-limit` 만큼
+2. 살아 있는 대화의 `conversation_messages.deleted_at < 기준` 인 행(되감긴 질문과 답)은 물리 삭제. 그 턴의 `chat_generated_images.deleted_at < 기준` 그림과 `chat_document_versions.deleted_at < 기준` 판은 파일과 행을 삭제
+3. 실패한 대화는 다음 회차에 다시 본다. 회차 결과(테넌트, 삭제 수, 실패 수)는 로그
+
+---
+
+## 채팅창 iframe 방식 [v7.32, CR-203]
 
 설계 상세 [CR-203_채팅창_iframe_방식_LexFlow_R1.md](CR-203_채팅창_iframe_방식_LexFlow_R1.md) 4.5, 5절. 새 API 는 없다. 정적 파일과 응답 머리글, 토큰 검사가 바뀐다.
 

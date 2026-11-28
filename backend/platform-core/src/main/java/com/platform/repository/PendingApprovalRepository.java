@@ -44,4 +44,9 @@ public interface PendingApprovalRepository extends JpaRepository<PendingApproval
     int closeWorkflowIfPending(@Param("runId") UUID runId, @Param("status") String status,
                                @Param("decidedBy") String decidedBy, @Param("reason") String reason,
                                @Param("at") java.time.OffsetDateTime at);
+
+    /** CR-204 BIZ-292: 대화 완전 삭제. 삭제 표시 여부와 관계없이 그 대화의 행을 모두 지운다. */
+    @Modifying
+    @Query("DELETE FROM PendingApprovalEntity a WHERE a.sessionId = :sessionId")
+    int purgeBySessionId(@Param("sessionId") String sessionId);
 }

@@ -7,9 +7,16 @@ export interface ConnectionTarget {
   connectionGroupId?: string;
 }
 
-/** 서버가 ApiResponse.error(code) 로 돌려준 거절 코드를 담는다. */
+/**
+ * 서버가 ApiResponse.error(code) 로 돌려준 거절 코드를 담는다.
+ * CR-205: 요청 한도(429)의 남은 초도 담는다. 문구가 몇 초 뒤 다시 시도할지 알려 주기 위해서다.
+ */
 export class WidgetApiError extends Error {
-  constructor(public readonly status: number, public readonly code: string) {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    public readonly retryAfterSeconds?: number,
+  ) {
     super(code);
     this.name = "WidgetApiError";
   }
@@ -18,13 +25,20 @@ export class WidgetApiError extends Error {
 export async function readError(res: Response): Promise<WidgetApiError> {
   const raw = await res.text().catch(() => "");
   let code = raw.slice(0, 200);
+  let retryAfter = retryAfterOf(res.headers.get("Retry-After"));
   try {
-    const body = JSON.parse(raw) as { error?: string; message?: string };
+    const body = JSON.parse(raw) as { error?: string; message?: string; data?: { retry_after_seconds?: unknown } };
     code = body.error ?? body.message ?? code;
+    retryAfter = retryAfterOf(body.data?.retry_after_seconds) ?? retryAfter;
   } catch {
     // 본문이 JSON 이 아니면 앞부분을 그대로 코드로 쓴다.
   }
-  return new WidgetApiError(res.status, code || `HTTP ${res.status}`);
+  return new WidgetApiError(res.status, code || `HTTP ${res.status}`, retryAfter);
+}
+
+function retryAfterOf(value: unknown): number | undefined {
+  const n = typeof value === "string" ? Number(value) : value;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.ceil(n) : undefined;
 }
 
 /** CR-175: 위젯 설정, 응답 평가, 후속 질문 호출. */

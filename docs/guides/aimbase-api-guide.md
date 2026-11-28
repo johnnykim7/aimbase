@@ -1,6 +1,6 @@
 # Aimbase REST API 통합 가이드
 
-> **v3.46.0** | 2026-11-27 | Aimbase v8.18.0 기준
+> **v3.47.0** | 2026-11-27 | Aimbase v8.18.0 기준
 
 Swagger만으로는 알 수 없는 시나리오별 흐름, 파라미터 조합, 주의사항을 다룹니다.
 
@@ -725,6 +725,7 @@ DELETE /api/v1/workflows/{id}
 | 401 | 토큰 만료 또는 잘못된 인증 | 재로그인 |
 | 403 | 권한 없음, `X-Tenant-Id` 누락, API Key 만료 | 인증 헤더 확인 |
 | 404 | 리소스 없음 | ID 확인 |
+| 429 | 분당 요청 한도 초과. `X-RateLimit-Scope` 가 `tenant` 면 테넌트 한도, `chat` 이면 채팅(위젯 토큰 요청) 한도 (CR-013, CR-205) | `Retry-After` 초 뒤 재시도. 채팅 칸 본문 `error` 는 `chat_rate_limited`, 테넌트 칸은 `Rate limit exceeded. Max N requests per minute.` 문장. 두 칸은 서로 세지 않는다 (§ 17-3) |
 | 503 | RAG 사이드카 미기동 | 사이드카 상태 확인 (port 8002) |
 | 503 | `connection_group_unavailable:retry_after=<시각>` 연결 묶음에 고를 커넥션이 없음 (CR-161) | `retry_after` 뒤에 다시 요청 (§ 25-3) |
 | 503 | `cli_account_token_missing:`, `cli_account_token_expired:` 단일 CLI 커넥션의 계정에 1년 토큰이 없거나 기한이 지남 (CR-196) | 다시 보내도 같다. Aimbase 담당에게 알린다. 연결 묶음을 쓰면 다른 계정으로 넘어간다 (§ 25-3) |
@@ -1504,6 +1505,9 @@ curl -X POST $AIMBASE/api/v1/sessions/issue-widget-token \
 ### 17-3. 위젯 토큰으로 Aimbase API 호출
 
 브라우저는 `Authorization: Bearer <token>` 헤더, SSE 는 `?access_token=<token>` 쿼리로 전달 (EventSource 가 커스텀 헤더를 못 다루므로). **access 토큰은 쿼리 전달 금지**(로그 유출 리스크) — 위젯 토큰만 쿼리 파라미터를 수용한다.
+
+
+**요청 한도** (CR-205, BIZ-297): 위젯 토큰으로 부르는 요청은 테넌트 분당 요청 한도와 별개의 「채팅 분당 요청 한도」 로 셉니다. 소비앱 서버가 연동키로 부르는 요청(워크플로우 실행, 상태 조회, 위젯 토큰 발급)이 채팅 때문에 429 를 받지 않습니다. 응답 머리 `X-RateLimit-Scope: chat`, 넘으면 429 와 `Retry-After`, 본문 `{"success":false,"error":"chat_rate_limited","data":{"limit":300,"current":301,"retry_after_seconds":12,"scope":"chat"}}`. 위젯은 이 응답을 받으면 남은 초와 함께 다시 시도 안내를 보입니다. 한도 값은 Aimbase 운영자가 「구독 관리」 에서 바꿉니다.
 
 ### 17-4. 채팅 + RAG Citations — `POST /api/v1/chat/completions`
 
@@ -3531,12 +3535,97 @@ data: {"approval_id":"7b1e...","status":"approved","decided_at":"2026-11-13T07:2
 | BFF | 토큰 요청에 그 사용자 사무소의 `rag_source_ids` 를 싣는다 |
 | 화면 | 위젯 속성 `rag-source-id` 는 생략해도 됩니다. 토큰의 기본 자료로 갑니다. 한 사용자가 자료 둘 중 하나를 고르게 하려면 속성으로 고르되 토큰 목록 안의 값이어야 합니다 |
 | 오류 처리 | 404 `rag_source_not_found` 는 속성과 토큰 목록이 어긋난 것입니다. 400 `widget_token_invalid:rag_source_id` 는 BFF 가 실은 ID 가 테넌트에 없는 것입니다 |
+## 40. 대화 일괄 완전 삭제 [CR-204]
+
+설계 상세: `docs/CR-204_대화_일괄_삭제_API_와_완전_삭제_LexFlow_R3.md`. 소비앱 서버가 연동키(§ 2 API 키)로 부릅니다. 위젯 토큰으로는 부를 수 없습니다(403 `widget_forbidden`).
+
+### 40-1. 무엇을 삭제하나
+
+조건에 맞는 대화를 삭제 표시가 아니라 완전 삭제합니다. 대화 행과 질문, 답(삭제 표시된 것 포함), 첨부와 만든 그림과 옆 창 문서의 파일, 공유 링크와 사본, 응답 평가, 대화 요약과 기억, 승인 요청, 추적과 도구 실행 기록, 서버 캐시의 대화 기록이 모두 삭제해집니다. 사용량과 감사 로그는 대화 내용이 없어 남습니다.
+
+`user_ref` 조건은 그 사람의 자료(선호와 지시문, 자동 기억, 프로젝트와 자료 파일, 응답 평가)도 삭제하고, 함께 보는 대화(§ 38-3)에 남은 그 사람의 질문은 대화와 함께 두되 묻는 사람 이름만 삭제합니다.
+
+### 40-2. 요청
+
+`POST /api/v1/conversations/purge`
+
+| 칸 | 타입 | 필수 | 뜻 |
+|---|---|---|---|
+| user_ref | string | 선택 | 이 사용자의 대화 전부와 사용자 자료 |
+| share_key | string | 선택 | 이 함께 보기 키의 대화(사건 대화 하나) |
+| user_ref_prefix | string | 선택 | 이 글자로 시작하는 모든 `user_ref` 의 대화와 자료 |
+| share_key_prefix | string | 선택 | 이 글자로 시작하는 모든 함께 보기 키의 대화 |
+| dry_run | boolean | 선택 | true 면 삭제하지 않고 건수만 돌려줍니다 |
+| limit | int | 선택 | 이번 호출에서 삭제할 대화 상한. 비우면 서버 설정(기본 200) |
+
+네 조건 중 하나 이상을 줍니다. 둘 이상 주면 어느 하나에라도 맞는 대화를 모두 삭제합니다. 접두어는 글자 그대로 앞부분 일치이고 aimbase 는 뜻을 해석하지 않습니다. 사무소 단위로 삭제할 때는 구분자까지 넣어야 `12` 가 `123` 을 삭제하지 않습니다.
+
+```bash
+# 사무소 하나를 통째로
+curl -X POST https://aimbase.example.com/api/v1/conversations/purge \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"user_ref_prefix": "office-12:", "share_key_prefix": "lexflow:case:office-12:"}'
+
+# 사용자 한 명
+curl -X POST .../api/v1/conversations/purge -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"user_ref": "office-12:user-7"}'
+
+# 사건 대화 하나, 먼저 건수만
+curl -X POST .../api/v1/conversations/purge -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"share_key": "lexflow:case:office-12:/case/[id]:2026-0042", "dry_run": true}'
+```
+
+### 40-3. 응답과 반복 호출
+
+```json
+{
+  "dry_run": false,
+  "completed": false,
+  "sessions": {"matched": 450, "deleted": 200, "remaining": 250, "failed": 0, "failed_session_ids": []},
+  "rows": {"messages": 5120, "attachments": 31, "generated_images": 4, "documents": 2, "document_versions": 6,
+           "shares": 3, "feedback": 40, "memories": 12, "briefs": 90, "approvals": 1, "tool_results": 0,
+           "traces": 800, "tool_logs": 120},
+  "files": {"deleted": 44, "failed": 0},
+  "users": null
+}
+```
+
+- 한 번 호출에 `limit`(기본 200) 대화까지 삭제하고 `sessions.remaining` 에 남은 수를 돌려줍니다. **`completed` 가 true 가 될 때까지 같은 본문으로 다시 부릅니다.** 대화는 한 건씩 완결되므로 중간에 끊겨도 삭제한 대화는 온전히 삭제해지고 남은 대화는 온전히 남습니다.
+- `users` 는 `user_ref` 나 `user_ref_prefix` 를 준 요청에서 남은 대화가 0 이 된 호출에 채워집니다. 그 전에는 `null` 입니다.
+- `sessions.failed` 는 파일을 삭제하지 못해 행을 남긴 대화 수입니다. 번호는 `failed_session_ids` 에 20개까지 옵니다. 같은 본문으로 다시 부르면 다시 시도하고, 계속 실패하면 운영에 알려 주세요.
+- `dry_run` 은 `sessions.matched`, `users.matched` 만 채우고 감사 기록도 남기지 않습니다.
+
+| 상태 | 코드 | 경우 |
+|---|---|---|
+| 400 | `purge_invalid:criteria` | 조건이 하나도 없음 |
+| 400 | `purge_invalid:share_key` | 함께 보기 키 글자 규칙 위반(§ 38-1) |
+| 400 | `purge_invalid:share_key_prefix` | 빈 값, 128자 초과, 글자 규칙 위반 |
+| 400 | `purge_invalid:user_ref` | 빈 값, 200자 초과(`user_ref_prefix` 도 같음) |
+| 400 | `purge_invalid:limit` | 1 보다 작음 |
+| 403 | `widget_forbidden` | 위젯 토큰으로 부름 |
+
+### 40-4. 보관 기간
+
+| 무엇 | 보관 | 정하는 곳 |
+|---|---|---|
+| 대화와 질문, 답 | 삭제하기 전까지. 사람이 삭제하거나 되감으면 삭제 표시가 되고 30일 뒤 완전 삭제. 이 API 는 바로 완전 삭제 | 운용 설정 `chat.purge.retention-days` |
+| 첨부 파일 | 올린 뒤 24시간 | `widget.attachment.ttl-seconds` |
+| 만든 그림, 옆 창 문서 파일 | 대화와 같음 | 위와 같음 |
+| 공유 링크 사본 | 링크 기한까지. 끊으면 바로 | `chat.share.ttl-days` |
+| 실행기 산출물 파일 | 24시간 | `aimbase.artifact.ttl-hours` |
+| 실행기 CLI 대화 기록 사본 | 마지막 활동 뒤 7일 | 운영 설정(실행기 CLI 계정 폴더의 `cleanupPeriodDays`). 이 API 로는 삭제하지 않습니다 |
+| 위젯 읽어 주기 음성 | 저장하지 않음 | 없음 |
+| 사용량과 감사 로그 | 보존(대화 내용 없음) | 없음 |
+
+특정 질문과 답 하나만 삭제하는 기능은 없습니다. 질문 수정이나 다시 생성(되감기)으로 그 질문부터 뒤를 삭제 표시할 수 있고, 삭제 표시된 것은 30일 뒤 완전 삭제됩니다.
 
 ## 변경 이력
 
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
+| v3.47.0 | 2026-11-27 | **CR-204 대화 일괄 완전 삭제** (§ 40). `POST /conversations/purge`, 조건 `user_ref`, `share_key`, `user_ref_prefix`, `share_key_prefix`, `dry_run`, `limit`, 반복 호출 규칙, 오류 `purge_invalid:*`, 보관 기간 표 |
 | v3.46.0 | 2026-11-27 | **CR-206 위젯 지식 자료 토큰 결합** (§ 17-2, § 17-4, § 17-5, § 39). 토큰 발급 칸 `rag_source_ids`, 대화 요청 `rag_source_id` 를 서버가 받음(그 전 판은 버렸음), 허용 자료 밖은 404 `rag_source_not_found`, 지식 자료 API 는 청크 원문 조회 외 위젯 토큰 403 |
+| v3.46.0 | 2026-11-27 | **CR-205 채팅 분당 요청 한도** (§ 5, § 17-3). 위젯 토큰 요청은 테넌트 분당 요청 한도와 별개의 채팅 칸으로 센다. 응답 머리 `X-RateLimit-Scope`, 채팅 칸 429 본문 `chat_rate_limited` 와 `data.scope` |
 | v3.45.0 | 2026-11-16 | **CR-196 1년 토큰 API** (§ 13 LLM 연결, 실행기 계정 토큰). `GET /cli-account-tokens`, `GET`/`PUT /connections/{id}/account-token`, `GET`/`PUT /cli-token-recipients`, 플랫폼 `GET /platform/cli-account-tokens`. 플랫폼 관리자는 임퍼소네이션 토큰으로 테넌트 API 를 부른다 |
 | v3.44.0 | 2026-11-16 | **CR-196 CLI 계정 1년 토큰 오류** (§ 5, § 25-3). 오류 머리 `cli_account_token_missing`, `cli_account_token_expired`. 연결 묶음은 그 커넥션을 5분 빼고 다음으로 넘기고, 단일 커넥션 비실시간은 503 |
 | v3.43.1 | 2026-11-16 | **CR-194 위젯 보정** (§ 38-1, § 38-4, § 38-5). 연결 속성을 하나씩 바꿀 때 마지막 연결 설정만 쓰고 받기 전 질문은 기다림. 모달 위 위젯 누름과 복사, `data-aimbase-widget` 표시. 화면 키 없는 화면에서 `session-id` 가 없으면 지난 대화를 묻지 않음 |

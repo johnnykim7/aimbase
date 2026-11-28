@@ -74,6 +74,7 @@ public class TenantOnboardingService {
         // CR-191 BIZ-153: 없는 플랜이면 테넌트 행과 DB 를 남기지 않고 400 으로 끝나도록 무엇이든 만들기 전에 확인한다.
         String plan = planService.resolveForCreate(request.plan());
         int apiRpmLimit = planService.rpmLimit(plan);
+        int chatRpmLimit = planService.chatRpmLimit(plan);
 
         // Step 1: Master DB에 테넌트 레코드 저장
         TenantEntity tenant = createTenantEntity(request);
@@ -85,7 +86,7 @@ public class TenantOnboardingService {
             prepareTenantDatabase(request, dbName);
 
             // Step 6: 구독 정보 저장
-            subscriptionRepository.save(createSubscription(request.tenantId(), plan, apiRpmLimit));
+            subscriptionRepository.save(createSubscription(request.tenantId(), plan, apiRpmLimit, chatRpmLimit));
 
             // Master DB 테넌트 상태 업데이트
             tenant.setDbName(dbName);
@@ -183,11 +184,12 @@ public class TenantOnboardingService {
         return tenant;
     }
 
-    private SubscriptionEntity createSubscription(String tenantId, String plan, int apiRpmLimit) {
+    private SubscriptionEntity createSubscription(String tenantId, String plan, int apiRpmLimit, int chatRpmLimit) {
         SubscriptionEntity sub = new SubscriptionEntity();
         sub.setTenantId(tenantId);
         sub.setPlan(plan);
         sub.setApiRpmLimit(apiRpmLimit);
+        sub.setChatRpmLimit(chatRpmLimit);
         return sub;
     }
 

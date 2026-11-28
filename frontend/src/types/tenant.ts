@@ -60,10 +60,11 @@ export interface AppTenantCreateRequest {
   plan?: string;
 }
 
-// CR-191: 플랜 목록과 플랜별 분당 요청 한도. 이름과 값은 운영 설정(plan.*)에서 온다.
+// CR-191: 플랜 목록과 플랜별 분당 요청 한도. 이름과 값은 운영 설정(plan.*)에서 온다. CR-205: 채팅 분당 요청 한도.
 export interface PlanInfo {
   code: string;
   apiRpmLimit: number;
+  chatRpmLimit: number;
 }
 
 export interface PlanCatalog {
@@ -77,6 +78,7 @@ export interface Subscription {
   plan?: string;
   llmMonthlyTokenQuota: number;
   apiRpmLimit: number;
+  chatRpmLimit: number;
   maxConnections: number;
   maxWorkflows?: number;
   validUntil?: string | null;

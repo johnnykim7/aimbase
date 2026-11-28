@@ -1,5 +1,7 @@
 package com.platform.repository;
 
+import java.util.Collection;
+import org.springframework.data.domain.Pageable;
 import com.platform.domain.ConversationMessageEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -107,4 +109,30 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
            "WHERE m.sessionId = :sessionId AND m.deletedAt IS NULL AND m.createdAt >= :since " +
            "ORDER BY m.seq ASC")
     List<ConversationMessageEntity> findBySessionIdSince(String sessionId, OffsetDateTime since);
+
+    /** CR-204 BIZ-292: 대화 완전 삭제. 삭제 표시 여부와 관계없이 그 대화의 행을 모두 지운다. */
+    @Modifying
+    @Query("DELETE FROM ConversationMessageEntity m WHERE m.sessionId = :sessionId")
+    int purgeBySessionId(@Param("sessionId") String sessionId);
+
+    /** CR-204 BIZ-295: 되감기 등으로 삭제 표시된 뒤 보관 기간이 지난 행. */
+    @Query("SELECT m FROM ConversationMessageEntity m WHERE m.deletedAt < :cutoff ORDER BY m.deletedAt ASC")
+    List<ConversationMessageEntity> findSoftDeletedBefore(@Param("cutoff") OffsetDateTime cutoff, Pageable pageable);
+
+    @Modifying
+    @Query("DELETE FROM ConversationMessageEntity m WHERE m.id IN :ids")
+    int deleteByIds(@Param("ids") Collection<UUID> ids);
+
+    /** CR-204 BIZ-293: 함께 보는 대화에 남은 그 사람의 질문에서 이름만 뗀다. user_ref 는 남는다. */
+    @Modifying
+    @Query(value = "UPDATE conversation_messages SET display = display #- '{asker,user_name}' "
+            + "WHERE display -> 'asker' ->> 'user_ref' = :userRef AND display #> '{asker,user_name}' IS NOT NULL",
+            nativeQuery = true)
+    int clearAskerName(@Param("userRef") String userRef);
+
+    @Modifying
+    @Query(value = "UPDATE conversation_messages SET display = display #- '{asker,user_name}' "
+            + "WHERE display -> 'asker' ->> 'user_ref' LIKE :pattern ESCAPE '!' AND display #> '{asker,user_name}' IS NOT NULL",
+            nativeQuery = true)
+    int clearAskerNameByPrefix(@Param("pattern") String pattern);
 }
