@@ -189,14 +189,15 @@
 
 ## 5. 운영 작업: 실행기의 CLI 대화 기록 사본
 
-Claude CLI 는 계정 폴더 `projects/` 아래에 세션 대화 기록을 둔다(2절 16). 이 사본은 aimbase DB 밖에 있고 aimbase 는 세션 번호를 모르므로 API 로 삭제하지 못한다. CLI 설정 `cleanupPeriodDays` 로 보관 일수를 정한다(기본 30일, 기록의 마지막 활동 뒤 그 일수가 지나면 CLI 가 기동 때 삭제한다).
+Claude CLI 는 계정 폴더 `projects/` 아래에 세션 대화 기록을 둔다(2절 16). 이 사본은 aimbase DB 밖에 있고 aimbase 는 세션 번호를 모르므로 API 로 삭제하지 못한다. CLI 설정 `cleanupPeriodDays` 로 보관 일수를 정한다(기본 30일, 기록의 마지막 활동 뒤 그 일수가 지나면 CLI 가 삭제한다).
 
 - 대상: 59 의 `cli-runner-lexflow-chat` 실행기가 쓰는 계정 폴더의 `settings.json`
 - 값: 7일로 둔다(음성 생성기 작업 7일과 같은 기준). 적용 전에 그 서버의 현재 값과 폴더 위치를 확인하고, 운영 서버 설정 변경이라 사용자 승인 뒤 한다
 - 이 값은 보관 기간 안내(6절)에 함께 적는다
 - 확인(2026-11-28, 59 읽기만): LexFlow 연결 `cli-runner-lexflow-chat`, `cli-runner-lexflow-001` 의 계정 폴더는 `local-agent-1` 이다. 같은 폴더를 axopm, 입찰, bp-office, bp-wes, workmap 연결도 쓴다. 폴더에 `settings.json` 이 없어 지금은 CLI 기본 30일이고, 대화 기록 폴더 309개 중 가장 오래된 것이 10-29, 7일이 넘은 것이 267개다
 - 오래된 기록을 삭제해도 대화 이어 가기는 깨지지 않는다. 실행기는 새 워커를 기록 없이 띄우고(`ClaudeCliWorkerPool.java:466`), 이전 세션을 이어 쓰는 것은 살아 있는 워커에서 갈라지는 병렬 갈래뿐이다(`ClaudeCliWorkerPool.java:576`)
-- 적용(2026-11-28 14:58, 사용자 14:56 승인, 컨타 전달): 59 `/home/therecommerce/aimbase/claude-accounts/local-agent-1/settings.json` 을 새로 만들어 `{"cleanupPeriodDays": 7}` 을 넣었다(파일이 없었다, 주인 uid 999). LexFlow, bp-office, axopm 실행기에서 같은 값이 보인다. CLI 가 다음에 뜰 때 7일 지난 기록을 삭제한다
+- 적용(2026-11-28 14:58, 사용자 14:56 승인, 컨타 전달): 59 `/home/therecommerce/aimbase/claude-accounts/local-agent-1/settings.json` 을 새로 만들어 `{"cleanupPeriodDays": 7}` 을 넣었다(파일이 없었다, 주인 uid 999). LexFlow, bp-office, axopm 실행기에서 같은 값이 보인다.
+- 정리 시점: CLI 2.1.325 는 기록 정리를 계정 폴더 하나에 하루 한 번만 한다. 폴더의 `.last-cleanup` 시각이 24시간 안이면 건너뛰고, 정리는 CLI 가 뜬 뒤 10분이 지나야 시작한다. 59 `local-agent-1` 은 설정을 넣기 전 2026-11-28 14:00 에 이미 30일 기준으로 정리했으므로, 7일 기준 첫 정리는 2026-11-29 14:00 뒤 처음 10분 넘게 떠 있는 CLI 에서 돈다. 15:08 현재 7일 넘은 기록 1686개, 30일 넘은 기록 0개가 남아 있다
 
 ## 6. 보관 기간 (LexFlow 답변과 API 가이드에 적는 값)
 
@@ -209,7 +210,7 @@ Claude CLI 는 계정 폴더 `projects/` 아래에 세션 대화 기록을 둔�
 | 실행기 산출물(`out/`) | 24시간 | `aimbase.artifact.ttl-hours` |
 | 위젯 읽어 주기 음성 | 저장하지 않는다 | 없음 |
 | 음성 생성기 작업(`tts_jobs`, LexFlow 미사용) | 7일 | `aimbase.tts.retention-days` |
-| 실행기 CLI 대화 기록 사본 | 마지막 활동 뒤 7일 | CLI `cleanupPeriodDays` |
+| 실행기 CLI 대화 기록 사본 | 마지막 활동 뒤 7일(하루 한 번 정리, 최대 하루 더 남음) | CLI `cleanupPeriodDays` (5절) |
 | 사용량, 감사 로그 | 보존(대화 내용 없음) | 없음 |
 
 ## 7. Q9 판단: 특정 질문과 답변만 삭제
@@ -262,3 +263,5 @@ Claude CLI 는 계정 폴더 `projects/` 아래에 세션 대화 기록을 둔�
 - 2026-11-28 로컬 확인(작업 사본 api 8251, 로컬 DB 테넌트 `cr196_local`, 전용 Redis 16204, 저장소는 임시 폴더). 시험항목 IT-29-001 ~ 009 를 서버 호출과 DB 조회로 봤다. 조건 오류 4가지는 400, 위젯 토큰은 403 `widget_forbidden`, 뷰어 키는 403. dry_run 은 건수만 돌려주고 감사 기록을 남기지 않는다. 사무소 A 를 두 접두어와 limit 1 로 부르면 두 번에 나눠 대화 2개를 삭제하고, 남은 것이 없어진 호출에서 사용자 자료(선호 2, 기억 1, 프로젝트 1, 평가 1, 묻는 사람 이름 1)를 정리한다. 사무소 B 대화는 남고 그 안의 A 사람 이름만 빠진다. 함께 보기 키 하나, 사용자 하나 단위도 그 대화만 삭제한다. 시험 파일 13개(첨부, 그림, 문서 판, 공유 사본, 프로젝트 자료)가 저장소에서 모두 사라졌다. 감사 기록은 삭제 호출 5번에 5건이다. 자동 주기는 기동 10분 뒤 30일 지난 삭제 표시 대화 1, 되감긴 질문 1, 삭제 표시 그림 1 을 삭제하고 5일 된 것은 남겼다.
 - 로컬의 마이그레이션이 덜 된 옛 테넌트 DB 에서는 자동 주기가 칸 없음 오류를 남기고 그 테넌트만 건너뛴다. 로컬 환경 문제이고 59 는 기동 때 테넌트 마이그레이션이 돈다.
 - 2026-11-28 origin/dev c807052d(CR-206) 위로 옮겼다. 같은 판 번호를 잡은 설계서는 다음 판(T1-1 v7.25, T1-3 v5.27, T1-7 v3.35, T1-10 v1.12, T3-2 v7.31, T3-5 v4.29, 가이드 v3.47.0)으로, API 가이드 절은 40절로 옮겼다. 옮긴 코드로 관련 단위시험 45건 통과, 로컬 재기동 뒤 조건 오류, 뷰어 거절, 삭제 표시 대화를 포함한 접두어 삭제를 다시 봤다.
+- 2026-11-28 15:04 59 반영(사용자 14:56 승인, 컨타 전달). origin/dev a19054d3 을 작업 사본에서 `./deploy.sh be` 로 올렸다. api 컨테이너 15:04 재기동, 기동 오류 0줄, jar 에 `ConversationPurgeService`, `ConversationPurgeScheduler`, `ConversationPurgeRequest`, `ConversationPurgeResult` 가 들어 있다. 59 의 모든 테넌트에 30일 지난 삭제 표시 대화가 없어(삭제 표시 대화는 lexflow 2, bp_office 6, 모두 30일 안) 첫 자동 주기가 삭제할 것은 없다.
+- 2026-11-28 실행기 CLI 기록 7일 설정을 넣었다(5절). 첫 7일 정리는 CLI 의 하루 한 번 규칙 때문에 2026-11-29 14:00 뒤에 돈다.
