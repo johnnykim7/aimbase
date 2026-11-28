@@ -143,6 +143,19 @@
 - CR-202(같은 레포, 채팅창 묶음): 버전 고정 주소 체계. 전용 페이지와 연결 스크립트의 주소가 그 체계를 따른다. 확정되면 4.1 과 가이드를 맞춘다.
 - LexFlow(소비앱, 다른 레포): 완료 때 안내서와 답변 문서에 반영할 사항(요소 이름, 속성, 주소, 두 방식의 차이)을 컨타(lexflow-7434)에 `[알림]` 한 줄과 가이드 경로로 보낸다. LexFlow 쪽 BFF 는 바뀌지 않는다.
 
+### 6.1 LexFlow 안내서와 답변 문서에 반영할 사항
+
+| 순번 | 항목 | 내용 |
+|---|---|---|
+| 1 | 연결 스크립트 주소 | `https://aimbase.banpoom.co.kr/widget/v1/aimbase-chat-frame.js` (운영은 그 서버의 같은 경로). 한 파일이라 받아서 LexFlow 서버에 두어도 된다 |
+| 2 | 요소 | `<aimbase-chat-frame>`. 속성은 `<aimbase-chat>` 과 같고 `frame-src` 만 더한다(보통 적지 않는다). `display` 를 적지 않으면 `inline` |
+| 3 | JS 속성과 메서드 | `contextProvider`(JSON 값만 간다, Promise 가능), `authResolver`, `ragSourceId`, `open()`, `close()`, `isOpen()`, `new-conversation` 이벤트. `on.*` 콜백과 `sendMessage` 는 이 방식에 없다 |
+| 4 | 토큰 | BFF 는 그대로. 토큰 발급 요청의 `origin` 은 LexFlow 화면의 출처다(Aimbase 주소가 아님) |
+| 5 | 허용 주소 | Aimbase 운영자가 LexFlow 화면 출처를 `widget.allowed-origins` 에 넣어야 끼워진다. 2026-11-28 59 목록에는 LexFlow 출처가 없다 |
+| 6 | LexFlow 화면 CSP | 있으면 `frame-src` 에 Aimbase 주소, `script-src` 에 연결 스크립트 주소 |
+| 7 | 고르는 기준 | 채팅창 코드를 LexFlow 출처와 갈라야 하면 iframe 방식, 콜백으로 깊게 주고받으면 기존 방식 |
+| 8 | 상세 | Aimbase `docs/guides/embed-chat-widget.md` 3-6절, `docs/guides/aimbase-api-guide.md` 17-12절, 공개 안내 `/widget/v1/` 의 D 방식 |
+
 ## 7. 시험
 
 ### 7.1 단위시험 (T3-5)
@@ -184,6 +197,17 @@
 - 2026-11-28 08:00 로컬 확인 35건 통과(18203 api, 13203~13205 붙이는 앱 흉내 화면, 가짜 모델). 끼워짐, 질문과 답(요청이 `Sec-Fetch-Site: same-origin` 으로 와 토큰 검사 통과), 화면 자료 실림, `screen-key` 거름과 바꾸기, 끌기, 크기 바꾸기, 기억(붙이는 앱 출처 저장소), 크게 보기와 뒷막, 새 대화 이벤트 전달, `open()`, `close()`, panel, inline, 허용 목록 밖 출처 막힘(CSP), 토큰 origin 다름 안내, `frame.html` 바로 열기 안내, 스크립트 없이 iframe 만 끼우면 3초 뒤 안내, defer 스크립트에서 화면 자료, 대화 목록 붙임이 기존 방식과 같은 자리, 680px 아래 붙이지 않음, 기존 `<aimbase-chat>` 방식 회귀 없음. 토큰 갱신은 처음 받기와 같은 경로라 따로 보지 않았다.
 - 2026-11-28 08:00 번호 옮김. CR-202 가 TC-CHT-175 ~ 180 을 쓰므로 새 시험을 TC-CHT-181(전용 페이지 주소), 182(화면 자료)로, CR-186 ~ 188 이 FE-140 ~ 159 를 잡아 화면 번호를 FE-160 으로 했다.
 - 2026-11-28 08:00 본 것(고치지 않음): 기존 `<aimbase-chat>` 방식에서 위젯 스크립트가 늦게 등록되면 그 전에 넣은 `contextProvider` 가 등록 때 지워진다(요소 필드 초기값이 덮음). 이 CR 범위 밖이라 컨타에 알린다.
+- 2026-11-28 15:05 dev(CR-204, CR-205 반영분)를 합침. 같은 판 번호를 먼저 잡은 설계서는 이 CR 판을 다음 번호로 옮김(T1-1 7.26, T1-3 5.28, T1-7 3.36, T3-2 7.32, T3-3 3.23, T3-4 3.22, T3-5 4.30). CR-205 가 위젯 소스를 고쳐 합친 소스로 위젯을 다시 빌드(CR-205 문구와 이 CR 이 함께 들어간 것 확인). 위젯 단위시험 85건, 서버 관련 시험 86건 통과.
+- 2026-11-28 15:13 합친 판으로 로컬 확인 다시 35/35 통과. 로컬 시험 행과 서버는 다시 내림.
+- 2026-11-28 15:14 59 반영(사용자 14:56 승인, 컨타 전달, 배포 차례 CR-205, CR-204 다음). 59 jar(CR-204 판)와 대조해 차이가 이 CR 파일과 위젯 다시 빌드분뿐인 것을 보고, 가지를 origin/dev 에 빨리감기로 올려(90a0673a) 그 작업 폴더에서 `./deploy.sh be`. api 재기동, 상태 UP. 마이그레이션 없음.
+- 2026-11-28 15:15 59 확인(aimbase.banpoom.co.kr, 읽기만). 아래 표. 위젯 토큰의 같은 출처 경로는 59 에서 토큰을 받을 붙이는 앱 키가 이 창에 없어 치지 않았다(단위시험 TC-FRM-001 ~ 003 과 로컬 확인으로 대신함).
+
+| 순번 | 요청 | 결과 |
+|---|---|---|
+| 1 | `GET /widget/v1/frame.html` | 200, `Content-Security-Policy: frame-ancestors` 에 59 허용 주소 7개, `X-Frame-Options` 없음, `no-cache` |
+| 2 | `GET /widget/v1/aimbase-chat-frame.js`, `aimbase-chat.frame.js` | 200, `no-cache` |
+| 3 | `GET /widget/v1/index.html`, `/api/v1/sessions/me` | `X-Frame-Options: DENY` 그대로 |
+| 4 | 59 `widget.allowed-origins` | LexFlow 화면 출처가 없다. LexFlow 가 붙일 때 운영자가 넣어야 한다(6.1 의 5번) |
 
 ## 기획서 화면 대조
 
